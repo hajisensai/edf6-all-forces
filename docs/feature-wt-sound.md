@@ -139,10 +139,21 @@
 用户也说了喷气机和车辆声做得不好。炮声、爆炸、掠过 / 来袭、炮塔和装填已换成 WT 素材，下面这些没做：
 - 喷气机按转速分层、地面载具引擎的 rpm / load 分层 loop：**给 mod 作者的 FMOD 工程里没有引擎录音**。元数据引用了 `/engines_new/jet` 等，但 Assets 只有 common / explosion / explosive / fx / tanks / weapons（15,783 个 wav，没有引擎）。没有素材就换不了，引擎仍是合成音。
 
+## 实机数据（Debug=1，2026-11-26）
+
+Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain … side … front … spread … rate … cutoff … Hz; matrix [...] (N ch)`（同名每 2 s 至多一行）与每 5 s 一行的 `SOUND stats 5 s: one-shots started X dropped Y, busy peak P/160; loops open O peak Q/96, none free Z; limiter on|off, N ch; 名=次数 ...`。计数里：`stock_hit_kept` 是原版命中声真的起播（预设有 bank），`stock_hit_taken` / `stock_blast_taken` 是被我们顶替的，`stock_silent` / `stock_silent_armour` 是原版预设本来就没声音（后者是命中装甲、只响我们的），`stock_se` 是全部原版预设起播（0x7AA8C0 探针），`stock_se_held` 是载具扣住的预设仍起播（应为 0）。
+
+- 第一轮（测试场狂战士波次 + 3 辆 NPC 403 + 3 队士兵，`tools/perfrun.py swarm:e602_berserker:4:12:0.3`，120 s，DLL sha256 836b6fc0…，日志 loading 行 build 4b0eacb451 与之相符）：
+  - 挂钩：`HOOK blast sound=1 (8/8)`、`HOOK armour hit sound=1 (4/4)`、`HOOK stock sound probe (Debug) 4/4`；`War Thunder's: 78 of 78 groups`。
+  - 出现的事件：12mm_m2_ai / _last（NPC 机枪）、hit_mgun 53、rico_mgun 9、hit_pierce 8、passby 2、turret_loop 16 / turret_stop 14、reload_insert 31。
+  - 27 个 5 s 窗口：one-shots dropped 全 0，busy 峰值 ≤ 5/160，loops 峰值 9/96、none free 全 0，限幅器 on（2 声道）；`stock_se_held` 全程 0。
+  - 这一轮坦克只开了同轴机枪、场上没有爆炸弹：主炮、爆炸、来袭、装甲上的爆炸层没有触发，留给下一轮（坦克炮击 + 火箭 / 榴弹，打狂战士）。
+  - 发现计数错位：`Take` 先看预设有没有 bank 再取标记，没声音的原版预设被记成 `stock_hit_kept`、标记留着过期，`stock_hit_taken` 恒为 0，证明不了「不两个都响」。已改成先取标记、再分「真起播」和「本来没声音」计数（见上一段）。
+
 ## 没验证的
 
-- 全部只做了离线检查，没在游戏里试听：各口径的音量平衡、近距层淡出距离、500 m 外 1/d 衰减的手感、机枪 grain 的连贯性。
+- 没在游戏里试听（只有上面的日志数据）：各口径的音量平衡、近距层淡出距离、500 m 外 1/d 衰减的手感、机枪 grain 的连贯性。
 - 真实 5.1 / 7.1 设备上的方位，以及 `FXMasteringLimiter` 在用户机器上能否挂上（看日志）。
 - 联机时远端开炮、爆炸、掠过的覆盖：只确认了代码路径相同，没实测。
-- 爆炸 hook 的 8 个调用点、子弹链表的偏移都只做了静态核对（vanilla.py 反汇编），没在游戏里跑过；掠过的触发频率、来袭提前量的手感、炮塔 / 装填按峰值对齐后的响度都没试听。
+- 爆炸 hook 的 8 个调用点已在游戏里挂上（上面），爆炸事件本身还没在实机触发过；掠过的触发频率、来袭提前量的手感、炮塔 / 装填按峰值对齐后的响度都没试听。
 - `turret_turn_loop_1` 的首尾接缝只看了样点连续（首 953、尾 1346，同向），没试听。

@@ -82,7 +82,7 @@ float Volume(float v) noexcept { return std::isfinite(v) && v>0.0f ? (v>4.0f ? 4
 bool Take(const unsigned char* preset,const float* pos) noexcept {
     if(GetTickCount64()>=armedUntil.load(std::memory_order_relaxed) || !preset || !pos)return false;
     __try {
-        if(!At<const void*>(preset,kBank))return false;   // the stock plays nothing either
+        // The round's mark taken first, whatever its preset holds: one left behind would be another frame's.
         const unsigned char* const core=preset-kPresetInCore;
         bool armour=false,ours=false;
         AcquireSRWLockExclusive(&queueLock);
@@ -93,6 +93,10 @@ bool Take(const unsigned char* preset,const float* pos) noexcept {
                 break;
             }
         ReleaseSRWLockExclusive(&queueLock);
+        if(!At<const void*>(preset,kBank)) {   // the stock plays nothing: an armoured hit's is then ours alone
+            audio::Count(ours ? "stock_silent_armour" : "stock_silent");
+            return false;
+        }
         if(ours){audio::Count("stock_hit_taken");return true;}   // a plain round's hit on armour: heard as ours (Drain)
         const std::uint32_t flags=At<std::uint32_t>(core,kCoreFlags);
         const float burst=At<float>(core,kCoreBurst),blast=At<float>(core,kCoreBlast);
@@ -111,7 +115,8 @@ bool Take(const unsigned char* preset,const float* pos) noexcept {
 
 void __fastcall ExplodeSe(void* preset,const float* pos,void* handle) {
     if(Take(static_cast<const unsigned char*>(preset),pos))return;
-    audio::Count("stock_hit_kept");
+    // Counted only when the stock really sounds (a preset with a bank): Take counts the silent ones while armed.
+    if(preset && At<const void*>(static_cast<const unsigned char*>(preset),kBank))audio::Count("stock_hit_kept");
     reinterpret_cast<PlaySeFn>(image+kPlaySe)(preset,pos,handle);
 }
 
