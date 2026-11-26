@@ -182,6 +182,7 @@ struct State {
     std::int32_t ownTeam;   // the vehicle's team before we crewed it (valid when crewedAt != 0)
     HiddenLine lines[kLinesPerVehicle];
     bool linesFullLogged;   // SetLine found no room once for this vehicle: said once, not every frame
+    bool powered;           // started this mission (VehiclePowered)
 };
 // Every live vehicle runs its input every frame (seen); one not seen for kStaleMs is gone.
 constexpr int kMaxStates=128;
@@ -244,6 +245,7 @@ int ClassOf(const void* object) noexcept {
 }
 
 const void* RiderObject(const unsigned char* seat) noexcept { return At<const void*>(seat,kSeatRider); }
+
 
 HiddenLine* HiddenOf(State& st,const unsigned char* line) noexcept {
     for(auto& h:st.lines)if(h.line==line)return &h;
@@ -410,6 +412,14 @@ bool LeaveSeat(unsigned char* vehicle,unsigned char* from,unsigned char* to) noe
 }
 
 }  // namespace
+
+bool VehiclePowered(const void* vehicle) noexcept {
+    const State* s=FindState(vehicle);
+    return s && s->powered;
+}
+void PowerVehicle(const void* vehicle) noexcept {
+    if(State* s=StateFor(vehicle,GameMs()))s->powered=true;
+}
 
 // The NPC in seat `from` to seat `to` (seat, then clear: LeaveSeat pairs them). False: not moved, the NPC still where
 // it was (the seat refused it, or the clear faulted and the seating was undone).
@@ -649,11 +659,12 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     const auto now=GameMs();
     const unsigned count=SeatCount(vehicle);
     // anyPlayer: a player of any machine aboard (no NPC driver for it); localPlayer: this machine's (its fix).
-    bool anyPlayer=false,localPlayer=false,driver=false;
+    bool anyPlayer=false,localPlayer=false,driver=false,started=false;
     int dummies=0;
     for(unsigned i=0;i<count;++i) {
         const Rider r=SeatRider(SeatAt(vehicle,i));
         localPlayer=localPlayer || r==Rider::player;
+        started=started || (r!=Rider::none && r!=Rider::player);   // this machine's player starts it in PowerVehicle
         anyPlayer=anyPlayer || AnyPlayerIn(SeatAt(vehicle,i));
         driver=driver || (i==0 && r!=Rider::none);
         dummies+=r==Rider::dummy;
@@ -663,6 +674,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     State* const sp=StateFor(vehicle,now);
     if(!sp)return;
     State& st=*sp;st.seen=now;
+    st.powered=st.powered || started;
     if(Cfg().debug && now-st.loggedAt>5000) {
         st.loggedAt=now;
         char riders[17]{};
@@ -743,6 +755,11 @@ using VehicleStep=void(*)(unsigned char*);
 void Guarded(int step,VehicleStep run,unsigned char* v) noexcept {
     __try { run(v); } __except(StepFault(step,GetExceptionInformation())) {}
 }
+// The vehicles' sounds and their recording at one "now", read once before both (vehsound.cpp stepMs): the recording's
+// time is the very one the step ran at.
+ULONGLONG soundMs=0;
+void TraceSoundStep(unsigned char* v) noexcept { TraceVehicleSound(v,soundMs); }
+void SoundStep(unsigned char* v) noexcept { VehicleSoundAt(v,soundMs); }
 void GuardedTick(int step,void(*run)()) noexcept {
     __try { run(); } __except(StepFault(step,GetExceptionInformation())) {}
 }
@@ -970,7 +987,10 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepTurretCam,&TurretCamFrame,v);      // the plugin off too: it lets the camera go then
     Guarded(kStepProteus,&ProteusFrame,v);          // the plugin off too: a reworked Proteus gets its stock numbers back
     Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: the high view goes then
-    Guarded(kStepVehicleSound,&VehicleSound,v);     // the plugin off too: the stock sounds are given back then
+    soundMs=GameMs();                               // one "now" for the step and its recording (vehsound.cpp stepMs)
+    if(Cfg().traceFile[0])Guarded(kStepVehicleSound,&TraceSoundStep,v);   // its inputs, for the offline replay (trace_rec.cpp)
+    Guarded(kStepVehicleSound,&SoundStep,v);        // the plugin off too: the stock sounds are given back then
+    TraceEnd();
     Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
     GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
     GuardedTick(kStepSazabi,&SazabiSoundTick);      // the plugin off too: the Sazabi's loops stop then (once a frame)
@@ -1134,7 +1154,7 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
                 if(!std::isfinite(d) || d>=best || d>=most*most)continue;
                 best=d;found=true;
                 std::memcpy(out->at,point,12);out->reach=reach;out->distance=std::sqrt(d);out->inReach=d<=reach*reach;
-                out->hail=out->coming=false;
+                out->hail=out->coming=false;out->of=reinterpret_cast<std::uintptr_t>(v)*8u+i;
             }
         }
         if(found)return true;
@@ -1143,6 +1163,7 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
         float at[3],distance=0.0f;bool coming=false;
         if(!Cfg().playerJet || !PlayerJetHailHint(pos,at,&distance,&coming))return false;
         std::memcpy(out->at,at,12);out->reach=0.0f;out->distance=distance;out->inReach=false;out->hail=true;out->coming=coming;
+        out->of=1;   // the one carrier the hail calls (a seat's are vehicle x 8 + seat: never 1)
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

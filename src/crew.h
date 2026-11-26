@@ -107,6 +107,7 @@ struct Config {
     float vehicleHudRange=500.0f;// ...within this many metres of the player
     float hudScale=1.0f;       // every HUD the plugin draws, times this on top of the screen's own scale (src/hudscale.h)
     int hudLanguage=0;         // the HUD's words: 0 the game's text language, else hudtext::Setting (en, zh-CN, zh-TW, ja)
+    bool worldText3D=true;     // the HUD's labels of things in the world stand in it (hologram-like 3D text), else flat (hud.cpp WorldLabel)
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
@@ -245,6 +246,9 @@ struct Config {
     int floatGunMost=4;             // ...at most this many round one player (a fifth replaces the oldest)
     float floatGunSec=90.0f;        // ...each fights this long once picked up (0: until the mission ends)
     float floatGunReach=3.5f;       // ...picked up by walking this near it (m across; 3 m up or down)
+    wchar_t traceFile[260]{};       // a recording of the vehicles' sounds' inputs and outputs for the offline replay (trace_rec.cpp,
+                                    // docs/trace-replay.md): its path, empty off; read at load
+    int traceSeconds=120;           // ...the game seconds it records from the first mission begun, then the file is closed
     bool vehicleSound=true;         // the ground vehicles' engines, turrets, loaders and main guns heard as the plugin makes them (vehsound.cpp)
     float vehicleEngineVolume=1.0f; // ...each group's volume, times the game's own; 0: that group's stock sound kept
     float vehicleTurretVolume=1.0f;
@@ -781,11 +785,25 @@ void LockSound(unsigned char* vehicle) noexcept;
 // listener this frame.
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;
 bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
+// SoundAt's whole input besides the sound's own (the trace's, trace_rec.cpp): whether it places sounds now, the listener
+// (soundplace::kListenerFloats) and its velocity.
+bool ListenerState(float* listener,float* listenerVel) noexcept;
 bool ListenerAt(float* pos) noexcept;   // where that listener (the camera) is this frame; false: none
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
 bool InstallVehicleSound() noexcept;
-void VehicleSound(unsigned char* vehicle) noexcept;
+void VehicleSound(unsigned char* vehicle) noexcept;              // VehicleSoundAt at GameMs
+void VehicleSoundAt(unsigned char* vehicle,ULONGLONG ms) noexcept; // `ms`: the step's one "now" (GameMs read once)
+// The offline replay's recording (trace_rec.cpp, ini TraceFile; docs/trace-replay.md): a step's inputs taken before it
+// runs on `vehicle`, what it does recorded until TraceEnd; TraceReset where the plugin resets the step's state (a mission).
+void TraceVehicleSound(unsigned char* vehicle,ULONGLONG ms) noexcept;   // `ms`: the step's, as VehicleSoundAt is given
+void TraceEnd() noexcept;
+void TraceReset() noexcept;
+// Inside a recorded step: where its outputs go (null outside one). A pointer, not a function, so that the sources that
+// record an output (jetaudio.cpp) need nothing of the recorder's when a test builds them.
+inline void (*traceOutput)(const char* name,const void* data,std::size_t size) noexcept=nullptr;
+inline bool TraceRecording() noexcept { return traceOutput!=nullptr; }
+inline void TraceOutput(const char* name,const void* data,std::size_t size) noexcept { if(traceOutput)traceOutput(name,data,size); }
 void ResetVehicleSound() noexcept;
 bool VehicleSoundHeld(const void* preset) noexcept;   // a vehicle's stock sound preset held silent (vehsound.cpp)
 // The rounds' explosions as War Thunder layers them (blastsound.cpp, ini ExplosionVolume): the calls that play a round's
@@ -1179,6 +1197,11 @@ bool IsSidecar(const void* vehicle) noexcept;
 void SidecarFrame(unsigned char* vehicle) noexcept;
 bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
+// crew.cpp (game thread): the vehicle has been started this mission: someone other than this machine's player (an NPC,
+// another machine's player) has been aboard, or PowerVehicle said this machine's player started it (a panoramic
+// cockpit's boot, cockpit_instruments.h kBootSteps). A vehicle the crew table has no room for reads as never started.
+bool VehiclePowered(const void* vehicle) noexcept;
+void PowerVehicle(const void* vehicle) noexcept;
 // Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
 bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
 // The game's warp of a human's character controller to `pos` (sidecar.cpp, as the ride exit does); false: not known.

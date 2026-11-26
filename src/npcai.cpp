@@ -4005,7 +4005,7 @@ void NpcCommandHintFrame(const unsigned char* human,bool mapOpen) noexcept {
         }
         bool finished=false;
         if(ridealong::HintStep(hint,candidate,GameMs(),&finished) && candidate) {
-            hintOut=CommandHint{{at[0],at[1]+2.4f,at[2]},Cfg().mapKey};hintOn=!mapOpen;
+            hintOut=CommandHint{{at[0],at[1]+2.4f,at[2]},Cfg().mapKey,reinterpret_cast<std::uintptr_t>(candidate)};hintOn=!mapOpen;
         }
         if(finished)QueueUserWorkItem(&WriteHintShown,nullptr,WT_EXECUTEDEFAULT);
     } __except(EXCEPTION_EXECUTE_HANDLER){hintOn=false;}

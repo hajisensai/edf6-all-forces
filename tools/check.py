@@ -41,6 +41,7 @@ BUILD = os.path.join(ROOT, 'build')
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import checklock  # noqa: E402
 import gamedir  # noqa: E402
+import heartbeat  # noqa: E402
 import test_domains  # noqa: E402  (tools/, this script's folder)
 
 BUSY = 3   # exit code: this worktree's check is already queued or running
@@ -288,7 +289,12 @@ def _main(argv: list[str], jobs: int) -> int:
     os.makedirs(BUILD, exist_ok=True)
     results: dict[str, tuple[int, float]] = {}
     logs = {k: os.path.join(BUILD, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
-    with slot(argv) as (sel, waited):
+    # the parts' output goes to their logs: a line every few minutes for whoever watches this run (pylib/heartbeat.py),
+    # from when the slot is ours (checklock says its own while waiting)
+    with slot(argv) as (sel, waited), heartbeat.beating('check.py', lambda: heartbeat.parts_progress(results, logs)):
+        for log in logs.values():   # a part's log is this run's from its start on: parts_progress() never reads a stale one
+            with contextlib.suppress(OSError):
+                os.remove(log)
         # taken inside the lock: it carries checklock.HELD, so selftest.py under this check does not wait for it
         env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
         started = time.perf_counter()   # the queue is not the check's time

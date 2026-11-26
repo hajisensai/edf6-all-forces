@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import time
 from dataclasses import dataclass, replace
 from typing import Callable
@@ -71,7 +72,13 @@ class KitMaterial:
 SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map', 'sensor')
 SCREEN = 'vc_scr_{}_{}_{}x{}'   # seat, kind, width and height in mm: the plugin draws that kind of live read-out there
 INSTRUMENT = 'vc_i_{}_{}_{}'   # seat, screen / control index, control: a moving instrument's pivot (graft)
-GRAFTED_BONES = (*(p.split('{')[0] for p in (MARKER, GAZE, SCREEN, INSTRUMENT)), cockpit_shell.PREFIX)
+# A panoramic seat's kit (Kit.panoramic, pylib/cockpit_kits_mech.py BOOT_STEPS): its parts ride PANORAMIC (an identity
+# child of the fit's bone) so the plugin can fold every bone of the vehicle's own in the rider's view
+# (src/firstperson.cpp InstrumentPose), its boot tiles (parts boot_<step>_<kind>) ride BOOT.
+PANORAMIC = 'vc_pan_{}'
+BOOT = 'vc_boot_{}_{}_{}'      # seat, step, kind (0 the dark tile, 1 its glow)
+BOOT_PART = re.compile(r'boot_(\d+)_([01])$')
+GRAFTED_BONES = (*(p.split('{')[0] for p in (MARKER, GAZE, SCREEN, INSTRUMENT, PANORAMIC, BOOT)), cockpit_shell.PREFIX)
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,7 @@ class Kit:
     controls: tuple[InstrumentControl, ...] = ()  # physical instruments replacing source-model dial faces
     ranges: tuple[tuple[int,int], ...] = ()
     gaze: bool = False
+    panoramic: bool = False   # a panoramic cockpit (PANORAMIC): the vehicle is folded in the rider's view, the kit kept
 
 
 KitFn = Callable[[dict[str, float]], Kit]   # the room round the eye (clearance) -> the kit laid out in it
@@ -317,6 +325,11 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
         md = vehicle_optics.add_marker(md, fit.bone, MARKER.format(fit.seat), frame(fit))
         if kit_of[fit.seat].gaze:
             md = vehicle_optics.add_marker(md, fit.bone, GAZE.format(fit.seat), frame(fit))
+        if kit_of[fit.seat].panoramic:
+            md = vehicle_optics.add_marker(md, fit.bone, PANORAMIC.format(fit.seat), frame(fit))
+            for step, kind in sorted({BOOT_PART.match(p.name).groups() for p in kit_of[fit.seat].parts
+                                      if BOOT_PART.match(p.name)}):
+                md = vehicle_optics.add_marker(md, fit.bone, BOOT.format(fit.seat, step, kind), frame(fit))
         seen=set()
         for index,scr in enumerate(kit_of[fit.seat].screens):
             marker=screen_marker(fit.seat,scr)
@@ -333,11 +346,15 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
     materials: dict[tuple[str, str], KitMaterial] = {}
     for fit in fits:
         kit, bone, m = kit_of[fit.seat], md.bone_index(fit.bone), frame(fit)
+        if kit.panoramic:
+            bone = md.bone_index(PANORAMIC.format(fit.seat))
         for part in kit.parts:
             if part.material not in kit.materials:
                 raise ValueError(f'{fit.kit}: part {part.name} has no material {part.material}')
             placed = place(part, m, fit.scale)
-            part_bone = md.bone_index(controls[fit.seat][part.name]) if part.name in controls[fit.seat] else bone
+            boot = BOOT_PART.match(part.name) if kit.panoramic else None
+            part_bone = (md.bone_index(controls[fit.seat][part.name]) if part.name in controls[fit.seat] else
+                         md.bone_index(BOOT.format(fit.seat, *boot.groups())) if boot else bone)
             by_material.setdefault((fit.kit, part.material), []).append((placed, om.rigid(placed, part_bone)))
             materials[(fit.kit, part.material)] = kit.materials[part.material]
     textures = {NORMAL_TEX: texfile.solid_bc5(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO)}

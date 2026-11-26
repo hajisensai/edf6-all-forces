@@ -501,7 +501,7 @@ void Gather(Game& g,const unsigned char* human) noexcept {
         for(const void* m:markers) {
             if(!m)continue;
             const float* p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(m)+kMarkerAt);
-            if(Readable(p,12))Add(g,p,MapKind::marker);
+            if(MapUnit* u=Readable(p,12) ? Add(g,p,MapKind::marker) : nullptr)u->of=reinterpret_cast<std::uintptr_t>(m);
         }
         ReleaseSRWLockShared(&markerLock);
     }

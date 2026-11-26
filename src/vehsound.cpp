@@ -147,6 +147,10 @@ Pending pending[kPending]{};
 wtevent::Rotation rotation{};   // the War Thunder groups' variants, never one twice running
 bool sigOk=false,stopOk=false,broken=false;
 ULONGLONG frameDone=0;
+// The game's time as this step began (VehicleSoundAt's `ms`): one "now" for the whole step. GameMs reads the tick count,
+// which moves on whenever it likes: read again in the middle of a step (or after the recorder's work, trace_rec.cpp) a clip
+// due then is played a frame early or late, and the recording's replay cannot say which (docs/trace-replay.md).
+ULONGLONG stepMs=0;
 
 struct Sig { unsigned rva; unsigned char bytes[16]; std::size_t size; };
 const Sig kSigs[]={
@@ -359,7 +363,7 @@ void Set(int& loop,int clip,bool want,const audio::Heard& h) noexcept {
 void Later(int clip,const SoundPlace& p,float gain,float after,float muffle=0.0f) noexcept {
     if(gain<0.002f || clip<0)return;
     for(auto& q:pending)
-        if(q.clip<0){q=Pending{clip,false,0,HeardAt(p,gain,1.0f,muffle),GameMs()+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+after)*1000.0f)};return;}
+        if(q.clip<0){q=Pending{clip,false,0,HeardAt(p,gain,1.0f,muffle),stepMs+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+after)*1000.0f)};return;}
     // more on their way than kPending: the rest are not heard
 }
 // A War Thunder event (sound_event.h) heard from `at`: each of its layers loud enough at the distance, its variant the
@@ -371,7 +375,7 @@ void PlayEvent(const wtevent::Event& e,const float* at,const float* vel,float vo
     wtevent::Heard h[wtevent::kMostLayers];
     const int n=wtevent::Hear(e,p.distance,h);
     const float spread=surround::SpreadAt(p.distance,e.size,e.least),ratio=wtevent::Doppler(e,p.doppler);
-    const ULONGLONG now=GameMs();
+    const ULONGLONG now=stepMs;
     int queued=0;
     audio::Heard first{};
     for(int i=0;i<n;++i) {
@@ -466,7 +470,7 @@ void EngineStep(unsigned char* v,Vehicle& s,float dt) noexcept {
     x.in.v[engine::kRpm]=s.box.rpm;x.in.v[engine::kLoad]=s.box.load;x.in.v[engine::kWep]=0.0f;
     x.in.v[engine::kSpeed]=run*3.6f;x.in.v[engine::kTurn]=s.turn;
     x.in.v[engine::kSpeedShare]=100.0f*speed*3.6f/d.top;
-    x.ms=GameMs();
+    x.ms=stepMs;
     engine::Push(*trail,x);
     float listener[3];
     const engine::Sample* r=ListenerAt(listener) ? engine::Retarded(*trail,listener,x.ms) : nullptr;
@@ -703,7 +707,7 @@ void Frame(ULONGLONG ms) noexcept {
 }
 
 void Step(unsigned char* v) noexcept {
-    const ULONGLONG ms=GameMs(),frame=GameFrame();
+    const ULONGLONG ms=stepMs,frame=GameFrame();
     if(frameDone!=frame){frameDone=frame;Frame(ms);}
     Vehicle* const s=EntryFor(v,ms,true);
     if(!s)return;
@@ -739,15 +743,17 @@ bool InstallVehicleSound() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-void VehicleSound(unsigned char* v) noexcept {
+void VehicleSound(unsigned char* v) noexcept { VehicleSoundAt(v,GameMs()); }
+void VehicleSoundAt(unsigned char* v,ULONGLONG ms) noexcept {
     if(!sigOk || broken)return;
+    stepMs=ms;
     __try {
         // Ours only while they can be heard: the sounds made (and the engine up) and the camera's listener placed (jetsound.cpp
         // JetSoundTick, the frame's first step: no listener, no voice of ours would sound). Until then, and whenever
         // switched off, the stock ones: never a stock sound silenced with nothing in its place.
         const bool on=Cfg().enabled && Cfg().vehicleSound && !v[kDead] && audio::ClipsReady() && SoundListening();
         if(!on) {
-            if(Vehicle* s=EntryFor(v,GameMs(),false)){Release(*s,v);s->ref=ObjRef{};}
+            if(Vehicle* s=EntryFor(v,stepMs,false)){Release(*s,v);s->ref=ObjRef{};}
             return;
         }
         Step(v);

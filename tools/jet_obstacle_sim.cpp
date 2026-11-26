@@ -90,7 +90,20 @@ PlayArea MapPlayArea() noexcept {
 }
 ULONGLONG GameMs() noexcept { return nowMs; }
 ULONGLONG GameFrame() noexcept { return nowMs/16; }
+// The extend-flip suite's tally of SetMode's transitions (its "%s -> %s" line, with Cfg().debug) and PlanExtend's plans.
+struct ModeTally { int extendIn=0,extendOut=0,plans=0; };
+ModeTally* modeTally=nullptr;
 void Log(const char* format,...) noexcept {
+    if(modeTally && !std::strcmp(format,"JET v=%p %s -> %s")) {
+        va_list a;va_start(a,format);
+        (void)va_arg(a,void*);
+        const char* from=va_arg(a,const char*);
+        const char* to=va_arg(a,const char*);
+        va_end(a);
+        if(!std::strcmp(to,"extend"))++modeTally->extendIn;
+        if(!std::strcmp(from,"extend"))++modeTally->extendOut;
+    }
+    if(modeTally && !std::strncmp(format,"JET v=%p extend: ",17))++modeTally->plans;
     if(!logFile)return;
     std::fprintf(logFile,"%8.3f ",static_cast<double>(nowMs)*0.001);
     va_list a;va_start(a,format);std::vfprintf(logFile,format,a);va_end(a);
@@ -1155,6 +1168,97 @@ int StrikeRoomSuite(const char* outDir) {
     std::printf("strike room: %d cases, %d failed, %.0f s of fire in all\n",cases,bad,static_cast<double>(fireAll));
     return bad ? 1 : 0;
 }
+
+// --extend-flip-suite (CTest jet_extend_flip): an extend once begun is flown, not ended the frame it began. The
+// 2026-11-26 perfrun log (build ba116944, engtank: 3 fighters at ants on the 5250 m range map) had fighter
+// v=...8720C470 at (759,889,66), 1271 m from its ground target at (-127,-73), turning in with the target inside its turn:
+// Approach planned a teardrop (0.92,-0.38) 386 m out, which the extend's end test (its distance out from the target
+// along that way) already held, so the next frame the extend ended and Approach planned it again: 245 approach / extend
+// flips and as many "extend: teardrop" lines in that minute. Each case starts a fighter where and as the log's was, and
+// round the target (12 bearings, 700 and 1300 m out, turning in either way: the log's own start does not flip here, its
+// state leading in differs; three of these did before the fix, one 137 times in 40 s), and flies Attack for
+// kFlipSeconds: every extend it enters lasts kFlipLeast at least (or is ended by its own time, kExtendMs), it plans an
+// extend at most once an entry (one "extend:" line), and it enters at most kFlipMost of them (one a manoeuvre: out,
+// round and in again takes several seconds).
+constexpr float kFlipSeconds=40.0f,kFlipLeast=1.0f;
+constexpr int kFlipMost=8;
+int ExtendFlipSuite(const char* outDir) {
+    const std::string logPath=std::string(outDir)+"/extend_flip.log";
+    logFile=std::fopen(logPath.c_str(),"w");
+    int bad=0,cases=0;
+    const float target[3]={-127.0f,4.0f,-73.0f};
+    struct FlipCase { float at[3]; float dir[2]; float speed; };
+    std::vector<FlipCase> list;
+    list.push_back({{759.0f,889.0f,66.0f},{-0.56f,-0.83f},181.0f});   // the log's, at 14:35:07.0
+    for(int a=0;a<12;++a)for(const float d:{700.0f,1300.0f})for(const float turn:{1.2f,-1.2f}) {
+        const float b=2.0f*kPi*static_cast<float>(a)/12.0f;
+        const float at[3]={target[0]+std::cos(b)*d,700.0f,target[2]+std::sin(b)*d};
+        // Heading round the target (off its line by `turn` rad): the target off its nose, where its turn holds it.
+        const float h=std::atan2(target[2]-at[2],target[0]-at[0])+turn;
+        list.push_back({{at[0],at[1],at[2]},{std::cos(h),std::sin(h)},181.0f});
+    }
+    groundHalf=5250.0f;
+    ResetWalls();
+    for(const FlipCase& c:list) {
+        boxes.clear();
+        config=Config{};config.debug=true;config.jetPilot=true;
+        const Kind& k=KindOf(Role::fighter);
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+        unsigned char* v=mem.data();
+        Jet& j=jets[0];
+        const float dir[3]={c.dir[0],0.0f,c.dir[1]};
+        nowMs=1000;
+        Place(j,v,ctrl.data(),Role::fighter,c.at,dir,c.speed,0.0f);
+        j.launched=false;j.entered=true;j.burden=Burden{1.0f,0.0f};
+        static int targetDummy=0;
+        j.t.target=&targetDummy;j.t.flyer=false;std::memcpy(j.t.aim,target,12);std::memcpy(j.t.tgtPrev,target,12);
+        j.mode=Mode::approach;j.modeAt=nowMs;
+        Arms arms{};arms.gunSpeed=960.0f;arms.gunRange=960.0f;arms.pick=-1;arms.rocket=-1;arms.guns=3600;arms.hasGun=true;
+        ModeTally tally{};modeTally=&tally;
+        int shortest=1<<30,frames=0;
+        ULONGLONG inAt=0;
+        bool in=false;
+        for(int f=0;f<static_cast<int>(kFlipSeconds*60.0f);++f) {
+            nowMs+=16;
+            const float* pos=reinterpret_cast<const float*>(v+kPosition);
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            float nose[3]={m[8],m[9],m[10]};
+            if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+            j.seen=nowMs;
+            Sense(j,pos,nowMs);
+            const float clear=GroundClearance(pos);
+            float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
+            bool gunsOk=false,missileOk=false;
+            const int outBefore=tally.extendOut;
+            Attack(j,arms,pos,nose,target,target[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
+            // An extend's length: from the frame it began to the frame it ended (ended by its time: kExtendMs, not short).
+            if(tally.extendOut>outBefore && in) {
+                const int len=static_cast<int>((nowMs-inAt)/16);
+                if(len<shortest)shortest=len;
+                in=false;
+            }
+            if(j.mode==Mode::extend && !in){in=true;inAt=nowMs;}
+            Wing(j,k,v,pos,clear,nose,want,speed,kDt,nowMs);
+            HoldOffGround(j,pos,clear,kDt,nowMs);
+            j.m.ready=true;
+            Move(j,v);
+            ++frames;
+        }
+        modeTally=nullptr;
+        const bool ok=(shortest==1<<30 || shortest>=static_cast<int>(kFlipLeast*60.0f)) && tally.plans<=tally.extendIn &&
+                      tally.extendIn<=kFlipMost;
+        ++cases;bad+=!ok;
+        std::printf("flip from (%5.0f,%4.0f,%5.0f) heading (%5.2f,%5.2f): %2d extends in %.0f s, %d plans, shortest %s frames %s\n",
+                    static_cast<double>(c.at[0]),static_cast<double>(c.at[1]),static_cast<double>(c.at[2]),static_cast<double>(c.dir[0]),
+                    static_cast<double>(c.dir[1]),tally.extendIn,static_cast<double>(kFlipSeconds),tally.plans,
+                    shortest==1<<30 ? "-" : std::to_string(shortest).c_str(),ok ? "ok" : "FAIL");
+    }
+    if(logFile)std::fclose(logFile);
+    logFile=nullptr;
+    groundHalf=0.0f;
+    std::printf("extend flip: %d cases, %d failed\n",cases,bad);
+    return bad ? 1 : 0;
+}
 }  // namespace
 
 int main(int argc,char** argv) {
@@ -1163,7 +1267,7 @@ int main(int argc,char** argv) {
     const char* outDir=".";
     std::string tag;
     float seconds=0.0f;
-    bool selftest=false,playerRotors=false,strikeRoom=false;
+    bool selftest=false,playerRotors=false,strikeRoom=false,extendFlip=false;
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--withdraw-suite"))return WithdrawSuite();
     for(int a=1;a<argc;++a) {
@@ -1176,6 +1280,7 @@ int main(int argc,char** argv) {
         else if(!std::strcmp(argv[a],"--ground-settle-suite"))return GroundSettleSuite();
         else if(!std::strcmp(argv[a],"--player-rotor-suite"))playerRotors=true;
         else if(!std::strcmp(argv[a],"--strike-room-suite"))strikeRoom=true;
+        else if(!std::strcmp(argv[a],"--extend-flip-suite"))extendFlip=true;
         else {std::fprintf(stderr,"unknown argument %s\n",argv[a]);return 1;}
     }
     // The image: zeroed, so the ceiling's pointer (image+0x20B2998) reads null: no ceiling (CeilingY 1e9).
@@ -1185,6 +1290,7 @@ int main(int argc,char** argv) {
     if(playerRotors)return PlayerRotorSuite();
     if(selftest)return SelfTest(outDir);
     if(strikeRoom)return StrikeRoomSuite(outDir);
+    if(extendFlip)return ExtendFlipSuite(outDir);
     if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     const std::string csvPath=std::string(outDir)+"/"+tag+".csv",logPath=std::string(outDir)+"/"+tag+".log";
     logFile=std::fopen(logPath.c_str(),"w");

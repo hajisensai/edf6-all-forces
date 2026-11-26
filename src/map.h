@@ -15,7 +15,8 @@ enum class MapKind : std::uint8_t { squad, ally, vehicle, air, carrier, enemy, e
 constexpr std::uint8_t kMapLarge=1,kMapNearest=2,kMapAcquiring=4,kMapFlying=8,kMapEmpty=16,kMapRotor=32;
 // A unit: where it is, the ground under it (an aircraft's stem goes down to it; else its own height), its level heading
 // (0, 0: none), its HP share (<0: not shown).
-struct MapUnit { float pos[3],ground,dir[2],hp; MapKind kind; std::uint8_t flags; };
+// `of`: what it is (an objective marker's object; 0 for the others), for the HUD's world label on it to keep its facing by.
+struct MapUnit { float pos[3],ground,dir[2],hp; MapKind kind; std::uint8_t flags; std::uint64_t of=0; };
 constexpr int kMapUnits=384;
 // The enemies (the user, 2026-10-06: "large ones first; the small ones need no 3D"): every large one a pin of its own
 // (kMapUnits' kind enemy / enemyAir, flag kMapLarge), at most kMapLargeEnemies, the highest HP max first; every small

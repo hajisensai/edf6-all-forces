@@ -33,6 +33,27 @@ class Portable(unittest.TestCase):
         self.assertIn(('car_base_simulation_node[0]', 'tire_l', True), v.names)
         self.assertIsNone(vc.settings({'name': 'not a vehicle'}))
 
+    def test_fall_out_seats_the_vehicle_has(self) -> None:
+        # EDF.dll 0x673F41 indexes the seat array with car_base_fall_out [4] unchecked: a one-seat car on the V512
+        # with its [1, 2, 3, 4] read the heap past its seat (2026-11-26, C0000005 at EDF.dll+0x673F70).
+        seat = ['exit', 'driver', ['camera']]
+        def doc(seats: int, fall: object) -> dict:
+            return {'vehicle_riding_position': [list(seat)] * seats, 'car_base_fall_out': [10.0, 80.0, 1.0, [0.0] * 3, fall]}
+        bad = vc.fall_out_problems(doc(1, [1, 2, 3, 4]), 'EDF6VC_SEDAN')
+        self.assertEqual([(p.severity, p.what) for p in bad], [('error', 'names seats it does not have: [1, 2, 3, 4] of 1')])
+        self.assertEqual(vc.fall_out_problems(doc(1, [0.0])), [])          # the stock V613 bike's float seat
+        self.assertEqual(vc.fall_out_problems(doc(5, [1, 2, 3, 4])), [])   # the V512 itself: its bed's four seats
+        self.assertEqual(vc.fall_out_problems(doc(1, [0])), [])            # the V503 bike throws its rider
+        self.assertEqual(vc.fall_out_problems(doc(1, [])), [])
+        self.assertEqual(len(vc.fall_out_problems(doc(2, [-1]))), 1)
+        self.assertEqual(vc.fall_out_problems({'vehicle_riding_position': [seat]}), [])
+        members = doc(5, [1, 2, 3, 4])
+        vc.keep_seats(members, 1)
+        self.assertEqual((len(members['vehicle_riding_position']), members['car_base_fall_out'][4]), (1, []))
+        members = doc(5, [0, 3])
+        vc.keep_seats(members, 2)
+        self.assertEqual((len(members['vehicle_riding_position']), members['car_base_fall_out'][4]), (2, [0]))
+
     def test_rest_compression_carries_the_weight(self) -> None:
         """Four equal springs round a centred mass share it; moving the mass forward loads the front, and the
         compressions keep carrying it (sum k c = g, sum k c x = g x0, sum k c z = g z0)."""

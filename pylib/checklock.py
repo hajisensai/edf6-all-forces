@@ -16,6 +16,8 @@ import os
 import time
 from typing import Iterator
 
+import heartbeat
+
 LOCK_DIR = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'edf6-all-forces')
 LOCK_FILE = os.path.join(LOCK_DIR, 'check.lock')
 HELD = 'EDF6_CHECK_LOCK'
@@ -115,15 +117,16 @@ def held(label: str) -> Iterator[None]:
     os.makedirs(LOCK_DIR, exist_ok=True)
     fd = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT)
     try:
-        said = False
-        while not _try_lock(fd):
-            if not said:
-                who = _holder()
-                since = time.strftime('%H:%M:%S', time.localtime(who.get('since', time.time())))
-                print(f"waiting for the machine's check slot: {who.get('label', '?')} in {who.get('cwd', '?')} "
-                      f"(pid {who.get('pid', '?')}, since {since})", flush=True)
-                said = True
-            time.sleep(5)
+        if not _try_lock(fd):
+            who = _holder()
+            since = time.strftime('%H:%M:%S', time.localtime(who.get('since', time.time())))
+            print(f"waiting for the machine's check slot: {who.get('label', '?')} in {who.get('cwd', '?')} "
+                  f"(pid {who.get('pid', '?')}, since {since})", flush=True)
+            # another session's check can take half an hour: a line every few minutes for whoever watches the wait
+            with heartbeat.beating("waiting for the machine's check slot",
+                                   lambda: f"held by {_holder().get('label', '?')}"):
+                while not _try_lock(fd):
+                    time.sleep(5)
         with open(LOCK_FILE + '.json', 'w', encoding='utf-8') as h:
             json.dump({'label': label, 'cwd': os.getcwd(), 'pid': os.getpid(), 'since': time.time()}, h)
         os.environ[HELD] = str(os.getpid())

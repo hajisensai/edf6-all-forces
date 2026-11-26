@@ -194,15 +194,24 @@ float StrikeSpeed(const Kind& k) noexcept {
 // flies a teardrop: out to j.t.outAt, kTearSide turn radii beside the line out from the target and outRun along it, so
 // the turn back from there ends on that line outRun out with its nose on the target. Of the ways out (kExtendWays, and
 // both sides), the one with the longest run in (up to diveStart: it dives from there), the one nearest its way ahead.
+//
+// Where an extend ends is measured from where it begins. Until 2026-11-26 a teardrop ended once the jet was outRun out
+// from the target along j.t.out, wherever it was across that way: Approach plans one wherever the target is inside its
+// turn, often some 1000 m out already, and the way it picked (the one nearest its way ahead) it was past already, so
+// the extend ended the next frame and Approach planned it again (2026-11-26 perfrun log, a fighter on the range map: 245
+// approach / extend flips and "extend: teardrop" lines in a minute; offline, jet_obstacle_sim --extend-flip-suite). A
+// teardrop now ends abreast of its turn point along the leg it flies to it (j.t.outLeg), the turn back from there as the
+// plan has it; a straight one already past its outRun is no way out: PlanExtend returns false and Approach turns in.
 constexpr float kTearSide=2.0f,kTearAlign=150.0f;   // turn radii beside; m of run in a way straight ahead is worth
 constexpr int kExtendWays=16;
-void PlanExtend(Jet& j,const float* pos,const float* lead,const float* vdir) noexcept {
+bool PlanExtend(Jet& j,const float* pos,const float* lead,const float* vdir) noexcept {
     const Kind& k=KindOf(j);
     const airbound::Box soft=JetSoftBox(j);
     const float r=TurnRadiusOf(k,j.burden.mass,StrikeSpeed(k));
+    const float dh=HorizDist(pos,lead);
     j.t.outTear=false;
     std::memcpy(j.t.out,vdir,12);j.t.out[1]=0.0f;
-    if(RoomAlong(soft,lead,vdir)-r-airbound::kSlack>=k.extendOut){j.t.outRun=k.extendOut;return;}
+    if(RoomAlong(soft,lead,vdir)-r-airbound::kSlack>=k.extendOut){j.t.outRun=k.extendOut;return dh<j.t.outRun;}
     const airbound::Box box=airbound::Inset(soft,airbound::kSlack);
     const float want=std::fmin(k.extendOut,k.diveStart),least=k.gunClose*3.0f;
     float bestScore=-1e9f;
@@ -216,17 +225,28 @@ void PlanExtend(Jet& j,const float* pos,const float* lead,const float* vdir) noe
         if(run<least)continue;
         const float at[3]={base[0]+u[0]*run,lead[1],base[2]+u[2]*run};
         float go[3]={at[0]-pos[0],0.0f,at[2]-pos[2]};
-        const float dot=Normalize(go) ? Dot(go,vdir) : 1.0f;
-        const float score=std::fmin(run,want)+kTearAlign*dot;
+        if(!Normalize(go))continue;   // at its turn point already: no leg to fly
+        const float score=std::fmin(run,want)+kTearAlign*Dot(go,vdir);
         if(score<=bestScore)continue;
         bestScore=score;
-        std::memcpy(j.t.out,u,12);std::memcpy(j.t.outAt,at,12);j.t.outRun=run;j.t.outTear=true;
+        std::memcpy(j.t.out,u,12);std::memcpy(j.t.outAt,at,12);std::memcpy(j.t.outLeg,go,12);j.t.outRun=run;j.t.outTear=true;
     }
     // No teardrop fits (a box little wider than its turn): straight out as far as the box leaves its turn back.
-    if(!j.t.outTear)j.t.outRun=std::fmax(0.0f,RoomAlong(soft,lead,vdir)-r-airbound::kSlack);
+    if(!j.t.outTear) {
+        j.t.outRun=std::fmax(0.0f,RoomAlong(soft,lead,vdir)-r-airbound::kSlack);
+        if(dh>=j.t.outRun)return false;
+    }
     if(Cfg().debug)Log("JET v=%p extend: %s (%.2f,%.2f) %.0f m out from (%.0f,%.0f), turn point (%.0f,%.0f), turn radius %.0f m",
                        j.Vehicle(),j.t.outTear ? "teardrop" : "straight",j.t.out[0],j.t.out[2],j.t.outRun,lead[0],lead[2],
                        j.t.outTear ? j.t.outAt[0] : 0.0f,j.t.outTear ? j.t.outAt[2] : 0.0f,r);
+    return true;
+}
+
+// The extend's steering: to the teardrop's turn point, or out along j.t.out.
+void FlyExtend(const Jet& j,const float* pos,float height,float* want) noexcept {
+    if(!j.t.outTear){Level(pos,j.t.out,height,want);return;}
+    const float toAt[3]={j.t.outAt[0]-pos[0],0.0f,j.t.outAt[2]-pos[2]};
+    Level(pos,toAt,height,want);
 }
 
 // Where to steer for the guns: the nose onto `lead`, not the flight path. The guns fire along the nose, which rides
@@ -269,20 +289,19 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
         return true;
     case Mode::pull:
         if(pos[1]>=height-20.0f || ms-j.modeAt>kPullMs) {
-            PlanExtend(j,pos,lead,vdir);SetMode(j,Mode::extend,ms);break;
+            if(!PlanExtend(j,pos,lead,vdir)){SetMode(j,Mode::approach,ms);break;}
+            SetMode(j,Mode::extend,ms);FlyExtend(j,pos,height,want);
+            return false;
         }
         want[0]=vdir[0];want[1]=0.7f;want[2]=vdir[2];Normalize(want);
         return false;
     case Mode::extend:
         if(j.t.outTear) {
-            // The teardrop: to its turn point; past it along the way out, the turn back (Approach) lines it up.
-            const float out[3]={pos[0]-lead[0],0.0f,pos[2]-lead[2]},toAt[3]={j.t.outAt[0]-pos[0],0.0f,j.t.outAt[2]-pos[2]};
-            if(Dot(out,j.t.out)>=j.t.outRun || ms-j.modeAt>kExtendMs){SetMode(j,Mode::approach,ms);break;}
-            Level(pos,toAt,height,want);
-            return false;
-        }
-        if(dh>j.t.outRun || ms-j.modeAt>kExtendMs){SetMode(j,Mode::approach,ms);break;}
-        Level(pos,j.t.out,height,want);
+            // The teardrop: to its turn point; abreast of it along its leg, the turn back (Approach) lines it up.
+            const float toAt[3]={j.t.outAt[0]-pos[0],0.0f,j.t.outAt[2]-pos[2]};
+            if(Dot(toAt,j.t.outLeg)<=0.0f || ms-j.modeAt>kExtendMs){SetMode(j,Mode::approach,ms);break;}
+        } else if(dh>j.t.outRun || ms-j.modeAt>kExtendMs){SetMode(j,Mode::approach,ms);break;}
+        FlyExtend(j,pos,height,want);
         return false;
     default:
         if(j.mode!=Mode::approach)SetMode(j,Mode::approach,ms);
@@ -298,10 +317,7 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
         j.entered=true;SetMode(j,Mode::dive,ms);GunToward(j,pos,nose,lead,want);return true;
     }
     if(!entering && off>kDiveCone && InsideTurn(j,pos,lead)) {
-        PlanExtend(j,pos,lead,vdir);SetMode(j,Mode::extend,ms);
-        if(j.t.outTear){const float toAt[3]={j.t.outAt[0]-pos[0],0.0f,j.t.outAt[2]-pos[2]};Level(pos,toAt,height,want);}
-        else Level(pos,j.t.out,height,want);
-        return false;
+        if(PlanExtend(j,pos,lead,vdir)){SetMode(j,Mode::extend,ms);FlyExtend(j,pos,height,want);return false;}
     }
     Level(pos,to,entering ? pos[1] : height,want);
     *speed=entering ? k.attack : k.cruise;

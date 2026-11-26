@@ -11,6 +11,19 @@ set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated n
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/blastsound.cpp src/sightzoom.cpp src/drivegear.cpp)
+# The sources the vehicles' sounds are made by (src/trace_rec.cpp records a run of them, tests/vehsound_replay_test.cpp
+# plays it back): their hash in a recording's header and in the replay, which holds a recording made from the same sources
+# to exactly what the game did (docs/trace-replay.md).
+set(EDF6_TRACE_SOURCE_FILES src/vehsound.cpp src/vehmix.h src/sound_event.h src/vsynth.h src/surround.h src/sound_place.h src/wt_clips.h src/jetaudio.h)
+set(edf6_trace_hashes "")
+foreach(f ${EDF6_TRACE_SOURCE_FILES})
+    file(SHA256 "${CMAKE_SOURCE_DIR}/${f}" h)
+    string(APPEND edf6_trace_hashes "${h}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${f}")
+endforeach()
+string(SHA256 EDF6_TRACE_SOURCES "${edf6_trace_hashes}")
+target_sources(EDF6VehicleCrew PRIVATE src/trace_rec.cpp)
+set_source_files_properties(src/trace_rec.cpp PROPERTIES COMPILE_DEFINITIONS "EDF6_TRACE_SOURCES=\"${EDF6_TRACE_SOURCES}\"")
 target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
@@ -1088,6 +1101,7 @@ add_test(NAME cockpit_instruments COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 add_test(NAME cockpit_retrofit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_retrofit_test.py")
 add_test(NAME cockpit_shell COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_shell_test.py")
 add_test(NAME cockpit_tub COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_tub_test.py")
+add_test(NAME cockpit_panoramic COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_panoramic_test.py")
 add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
@@ -1347,10 +1361,14 @@ set_target_properties(fp_flash_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAK
 add_executable(fp_aim_check EXCLUDE_FROM_ALL tools/fp_aim_check.cpp)
 target_compile_options(fp_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(fp_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The HUD's world text (src/world_text.h: the fixed hologram plates, their layers, size held, facings kept) offline.
+add_executable(world_text_check EXCLUDE_FROM_ALL tools/world_text_check.cpp)
+target_compile_options(world_text_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(world_text_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check surround_check sound_event_check sound_engine_check wing_engine_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check surround_check sound_event_check sound_engine_check wing_engine_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check world_text_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks keybind_test)
@@ -1383,6 +1401,9 @@ set_tests_properties(support_exit_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=
 # Ground attack runs on a stock-size map, whose soft box is narrower than the strike's own run (jet_obstacle_sim
 # --strike-room-suite; the 2026-10-09 log's multirole jets that never fired).
 add_test(NAME jet_strike_room COMMAND jet_obstacle_sim --strike-room-suite --out "${CMAKE_BINARY_DIR}")
+# An extend Strike begins is flown, not ended the next frame and planned again (jet_obstacle_sim --extend-flip-suite;
+# the 2026-11-26 perfrun log's fighter: 245 approach / extend flips and teardrop lines in a minute).
+add_test(NAME jet_extend_flip COMMAND jet_obstacle_sim --extend-flip-suite --out "${CMAKE_BINARY_DIR}")
 # The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
 # offline (tools/play_area_check.cpp). Not part of the plugin build:
 # cmake --build build --target play_area_check && build\play_area_check.exe
@@ -2992,6 +3013,37 @@ foreach(rtt 250 600)
         set_tests_properties(enemy_control_provider_trace_rtt${rtt}_bg${background} PROPERTIES FIXTURES_REQUIRED ec_provider_packed TIMEOUT 300)
     endforeach()
 endforeach()
+
+# The vehicles' guns heard (src/vehsound.cpp, the production source with the game's readers and voices replaced): a 403's
+# rail gun reported once a shot (Debug's report_rail), its stock FireSe held and given back; no game needed.
+add_executable(vehsound_gun_test EXCLUDE_FROM_ALL tests/vehsound_gun_test.cpp)
+target_include_directories(vehsound_gun_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(vehsound_gun_test PRIVATE edf6common user32)
+target_compile_options(vehsound_gun_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks vehsound_gun_test)
+add_test(NAME vehsound_gun COMMAND vehsound_gun_test)
+
+# The offline replay of the vehicles' sounds (docs/trace-replay.md): a recording made in the game (src/trace_rec.cpp, ini
+# TraceFile) played back through src/vehsound.cpp as built. vehsound_trace_fixture records a 403 made in memory through
+# the same recorder, the replay plays it back in another process: the recorder and the replay checked with each other.
+add_executable(vehsound_replay_test EXCLUDE_FROM_ALL tests/vehsound_replay_test.cpp)
+target_include_directories(vehsound_replay_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(vehsound_replay_test PRIVATE edf6common user32)
+target_compile_options(vehsound_replay_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_compile_definitions(vehsound_replay_test PRIVATE "EDF6_TRACE_SOURCES=\"${EDF6_TRACE_SOURCES}\"")
+add_dependencies(offline_checks vehsound_replay_test)
+add_executable(vehsound_trace_fixture EXCLUDE_FROM_ALL tests/vehsound_trace_fixture.cpp)
+target_include_directories(vehsound_trace_fixture PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(vehsound_trace_fixture PRIVATE edf6common user32)
+target_compile_options(vehsound_trace_fixture PRIVATE /W4 /WX /utf-8 /permissive-)
+target_compile_definitions(vehsound_trace_fixture PRIVATE "EDF6_TRACE_SOURCES=\"${EDF6_TRACE_SOURCES}\"")
+add_dependencies(vehsound_trace_fixture edf6_build_id)
+add_dependencies(offline_checks vehsound_trace_fixture)
+add_test(NAME vehsound_trace_record COMMAND vehsound_trace_fixture "${CMAKE_CURRENT_BINARY_DIR}/vehsound-fixture.trc")
+set_tests_properties(vehsound_trace_record PROPERTIES FIXTURES_SETUP vehsound_trace)
+add_test(NAME vehsound_trace_replay COMMAND vehsound_replay_test "${CMAKE_CURRENT_BINARY_DIR}/vehsound-fixture.trc"
+    --at-least note.report_rail=5 --at-least once=10)
+set_tests_properties(vehsound_trace_replay PROPERTIES FIXTURES_REQUIRED vehsound_trace)
 
 # The BMPT's twin barrels in turn (src/twin_cadence.h; docs/feedback-2026-10-21-bmpt-fire.md): the pure cadence against a
 # model of the native cooldown, and its EDF.dll fields (the shot's FireInterval -> cooldown, the update's countdown).
