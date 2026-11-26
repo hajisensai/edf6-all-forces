@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <intrin.h>
 #include <random>
 #include <vector>
 
@@ -243,6 +244,180 @@ bool TargetScoreCases() {
     }
     VirtualFree(reference,0,MEM_RELEASE);
     return valid && edf::At<int>(control,8)==2;
+}
+
+struct HostileNode {
+    HostileNode *left{},*parent{},*right{};
+    unsigned char color{},nil{};
+    const unsigned char* actor{};
+};
+static_assert(offsetof(HostileNode,nil)==0x19 && offsetof(HostileNode,actor)==0x20);
+
+struct HostileRow {
+    HostileNode* head{};
+    unsigned char reserved[0x10]{};
+    const int* relations{};
+    std::size_t reservedCount{},relationCount{},reservedTail{};
+};
+static_assert(sizeof(HostileRow)==0x38 && offsetof(HostileRow,relationCount)==0x28);
+
+struct HostileManager {
+    std::uintptr_t reserved{};
+    CRITICAL_SECTION lock{};
+    std::uintptr_t reservedTail{};
+    HostileRow* rows{};
+};
+static_assert(offsetof(HostileManager,lock)==8 && offsetof(HostileManager,rows)==0x38);
+
+HostileNode* LinkHostileTree(HostileNode* nodes,std::size_t count,HostileNode* parent,HostileNode* head) noexcept {
+    if(!count)return head;
+    const auto middle=count/2;
+    auto* const root=nodes+middle;
+    root->parent=parent;
+    root->left=LinkHostileTree(nodes,middle,root,head);
+    root->right=LinkHostileTree(root+1,count-middle-1,root,head);
+    return root;
+}
+
+void HostileTree(HostileNode& head,HostileNode* nodes,std::size_t count) noexcept {
+    head.nil=1;
+    head.left=count ? nodes : &head;
+    head.right=count ? nodes+count-1 : &head;
+    head.parent=LinkHostileTree(nodes,count,&head,&head);
+}
+
+struct HostileTrace {
+    const void* const* vtable{};
+    const void* const* next{};
+    const CRITICAL_SECTION* lock{};
+    std::array<const void*,8> actors{};
+    unsigned count{},firstCalls{},nextCalls{};
+    bool valid=true;
+};
+
+void RecordHostile(HostileTrace& trace,const void* actor,const void* caller) noexcept {
+    if(trace.count>=trace.actors.size()) {
+        trace.valid=false;
+        return;
+    }
+    trace.actors[trace.count++]=actor;
+    trace.valid=trace.valid && trace.lock->RecursionCount==1 && caller==image+kHostileVisitEnd;
+}
+void __fastcall HostileTraceFirst(HostileTrace* trace,const void* actor) noexcept {
+    RecordHostile(*trace,actor,_ReturnAddress());
+    ++trace->firstCalls;
+    trace->vtable=trace->next;
+}
+void __fastcall HostileTraceNext(HostileTrace* trace,const void* actor) noexcept {
+    RecordHostile(*trace,actor,_ReturnAddress());
+    ++trace->nextCalls;
+}
+
+struct HostileCounter { const void* const* vtable;std::size_t calls=0; };
+void __fastcall CountHostile(HostileCounter* counter,const void*) noexcept { ++counter->calls; }
+
+bool HostileVisitCases() {
+    constexpr unsigned leaveSlot=0x17555D0,enterSlot=0x1755870;
+    constexpr std::size_t importsSize=enterSlot-leaveSlot+sizeof(void*);
+    auto* const imports=image+leaveSlot;
+    DWORD importProtection=0;
+    if(!VirtualProtect(imports,importsSize,PAGE_READWRITE,&importProtection))return false;
+    const auto savedLeave=edf::At<void*>(image,leaveSlot),savedEnter=edf::At<void*>(image,enterSlot);
+    edf::Put(image,leaveSlot,reinterpret_cast<void*>(&LeaveCriticalSection));
+    edf::Put(image,enterSlot,reinterpret_cast<void*>(&EnterCriticalSection));
+
+    const auto walk=reinterpret_cast<void(__fastcall*)(HostileManager*,int,void*)>(image+kHostileWalk);
+    HostileManager manager;
+    InitializeCriticalSection(&manager.lock);
+    const bool valid=[&] {
+        constexpr int relations[]{0,2,2,1};
+        HostileRow rows[4]{};
+        manager.rows=rows;
+        rows[0].relations=relations;
+        rows[0].relationCount=std::size(relations);
+        HostileNode heads[3]{},nodes[9]{};
+        unsigned char actors[9][0x388]{};
+        for(unsigned i=0;i<9;++i)nodes[i].actor=actors[i];
+        actors[1][0x2E8]=1;
+        actors[4][0x380]=0x80;
+        HostileTree(heads[0],nodes,7);
+        HostileTree(heads[1],nodes+7,1);
+        HostileTree(heads[2],nodes+8,1);
+        for(unsigned i=0;i<3;++i)rows[i+1].head=heads+i;
+        const void* const first[]{nullptr,reinterpret_cast<const void*>(&HostileTraceFirst)};
+        const void* const next[]{nullptr,reinterpret_cast<const void*>(&HostileTraceNext)};
+        const std::array<const void*,8> expected{actors[0],actors[2],actors[3],actors[5],actors[6],actors[7]};
+        const auto trace=[&] {
+            HostileTrace result{first,next,&manager.lock};
+            walk(&manager,-1,&result);
+            if(result.count || manager.lock.RecursionCount)return false;
+            walk(&manager,0,&result);
+            return result.valid && result.actors==expected && result.count==6 &&
+                   result.firstCalls==1 && result.nextCalls==5 && !manager.lock.RecursionCount;
+        };
+        if(!trace() || !InstallNativeHostileVisit() || !trace())return false;
+
+        constexpr std::size_t population=1023;
+        constexpr unsigned scans=2048;
+        std::vector<std::array<unsigned char,0x388>> crowded(population);
+        std::vector<HostileNode> crowdedNodes(population);
+        for(std::size_t i=0;i<population;++i)crowdedNodes[i].actor=crowded[i].data();
+        HostileTree(heads[0],crowdedNodes.data(),population);
+        HostileTree(heads[1],nullptr,0);
+        const void* const countTable[]{nullptr,reinterpret_cast<const void*>(&CountHostile)};
+        auto* const site=image+kHostileVisit;
+        DWORD codeProtection=0;
+        if(!VirtualProtect(site,sizeof(kHostileVisitStock),PAGE_EXECUTE_READWRITE,&codeProtection))return false;
+        const auto select=[&](bool direct) {
+            std::memcpy(site,direct ? kHostileVisitDirect : kHostileVisitStock,sizeof(kHostileVisitStock));
+            FlushInstructionCache(GetCurrentProcess(),site,sizeof(kHostileVisitStock));
+        };
+        struct Measurement { double milliseconds;ULONG64 cycles; };
+        std::array<Measurement,7> before{},after{};
+        bool countsMatch=true;
+        const auto measure=[&](bool direct) {
+            select(direct);
+            HostileCounter counter{countTable};
+            ULONG64 startCycles=0,endCycles=0;
+            const bool cycleStart=QueryThreadCycleTime(GetCurrentThread(),&startCycles)!=FALSE;
+            const auto start=std::chrono::steady_clock::now();
+            for(unsigned i=0;i<scans;++i)walk(&manager,0,&counter);
+            const auto elapsed=std::chrono::steady_clock::now()-start;
+            const bool cycleEnd=QueryThreadCycleTime(GetCurrentThread(),&endCycles)!=FALSE;
+            countsMatch=countsMatch && counter.calls==scans*population && !manager.lock.RecursionCount;
+            return Measurement{std::chrono::duration<double,std::milli>(elapsed).count(),
+                               cycleStart && cycleEnd ? endCycles-startCycles : 0};
+        };
+        for(std::size_t i=0;i<before.size();++i) {
+            if(i%2) {
+                after[i]=measure(true);
+                before[i]=measure(false);
+            } else {
+                before[i]=measure(false);
+                after[i]=measure(true);
+            }
+        }
+        select(true);
+        DWORD previous=0;
+        if(!VirtualProtect(site,sizeof(kHostileVisitStock),codeProtection,&previous) || !countsMatch)return false;
+        const auto middle=before.size()/2;
+        const auto timeLess=[](const Measurement& a,const Measurement& b){return a.milliseconds<b.milliseconds;};
+        std::sort(before.begin(),before.end(),timeLess);
+        std::sort(after.begin(),after.end(),timeLess);
+        const auto oldMs=before[middle].milliseconds,newMs=after[middle].milliseconds;
+        const auto cycleLess=[](const Measurement& a,const Measurement& b){return a.cycles<b.cycles;};
+        std::sort(before.begin(),before.end(),cycleLess);
+        std::sort(after.begin(),after.end(),cycleLess);
+        std::printf("%zu native hostile callbacks (complete walks): %.2f -> %.2f ms, %.2f -> %.2f cycles/callback\n",
+                    scans*population,oldMs,newMs,static_cast<double>(before[middle].cycles)/(scans*population),
+                    static_cast<double>(after[middle].cycles)/(scans*population));
+        return true;
+    }();
+    DeleteCriticalSection(&manager.lock);
+    edf::Put(image,leaveSlot,savedLeave);
+    edf::Put(image,enterSlot,savedEnter);
+    DWORD ignored=0;
+    return VirtualProtect(imports,importsSize,importProtection,&ignored) && valid;
 }
 
 bool BoundsValidation() noexcept {
@@ -1071,6 +1246,10 @@ int main(int argc,char** argv) {
     if(!image)return 1;
     const auto* nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
     if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || !edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return 1;
+    if(!HostileVisitCases()) {
+        std::puts("FAIL: native hostile visitor differs from stock");
+        return 1;
+    }
     if(!TargetScoreCases()) {
         std::puts("FAIL: native packed target score differs from stock");
         return 1;

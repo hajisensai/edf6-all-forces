@@ -144,7 +144,7 @@ void __fastcall PushAvoidanceNeighbor(AvoidanceHeap* heap) noexcept {
     if(!farther)SiftAvoidanceNeighbors(heap,0);
 }
 
-bool AvoidanceKernelMatches(unsigned begin,unsigned end,std::uint64_t expected) noexcept {
+bool NativeCodeMatches(unsigned begin,unsigned end,std::uint64_t expected) noexcept {
     const auto* const code=image+begin;
     const unsigned bytes=end-begin;
     if(!edf::Readable(code,bytes))return false;
@@ -194,8 +194,8 @@ constexpr unsigned char kTargetScorePacked[]{
 };
 
 bool InstallTargetScore() noexcept {
-    if(!AvoidanceKernelMatches(kTargetScore,kTargetScoreFunctionEnd,0xA0D9D4BC5DF2ACCFull) ||
-       !AvoidanceKernelMatches(kReadWeakTarget,kReadWeakTargetEnd,0x367523FA969A4231ull))return false;
+    if(!NativeCodeMatches(kTargetScore,kTargetScoreFunctionEnd,0xA0D9D4BC5DF2ACCFull) ||
+       !NativeCodeMatches(kReadWeakTarget,kReadWeakTargetEnd,0x367523FA969A4231ull))return false;
     // Keep the original unwind range, the epilogue and saved registers.
     unsigned char code[sizeof(kTargetScoreStock)];
     static_assert(sizeof(kTargetScorePacked)<sizeof(code));
@@ -204,10 +204,40 @@ bool InstallTargetScore() noexcept {
     return edf::PatchCode(image+kTargetScoreStart,kTargetScoreStock,code,sizeof(code));
 }
 
+constexpr unsigned kHostileWalk=0x5E0F20,kHostileWalkEnd=0x5E1090;
+constexpr unsigned kHostileVisit=0x5E0FC8,kHostileVisitEnd=0x5E0FD5;
+constexpr unsigned kHostileAdapterSlot=0x17D7210,kHostileAdapter=0x5E2CC0;
+constexpr unsigned char kHostileAdapterStock[]{
+    0x48,0x8B,0x49,0x08,0x48,0x8B,0x01,0x48,0xFF,0x60,0x08,
+};
+constexpr unsigned char kHostileVisitStock[]{
+    0x48,0x8B,0x44,0x24,0x30,      // mov rax,[rsp+30h]
+    0x48,0x8D,0x4C,0x24,0x30,      // lea rcx,[rsp+30h]
+    0xFF,0x50,0x08,                 // call qword ptr [rax+8]
+};
+constexpr unsigned char kHostileVisitDirect[]{
+    0x48,0x8B,0x4C,0x24,0x38,      // mov rcx,[rsp+38h]
+    0x48,0x8B,0x01,                 // mov rax,[rcx]
+    0x66,0x90,                      // keep the call and its return address at the original offsets
+    0xFF,0x50,0x08,                 // call qword ptr [rax+8]
+};
+static_assert(sizeof(kHostileVisitStock)==kHostileVisitEnd-kHostileVisit &&
+              sizeof(kHostileVisitDirect)==sizeof(kHostileVisitStock));
+
+bool InstallHostileVisit() noexcept {
+    if(!NativeCodeMatches(kHostileWalk,kHostileWalkEnd,0xF4245D2AF5D26C84ull) ||
+       !edf::Readable(image+kHostileAdapterSlot,sizeof(void*)) ||
+       edf::At<const void*>(image,kHostileAdapterSlot)!=image+kHostileAdapter ||
+       !edf::Readable(image+kHostileAdapter,sizeof(kHostileAdapterStock)) ||
+       !edf::Matches(image,kHostileAdapter,kHostileAdapterStock,sizeof(kHostileAdapterStock)))return false;
+    // The stock adapter only loads the original visitor and tail-calls its slot. RDX still holds the candidate.
+    return edf::PatchCode(image+kHostileVisit,kHostileVisitStock,kHostileVisitDirect,sizeof(kHostileVisitStock));
+}
+
 bool InstallAvoidanceOverflow() noexcept {
     if(!edf::Matches(image,kAvoidanceOverflow-2,kAvoidanceFirstHeapSkip,sizeof(kAvoidanceFirstHeapSkip)) ||
        !edf::Matches(image,kAvoidanceDone,kAvoidanceDoneSig,sizeof(kAvoidanceDoneSig)) ||
-       !AvoidanceKernelMatches(kAvoidancePop,kAvoidanceDone,0x01EC66192E650870ull))return false;
+       !NativeCodeMatches(kAvoidancePop,kAvoidanceDone,0x01EC66192E650870ull))return false;
     auto* const start=image+kAvoidanceOverflow;
     auto* const thunk=edf::AllocateNearThunk(start,reinterpret_cast<void*>(&PushAvoidanceNeighbor));
     if(!thunk)return false;
@@ -237,8 +267,8 @@ unsigned InstallAvoidanceHeap() noexcept {
         edf::RedirectCall(image+site.call,image+stock,replacement,changed);
         return changed;
     };
-    const bool siftMatches=AvoidanceKernelMatches(kAvoidanceSift,kAvoidanceSiftEnd,0xD8C5803BAE3519BBull);
-    const bool raiseMatches=AvoidanceKernelMatches(kAvoidanceRaise,kAvoidanceRaiseEnd,0x9561D33EE8875421ull);
+    const bool siftMatches=NativeCodeMatches(kAvoidanceSift,kAvoidanceSiftEnd,0xD8C5803BAE3519BBull);
+    const bool raiseMatches=NativeCodeMatches(kAvoidanceRaise,kAvoidanceRaiseEnd,0x9561D33EE8875421ull);
     // The first overflow builds the heap in-place and still reaches the original pop.
     const bool combined=siftMatches && raiseMatches && InstallAvoidanceOverflow();
     unsigned installed=combined;
@@ -1018,6 +1048,10 @@ void __fastcall NormalizeAttachedBasis(float* matrix) noexcept {
 
 bool InstallNativeTargetScore() noexcept {
     return image && InstallTargetScore();
+}
+
+bool InstallNativeHostileVisit() noexcept {
+    return image && InstallHostileVisit();
 }
 
 unsigned InstallNativeBodyMath() noexcept {

@@ -1362,6 +1362,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(Cfg().enabled) {
         Log("PHYSICS attachment and collision: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
         Log("AI native target scoring: %s",InstallNativeTargetScore() ? "optimized" : "stock");
+        Log("AI native hostile visitor: %s",InstallNativeHostileVisit() ? "direct" : "stock");
     }
     if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
         Log("RENDER pose snapshots installed=%d",renderpose::Install());
