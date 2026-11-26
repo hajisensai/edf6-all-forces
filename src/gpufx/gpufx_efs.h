@@ -40,9 +40,9 @@ inline void EfsTurn(const float q[4],const float v[3],const float basis[9],float
 // p = (rot2D(xrot) (fx, fy)) * position.zw + position.xy, times scale.xy, turned, plus the world centre. Linear in
 // (fx, fy): centre' + fx * axisX + fy * axisY.
 //   a.pos centre', a.size zbias, a.color colour, (a.rot, a.frame, a.soft) axisX, a.emissive the nearest distance
-//   b.pos axisY, b.size 1 = depth tested (the stock LESS), b.color the uv rect (offset xy, size zw)
+//   b.pos axisY, b.size the depth test (0 none, 1 the stock LESS, 2 LESS_EQUAL), b.color the uv rect (offset xy, size zw)
 inline void EfsQuad(const EfsRecord& r,const EfsComposite& c,const float world[16],const float basis[9],float zbias,
-                    float nearest,bool depthTest,Instance out[2]) noexcept {
+                    float nearest,int depthTest,Instance out[2]) noexcept {
     const float co=std::cos(c.xrot),si=std::sin(c.xrot);
     const float sx=r.scale[0],sy=r.scale[1];
     const float ax[3]{co*c.position[2]*sx,si*c.position[3]*sy,0.0f};
@@ -56,7 +56,7 @@ inline void EfsQuad(const EfsRecord& r,const EfsComposite& c,const float world[1
         a.pos[k]=r.translate[0]*world[k]+r.translate[1]*world[4+k]+r.translate[2]*world[8+k]+world[12+k]+tb[k];
     a.size=zbias;std::memcpy(a.color,c.color,sizeof(a.color));
     a.rot=tx[0];a.frame=tx[1];a.soft=tx[2];a.emissive=nearest;
-    std::memcpy(o.pos,ty,sizeof(o.pos));o.size=depthTest ? 1.0f : 0.0f;std::memcpy(o.color,c.texcoord,sizeof(o.color));
+    std::memcpy(o.pos,ty,sizeof(o.pos));o.size=static_cast<float>(depthTest);std::memcpy(o.color,c.texcoord,sizeof(o.color));
 }
 
 // The stock fetch (g_fetch t0, float4: corner xy, uv zw) and the first six indices of its index buffer, read back from

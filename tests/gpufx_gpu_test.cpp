@@ -312,7 +312,7 @@ int main() {
         float strip[16];CHECK(EfsStripFetch(fetch,4,idx,strip));
         float basis[9];EfsBasis(identity,nullptr,basis);
         Instance q[2];
-        auto drawEfs=[&](Kind kind,ID3D11Buffer* sys,const float* clearTo,float depthTo,bool depthTest){
+        auto drawEfs=[&](Kind kind,ID3D11Buffer* sys,const float* clearTo,float depthTo,int depthTest){
             EfsQuad(rec,comp,identity,basis,0.0f,0.0f,depthTest,q);
             Batch b{};b.texture=v.Get();b.kind=kind;b.gridX=b.gridY=b.frames=1;b.instances=q;b.count=2;
             std::memcpy(b.efsFetch,strip,sizeof(strip));
@@ -328,47 +328,56 @@ int main() {
         };
         ComPtr<ID3D11Buffer> plain=system([](float*){});
         // Blend 0: SRC_ALPHA / INV_SRC_ALPHA, alpha ONE / ZERO. Half width 1.5 m at 10 m: 7 px; 4 px out drawn, 10 px clear.
-        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,false);
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,0);
         std::printf("efs alpha %.3f %.3f %.3f a=%.3f drawn %d\n",centre(px)[0],centre(px)[1],centre(px)[2],centre(px)[3],st.drawn);
         CHECK(st.drawn==1 && near3(centre(px),1.0f,0.5f,0.25f) && std::fabs(centre(px)[3]-1.0f)<1e-3f);
         CHECK(centre(px,4)[0]>0.9f && centre(px,10)[0]==0.0f);
         comp.color[3]=0.5f;
-        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,false);
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,0);
         CHECK(near3(centre(px),0.5f,0.25f,0.125f) && std::fabs(centre(px)[3]-0.5f)<1e-3f);
         comp.color[3]=1.0f;
         // The distance alpha: 1 - (dist * 0.05) at 10 m: a half.
         ComPtr<ID3D11Buffer> faded=system([](float* s){s[35*4+2]=0.05f;});
-        px=drawEfs(Kind::efsAlpha,faded.Get(),clear,1.0f,false);
+        px=drawEfs(Kind::efsAlpha,faded.Get(),clear,1.0f,0);
         std::printf("efs faded %.3f a=%.3f\n",centre(px)[0],centre(px)[3]);
         CHECK(near3(centre(px),0.5f,0.25f,0.125f,0.02f) && std::fabs(centre(px)[3]-0.5f)<0.02f);
         // Full fog (green): the colour replaced by the fog's.
         ComPtr<ID3D11Buffer> fogged=system([](float* s){s[34*4+0]=0.1f;s[36*4+1]=1.0f;s[36*4+3]=1.0f;});
-        px=drawEfs(Kind::efsAlpha,fogged.Get(),clear,1.0f,false);
+        px=drawEfs(Kind::efsAlpha,fogged.Get(),clear,1.0f,0);
         std::printf("efs fog %.3f %.3f %.3f\n",centre(px)[0],centre(px)[1],centre(px)[2]);
         CHECK(near3(centre(px),0.0f,1.0f,0.0f,0.02f));
         // The glow floor 2 (Sys37.rgb * w at o2.z = 1): above the texel colour.
         ComPtr<ID3D11Buffer> glowing=system([](float* s){s[34*4+3]=0.1f;s[37*4+0]=s[37*4+1]=s[37*4+2]=1.0f;s[37*4+3]=2.0f;});
-        px=drawEfs(Kind::efsAlpha,glowing.Get(),clear,1.0f,false);
+        px=drawEfs(Kind::efsAlpha,glowing.Get(),clear,1.0f,0);
         CHECK(near3(centre(px),2.0f,2.0f,2.0f,0.02f));
         // Blend 1 / 2: the target plus / minus colour * alpha (alpha 0.5), the alpha replaced.
         const float grey[4]{0.75f,0.75f,0.75f,0.25f};
         comp.color[3]=0.5f;
-        px=drawEfs(Kind::efsAdditive,plain.Get(),grey,1.0f,false);
+        px=drawEfs(Kind::efsAdditive,plain.Get(),grey,1.0f,0);
         std::printf("efs add %.3f %.3f %.3f a=%.3f\n",centre(px)[0],centre(px)[1],centre(px)[2],centre(px)[3]);
         CHECK(near3(centre(px),1.25f,1.0f,0.875f) && std::fabs(centre(px)[3]-0.5f)<1e-3f);
-        px=drawEfs(Kind::efsSubtract,plain.Get(),grey,1.0f,false);
+        px=drawEfs(Kind::efsSubtract,plain.Get(),grey,1.0f,0);
         std::printf("efs subtract %.3f %.3f %.3f\n",centre(px)[0],centre(px)[1],centre(px)[2]);
         CHECK(near3(centre(px),0.25f,0.5f,0.625f));
         comp.color[3]=1.0f;
         // The depth test (the stock LESS): a scene 5 m ahead hides it, a far one does not; untested it shows through.
-        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z5,true);
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z5,1);
         CHECK(centre(px)[0]==0.0f);
-        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,true);
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,1.0f,1);
         CHECK(near3(centre(px),1.0f,0.5f,0.25f));
-        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z5,false);
+        // The boundary on D24: a scene at the quad's own depth (stored as 24-bit UNORM) hides it under LESS and shows
+        // it under LESS_EQUAL, as the hardware test of the fragment's converted depth does.
+        const float z10=DepthFromViewZ(vp.proj,-10.0f);
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z10,1);
+        std::printf("efs depth at its own D24 depth: LESS %.3f",centre(px)[0]);
+        CHECK(centre(px)[0]==0.0f);
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z10,2);
+        std::printf(", LESS_EQUAL %.3f\n",centre(px)[0]);
+        CHECK(near3(centre(px),1.0f,0.5f,0.25f));
+        px=drawEfs(Kind::efsAlpha,plain.Get(),clear,z5,0);
         CHECK(near3(centre(px),1.0f,0.5f,0.25f));
         // Without the system constants the efs batch is skipped.
-        px=drawEfs(Kind::efsAlpha,nullptr,clear,1.0f,false);
+        px=drawEfs(Kind::efsAlpha,nullptr,clear,1.0f,0);
         CHECK(centre(px)[0]==0.0f && st.drawn==0);
     }
     // 5. A refusal changes nothing: depth of another size.

@@ -878,8 +878,7 @@ bool EfsTakeOver(const unsigned char* ctx,const float* world,const unsigned char
     for(std::size_t i=0;i<n;++i) {
         const std::size_t r=index ? index[i] : i;
         if(r>=n)continue;   // past the stock buffers' end
-        EfsQuad(records[r],comps[r],world,basis,zbias,nearest,depth!=0,out+2*quads);
-        out[2*quads+1].size=static_cast<float>(depth);   // 1 LESS, 2 LESS_EQUAL
+        EfsQuad(records[r],comps[r],world,basis,zbias,nearest,depth,out+2*quads);   // depth: 1 LESS, 2 LESS_EQUAL
         ++quads;
     }
     nativeInstances.resize(start+2u*static_cast<std::size_t>(quads));

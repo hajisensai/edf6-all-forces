@@ -30,7 +30,8 @@ cbuffer Frame : register(b0) {
     float4 SunColor;   // rgb; w: exposure (the scene's measured light scale)
     float4 Ambient;    // rgb; w: near-camera fade distance
     float4 Screen;     // width, height, 1/width, 1/height
-    float4 Fade;       // the stock particle distance fade: x mul, y add (alpha *= sat(1 - (distance * x + y)))
+    float4 Fade;       // the stock particle distance fade: x mul, y add (alpha *= sat(1 - (distance * x + y)));
+                       // z: the depth target's UNORM steps (2^24 - 1 for D24; 0: a float depth)
 };
 cbuffer BatchConstants : register(b1) {
     uint Base;
@@ -70,7 +71,7 @@ Texture2D<float4> Tex : register(t1);
 Texture2D<float4> TexMore[7] : register(t8);
 Texture2D<float> Depth : register(t2);
 SamplerState Linear : register(s0);
-SamplerState Wrap : register(s1);     // the stock efs sampler (linear, wrap: its first draw's PS s0)
+SamplerState Wrap : register(s1);     // the stock sampler (linear, wrap: the PS s0 of the first stock efs and particle draws)
 
 struct V {
     float4 pos : SV_Position;
@@ -247,7 +248,9 @@ float4 EfsPs(V i) {
     float4 t = Tex.Sample(Wrap, i.uv.xy) * i.color;
     if (i.vpos.w > 0.5) {
         float scene = Depth.Load(int3(int2(i.pos.xy), 0));
-        if (i.vpos.w > 1.5 ? !(i.pos.z <= scene) : !(i.pos.z < scene)) discard;
+        // The hardware test compares the fragment's depth converted to the target's format (round to nearest).
+        float z = Fade.z > 0.0 ? round(i.pos.z * Fade.z) / Fade.z : i.pos.z;
+        if (i.vpos.w > 1.5 ? !(z <= scene) : !(z < scene)) discard;
     }
     float3 fz = saturate(i.misc);
     float fog = exp2(log2(fz.x) * Sys[34].z) * Sys[36].w;
@@ -257,20 +260,46 @@ float4 EfsPs(V i) {
     return float4(rgb * a, a);
 }
 
+)hlsl"
+// (split: one string literal is limited to 16 KB by MSVC; adjacent literals join)
+R"hlsl(
 // One of the draw's textures. The slot is one instance's (flat), so a quad's pixels agree but for its edges: the
 // gradients are taken outside the branch.
+float4 SlotClamp(uint slot, float2 uv, float2 dx, float2 dy) {
+    float4 t;
+    [branch] switch (slot) {
+    case 1u: t = TexMore[0].SampleGrad(Linear, uv, dx, dy); break;
+    case 2u: t = TexMore[1].SampleGrad(Linear, uv, dx, dy); break;
+    case 3u: t = TexMore[2].SampleGrad(Linear, uv, dx, dy); break;
+    case 4u: t = TexMore[3].SampleGrad(Linear, uv, dx, dy); break;
+    case 5u: t = TexMore[4].SampleGrad(Linear, uv, dx, dy); break;
+    case 6u: t = TexMore[5].SampleGrad(Linear, uv, dx, dy); break;
+    case 7u: t = TexMore[6].SampleGrad(Linear, uv, dx, dy); break;
+    default: t = Tex.SampleGrad(Linear, uv, dx, dy); break;
+    }
+    return t;
+}
+float4 SlotWrap(uint slot, float2 uv, float2 dx, float2 dy) {
+    float4 t;
+    [branch] switch (slot) {
+    case 1u: t = TexMore[0].SampleGrad(Wrap, uv, dx, dy); break;
+    case 2u: t = TexMore[1].SampleGrad(Wrap, uv, dx, dy); break;
+    case 3u: t = TexMore[2].SampleGrad(Wrap, uv, dx, dy); break;
+    case 4u: t = TexMore[3].SampleGrad(Wrap, uv, dx, dy); break;
+    case 5u: t = TexMore[4].SampleGrad(Wrap, uv, dx, dy); break;
+    case 6u: t = TexMore[5].SampleGrad(Wrap, uv, dx, dy); break;
+    case 7u: t = TexMore[6].SampleGrad(Wrap, uv, dx, dy); break;
+    default: t = Tex.SampleGrad(Wrap, uv, dx, dy); break;
+    }
+    return t;
+}
+// Ours (kind 0) clamps its own flipbook; the stock kinds sample as the stock does (linear, wrap). Kind is the draw's.
 float4 SampleSlot(uint slot, float2 uv) {
     float2 dx = ddx(uv), dy = ddy(uv);
-    [branch] switch (slot) {
-    case 1u: return TexMore[0].SampleGrad(Linear, uv, dx, dy);
-    case 2u: return TexMore[1].SampleGrad(Linear, uv, dx, dy);
-    case 3u: return TexMore[2].SampleGrad(Linear, uv, dx, dy);
-    case 4u: return TexMore[3].SampleGrad(Linear, uv, dx, dy);
-    case 5u: return TexMore[4].SampleGrad(Linear, uv, dx, dy);
-    case 6u: return TexMore[5].SampleGrad(Linear, uv, dx, dy);
-    case 7u: return TexMore[6].SampleGrad(Linear, uv, dx, dy);
-    default: return Tex.SampleGrad(Linear, uv, dx, dy);
-    }
+    float4 t;
+    [branch] if (Kind == 0u) t = SlotClamp(slot, uv, dx, dy);
+    else t = SlotWrap(slot, uv, dx, dy);
+    return t;
 }
 
 float4 Ps(V i) : SV_Target0 {
@@ -374,7 +403,12 @@ struct Renderer::Impl final {
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd,blendEfsAdd,blendEfsSubtract;
-    ComPtr<ID3D11DepthStencilState> noDepth;
+    ComPtr<ID3D11DepthStencilState> noDepth,testDepth,testDepthReversed;
+    // The scene depth bound for the hardware test (read-only, no write) of the particle kinds: a view of the depth
+    // target itself (the depth copy is what the shaders read).
+    ComPtr<ID3D11Texture2D> testTarget;
+    ComPtr<ID3D11DepthStencilView> testView;
+    DXGI_FORMAT testFormat=DXGI_FORMAT_UNKNOWN;
     ComPtr<ID3D11RasterizerState> raster;
     ComPtr<ID3D11SamplerState> sampler,samplerWrap;
     ComPtr<ID3D11Buffer> particles,frameCb,batchCb;
@@ -452,6 +486,10 @@ struct Renderer::Impl final {
         D3D11_BLEND_DESC bs=be;bs.RenderTarget[0].BlendOp=D3D11_BLEND_OP_REV_SUBTRACT;
         D3D11_DEPTH_STENCIL_DESC ds{};ds.DepthEnable=FALSE;ds.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
         ds.DepthFunc=D3D11_COMPARISON_ALWAYS;
+        // The stock particles' own depth state (GPUFX native depth log: test on, no write, LESS_EQUAL); GREATER_EQUAL
+        // under a reversed projection.
+        D3D11_DEPTH_STENCIL_DESC dt=ds;dt.DepthEnable=TRUE;dt.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;
+        D3D11_DEPTH_STENCIL_DESC dr=dt;dr.DepthFunc=D3D11_COMPARISON_GREATER_EQUAL;
         D3D11_RASTERIZER_DESC r{};r.FillMode=D3D11_FILL_SOLID;r.CullMode=D3D11_CULL_NONE;r.DepthClipEnable=TRUE;
         D3D11_SAMPLER_DESC s{};s.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU=s.AddressV=s.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;s.MaxLOD=D3D11_FLOAT32_MAX;
@@ -466,6 +504,7 @@ struct Renderer::Impl final {
         if(FAILED(device->CreateBlendState(&b,&blend)) || FAILED(device->CreateBlendState(&ba,&blendStockAlpha)) ||
            FAILED(device->CreateBlendState(&bd,&blendStockAdd)) || FAILED(device->CreateBlendState(&be,&blendEfsAdd)) ||
            FAILED(device->CreateBlendState(&bs,&blendEfsSubtract)) || FAILED(device->CreateDepthStencilState(&ds,&noDepth)) ||
+           FAILED(device->CreateDepthStencilState(&dt,&testDepth)) || FAILED(device->CreateDepthStencilState(&dr,&testDepthReversed)) ||
            FAILED(device->CreateRasterizerState(&r,&raster)) ||
            FAILED(device->CreateSamplerState(&s,&sampler)) || FAILED(device->CreateSamplerState(&sw,&samplerWrap)) ||
            FAILED(device->CreateBuffer(&pb,nullptr,&particles)) || FAILED(device->CreateBuffer(&fb,nullptr,&frameCb)) ||
@@ -482,6 +521,17 @@ struct Renderer::Impl final {
         }
         order.resize(kMaxInstances);keys.resize(kMaxInstances);
         context=value;
+        return true;
+    }
+
+    bool PrepareTestView(ID3D11Texture2D* target,DXGI_FORMAT viewFormat) noexcept {
+        if(testView && testTarget.Get()==target && testFormat==viewFormat)return true;
+        testView.Reset();testTarget.Reset();
+        D3D11_DEPTH_STENCIL_VIEW_DESC v{};v.Format=viewFormat;v.ViewDimension=D3D11_DSV_DIMENSION_TEXTURE2D;
+        v.Flags=D3D11_DSV_READ_ONLY_DEPTH;
+        if(viewFormat==DXGI_FORMAT_D24_UNORM_S8_UINT || viewFormat==DXGI_FORMAT_D32_FLOAT_S8X24_UINT)v.Flags|=D3D11_DSV_READ_ONLY_STENCIL;
+        if(FAILED(device->CreateDepthStencilView(target,&v,&testView))){testView.Reset();return false;}
+        testTarget=target;testFormat=viewFormat;
         return true;
     }
 
@@ -642,6 +692,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     if(dd.SampleDesc.Count!=1 || dd.MipLevels!=1 || dd.ArraySize!=1)return refuse("depth multisampled or layered");
     if(dd.Width!=cd.Width || dd.Height!=cd.Height)return refuse("depth and colour differ in size");
     if(!s.PrepareDepth(dd,static_cast<DXGI_FORMAT>(depthViewFormat)))return refuse("depth format unsupported");
+    if(!s.PrepareTestView(depth,static_cast<DXGI_FORMAT>(depthViewFormat)))return refuse("depth test view failed");
     UINT viewports=1;
     D3D11_VIEWPORT vp{};
     context->RSGetViewports(&viewports,&vp);
@@ -695,6 +746,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     std::memcpy(f.sunColor,view.sunColor,12);f.sunColor[3]=view.exposure;
     std::memcpy(f.ambient,view.ambient,12);f.ambient[3]=1.5f;
     f.fade[0]=view.fadeMul;f.fade[1]=view.fadeAdd;
+    f.fade[2]=depthViewFormat==DXGI_FORMAT_D24_UNORM_S8_UINT ? 16777215.0f : 0.0f;
     f.screen[0]=static_cast<float>(cd.Width);f.screen[1]=static_cast<float>(cd.Height);
     f.screen[2]=1.0f/f.screen[0];f.screen[3]=1.0f/f.screen[1];
     if(FAILED(context->Map(s.frameCb.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map)))return refuse("constant map failed");
@@ -713,9 +765,13 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         s.PrepareFlipbook(context);
         context->CopyResource(s.depthCopy.Get(),depth);
         ID3D11RenderTargetView* target=targets[0].Get();
-        context->OMSetRenderTargets(1,&target,nullptr);
+        context->OMSetRenderTargets(1,&target,s.testView.Get());
         context->OMSetBlendState(s.blend.Get(),nullptr,0xFFFFFFFFu);
-        context->OMSetDepthStencilState(s.noDepth.Get(),0);
+        // The particle kinds: the hardware test against the scene depth (a camera-facing card behind the scene has a
+        // soft fade of 0 there anyway; the test only lets the GPU drop those pixels before shading them). The efs
+        // kinds test per instance in their PS (their compare is the stock draw's own).
+        ID3D11DepthStencilState* const tested=st.reversed ? s.testDepthReversed.Get() : s.testDepth.Get();
+        ID3D11DepthStencilState* depthBound=nullptr;
         context->RSSetState(s.raster.Get());
         context->RSSetViewports(1,&vp);
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
@@ -777,6 +833,8 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
                 batch.kind==Kind::efsAlpha ? s.blendStockAlpha.Get() : batch.kind==Kind::efsAdditive ? s.blendEfsAdd.Get() :
                 batch.kind==Kind::efsSubtract ? s.blendEfsSubtract.Get() : s.blend.Get();
             context->OMSetBlendState(bs,nullptr,0xFFFFFFFFu);
+            ID3D11DepthStencilState* const dss=efs ? s.noDepth.Get() : tested;
+            if(dss!=depthBound){context->OMSetDepthStencilState(dss,0);depthBound=dss;}
             const int drawn=efs ? ranges[b].count/2 : ranges[b].count;
             context->DrawInstanced(4,static_cast<UINT>(drawn),0,0);
             st.drawn+=drawn;++st.batches;

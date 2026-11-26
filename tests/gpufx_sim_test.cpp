@@ -303,7 +303,7 @@ static void Efs() {
         for(int k=0;k<4;++k){c.texcoord[k]=rnd();c.color[k]=rnd();}
         EfsBasis(world,(it&1) ? camera : nullptr,basis);
         Instance o[2];
-        EfsQuad(r,c,world,basis,0.25f,1.5f,(it&2)!=0,o);
+        EfsQuad(r,c,world,basis,0.25f,1.5f,(it&2)!=0 ? 1 : 0,o);
         CHECK(o[0].size==0.25f && o[0].emissive==1.5f && o[1].size==((it&2) ? 1.0f : 0.0f));
         CHECK(std::memcmp(o[0].color,c.color,sizeof(c.color))==0 && std::memcmp(o[1].color,c.texcoord,sizeof(c.texcoord))==0);
         const float corners[5][2]{{-1.0f,1.0f},{1.0f,1.0f},{-1.0f,-1.0f},{1.0f,-1.0f},{0.3f,-0.7f}};
