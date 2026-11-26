@@ -39,6 +39,7 @@ constexpr BasisCall kAttachedBasisCalls[]={
     {0x6EDB05,0x6EDBF4,{0x48,0x8D,0x4C,0x24,0x60},{0xE8,0xC7,0x35,0x96,0xFF}},
 };
 constexpr unsigned kAvoidanceSift=0xD5E020,kAvoidanceSiftEnd=0xD5E0F7;
+constexpr unsigned kAvoidanceRaise=0xD5FF10,kAvoidanceRaiseEnd=0xD5FF72;
 struct AvoidanceCall {
     unsigned call;
     unsigned char stock[10];
@@ -47,8 +48,9 @@ constexpr AvoidanceCall kAvoidanceCalls[]{
     {0xD5F5A5,{0x8B,0xD7,0x48,0x8B,0xCB,0xE8,0x76,0xEA,0xFF,0xFF}},
     {0xD5F604,{0x75,0x08,0x48,0x8B,0xCB,0xE8,0x17,0xEA,0xFF,0xFF}},
 };
+constexpr AvoidanceCall kAvoidancePush{0xD5F5BA,{0x8B,0xD6,0x48,0x8B,0xCB,0xE8,0x51,0x09,0,0}};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
-              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+4==kNativeBodyMathSites);
+              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+5==kNativeBodyMathSites);
 
 struct AvoidanceNeighbor { std::uint64_t handle; float distanceSquared; std::uint32_t padding; };
 struct AvoidanceHeap { AvoidanceNeighbor* entries; int count; };
@@ -80,20 +82,48 @@ int __fastcall SiftAvoidanceNeighbors(AvoidanceHeap* heap,int root) noexcept {
     return hole;
 }
 
-unsigned InstallAvoidanceHeap() noexcept {
-    const auto* const stock=image+kAvoidanceSift;
-    constexpr unsigned bytes=kAvoidanceSiftEnd-kAvoidanceSift;
-    if(!edf::Readable(stock,bytes))return 0;
+void __fastcall RaiseAvoidanceNeighbor(AvoidanceHeap* heap,int index) noexcept {
+    if(index<=0)return;
+    auto* const entries=heap->entries;
+    const float distance=entries[index].distanceSquared;
+    int parent=(index-1)/2;
+    if(entries[parent].distanceSquared>distance)return;
+    const auto handle=entries[index].handle;
+    do {
+        entries[index].handle=entries[parent].handle;
+        entries[index].distanceSquared=entries[parent].distanceSquared;
+        index=parent;
+        if(!index)break;
+        parent=(index-1)/2;
+        // The native push advances on ties and unordered distances.
+    } while(!(entries[parent].distanceSquared>distance));
+    entries[index].handle=handle;
+    entries[index].distanceSquared=distance;
+}
+
+bool AvoidanceKernelMatches(unsigned begin,unsigned end,std::uint64_t expected) noexcept {
+    const auto* const code=image+begin;
+    const unsigned bytes=end-begin;
+    if(!edf::Readable(code,bytes))return false;
     std::uint64_t fingerprint=14695981039346656037ull;
-    for(unsigned i=0;i<bytes;++i)fingerprint=(fingerprint^stock[i])*1099511628211ull;
-    if(fingerprint!=0xD8C5803BAE3519BBull)return 0;
-    unsigned installed=0;
-    for(const auto& site:kAvoidanceCalls) {
-        if(!edf::Matches(image,site.call-5,site.stock,sizeof(site.stock)))continue;
+    for(unsigned i=0;i<bytes;++i)fingerprint=(fingerprint^code[i])*1099511628211ull;
+    return fingerprint==expected;
+}
+
+unsigned InstallAvoidanceHeap() noexcept {
+    const auto redirect=[](const AvoidanceCall& site,unsigned stock,void* replacement) {
+        if(!edf::Matches(image,site.call-5,site.stock,sizeof(site.stock)))return false;
         bool changed=false;
-        edf::RedirectCall(image+site.call,image+kAvoidanceSift,reinterpret_cast<void*>(&SiftAvoidanceNeighbors),changed);
-        installed+=changed;
+        edf::RedirectCall(image+site.call,image+stock,replacement,changed);
+        return changed;
+    };
+    unsigned installed=0;
+    if(AvoidanceKernelMatches(kAvoidanceSift,kAvoidanceSiftEnd,0xD8C5803BAE3519BBull)) {
+        for(const auto& site:kAvoidanceCalls)
+            installed+=redirect(site,kAvoidanceSift,reinterpret_cast<void*>(&SiftAvoidanceNeighbors));
     }
+    if(AvoidanceKernelMatches(kAvoidanceRaise,kAvoidanceRaiseEnd,0x9561D33EE8875421ull))
+        installed+=redirect(kAvoidancePush,kAvoidanceRaise,reinterpret_cast<void*>(&RaiseAvoidanceNeighbor));
     return installed;
 }
 

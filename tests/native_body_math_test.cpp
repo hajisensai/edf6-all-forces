@@ -105,16 +105,13 @@ template<class Before,class After> void Bench(const char* name,Before before,Aft
 }
 bool AvoidanceNeighbors() noexcept {
     using Sift=int(__fastcall*)(AvoidanceHeap*,int) noexcept;
-    const auto stock=reinterpret_cast<Sift>(image+kAvoidanceSift);
+    using Raise=void(__fastcall*)(AvoidanceHeap*,int) noexcept;
     std::mt19937 rng(2101);
     constexpr unsigned cases=24000,capacity=64;
-    for(const auto& site:kAvoidanceCalls) {
-        if(image[site.call]!=0xE8)return false;
-        const auto candidate=Redirected<Sift>(site.call);
-        if(reinterpret_cast<const void*>(candidate)==image+kAvoidanceSift)return false;
+    const auto compare=[&](unsigned call,auto run) {
         for(unsigned i=0;i<cases;++i) {
             std::array<AvoidanceNeighbor,capacity> expected{},actual{};
-            const int count=static_cast<int>(rng()%capacity);
+            const int count=static_cast<int>(rng()%(capacity+1));
             const int root=count ? static_cast<int>(rng()%static_cast<unsigned>(count)) : 0;
             for(int j=0;j<count;++j) {
                 float distance=static_cast<float>(rng()%31);
@@ -124,14 +121,32 @@ bool AvoidanceNeighbors() noexcept {
             }
             actual=expected;
             AvoidanceHeap a{expected.data(),count},b{actual.data(),count};
-            if(stock(&a,root)!=candidate(&b,root) || a.count!=b.count ||
+            if(!run(a,b,root) || a.count!=b.count ||
                std::memcmp(expected.data(),actual.data(),sizeof(expected))!=0) {
-                std::printf("FAIL: neighbor heap at %x, case %u\n",site.call,i);
+                std::printf("FAIL: neighbor heap at %x, case %u\n",call,i);
                 return false;
             }
         }
+        return true;
+    };
+
+    const auto stockSift=reinterpret_cast<Sift>(image+kAvoidanceSift);
+    for(const auto& site:kAvoidanceCalls) {
+        if(image[site.call]!=0xE8)return false;
+        const auto candidate=Redirected<Sift>(site.call);
+        if(candidate==stockSift || !compare(site.call,[&](AvoidanceHeap& a,AvoidanceHeap& b,int root) {
+            return stockSift(&a,root)==candidate(&b,root);
+        }))return false;
     }
-    std::printf("native avoidance neighbor heap: %u byte-identical cases per call site\n",cases);
+    const auto stockRaise=reinterpret_cast<Raise>(image+kAvoidanceRaise);
+    if(image[kAvoidancePush.call]!=0xE8)return false;
+    const auto raise=Redirected<Raise>(kAvoidancePush.call);
+    if(raise==stockRaise || !compare(kAvoidancePush.call,[&](AvoidanceHeap& a,AvoidanceHeap& b,int root) {
+        stockRaise(&a,root);
+        raise(&b,root);
+        return true;
+    }))return false;
+    std::printf("native avoidance neighbor heap: %u byte-identical cases per up/down call site\n",cases);
     return true;
 }
 
