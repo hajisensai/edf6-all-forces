@@ -21,6 +21,7 @@ bool CameraRay(float*,float*) noexcept{return false;}
 PluginBody BodyOf(const void*) noexcept{return PluginBody::none;}
 bool HighCamOn(const void*) noexcept{return false;}
 bool TurretCamHighTransition(const void*) noexcept{return false;}
+bool BargaOwnsCannon(const void*) noexcept{return false;}
 const unsigned char* PlayerTurretGun(const unsigned char*,const unsigned char*) noexcept{return nullptr;}
 float SightZoomNow(const void*) noexcept{return 1;}
 int SightZoomRange(const void*,float*) noexcept{return 0;}
