@@ -135,6 +135,80 @@ bool AvoidanceNeighbors() noexcept {
     return true;
 }
 
+struct ScanBounds { std::uint32_t lower[4],upper[4]; };
+static_assert(sizeof(ScanBounds)==0x20 && offsetof(ScanBounds,upper)==0x10);
+using Scan=const ScanBounds*(__fastcall*)(const ScanBounds*,const ScanBounds*,std::uint32_t);
+
+bool AvoidanceBoxes() noexcept {
+    constexpr unsigned char entry[]{
+        0x53,0x56,0x57,0x41,0x56,    // save nonvolatile registers used by the stock loop
+        0x45,0x8B,0xC8,              // mov r9d,r8d  X cutoff
+        0x4C,0x8B,0xC1,              // mov r8,rcx   reference box
+    };
+    constexpr unsigned char missed[]{0x33,0xC0,0x41,0x5E,0x5F,0x5E,0x5B,0xC3};
+    constexpr unsigned char found[]{0x48,0x8B,0xC2,0x41,0x5E,0x5F,0x5E,0x5B,0xC3};
+    constexpr auto bytes=sizeof(kAvoidanceScanStock);
+    const auto* const patched=image+kAvoidanceScan;
+    if(patched[kPackedOverlapDisp-1]!=0x74 ||
+       kPackedOverlapDisp+1+patched[kPackedOverlapDisp]!=kAvoidanceScanOverlap-kAvoidanceScan)return false;
+    auto* const mem=static_cast<unsigned char*>(VirtualAlloc(nullptr,4096,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    if(!mem)return false;
+    const auto copy=[&](std::size_t offset,const unsigned char* body,unsigned branchDisp) {
+        auto* const runner=mem+offset;
+        auto* const loop=runner+sizeof(entry);
+        std::memcpy(runner,entry,sizeof(entry));
+        std::memcpy(loop,body,bytes);
+        std::memcpy(loop+bytes,missed,sizeof(missed));
+        std::memcpy(loop+bytes+sizeof(missed),found,sizeof(found));
+        loop[branchDisp]=static_cast<unsigned char>(bytes+sizeof(missed)-branchDisp-1);
+        return reinterpret_cast<Scan>(runner);
+    };
+    const auto stock=copy(0,kAvoidanceScanStock,kStockOverlapDisp);
+    const auto candidate=copy(128,patched,kPackedOverlapDisp);
+    DWORD protect=0;
+    if(!VirtualProtect(mem,4096,PAGE_EXECUTE_READ,&protect)) {VirtualFree(mem,0,MEM_RELEASE);return false;}
+    FlushInstructionCache(GetCurrentProcess(),mem,4096);
+
+    std::mt19937 rng(22712);
+    std::array<ScanBounds,33> bounds{};
+    ScanBounds reference{};
+    constexpr unsigned cases=60000;
+    bool matched=true;
+    for(unsigned i=0;i<cases && matched;++i) {
+        for(unsigned j=0;j<bounds.size();++j) {
+            auto& x=bounds[j];
+            for(unsigned k=1;k<4;++k) {x.lower[k]=rng();x.upper[k]=rng();}
+            x.lower[0]=j+i;
+        }
+        for(unsigned k=1;k<4;++k) {reference.lower[k]=rng();reference.upper[k]=rng();}
+        const auto limit=static_cast<std::uint32_t>(i+1u+rng()%31);
+        if(i%4==0) {
+            // Exact Y/Z edges count as overlap. Put one either side of the strict X cutoff.
+            const auto index=(limit-i)-(i%8==0 ? 1u : 0u);
+            for(unsigned k=1;k<=2;++k) {
+                bounds[index].lower[k]=reference.upper[k];
+                bounds[index].upper[k]=reference.lower[k];
+            }
+        }
+        matched=stock(&reference,bounds.data(),limit)==candidate(&reference,bounds.data(),limit);
+    }
+    if(matched) {
+        std::puts("native avoidance sweep: 60,000 identical first overlaps or cutoff results");
+        // Force the complete short sweep and a final true hit for a stable instruction-path comparison.
+        reference.lower[1]=reference.lower[2]=100;
+        reference.upper[1]=reference.upper[2]=200;
+        for(unsigned j=0;j<bounds.size();++j)bounds[j]={{j,300,300,0},{j,400,400,0}};
+        bounds[11]={{11,150,150,0},{11,160,160,0}};
+        const ScanBounds* volatile result=nullptr;
+        Bench("12-box avoidance sweeps",
+              [&](unsigned){result=stock(&reference,bounds.data(),12);},
+              [&](unsigned){result=candidate(&reference,bounds.data(),12);});
+        matched=result==&bounds[11];
+    }
+    VirtualFree(mem,0,MEM_RELEASE);
+    return matched;
+}
+
 struct StreamBlock {
     std::uint16_t records=0;
     unsigned char padding[6]{};
@@ -385,6 +459,10 @@ int main(int argc,char** argv) {
         return 1;
     }
     if(!AvoidanceNeighbors())return 1;
+    if(!AvoidanceBoxes()) {
+        std::puts("FAIL: avoidance sweep changed the first overlap or the X cutoff");
+        return 1;
+    }
     if(!ContactStreams()) {
         std::puts("FAIL: contact stream changed record dispatch, deferred bytes or command accounting");
         return 1;

@@ -48,7 +48,7 @@ constexpr AvoidanceCall kAvoidanceCalls[]{
     {0xD5F604,{0x75,0x08,0x48,0x8B,0xCB,0xE8,0x17,0xEA,0xFF,0xFF}},
 };
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
-              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+3==kNativeBodyMathSites);
+              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+4==kNativeBodyMathSites);
 
 struct AvoidanceNeighbor { std::uint64_t handle; float distanceSquared; std::uint32_t padding; };
 struct AvoidanceHeap { AvoidanceNeighbor* entries; int count; };
@@ -95,6 +95,46 @@ unsigned InstallAvoidanceHeap() noexcept {
         installed+=changed;
     }
     return installed;
+}
+
+// The sweep already limits the sorted X axis. Compare both remaining axes before reporting a pair.
+constexpr unsigned kAvoidanceScan=0xD5F62E,kAvoidanceScanNext=0xD5F666,kAvoidanceScanOverlap=0xD5F6C8;
+constexpr unsigned kStockOverlapDisp=46,kPackedOverlapDisp=42;
+constexpr unsigned char kAvoidanceScanEntry[]{0x45,0x8B,0x48,0x10,0x44,0x39,0x0A,0x73,0x38};
+constexpr unsigned char kAvoidanceScanAdvance[]{0x45,0x85,0xFF,0x48,0x8D,0x4D,0xF7};
+constexpr unsigned char kAvoidanceScanFound[]{0x48,0x89,0x55,0xE7,0x4C,0x89,0x45,0xDF,0x44,0x89,0x7D,0xD7};
+constexpr unsigned char kAvoidanceScanStock[]{
+    0x41,0x8B,0x58,0x08,0x41,0x8B,0x78,0x04,0x41,0x8B,0x70,0x18,0x45,0x8B,0x70,0x14,
+    0x66,0x90,0x41,0x8B,0xCE,0x8B,0xC6,0x2B,0x42,0x08,0x2B,0x4A,0x04,0x0B,0xC8,0x8B,
+    0x42,0x14,0x2B,0xC7,0x0B,0xC8,0x8B,0x42,0x18,0x2B,0xC3,0x0B,0xC8,0x7D,0x6B,0x48,
+    0x83,0xC2,0x20,0x44,0x39,0x0A,0x72,0xDA,
+};
+constexpr unsigned char kAvoidanceScanPacked[]{
+    0xF3,0x41,0x0F,0x7E,0x40,0x04,     // movq xmm0,[r8+4]    reference min Y/Z
+    0xF3,0x41,0x0F,0x7E,0x48,0x14,     // movq xmm1,[r8+14h]  reference max Y/Z
+    0x0F,0x28,0xD1,                    // movaps xmm2,xmm1    scan loop
+    0xF3,0x0F,0x7E,0x5A,0x04,          // movq xmm3,[rdx+4]   candidate min Y/Z
+    0x66,0x0F,0xFA,0xD3,               // psubd xmm2,xmm3     keep native 32-bit wraparound
+    0xF3,0x0F,0x7E,0x5A,0x14,          // movq xmm3,[rdx+14h] candidate max Y/Z
+    0x66,0x0F,0xFA,0xD8,               // psubd xmm3,xmm0
+    0x0F,0x56,0xD3,                    // orps xmm2,xmm3
+    0x0F,0x50,0xC2,                    // movmskps eax,xmm2
+    0x85,0xC0,                         // test eax,eax
+    0x74,static_cast<unsigned char>(kAvoidanceScanOverlap-kAvoidanceScan-kPackedOverlapDisp-1),
+    0x48,0x83,0xC2,0x20,               // add rdx,20h
+    0x44,0x39,0x0A,                    // cmp [rdx],r9d       native X cutoff
+    0x72,static_cast<unsigned char>(12-52),
+    0x0F,0x1F,0x40,0x00,               // nop
+};
+static_assert(sizeof(kAvoidanceScanStock)==kAvoidanceScanNext-kAvoidanceScan);
+static_assert(sizeof(kAvoidanceScanPacked)==sizeof(kAvoidanceScanStock));
+static_assert(kAvoidanceScanOverlap-kAvoidanceScan-kPackedOverlapDisp-1<=127);
+
+bool InstallAvoidanceScan() noexcept {
+    if(!edf::Matches(image,kAvoidanceScan-sizeof(kAvoidanceScanEntry),kAvoidanceScanEntry,sizeof(kAvoidanceScanEntry)) ||
+       !edf::Matches(image,kAvoidanceScanNext,kAvoidanceScanAdvance,sizeof(kAvoidanceScanAdvance)) ||
+       !edf::Matches(image,kAvoidanceScanOverlap,kAvoidanceScanFound,sizeof(kAvoidanceScanFound)))return false;
+    return edf::PatchCode(image+kAvoidanceScan,kAvoidanceScanStock,kAvoidanceScanPacked,sizeof(kAvoidanceScanStock));
 }
 
 constexpr unsigned kStreamCall=0xE782CB,kStockStream=0xE776F0,kContactCommand=0x12FE960;
@@ -331,6 +371,7 @@ unsigned InstallNativeBodyMath() noexcept {
         }
     }
     installed+=InstallAvoidanceHeap();
+    installed+=InstallAvoidanceScan();
     installed+=InstallClingBodyReuse();
     installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
