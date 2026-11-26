@@ -36,13 +36,28 @@ int PickTarget(const Grid& g,int n,AimOf aimOf,IsCurrent isCurrent,Usable usable
     return best;
 }
 
-// A blocker on either the line or the landing area vetoes the shot. Keep each exact test in its own spatial query.
 template<class FriendAt,class IsSelf>
-bool ShotClear(const Grid& g,const Shot& shot,float maxRadius,FriendAt at,IsSelf self) noexcept {
-    if(g.AnyInCapsule(shot.from,shot.to,maxRadius+shot.spread,[&](int i){ return !self(i) && shot.BlocksLine(at(i)); }))return false;
+bool BlastClear(const Grid& g,const Shot& shot,float maxRadius,FriendAt at,IsSelf self) noexcept {
     return !(shot.blast>0.0f && g.AnyAround(shot.to,shot.BlastMargin(maxRadius),[&](int i){
         return !self(i) && shot.BlocksBlast(at(i));
     }));
+}
+
+template<class FriendAt,class IsSelf>
+bool ShotClear(const Grid& g,const Shot& shot,float maxRadius,FriendAt at,IsSelf self) noexcept {
+    if(g.AnyInCapsule(shot.from,shot.to,maxRadius+shot.spread,[&](int i){ return !self(i) && shot.BlocksLine(at(i)); }))return false;
+    return BlastClear(g,shot,maxRadius,at,self);
+}
+
+// The ground track of successive ballistic chords is straight. Query this short run once, then use its exact 3D tests.
+template<class FriendAt,class IsSelf>
+bool ArcChordsClear(const Grid& g,const Shot* chords,int count,float maxRadius,FriendAt at,IsSelf self) noexcept {
+    return !g.AnyInCapsule(chords[0].from,chords[count-1].to,maxRadius+chords[0].spread,[&](int i) {
+        if(self(i))return false;
+        const auto& friendly=at(i);
+        for(int j=0;j<count;++j)if(chords[j].BlocksLine(friendly))return true;
+        return false;
+    });
 }
 
 // The point nearest `pos` over the ground (Horiz), -1 with none (the scan: d<nd from 1e30, the first of a tie).

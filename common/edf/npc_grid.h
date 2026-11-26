@@ -284,14 +284,4 @@ template<class Keep> void FirstAround(const Grid& g,const float* c,float r,int m
     std::sort(out.begin(),out.end());
 }
 
-// The friends a shot from `from` to `to` can touch (ShotClear's two tests: within `line` of its line, within `blast` of
-// where it lands; `line` and `blast` with the largest radius among them already added), ascending and once each, into
-// `out`; ShotClear over them is ShotClear over all.
-inline void ShotCandidates(const Grid& g,const float* from,const float* to,float line,float blast,std::vector<int>& out) {
-    out.clear();
-    g.Capsule(from,to,line,[&](int i){ out.push_back(i); });
-    if(blast>0.0f)g.Around(to,blast,[&](int i){ out.push_back(i); });
-    std::sort(out.begin(),out.end());
-    out.erase(std::unique(out.begin(),out.end()),out.end());
-}
 }  // namespace npc::grid

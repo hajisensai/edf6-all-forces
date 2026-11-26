@@ -777,25 +777,23 @@ npc::TargetKind KindOf(const Enemy& e,const float* pos) noexcept {
     if(e.aim[1]-pos[1]>kAirAbove)return npc::TargetKind::air;
     return e.points>=kLargePoints ? npc::TargetKind::large : npc::TargetKind::light;
 }
-// The friends (the player among them) but `self` a shot from `from` to `to` (a round of `blast`) can touch, for
-// ShotClear, into `out` (each caller's own buffer, kept from frame to frame): those in the cells along its line and round
-// where it lands (npc_grid.h ShotCandidates), in the list's order. ShotClear over them is ShotClear over every friend but
-// `self`: the others are farther off its line and its blast than any friend's radius. The same for a thrown round's arc
-// and landing (npc_backpack.h ArcClear: its ground track is the line's, its landing `blast` its Radius), so no caller
-// copies every friend any more.
-int FriendsOnShot(const void* self,const float* from,const float* to,float blast,std::vector<npc::Friend>& out) noexcept {
-    static std::vector<int> rows;
-    npc::grid::ShotCandidates(world.friendGrid,from,to,world.frRadius+kSpread,blast>0.0f ? blast*1.25f+world.frRadius : 0.0f,rows);
-    if(out.size()<rows.size())out.resize(rows.size());
-    int n=0;
-    for(const int i:rows)if(world.frObject[static_cast<std::size_t>(i)]!=self)out[static_cast<std::size_t>(n++)]=world.fr[static_cast<std::size_t>(i)];
-    return n;
-}
 // Veto a shot at the first blocker in the relevant cells.
 bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
     return npc::grid::ShotClear(world.friendGrid,npc::Shot(from,to,kSpread,blast),world.frRadius,
         [](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; },
         [self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; });
+}
+template<class Blocked>
+bool PackArcClearOf(const void* self,const npcpack::Weapon& pack,const float* from,const float* to,
+                    float pitch,Blocked blocked) noexcept {
+    const auto at=[](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; };
+    const auto isSelf=[self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; };
+    return npcpack::ArcClear(pack,from,to,pitch,kSpread,
+        [&](const npc::Shot* chords,int count) noexcept {
+            return npc::grid::ArcChordsClear(world.friendGrid,chords,count,world.frRadius,at,isSelf);
+        },[&](const float* landing,float radius) noexcept {
+            return npc::grid::BlastClear(world.friendGrid,npc::Shot(landing,landing,0.0f,radius),world.frRadius,at,isSelf);
+        },blocked);
 }
 bool FriendNear(const void* self,const float* at,float r) noexcept {
     return world.friendGrid.AnyAround(at,r,[&](int i) noexcept {
@@ -1498,10 +1496,11 @@ bool AttackMoveSee(Squad& q,bool target,bool fired,ULONGLONG ms) noexcept {
 
 // --- Its backpack weapon (docs/npc-backpack-re.md; npc_backpack.h) ---
 // The enemies within `radius` of target `t`'s lock point, `t` among them.
-int GroupAt(const Enemy& t,float radius) noexcept {
-    int n=0;
-    world.enemyGrid.Around(t.aim,radius,[&n,&t,radius](int i) noexcept { if(npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=radius)++n; });
-    return n>0 ? n : 1;
+bool PackGroupExists(const Enemy& t,float radius) noexcept {
+    int found=0;
+    return world.enemyGrid.AnyAround(t.aim,radius,[&](int i) noexcept {
+        return npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=radius && ++found>=npcpack::kGroupLeast;
+    });
 }
 ULONGLONG packLoggedAt=0;
 // After the main weapon's look and trigger: a throw or a swing at `t` when its backpack weapon is for it (npc_backpack.h
@@ -1528,7 +1527,6 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
         return;
     }
     if(!t)return;
-    static std::vector<npc::Friend> fr;
     const float dist=npc::Dist(eye,t->aim);
     for(int i=0;i<n;++i) {
         const PackWeapon& row=*slots[i].row;
@@ -1541,22 +1539,18 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
                              std::isfinite(factor) && factor>0.0f ? factor*npcpack::kGravity : 0.0f,row.lift,
                              At<std::int32_t>(w,kWeaponAmmo)>0};
         if(!npcpack::Rested(row.use,s.packUsed,ms-s.packAt))continue;
-        const npcpack::Target target{dist,npc::Horiz(eye,t->aim),t->aim[1]-eye[1],GroupAt(*t,npcpack::GroupRadius(pack)),
-                                     t->points>=kLargePoints};
+        const npcpack::Target target{dist,npc::Horiz(eye,t->aim),t->aim[1]-eye[1],t->points>=kLargePoints};
         float pitch=0.0f,dir[3],hit[3];
-        if(!npcpack::Fits(pack,target,&pitch))continue;
-        // The friends its round can touch: along the line over the ground (a throw's arc keeps to it: npc_backpack.h
-        // ArcClear's points are eye + (aim - eye) * t/flight on x and z) and round where it lands (its Radius).
-        const int friends=FriendsOnShot(h,eye,t->aim,row.use==PackUse::thrown ? npcpack::Radius(pack) : 0.0f,fr);
+        if(!npcpack::Fits(pack,target,&pitch,[&]() noexcept { return PackGroupExists(*t,npcpack::GroupRadius(pack)); }))continue;
         if(row.use==PackUse::thrown) {
             npcpack::ThrowLook(eye,t->aim,pitch,row.lift,dir);
-            if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr.data(),friends,[](const float* from,const float* to) noexcept {
+            if(!PackArcClearOf(h,pack,eye,t->aim,pitch,[](const float* from,const float* to) noexcept {
                 float collision[3];return MapRay(from,to,collision)>=0.0f;
             }))continue;
         } else {
             dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
             const float wall=MapRay(eye,t->aim,hit);
-            if(!npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends) || (wall>=0.0f && wall<dist-2.0f))continue;
+            if(!ShotClearOf(h,eye,t->aim,0.0f) || (wall>=0.0f && wall<dist-2.0f))continue;
         }
         if(!(mask&kMaskLook))return;
         Look(h,dir);

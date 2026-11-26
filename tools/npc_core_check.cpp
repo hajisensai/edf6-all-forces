@@ -341,7 +341,64 @@ bool NearestEnemyThisStep(const unsigned char* v,const float* from,float reach,E
 }
 }
 #ifndef SUPPORT_INFANTRY_NATIVE_TEST
+static bool ScanPackArc(const crew::npcpack::Weapon& w,const float* from,const float* to,float pitch,
+                        const std::vector<npc::Friend>& friends) noexcept {
+    using namespace crew::npcpack;
+    const float horiz=npc::Horiz(from,to),c=std::cos(pitch);
+    if(!(horiz>0.01f) || !(w.speed>0.0f) || !(c>1e-4f))return false;
+    const float flight=horiz/(w.speed*c);
+    if(!std::isfinite(flight) || !(flight>0.0f) || flight>kFlightMost)return false;
+    const float byTime=flight/kArcTimeStep,byLength=(w.speed+w.gravity*flight)*flight/kArcStep;
+    const float segments=std::ceil(byTime>byLength ? byTime : byLength);
+    if(!std::isfinite(segments) || segments>256.0f)return false;
+    const int steps=segments>1.0f ? static_cast<int>(segments) : 1;
+    const float vx=(to[0]-from[0])/flight,vz=(to[2]-from[2])/flight,vy=w.speed*std::sin(pitch);
+    float previous[3]={from[0],from[1],from[2]};
+    for(int i=1;i<=steps;++i) {
+        const float t=flight*static_cast<float>(i)/static_cast<float>(steps);
+        const float point[3]={from[0]+vx*t,from[1]+vy*t-0.5f*w.gravity*t*t,from[2]+vz*t};
+        if(!npc::ShotClear(previous,point,crew::kSpread,0.0f,friends.data(),static_cast<int>(friends.size())))return false;
+        std::memcpy(previous,point,sizeof(previous));
+    }
+    const float radius=Radius(w);
+    if(radius>0.0f)for(const auto& f:friends)if(npc::Dist(to,f.pos)<radius*1.25f+f.radius)return false;
+    return true;
+}
+
+static void CheckPackArcWork() {
+    using namespace crew;
+    const float from[3]={0,0,0},to[3]={0,0,100};
+    const npcpack::Weapon pack{PackUse::thrown,150.0f,5.0f,0.0f,55.0f,npcpack::kGravity,0.0f,true};
+    float pitch=0,flight=0;
+    Expect(npcpack::LobPitch(100.0f,0.0f,pack.speed,pack.gravity,&pitch,&flight),"dense arc fixture has a trajectory");
+    constexpr int friendCount=1200;
+    std::vector<npc::Friend> crowd;
+    crowd.reserve(friendCount);
+    for(int i=0;i<friendCount;++i)crowd.push_back({{0.0f,55.0f,70.0f+static_cast<float>(i%61)*0.5f},0.9f});
+    npc::grid::Grid grid;
+    grid.Build(friendCount,[&](int i) { return crowd[static_cast<std::size_t>(i)].pos; },4.0f);
+    const auto noSelf=[](int) noexcept { return false; };
+    int comparisons=0,rays=0;
+    const bool clear=npcpack::ArcClear(pack,from,to,pitch,kSpread,[&](const npc::Shot* chords,int count) noexcept {
+        return npc::grid::ArcChordsClear(grid,chords,count,0.9f,[&](int i) noexcept -> const npc::Friend& {
+            comparisons+=count;  // every candidate here clears every chord (the crowd is 55 m above the ground)
+            return crowd[static_cast<std::size_t>(i)];
+        },noSelf);
+    },[&](const float* landing,float radius) noexcept {
+        return npc::grid::BlastClear(grid,npc::Shot(landing,landing,0.0f,radius),0.9f,[&](int i) noexcept -> const npc::Friend& {
+            return crowd[static_cast<std::size_t>(i)];
+        },noSelf);
+    },[&](const float*,const float*) noexcept { ++rays;return false; });
+    // Every point projects into the old whole-shot corridor. Previously each chord tested all 1,200 points.
+    const int before=rays*friendCount;
+    Expect(clear && ScanPackArc(pack,from,to,pitch,crowd) && comparisons>0 && comparisons<before/2,
+           "dense arc: identical safety verdict with less than half the chord-friend tests");
+    std::printf("backpack arc: %d chords tested against %d friends, %d -> %d chord-friend tests\n",
+                rays,friendCount,before,comparisons);
+}
+
 int main() {
+    CheckPackArcWork();
     edf::SetInputSource(&markinput::Key,&markinput::Window);   // the plugin's key source (edf/input_source.h)
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
@@ -1429,9 +1486,9 @@ int main() {
             FriendVisit(&walk,p.data());
         }
         IndexFixture();
-        static std::vector<npc::Friend> mine;
         const float shotFrom[3]={0.0f,1.0f,-5.0f},shotTo[3]={2.0f,1.0f,5.0f};   // across the spot they all stand on
-        Expect(world.friends==kSquadCount && FriendsOnShot(people[5].data(),shotFrom,shotTo,0.0f,mine)==kSquadCount-1,
+        Expect(world.friends==kSquadCount && world.frObject[static_cast<std::size_t>(kSquadCount-1)]==people.back().data() &&
+               !ShotClearOf(people[5].data(),shotFrom,shotTo,0.0f),
                "600 friends (the old table held 512): all of them in the shot's test");
         bool squadsOk=true;
         for(auto& p:people)squadsOk=squadsOk && SeeSquad(p.data(),p.data(),0,npc::Control::free,now)!=nullptr;
@@ -1488,8 +1545,8 @@ int main() {
         Reset();IndexFixture();
     }
     // npcai.cpp's own grid questions (the wrappers as Think asks them: PickTarget with its held row and WastedFire,
-    // EnemyRow, FriendNear and FriendsOnShot with frObject != self and the radii they add, ThreatsNear's first 64 and
-    // weights, GroupAt, NearestEnemy) against the scans they replaced, written out here as npcai.cpp had them, over
+    // EnemyRow, FriendNear and shot safety with frObject != self, ThreatsNear's first 64 and
+    // weights, PackGroupExists, NearestEnemy) against independent scans, over
     // random battles: clusters, repeats (enemies and friends on one spot; a friend object listed twice), far points.
     {
         Reset();
@@ -1500,7 +1557,7 @@ int main() {
         std::vector<unsigned char> objects(static_cast<std::size_t>(kObjects)*kStride,0);
         const auto obj=[&objects](int k){ return objects.data()+static_cast<std::size_t>(k)*kStride; };
         for(int k=0;k<kObjects;++k)Put<const void*>(obj(k),kSelfCtrl,obj(k)+8);   // each its own control block
-        int bad[10]={},asked=0,arcs=0;
+        int bad[8]={},asked=0,arcs=0;
         for(int battle=0;battle<12;++battle) {
             const float spread=battle%3==0 ? 60.0f : battle%3==1 ? 400.0f : 1500.0f;
             const int enemies=battle==11 ? 0 : 50+I(1100),friends=battle==10 ? 0 : 20+I(650);
@@ -1555,38 +1612,23 @@ int main() {
                 bool nearWant=false;
                 for(int i=0;i<world.friends;++i)if(world.frObject[static_cast<std::size_t>(i)]!=self && npc::Dist(world.fr[static_cast<std::size_t>(i)].pos,at)<r){nearWant=true;break;}
                 if(FriendNear(self,at,r)!=nearWant)++bad[2];
-                // A shot's friends: FriendsOnShot + ShotClear against every friend but self + ShotClear, and the
-                // candidates a superset of every friend but self the line or the blast touches.
+                // The production grid should give the same verdict as visiting everyone except the shooter.
                 float to[3];
                 if(enemies && I(3)){const float* a=world.enemy[static_cast<std::size_t>(I(enemies))].aim;to[0]=a[0];to[1]=a[1];to[2]=a[2];}
                 else{const float len=I(5)==0 ? U(300,3000) : U(0,200),ang=U(0,6.3f);to[0]=from[0]+std::sin(ang)*len;to[1]=from[1]+U(-15,15);to[2]=from[2]+std::cos(ang)*len;}
                 const float blast=I(2) ? 0.0f : U(1,25);
-                std::vector<npc::Friend> all,got;
+                std::vector<npc::Friend> all;
                 for(int i=0;i<world.friends;++i)if(world.frObject[static_cast<std::size_t>(i)]!=self)all.push_back(world.fr[static_cast<std::size_t>(i)]);
-                const int n=FriendsOnShot(self,from,to,blast,got);
                 const bool clearAll=npc::ShotClear(from,to,kSpread,blast,all.data(),static_cast<int>(all.size()));
-                if(clearAll!=npc::ShotClear(from,to,kSpread,blast,got.data(),n))++bad[3];
-                if(clearAll!=ShotClearOf(self,from,to,blast))++bad[9];   // ShotOk / ShotSafe's own verdict
-                for(const npc::Friend& f:all) {
-                    float t;
-                    const bool touches=(npc::SegmentDist(from,to,f.pos,&t)<f.radius+kSpread && t>0.0f) ||
-                                       (blast>0.0f && npc::Dist(to,f.pos)<blast*1.25f+f.radius);
-                    if(!touches)continue;
-                    bool in=false;
-                    for(int k=0;k<n && !in;++k)in=std::memcmp(&got[static_cast<std::size_t>(k)],&f,sizeof(f))==0;
-                    if(!in){++bad[4];break;}
-                }
-                // A thrown backpack round (Backpack): ArcClear over the friends FriendsOnShot gives for its line and its
-                // Radius = ArcClear over every friend but self (its arc's ground track is the line's).
+                if(clearAll!=ShotClearOf(self,from,to,blast))++bad[3];
+                // Check the production trajectory and self-filter against the unbatched reference.
                 {
                     const float speed=U(15,60),gravity=I(4)==0 ? 0.0f : npcpack::kGravity*U(0.5f,1.5f),radius=I(3)==0 ? 0.0f : U(1,12);
                     const npcpack::Weapon pack{PackUse::thrown,150.0f,radius,0.0f,speed,gravity,0.0f,true};
                     float pitch=0.0f,flight=0.0f;
                     if(npcpack::LobPitch(npc::Horiz(from,to),to[1]-from[1],speed,gravity,&pitch,&flight)) {
                         const auto open=[](const float*,const float*) noexcept { return false; };
-                        const int an=FriendsOnShot(self,from,to,npcpack::Radius(pack),got);
-                        if(npcpack::ArcClear(pack,from,to,pitch,kSpread,all.data(),static_cast<int>(all.size()),open)!=
-                           npcpack::ArcClear(pack,from,to,pitch,kSpread,got.data(),an,open))++bad[8];
+                        if(ScanPackArc(pack,from,to,pitch,all)!=PackArcClearOf(self,pack,from,to,pitch,open))++bad[4];
                         ++arcs;
                     }
                 }
@@ -1599,13 +1641,13 @@ int main() {
                 }
                 const int gn=ThreatsNear(from,tr,got64);
                 if(gn!=wn || std::memcmp(want64,got64,sizeof(npc::Threat)*static_cast<std::size_t>(wn))!=0)++bad[5];
-                // GroupAt round a target, and the nearest over the ground (FallBack).
+                // PackGroupExists round a target, and the nearest over the ground (FallBack).
                 if(enemies) {
                     const Enemy& t=world.enemy[static_cast<std::size_t>(I(enemies))];
                     const float gr=U(0,40);
                     int count=0;
                     for(int i=0;i<world.enemies;++i)if(npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=gr)++count;
-                    if(GroupAt(t,gr)!=(count>0 ? count : 1))++bad[6];
+                    if(PackGroupExists(t,gr)!=(count>=npcpack::kGroupLeast))++bad[6];
                 }
                 const Enemy* nearest=nullptr;float nd=1e30f;
                 for(int i=0;i<world.enemies;++i){const float d=npc::Horiz(from,world.enemy[static_cast<std::size_t>(i)].aim);if(d<nd){nd=d;nearest=&world.enemy[static_cast<std::size_t>(i)];}}
@@ -1613,9 +1655,9 @@ int main() {
             }
         }
         wastedTarget=nullptr;
-        static const char* const kWhat[]={"PickTarget","EnemyRow","FriendNear","FriendsOnShot's verdict","FriendsOnShot's superset",
-                                          "ThreatsNear","GroupAt","NearestEnemy","backpack ArcClear","ShotClearOf"};
-        for(int k=0;k<10;++k) {
+        static const char* const kWhat[]={"PickTarget","EnemyRow","FriendNear","ShotClearOf","backpack arc",
+                                          "ThreatsNear","PackGroupExists","NearestEnemy"};
+        for(int k=0;k<8;++k) {
             char what[200];
             std::snprintf(what,sizeof(what),"npcai's %s through the grid = the scan it replaced (%d asks over 12 battles, %d differ)",kWhat[k],asked,bad[k]);
             Expect(bad[k]==0,what);

@@ -1,6 +1,6 @@
 // The soldiers' frame grid (src/npc_grid.h) offline: every question asked through it gives the brute-force scan's own
 // answer (npcai.cpp before 2026-11-08: npc_logic.h PickTarget, FriendNear, FriendsBut + ShotClear, Evade's first 64
-// threats, GroupAt, FallBack's nearest), over thousands of random points: clusters, exact ties (repeated positions),
+// threats, neighbors in range, FallBack's nearest), over thousands of random points: clusters, exact ties (repeated positions),
 // points on cell edges, far outliers (kept apart off the main body), odd points (NaN, infinite), scopes and radii from 0 to past the whole
 // grid, and the grid rebuilt over fewer and more points (objects gone and new: no index of the last build comes back).
 //   cmake --build build --target npc_grid_check && build\npc_grid_check.exe      (exit code 1 on a failure)
@@ -83,7 +83,7 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
             const bool near=g.AnyAround(anchor,r,[&](int i){ return i!=self && npc::Dist(fr[static_cast<std::size_t>(i)].pos,anchor)<r; });
             if(want2!=near)++mismatches[2];
         }
-        // The threats in reach, the first 64 in index order (Evade), and the group round a point (GroupAt).
+        // The threats in reach, the first 64 in index order (Evade), and the group round a point.
         {
             const float r=U(1,40);
             std::vector<int> scan;
@@ -114,7 +114,12 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
             sub.clear();
             for(int i=0;i<n;++i)if(i!=self)sub.push_back(fr[static_cast<std::size_t>(i)]);
             const bool want3=npc::ShotClear(eye,to,kSpread,blast,sub.data(),static_cast<int>(sub.size()));
-            npc::grid::ShotCandidates(g,eye,to,maxRadius+kSpread,blast>0.0f ? blast*1.25f+maxRadius : 0.0f,got);
+            got.clear();
+            const auto remember=[&](int i){got.push_back(i);};
+            g.Capsule(eye,to,maxRadius+kSpread,remember);
+            if(blast>0.0f)g.Around(to,blast*1.25f+maxRadius,remember);
+            std::sort(got.begin(),got.end());
+            got.erase(std::unique(got.begin(),got.end()),got.end());
             sub.clear();
             for(int i:got)if(i!=self)sub.push_back(fr[static_cast<std::size_t>(i)]);
             const bool clear=npc::ShotClear(eye,to,kSpread,blast,sub.data(),static_cast<int>(sub.size()));
@@ -135,7 +140,7 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
             }
         }
     }
-    static const char* const kWhat[]={"PickTarget","NearestHoriz","FriendNear","Evade's 64","GroupAt","ShotClear"};
+    static const char* const kWhat[]={"PickTarget","NearestHoriz","FriendNear","Evade's 64","Group radius","ShotClear"};
     for(int k=0;k<6;++k) {
         char what[160];std::snprintf(what,sizeof(what),"%s: %s through the grid = the scan",label,kWhat[k]);
         Check(mismatches[k]==0,what,mismatches[k],queries);

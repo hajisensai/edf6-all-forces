@@ -159,6 +159,7 @@ inline bool LaneEscape(const Lane& lane,const float* p,float* out) noexcept {
 struct Friend { float pos[3],radius; };
 // Precompute the shot geometry once, then test the line and landing area independently against each candidate.
 struct Shot {
+    Shot() noexcept=default;
     Shot(const float* start,const float* end,float spreadRadius,float blastRadius) noexcept:
         from(start),to(end),direction{end[0]-start[0],end[1]-start[1],end[2]-start[2]},
         lengthSquared(Dot(direction,direction)),spread(spreadRadius),blast(blastRadius) {}
@@ -174,9 +175,9 @@ struct Shot {
         return blast>0.0f && Dist(to,f.pos)<BlastMargin(f.radius);
     }
     float BlastMargin(float radius) const noexcept { return blast*1.25f+radius; }
-    const float* from;
-    const float* to;
-    float direction[3],lengthSquared,spread,blast;
+    const float* from=nullptr;
+    const float* to=nullptr;
+    float direction[3]{},lengthSquared=0,spread=0,blast=0;
 };
 
 inline bool ShotClear(const float* from,const float* to,float spread,float blast,const Friend* friends,int n) noexcept {
