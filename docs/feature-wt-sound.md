@@ -162,10 +162,16 @@ Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain …
   - 没触发：来袭（41 次榴弹炮齐射、14 处爆炸落在耳边 300 m 内，一次也没过「陡落」条件；插件榴弹炮 240 m/s，按 g≈14.4 m/s² 低伸弹道要 3 km 以上落角才过 26.6°，所以加了 Debug 计数 `incoming_flat_under10deg` / `_under20deg` / `_under27deg` / `incoming_no_burst` / `incoming_rolled_out` / `incoming_over_budget`，下一轮看落角分布再定）、hit_aphe_mid（3–8 m 的爆炸只有 2 次且不在装甲上：所有友军都是 603_Flak 车体，中型坦克和 BMPT 整局没有开火记录）。
   - 顺带查出：`KindOf` 漏了 GrenadeBullet01_MapNoDamage（0x17A16E8，近炸高爆弹）和 RocketBullet01_LowLight（0x17A39A8），这两类弹没有掠过声和来袭声；已补（docs/hit-sound-re.md）。
 
+- 第四轮（wtfx2：泰坦玩家 + 狂战士波次；友军 Flak 88×2、镇魂炮、EMP 中、PzH2000×2、插件榴弹炮、喀秋莎；29 个 5 s 窗口；DLL build 78a7dccc55，代码同 15527696，loading 行相符）：
+  - 主炮 `128mm_pak44_ai` 10、`150mm_sfh_18_ai` 51；爆炸 explosion_ground 122、art_explosion_ground 61、bomb_explosion_ground 53，`stock_blast_taken` 436；hit_aphe_big 39，hit_mgun 137、rico_mgun 14；`stock_hit_taken` / `stock_hit_kept` 都是 0：不双响。
+  - 声部：dropped 0，busy 峰值 143/160，loops 35/96、none free 0，限幅器 on。
+  - 来袭：落在耳边 300 m 内、2.3 s 内落地的候选 87 发，**全部**落角 < 10°（`incoming_flat_under10deg` 87，10°–27° 两档都是 0）。这些是近距离平射：目标都在几百米内，榴弹炮的武器不是 lofted 标记，走低弧；按 240 m/s 算，低弧要 3.2 km 外落角才陡过 26.6°。落角分布在 10° 以下和 26.6° 以上之间没有样本，阈值放到 10°–27° 之间任何位置都不改变结果，放到 10° 以下就会给平射弹放炮弹来袭声，所以条件（陡于 26.6°）不改。测试场方案没法把炮兵放到离耳边 3 km 外再把弹落到耳边，来袭在实机仍未触发。
+  - hit_aphe_mid 0 的根因：`Strike`（装甲命中）自己的弹类清单漏了 GrenadeBullet01_MapNoDamage，Flak 88 的 7 m 近炸高爆弹打在狂战士上只出 explosion_ground。已改成和 `KindOf` 共用 `ShellClass`，并加 Debug 计数 `armour_shell_no_hit_se`（高爆弹打在装甲上但原版这一下不放命中声，所以爆炸不带装甲层）。
+
 ## 没验证的
 
 - 没在游戏里试听（只有上面的日志数据）：各口径的音量平衡、近距层淡出距离、500 m 外 1/d 衰减的手感、机枪 grain 的连贯性。
 - 真实 5.1 / 7.1 设备上的方位，以及 `FXMasteringLimiter` 在用户机器上能否挂上（看日志）。
 - 联机时远端开炮、爆炸、掠过的覆盖：只确认了代码路径相同，没实测。
-- 爆炸 hook 的 8 个调用点已在游戏里挂上（上面），爆炸事件本身还没在实机触发过；掠过的触发频率、来袭提前量的手感、炮塔 / 装填按峰值对齐后的响度都没试听。
+- 来袭没在实机触发过（见第四轮）；掠过的触发频率、来袭提前量的手感、炮塔 / 装填按峰值对齐后的响度都没试听。
 - `turret_turn_loop_1` 的首尾接缝只看了样点连续（首 953、尾 1346，同向），没试听。

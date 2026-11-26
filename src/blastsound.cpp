@@ -217,9 +217,15 @@ constexpr int kMostWalked=4096;   // more rounds than that in a frame: the rest 
 constexpr unsigned kSolid=0x17A3F78,kRail=0x17A4038,kSolidExp=0x17A4498,kGrenade=0x17A17E0,kGrenadeMapSafe=0x17A16E8,
                    kRocket=0x17A38E8,kRocketLowLight=0x17A39A8,kBomb=0x17A47D0;
 enum class Kind : std::uint8_t { none, round, shell, falling, bomb };
+std::uintptr_t ClassOf(const unsigned char* core) noexcept {   // the round's vtable (RVA)
+    return At<std::uintptr_t>(core-kBulletCore,0)-reinterpret_cast<std::uintptr_t>(image);
+}
+// The shells: one list for the flight (KindOf) and the strike on armour (Strike). GrenadeBullet01_MapNoDamage's vtable
+// differs from its base's only in the destructor (slot 1): the same update 0x264AB0, so the same flight step's hits.
+bool ShellClass(std::uintptr_t vt) noexcept { return vt==kSolidExp || vt==kGrenade || vt==kGrenadeMapSafe; }
 Kind KindOf(const unsigned char* core) noexcept {
-    const std::uintptr_t vt=At<std::uintptr_t>(core-kBulletCore,0)-reinterpret_cast<std::uintptr_t>(image);
-    return vt==kSolid || vt==kRail ? Kind::round : vt==kSolidExp || vt==kGrenade || vt==kGrenadeMapSafe ? Kind::shell :
+    const std::uintptr_t vt=ClassOf(core);
+    return vt==kSolid || vt==kRail ? Kind::round : ShellClass(vt) ? Kind::shell :
            vt==kRocket || vt==kRocketLowLight ? Kind::falling : vt==kBomb ? Kind::bomb : Kind::none;
 }
 constexpr float kFrameSeconds=1.0f/60.0f;   // the age's frames (core+0xAF8, int32)
@@ -411,8 +417,8 @@ void MarkRound(const void* core,bool ours) noexcept {   // queueLock held
 }
 
 void Strike(const unsigned char* core,const float* vel,std::uint32_t body,const float* point,const float* normal,bool stepped) noexcept {
-    const std::uintptr_t vt=At<std::uintptr_t>(core-kBulletCore,0)-reinterpret_cast<std::uintptr_t>(image);
-    const bool solid=vt==kSolid,rail=vt==kRail,shellClass=vt==kSolidExp || vt==kGrenade;
+    const std::uintptr_t vt=ClassOf(core);
+    const bool solid=vt==kSolid,rail=vt==kRail,shellClass=ShellClass(vt);
     if(!solid && !rail && !shellClass)return;   // a laser's, a flame's, a missile's...: the stock alone
     const unsigned char* object=reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body);
     if(!object || !Armoured(object))return;
@@ -421,7 +427,7 @@ void Strike(const unsigned char* core,const float* vel,std::uint32_t body,const 
     const bool stockSe=stepped && !(flags&kNoHitSe) && At<std::int32_t>(core,kCoreMode)!=3 && (flags&fuze::kHitSound) &&
                        (!(flags&kPierce) || (flags&kPierceSe));
     if(explosive) {
-        if(!stockSe)return;   // its explosion comes at another call: heard without the armour's layers
+        if(!stockSe){audio::Count("armour_shell_no_hit_se");return;}   // its explosion comes at another call: heard without the armour's layers
         AcquireSRWLockExclusive(&queueLock);
         MarkRound(core,false);
         ReleaseSRWLockExclusive(&queueLock);
