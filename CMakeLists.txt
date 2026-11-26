@@ -2961,6 +2961,28 @@ target_compile_options(vehsound_gun_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks vehsound_gun_test)
 add_test(NAME vehsound_gun COMMAND vehsound_gun_test)
 
+# The offline replay of the vehicles' sounds (docs/trace-replay.md): a recording made in the game (src/trace_rec.cpp, ini
+# TraceFile) played back through src/vehsound.cpp as built. vehsound_trace_fixture records a 403 made in memory through
+# the same recorder, the replay plays it back in another process: the recorder and the replay checked with each other.
+add_executable(vehsound_replay_test EXCLUDE_FROM_ALL tests/vehsound_replay_test.cpp)
+target_include_directories(vehsound_replay_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(vehsound_replay_test PRIVATE edf6common user32)
+target_compile_options(vehsound_replay_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_compile_definitions(vehsound_replay_test PRIVATE "EDF6_TRACE_SOURCES=\"${EDF6_TRACE_SOURCES}\"")
+add_dependencies(offline_checks vehsound_replay_test)
+add_executable(vehsound_trace_fixture EXCLUDE_FROM_ALL tests/vehsound_trace_fixture.cpp)
+target_include_directories(vehsound_trace_fixture PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(vehsound_trace_fixture PRIVATE edf6common user32)
+target_compile_options(vehsound_trace_fixture PRIVATE /W4 /WX /utf-8 /permissive-)
+target_compile_definitions(vehsound_trace_fixture PRIVATE "EDF6_TRACE_SOURCES=\"${EDF6_TRACE_SOURCES}\"")
+add_dependencies(vehsound_trace_fixture edf6_build_id)
+add_dependencies(offline_checks vehsound_trace_fixture)
+add_test(NAME vehsound_trace_record COMMAND vehsound_trace_fixture "${CMAKE_CURRENT_BINARY_DIR}/vehsound-fixture.trc")
+set_tests_properties(vehsound_trace_record PROPERTIES FIXTURES_SETUP vehsound_trace)
+add_test(NAME vehsound_trace_replay COMMAND vehsound_replay_test "${CMAKE_CURRENT_BINARY_DIR}/vehsound-fixture.trc"
+    --at-least note.report_rail=5 --at-least once=10)
+set_tests_properties(vehsound_trace_replay PROPERTIES FIXTURES_REQUIRED vehsound_trace)
+
 # The BMPT's twin barrels in turn (src/twin_cadence.h; docs/feedback-2026-10-21-bmpt-fire.md): the pure cadence against a
 # model of the native cooldown, and its EDF.dll fields (the shot's FireInterval -> cooldown, the update's countdown).
 add_executable(twin_cadence_test EXCLUDE_FROM_ALL tests/twin_cadence_test.cpp)

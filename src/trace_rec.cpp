@@ -26,7 +26,8 @@
 #endif
 
 namespace crew {
-namespace {
+// Its own namespace, not an unnamed one: a test builds it with vehsound.cpp in one file (tests/vehsound_trace_fixture.cpp).
+namespace tracerec {
 namespace trace=edf::trace;
 // What vehsound.cpp reads past the objects' own layouts (its constants, kept in step with it: a region missed shows as
 // the replay of a fresh recording differing from what the game did, tests/vehsound_replay_test.cpp).
@@ -152,9 +153,7 @@ bool Open() noexcept {
     out.Reset();   // it begins where a mission did
     return true;
 }
-}  // namespace
-
-void TraceVehicleSound(unsigned char* v) noexcept {
+void Begin(unsigned char* v) noexcept {
     traceOutput=nullptr;
     if(finished || !armed || !Cfg().traceFile[0] || !v)return;
     if(!opened && !Open())return;
@@ -166,9 +165,13 @@ void TraceVehicleSound(unsigned char* v) noexcept {
     Vehicle(v);
     traceOutput=&Output;
 }
-void TraceEnd() noexcept { traceOutput=nullptr; }
-void TraceReset() noexcept {
+void Reset() noexcept {
     armed=true;
     if(opened && !finished){out.Reset();written.clear();frameWritten=~0ull;}
 }
+}  // namespace tracerec
+
+void TraceVehicleSound(unsigned char* v) noexcept { tracerec::Begin(v); }
+void TraceEnd() noexcept { traceOutput=nullptr; }
+void TraceReset() noexcept { tracerec::Reset(); }
 }  // namespace crew
