@@ -668,6 +668,47 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
     return ForEachEnemyOf(At<std::int32_t>(v,kTeam),v,static_cast<F&&>(f));
 }
 
+struct StepSide {
+    enemypoints::TeamMask enemies=0;
+    bool taken=false,watched=false;
+};
+SceneStep enemyStep{};
+std::vector<enemypoints::Point> stepRegistry;
+StepSide stepSides[kMaxTeam];
+
+// Game-thread AI readers share one native walk. The scene step advances before the vehicle inputs, unlike GameFrame().
+// Derive each side lazily from the same ordered lock points. The mission key prevents reuse when an address recurs.
+StepSide* PointsThisStep(std::int32_t team) noexcept {
+    if(team==kTeamVehicle)team=player.team;
+    if(team<0 || team>=kMaxTeam)return nullptr;
+    const SceneStep step=SceneStepNow();
+    if(!step.scene)return nullptr;
+    if(enemyStep.scene!=step.scene || enemyStep.count!=step.count || enemyStep.mission!=step.mission) {
+        const unsigned char* head=nullptr;
+        std::uint64_t nodes=0;
+        if(!edf::LockList(image,head,nodes))return nullptr;
+        enemypoints::Collect(head,nullptr,stepRegistry,nodes);
+        for(auto& side:stepSides)side.taken=side.watched=false;
+        enemyStep=step;
+    }
+    auto& side=stepSides[team];
+    if(!side.taken) {
+        const auto* relation=edf::Relations(image,team);
+        if(!relation)return nullptr;
+        side.enemies=enemypoints::EnemyTeams(relation);
+        side.taken=true;
+    }
+    return &side;
+}
+
+template<class F> bool ForEachEnemyThisStep(std::int32_t team,const void* self,F&& f) noexcept {
+    if(auto* side=PointsThisStep(team)) {
+        enemypoints::Visit(stepRegistry,self,static_cast<F&&>(f),side->enemies);
+        return true;
+    }
+    return ForEachEnemyOf(team,self,static_cast<F&&>(f));
+}
+
 // ---- The medic heli (tools/make_jets.py MEDIC_HELI_FILE; the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，
 // 自瞄也是锁队友」) ----
 // A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way) aims at hurt friends.
@@ -842,7 +883,9 @@ template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) no
     if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept {
         f(o,a,share*kHurtWeight,[]() noexcept { return false; });
     });
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); }); });
+    return ForEachEnemyThisStep(At<std::int32_t>(v,kTeam),v,[&](const void* o,const float* a) noexcept {
+        f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });
+    });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
@@ -1994,7 +2037,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // and between two kills there is none, which used to set it down mid-fight.
     const ULONGLONG game=GameMs();
     if(!s.follow)h.enemyAt=game;
-    else ForEachEnemy(v,[&](const void*,const float* p) noexcept {
+    else ForEachEnemyThisStep(At<std::int32_t>(v,kTeam),v,[&](const void*,const float* p) noexcept {
         const float d[3]={p[0]-player.pos[0],0,p[2]-player.pos[2]};
         if(Dot2(d,d)<Cfg().heliRange*Cfg().heliRange)h.enemyAt=game;
     });
@@ -4070,48 +4113,24 @@ bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noe
     return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
-// The enemies of a side copied once per scene step (enemy_points.h): the registry walked once per side per frame,
-// not once per gunner seat. The copy is taken at the side's first ask in the step; one that has died since is skipped.
-// Keyed by the native scene step (SceneStepNow), not GameFrame: that one moves on only after the first vehicle's input,
-// where the gunners run. With the step unreadable: the live walk.
-namespace {
-struct StepPoints { SceneStep step; bool taken,ok; std::vector<enemypoints::Point> points; };
-StepPoints stepPoints[kMaxTeam];
-// The side's copy for this step, or null: the step unreadable or the team out of the table (the live walk then).
-StepPoints* PointsThisStep(const unsigned char* vehicle) noexcept {
-    const SceneStep step=SceneStepNow();
-    std::int32_t team=At<std::int32_t>(vehicle,kTeam);
-    if(team==kTeamVehicle)team=player.team;
-    if(!step.scene || team<0 || team>=kMaxTeam)return nullptr;
-    StepPoints& s=stepPoints[team];
-    if(!s.taken || s.step.scene!=step.scene || s.step.count!=step.count || s.step.mission!=step.mission) {
-        const unsigned char* head=nullptr;
-        const std::int32_t* relation=nullptr;
-        std::uint64_t nodes=0;
-        s.ok=EnemyRegistry(team,head,relation,nodes);
-        if(s.ok)enemypoints::Collect(head,relation,s.points,nodes);
-        else s.points.clear();
-        s.step=step;s.taken=true;
-        // every enemy's window watched each step, not only the would-be best a seat asks of (damagestats.h)
-        for(const enemypoints::Point& p:s.points)WatchTarget(p.object);
-    }
-    return &s;
-}
-}  // namespace
 bool NearestEnemyThisStep(const unsigned char* vehicle,const float* from,float reach,EnemyUsable usable,void* ctx,
                           const void*& best,float& bestDist) noexcept {
     best=nullptr;bestDist=1e30f;
     auto dist=[](const float* a,const float* b) noexcept { return npc::Dist(a,b); };
     auto ok=[&](const void* object) noexcept { return usable(ctx,object); };
-    StepPoints* const s=PointsThisStep(vehicle);
+    auto* const s=PointsThisStep(At<std::int32_t>(vehicle,kTeam));
     if(!s) {   // the live walk, Nearest's rule
         return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept {
             const float d=dist(from,aim);
             if(d<=reach && d<bestDist && ok(object)){best=object;bestDist=d;}
         });
     }
-    if(!s->ok)return false;
-    const enemypoints::Pick p=enemypoints::Nearest(s->points,vehicle,from,reach,dist,ok);
+    if(!s->watched) {
+        s->watched=true;
+        // Observe every enemy's window even when it never becomes a candidate for a seat.
+        enemypoints::Visit(stepRegistry,nullptr,[](const void* object,const float*) noexcept { WatchTarget(object); },s->enemies);
+    }
+    const enemypoints::Pick p=enemypoints::Nearest(stepRegistry,vehicle,from,reach,dist,ok,s->enemies);
     best=p.object;bestDist=p.dist;
     return true;
 }
@@ -4134,6 +4153,10 @@ bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept {
 
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {
     return ForEachEnemyOf(team,nullptr,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
+}
+
+bool VisitEnemiesThisStep(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {
+    return ForEachEnemyThisStep(team,nullptr,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
 bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept {

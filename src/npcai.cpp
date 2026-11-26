@@ -562,7 +562,7 @@ void Gather(std::int32_t team) noexcept {
     __try {
         w.player=player.at && GameMs()-player.at<kPlayerFixMs;
         if(w.player)std::memcpy(w.playerAt,player.pos,12);
-        VisitEnemiesOf(team,&SeeEnemy,&w);
+        VisitEnemiesThisStep(team,&SeeEnemy,&w);
         // The local player first: whatever the walk's order, no shot crosses them (B1).
         if(unsigned char* const me=PlayerHuman(); me && HumanOnFoot(me)) {
             const float* p=Pos(me);
