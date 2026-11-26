@@ -9,6 +9,7 @@
 #include "infantryscope.h"
 #include "stores.h"
 #include "edf/input_source.h"
+#include "enemy_control_pad.h"
 #include "seat_switch_logic.h"
 #include <d3d11.h>
 #include <atomic>
@@ -33,6 +34,8 @@ constexpr int kModels=2048;
 struct Snapshot {
     stepfresh::Step at=0;
     bool enabled=false,eligible=false,inSight=false;
+    bool night=false;          // night vision drawn on this player's world views (on foot, switched on, not the map's view)
+    float nightGain=6.0f;      // ini InfantryNightVisionGain
     unsigned count=0;
     const void* model[kModels]{};
 };
@@ -50,11 +53,14 @@ struct Player {
     std::atomic<unsigned> modelCount{0};
     std::atomic<ULONGLONG> rejectedAt{0};
     std::atomic<bool> pad{false};
+    // Night vision: switched on (kept through a vehicle ride), usable now (on foot), drawn on the last world view.
+    std::atomic<bool> night{false},nightEligible{false},nightShown{false};
     ObjRef owner{};unsigned ownerSeat=0;bool keyHeld=true,padHeld=true;
 };
 Player players[kPlayers];
 SRWLOCK snapshotLock=SRWLOCK_INIT;
 std::atomic<bool> installed{false};
+std::atomic<bool> nightLogged{false};   // the night vision's surface refusal logged (once a mission)
 // A key edge on a seat with no thermal equipment: the HUD says so for kRejectMs instead of ignoring the press silently.
 constexpr ULONGLONG kRejectMs=2500;
 ULONGLONG ticked=~ULONGLONG(0);
@@ -66,6 +72,7 @@ struct RenderFrame {
     std::uint64_t serial=0;
     Mode mode=Mode::optical;
     bool active=false,target=false,failed=false;
+    bool night=false;   // this view gets night vision at its end
     // One render frame of views: the players whose view began in it, and whether any of them drew thermal. A player's
     // view beginning again starts the next frame (split screen: both viewports share this one renderer).
     unsigned seen=0;
@@ -79,6 +86,8 @@ void Clear(Player& p) noexcept {
     p.modelCount.store(0,std::memory_order_release);p.requested.store(Mode::optical,std::memory_order_release);
     p.effective.store(Mode::optical,std::memory_order_release);p.reason.store(Reason::optical,std::memory_order_release);
     p.rejectedAt.store(0,std::memory_order_release);p.pad.store(false,std::memory_order_release);
+    p.night.store(false,std::memory_order_release);p.nightEligible.store(false,std::memory_order_release);
+    p.nightShown.store(false,std::memory_order_release);
     p.owner={};p.keyHeld=p.padHeld=true;
 }
 // Game thread: the player's slot (a free or forgotten one taken for a player not seen before), null when both are held.
@@ -113,8 +122,10 @@ bool MainView(const void* view) noexcept {
 // Render thread: whose world view `view` is. The local player whose camera submitted it (firstperson.cpp
 // LocalViewPlayer: split screen's second viewport is its second player's); without that match (the camera step not
 // chained, or a frame no camera has submitted yet) the first camera slot's view is the first player's, as before.
+// The scope lens's own view (InfantryScope=2, viewport 3) is its soldier's: night vision is in the lens as round it.
 Player* ViewPlayer(const void* view) noexcept {
     if(Player* p=Find(LocalViewPlayer(view)))return p;
+    if(Player* p=Find(InfantryScopeLensOwner(view)))return p;
     return MainView(view) ? Find(PlayerHuman()) : nullptr;
 }
 ID3D11DeviceContext* Context(void* native) noexcept {return native ? At<ID3D11DeviceContext*>(native,8) : nullptr;}
@@ -129,13 +140,12 @@ void Failed() noexcept {
         frame.player->reason.store(Reason::unsupportedSurface,std::memory_order_release);
     }
 }
-void __fastcall BeginHook(void* manager,void* native,const void* view) {
-    reinterpret_cast<StageFn>(image+kViewBegin)(manager,native,view);
-    gpufx::WorldBegin(Context(native),view);
+// A world view begins (after the native stage): whose it is, and whether it gets thermal or night vision at its end.
+void ViewBegin(void* native,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire))return;
     Player* const p=ViewPlayer(view);
     if(!p)return;
-    frame.active=false;frame.target=false;frame.failed=false;frame.view=view;frame.player=p;
+    frame.active=false;frame.target=false;frame.failed=false;frame.night=false;frame.view=view;frame.player=p;
     // An optical view keeps the compiled shaders and states (rebuilding them is 8 shader compiles; in split screen with
     // one player in thermal it was every frame). Everything goes once a whole frame drew no thermal, so nothing (nor
     // the device they reference) outlives the thermal sight by more than a frame.
@@ -146,13 +156,32 @@ void __fastcall BeginHook(void* manager,void* native,const void* view) {
     }
     frame.seen|=bit;
     frame.shot=ReadSnapshot(*p);frame.mode=p->requested.load(std::memory_order_acquire);
+    // A soldier's night vision: no capture in this view, only the world's end (ThermalEnd) amplifies what it drew.
+    if(frame.shot.enabled && frame.shot.night && stepfresh::Fresh(frame.shot.at)) {
+        frame.gpu.Invalidate();frame.night=true;frame.used=true;return;
+    }
+    if(!frame.shot.night)p->nightShown.store(false,std::memory_order_release);
     if(frame.mode==Mode::optical || !frame.shot.enabled || !frame.shot.eligible || !frame.shot.inSight ||
        !stepfresh::Fresh(frame.shot.at)) {frame.gpu.Invalidate();return;}
     frame.active=frame.gpu.BeginView(Context(native),++frame.serial);
     if(frame.active)frame.used=true;
     else Failed();
 }
+void __fastcall BeginHook(void* manager,void* native,const void* view) {
+    reinterpret_cast<StageFn>(image+kViewBegin)(manager,native,view);
+    gpufx::WorldBegin(Context(native),view);
+    ViewBegin(native,view);
+}
+void NightEnd(void* native,Player& p) noexcept {
+    frame.night=false;
+    NightLook look{};look.gain=frame.shot.nightGain;look.seed=static_cast<float>(++frame.serial%4096u);
+    if(frame.gpu.NightVision(Context(native),look)){p.nightShown.store(true,std::memory_order_release);return;}
+    p.nightShown.store(false,std::memory_order_release);
+    if(!nightLogged.exchange(true,std::memory_order_acq_rel))
+        Log("NIGHTVISION this world view's surface is not one it draws on (or the device refused): the view stays as drawn");
+}
 void ThermalEnd(void* native,const void* view) noexcept {
+    if(frame.night && frame.view==view && frame.player){NightEnd(native,*frame.player);return;}
     if(!frame.active || frame.view!=view || !frame.player)return;
     Player& p=*frame.player;
     const Mode now=p.requested.load(std::memory_order_acquire);
@@ -219,6 +248,19 @@ Toggle Down(unsigned char* vehicle,unsigned seat,unsigned toggleKey) noexcept {
     }
     return t;
 }
+// On foot: the keyboard key in this game's foreground window and the first XInput pad's chord (ini
+// InfantryNightVisionButton, XInput button bits: map.cpp MapPadButtons), both this machine's first local player's
+// (enemy_control_pad.h FirstLocalPad: the soldier bound to local pad 0); a split screen's other player has neither.
+Toggle FootDown(const unsigned char* human,unsigned toggleKey) noexcept {
+    Toggle t{};
+    if(!Readable(human+enemy_control::kHumanLocalPad,4) ||
+       !enemy_control::FirstLocalPad(At<int>(human,enemy_control::kHumanLocalPad)))return t;
+    DWORD process=0;GetWindowThreadProcessId(edf::ForegroundWindow(),&process);
+    t.key=toggleKey && toggleKey<=0xFF && process==GetCurrentProcessId() && (edf::AsyncKey(static_cast<int>(toggleKey))&0x8000)!=0;
+    std::uint16_t buttons=0;
+    t.pad=MapPadButtons(&buttons) && seatsw::ChordHeld(buttons,static_cast<unsigned>(Cfg().nightVisionButton));
+    return t;
+}
 // The toggle's press this frame (its key's or its chord's edge); the held states are kept every frame.
 bool Pressed(Player& p,const Toggle& t) noexcept {
     const bool press=(t.key && !p.keyHeld) || (t.pad && !p.padHeld);
@@ -240,8 +282,16 @@ Mode CycleModeOf(Player& p) noexcept {
     const Mode next=was==Mode::optical ? Mode::whiteHot : was==Mode::whiteHot ? Mode::blackHot : Mode::optical;
     return SetModeOf(p,next) ? next : was;
 }
+// Night vision's whole decision for one frame (thermal_runtime_test drives it): on foot the press switches it; it is drawn
+// while on foot, switched on, and the player's own view is up (not the map's). Off in the ini: never on.
+bool FootNight(Player& p,bool onFoot,bool allowed,bool press,bool admitted) noexcept {
+    p.nightEligible.store(onFoot && allowed,std::memory_order_release);
+    if(!allowed){p.night.store(false,std::memory_order_release);return false;}
+    if(onFoot && press && admitted)p.night.store(!p.night.load(std::memory_order_acquire),std::memory_order_release);
+    return onFoot && p.night.load(std::memory_order_acquire) && !MapOwnsView();
+}
 void TickPlayer(Player& p,unsigned char* human,bool enabled,unsigned toggleKey) noexcept {
-    Snapshot shot{};shot.at=stepfresh::Now();shot.enabled=enabled;
+    Snapshot shot{};shot.at=stepfresh::Now();shot.enabled=enabled;shot.nightGain=Cfg().nightVisionGain;
     unsigned char* vehicle=nullptr;unsigned seat=0;
     const bool seated=enabled && Seat(human,&vehicle,&seat);
     p.pad.store(seated && At<unsigned char>(SeatAt(vehicle,seat),edf::kSeatPad)!=0,std::memory_order_release);
@@ -249,10 +299,16 @@ void TickPlayer(Player& p,unsigned char* human,bool enabled,unsigned toggleKey) 
     // (VehicleHasThermal: the seat's actual optic or sensor display); elsewhere the press is answered on the HUD.
     const bool admitted=!GamePaused() && !MapHoldsKeys();
     const bool equipped=seated && VehicleHasThermal(vehicle,seat);
+    // On foot (alive, every class): the same toggle is the night vision's.
+    const bool onFoot=enabled && !seated && Readable(human,kHumanVehicleCtrl+8) && !human[kDead] && HumanOnFoot(human);
+    shot.night=FootNight(p,onFoot,enabled && Cfg().nightVision,onFoot && Pressed(p,FootDown(human,toggleKey)),admitted);
     if(!equipped) {
         // A seat without the equipment: the press is answered on the HUD (rejectedAt), never turned into a request.
-        const Toggle t=seated ? Down(vehicle,seat,toggleKey) : Toggle{true,true};
-        if(Pressed(p,t) && admitted && seated)p.rejectedAt.store(GetTickCount64(),std::memory_order_release);
+        // On foot the press was the night vision's (FootDown above); held states otherwise as a held key.
+        if(!onFoot) {
+            const Toggle t=seated ? Down(vehicle,seat,toggleKey) : Toggle{true,true};
+            if(Pressed(p,t) && admitted && seated)p.rejectedAt.store(GetTickCount64(),std::memory_order_release);
+        }
         p.owner={};p.requested.store(Mode::optical,std::memory_order_release);
         p.effective.store(Mode::optical,std::memory_order_release);
         p.reason.store(seated ? Reason::unsupportedSeat : Reason::optical,std::memory_order_release);Publish(p,shot);return;
@@ -319,6 +375,11 @@ void Tick(bool enabled,unsigned toggleKey) noexcept {
     __try {TickNative(enabled,toggleKey);}
     __except(EXCEPTION_EXECUTE_HANDLER) {Reset();}
 }
+bool SetNightVision(bool on,const void* human) noexcept {
+    Player* p=Find(human ? human : PlayerHuman());
+    if(!p || (on && !p->nightEligible.load(std::memory_order_acquire)))return false;
+    p->night.store(on,std::memory_order_release);return true;
+}
 bool SetMode(Mode mode,const void* human) noexcept {
     Player* p=Find(human ? human : PlayerHuman());
     return p && SetModeOf(*p,mode);
@@ -336,11 +397,13 @@ Status GetStatus(const void* human) noexcept {
     s.reason=p->reason.load(std::memory_order_acquire);s.eligible=p->eligible.load(std::memory_order_acquire);
     s.models=p->modelCount.load(std::memory_order_acquire);s.rejected=at && GetTickCount64()-at<kRejectMs;
     s.pad=p->pad.load(std::memory_order_acquire);
+    s.nightEligible=p->nightEligible.load(std::memory_order_acquire);s.nightVision=p->night.load(std::memory_order_acquire);
+    s.nightShown=p->nightShown.load(std::memory_order_acquire);
     return s;
 }
 void Reset() noexcept {
     for(auto& p:players){Clear(p);p.human={};p.seen=0;}
-    ticked=~ULONGLONG(0);
+    ticked=~ULONGLONG(0);nightLogged.store(false,std::memory_order_release);
 }
 bool WantsCapture() noexcept {return frame.active && frame.target && !frame.failed;}
 void ObserveSurface(ID3D11DeviceContext* context,int pass) noexcept {

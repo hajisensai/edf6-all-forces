@@ -400,6 +400,8 @@ void Validate(Config& n) noexcept {
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.thermalKey=static_cast<int>(FixInt("VehicleThermalKey",n.thermalKey,0,254));
     n.thermalButton=static_cast<int>(FixInt("VehicleThermalButton",n.thermalButton,0,255));
+    n.nightVisionButton=static_cast<int>(FixInt("InfantryNightVisionButton",n.nightVisionButton,0,0xFFFF));
+    Fix("InfantryNightVisionGain",n.nightVisionGain,1.0f,30.0f);
     n.firstPersonKey=static_cast<int>(FixInt("FirstPersonKey",n.firstPersonKey,0,254));
     Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
     Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
@@ -886,6 +888,9 @@ void LoadConfig() noexcept {
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
     n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
     n.thermalButton=ReadInt(L"VehicleThermalButton",static_cast<DWORD>(n.thermalButton));
+    n.nightVision=ReadBool(L"InfantryNightVision",n.nightVision);
+    n.nightVisionButton=ReadInt(L"InfantryNightVisionButton",static_cast<DWORD>(n.nightVisionButton));
+    n.nightVisionGain=ReadFloat(L"InfantryNightVisionGain",n.nightVisionGain);
     n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
     n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);

@@ -333,6 +333,9 @@ struct Config {
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
+    bool nightVision=true;       // on foot (every class) the same key switches a soldier's night vision (thermal.cpp)
+    int nightVisionButton=0xC0;  // ...and the first XInput pad's chord on foot (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
+    float nightVisionGain=6.0f;  // ...how strongly the dark scene is amplified (1 ~ 30)
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
     bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
     bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
