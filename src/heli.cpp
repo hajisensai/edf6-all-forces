@@ -310,6 +310,15 @@ bool rayOk=false;
 struct alignas(16) RayInput { float from[4],to[4]; std::uint32_t filter,unk24; std::uint64_t pad; };
 static_assert(sizeof(RayInput)==0x30,"EdfRayInput");
 struct alignas(16) RayHits { unsigned char raw[0xA0]; };
+RayHits allRayStart{},mapRayStart{};
+void PrepareRayStarts() noexcept {
+    allRayStart={};mapRayStart={};
+    *reinterpret_cast<const void**>(allRayStart.raw)=image+kHitVtbl;
+    *reinterpret_cast<const void**>(mapRayStart.raw)=image+kGroundVtbl;
+    const auto reset=reinterpret_cast<void(*)(void*)>(image+kHitReset);
+    reset(&allRayStart);
+    reset(&mapRayStart);
+}
 
 // Metres along a->b to the nearest terrain/building, or -1 with none (or no physics world). `hit`
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
@@ -324,15 +333,17 @@ unsigned char* RayWorld() noexcept {
     return Readable(g,0x70) && At<const void*>(g,0x68) ? g : nullptr;
 }
 
+__forceinline void FireRay(unsigned char* g,const float* a,const float* b,std::uint32_t filter,RayHits& col) noexcept {
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
+    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+}
+
 float CastRayIn(unsigned char* g,const float* a,const float* b,float* hit=nullptr,bool any=false,
                 std::uint32_t* flags=nullptr,std::uint32_t filter=kMapLayer,float* normal=nullptr,
                 std::uint32_t* body=nullptr) noexcept {
     if(!g)return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
-    RayHits col{};
-    *reinterpret_cast<const void**>(col.raw)=image+(any ? kHitVtbl : kGroundVtbl);
-    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
-    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+    RayHits col=any ? allRayStart : mapRayStart;
+    FireRay(g,a,b,filter,col);
     if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
     const float f=*reinterpret_cast<const float*>(col.raw+0x50);
     if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
@@ -439,9 +450,7 @@ Sea CastWaterAreas(unsigned char* g,WaterAreas areas,float x,float z,float* surf
             if(!Readable(holder,0xF4))continue;
             const std::uint32_t id=At<std::uint32_t>(holder,0xF0);
             const RayInput in{{x,4000.0f,z,1.0f},{x,-4000.0f,z,1.0f},0,0,0};
-            RayHits col{};
-            *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
-            reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+            RayHits col=allRayStart;
             reinterpret_cast<void(*)(void*,void*,const RayInput*,const std::uint32_t*,int)>(image+kCastRayBodies)(g+0x10,&col,&in,&id,1);
             if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)continue;
             const float y=*reinterpret_cast<const float*>(col.raw+0x34);
@@ -4067,11 +4076,8 @@ float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
-    RayHits col{};
-    *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
-    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
-    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+    RayHits col=allRayStart;
+    FireRay(g,a,b,filter,col);
     if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
     const float f=*reinterpret_cast<const float*>(col.raw+0x50);
     if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
@@ -4129,7 +4135,13 @@ float GroundRayBatch::Floor(const float* a,const float* b,float* hit) noexcept {
     },hit);
 }
 bool GroundRayBatch::Clear(const float* a,const float* b) noexcept {
-    return CastRayIn(World(),a,b)<0.0f;
+    auto* const g=World();
+    if(!g)return true;
+    RayHits col=mapRayStart;
+    FireRay(g,a,b,kMapLayer,col);
+    if(At<std::int32_t>(col.raw,0x0C)==0)return true;
+    const float f=At<float>(col.raw,0x50);
+    return !(f>=0.0f && f<=1.0f);
 }
 Sea GroundRayBatch::Water(float x,float z,float* surface) noexcept {
     auto* const g=World();
@@ -4237,12 +4249,14 @@ bool CheckHeliProfile() noexcept {
         deleteOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));
         if(!deleteOk)Log("HELI delete: profile mismatch (called helis that leave fly on away instead of being deleted)");
         // Avoidance has its own check: without it the helis still fly, just blind.
-        rayOk=Readable(image+kHitVtbl,0x28) && At<const unsigned char*>(image,kHitVtbl)==image+kHitSlot0 &&
+        bool rayProfile=Readable(image+kHitVtbl,0x28) && At<const unsigned char*>(image,kHitVtbl)==image+kHitSlot0 &&
               At<const unsigned char*>(image,kHitVtbl+0x20)==image+kHitAdd &&
               Readable(image+kGroundVtbl,0x28) && At<const unsigned char*>(image,kGroundVtbl)==image+kHitSlot0 &&
               At<const unsigned char*>(image,kGroundVtbl+0x10)==image+kHitReset &&
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
-        for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
+        for(const auto& s:kRaySignatures)rayProfile=rayProfile && Matches(s.rva,s.bytes,s.size);
+        if(rayProfile)PrepareRayStarts();
+        rayOk=rayProfile;
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
         bodyOk=rayOk && Readable(image+kWorldVtbl,0x88) && At<const unsigned char*>(image,kWorldVtbl+16*8)==image+kWorldGetBody;
         for(const auto& s:kBodySignatures)bodyOk=bodyOk && Matches(s.rva,s.bytes,s.size);

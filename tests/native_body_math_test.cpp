@@ -142,6 +142,48 @@ void WriteRecord(StreamBlock& block,unsigned offset,std::uint16_t size,unsigned 
     record[3]=kind;
     std::memcpy(record+4,&payload,sizeof(payload));
 }
+// The collector ABI is larger than the result consumed by a clearance caller. Verify the full
+// reset state against the native reset, including unused payload and the chosen dispatch table.
+bool RayResetTemplates() {
+    using Reset=void(__fastcall*)(void*);
+    using Get=const void*(__fastcall*)(const void*);
+    using Add=void(__fastcall*)(void*,const void*);
+    struct alignas(16) Hits { unsigned char bytes[0xA0]{}; };
+    const auto reset=reinterpret_cast<Reset>(image+0xFDF00);
+    const auto get=reinterpret_cast<Get>(image+0xFDDB0);
+    const auto add=reinterpret_cast<Add>(image+0xD93980);
+    const void* tables[]={image+0x1768B78,image+0x179CBE8};
+    auto setup=[&](unsigned kind,Hits& hits) {
+        std::memcpy(hits.bytes,&tables[kind],sizeof(void*));
+        reset(&hits);
+    };
+    Hits starts[2]{};
+    setup(0,starts[0]);setup(1,starts[1]);
+    for(unsigned i=0;i<2;++i) {
+        Hits old{};
+        setup(i,old);
+        auto clone=starts[i];
+        if(std::memcmp(&old,&clone,sizeof(Hits))!=0)return false;
+        alignas(16) unsigned char hit[0x70]{};
+        const float fraction=0.5f;
+        std::memcpy(hit+0x20,&fraction,sizeof(fraction));
+        hit[0x6C]=2;
+        add(&old,hit);add(&clone,hit);
+        if(std::memcmp(&old,&clone,sizeof(Hits))!=0 || edf::At<std::int32_t>(clone.bytes,0x0C)!=1)return false;
+        clone=starts[i];
+        if(edf::At<std::int32_t>(clone.bytes,0x0C)!=0 || get(&clone)!=clone.bytes+0x30)return false;
+    }
+    Bench("ray collector initializations",[&](unsigned i){
+        Hits hits{};
+        setup(i&1u,hits);
+        get(&hits);
+    },[&](unsigned i){
+        auto hits=starts[i&1u];
+        get(&hits);
+    });
+    return true;
+}
+
 bool ContactStreams() {
     void* callbacks[4]={nullptr,nullptr,nullptr,reinterpret_cast<void*>(&TestCommand)};
     void* dispatcher[7]{};
@@ -305,6 +347,10 @@ int main(int argc,char** argv) {
        std::memcmp(packedProxies.data(),newProxies.data(),sizeof(packedProxies))!=0 ||
        std::memcmp(oldMatrices.data(),newMatrices.data(),sizeof(oldMatrices))!=0) {
         std::puts("FAIL: repeated updates changed the outputs");return 1;
+    }
+    if(!RayResetTemplates()) {
+        std::puts("FAIL: ray collector reset template does not reproduce the native state");
+        return 1;
     }
     if(!ContactStreams()) {
         std::puts("FAIL: contact stream changed record dispatch, deferred bytes or command accounting");
