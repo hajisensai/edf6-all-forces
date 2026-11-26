@@ -40,7 +40,7 @@ void CastRay(void* havokWorldWrapper, hknpClosestHitCollector* collector, const 
 - `0x11A7EFD`–`0x11A7F96`：读 `in+0x00`（起点）和 `in+0x10`（终点），算出 `dir = to - from`，并把 `dir.w` 强制设为 `1.0`（`unpckhps/shufps 0xC4`，常量 `0x1F82840 = {1,1,1,1}`）。这个 w 就是 hkcdRay 的最大比例，所以**命中比例的范围是 [0,1]，按线段长度计算**。随后用 `rcpps` + 牛顿迭代求出 `invDir`。
 - `in+0x20` → query `+0x14`（collisionFilterInfo）；query `+0x10` = `0xFFFF`（材质 id），`+0x18` = 0，`+0x20` = 1，`+0x22` = `0xFB`。
 - `in+0x24` → query `+0x60`。所有游戏调用点都传 0。
-- query `+0x00/+0x08` 来自 world vtable 的 `+0x18/+0x10`（filter / codec 指针），由函数自己填写。
+- query `+0x00/+0x08` 来自 world vtable 的 `+0x18/+0x10`（shape tag codec / collision filter 指针），由函数自己填写。
 - `0x11A7FD6 call [rax+0x1B0]` 调用 `hknpWorld::castRay(query, collector)` → `world+0x4C0` 上的 dispatcher `+0xB0`。
 
 ### 2.1 入参结构 `EdfRayInput`（大小 0x28，按 0x30 对齐分配）
