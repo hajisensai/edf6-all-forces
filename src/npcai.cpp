@@ -791,26 +791,17 @@ int FriendsOnShot(const void* self,const float* from,const float* to,float blast
     for(const int i:rows)if(world.frObject[static_cast<std::size_t>(i)]!=self)out[static_cast<std::size_t>(n++)]=world.fr[static_cast<std::size_t>(i)];
     return n;
 }
-// ShotClear over every friend but `self` for a shot from `from` to `to` (a round of `blast`), asked of the same cells as
-// FriendsOnShot and done at the first friend in the way: a yes or no needs neither their order nor each once, so nothing
-// is gathered or sorted (gathering and sorting the candidates cost 30 ms a frame with 2132 soldiers in one crowd).
+// Veto a shot at the first blocker in the relevant cells.
 bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
-    bool clear=true;
-    const auto test=[&](int i) noexcept {
-        const std::size_t k=static_cast<std::size_t>(i);
-        if(clear && world.frObject[k]!=self && !npc::ShotClear(from,to,kSpread,blast,&world.fr[k],1))clear=false;
-    };
-    world.friendGrid.Capsule(from,to,world.frRadius+kSpread,test);
-    if(clear && blast>0.0f)world.friendGrid.Around(to,blast*1.25f+world.frRadius,test);
-    return clear;
+    return npc::grid::ShotClear(world.friendGrid,npc::Shot(from,to,kSpread,blast),world.frRadius,
+        [](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; },
+        [self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; });
 }
-// A friend but `self` within `r` of `at`: looked for in the cells round it (the same answer as over every friend).
 bool FriendNear(const void* self,const float* at,float r) noexcept {
-    bool found=false;
-    world.friendGrid.Around(at,r,[&](int i) noexcept {
-        if(!found && world.frObject[static_cast<std::size_t>(i)]!=self && npc::Dist(world.fr[static_cast<std::size_t>(i)].pos,at)<r)found=true;
+    return world.friendGrid.AnyAround(at,r,[&](int i) noexcept {
+        const auto k=static_cast<std::size_t>(i);
+        return world.frObject[k]!=self && npc::Dist(world.fr[k].pos,at)<r;
     });
-    return found;
 }
 
 // --- The block's writes ---

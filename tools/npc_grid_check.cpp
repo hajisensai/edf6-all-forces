@@ -80,8 +80,7 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
             const int self=n ? I(n) : -1;
             bool want2=false;
             for(int i=0;i<n;++i)if(i!=self && npc::Dist(fr[static_cast<std::size_t>(i)].pos,anchor)<r){want2=true;break;}
-            bool near=false;
-            g.Around(anchor,r,[&](int i){ if(i!=self && npc::Dist(fr[static_cast<std::size_t>(i)].pos,anchor)<r)near=true; });
+            const bool near=g.AnyAround(anchor,r,[&](int i){ return i!=self && npc::Dist(fr[static_cast<std::size_t>(i)].pos,anchor)<r; });
             if(want2!=near)++mismatches[2];
         }
         // The threats in reach, the first 64 in index order (Evade), and the group round a point (GroupAt).
@@ -119,7 +118,10 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
             sub.clear();
             for(int i:got)if(i!=self)sub.push_back(fr[static_cast<std::size_t>(i)]);
             const bool clear=npc::ShotClear(eye,to,kSpread,blast,sub.data(),static_cast<int>(sub.size()));
-            if(want3!=clear)++mismatches[5];
+            const bool gridClear=npc::grid::ShotClear(g,npc::Shot(eye,to,kSpread,blast),maxRadius,
+                [&](int i) -> const npc::Friend& { return fr[static_cast<std::size_t>(i)]; },
+                [self](int i){ return i==self; });
+            if(want3!=clear || want3!=gridClear)++mismatches[5];
             // Every friend the line or the blast touches is a candidate (the superset itself, not only the verdict).
             for(int i=0;i<n;++i) {
                 if(i==self)continue;
@@ -127,7 +129,9 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
                 float t;
                 const bool touches=(npc::SegmentDist(eye,to,f.pos,&t)<f.radius+kSpread && t>0.0f) ||
                                    (blast>0.0f && npc::Dist(to,f.pos)<blast*1.25f+f.radius);
-                if(touches && !std::binary_search(got.begin(),got.end(),i)){++mismatches[5];break;}
+                const npc::Shot shot(eye,to,kSpread,blast);
+                if(touches!=(shot.BlocksLine(f) || shot.BlocksBlast(f)) ||
+                   (touches && !std::binary_search(got.begin(),got.end(),i))){++mismatches[5];break;}
             }
         }
     }
@@ -141,6 +145,15 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
 
 int main() {
     npc::grid::Grid g;
+    const float start[3]={0.0f,0.0f,0.0f},end[3]={0.0f,0.0f,100.0f};
+    const float points[][3]={{0.0f,0.0f,10.0f},{0.0f,0.0f,40.0f},{0.0f,0.0f,70.0f}};
+    g.Build(3,[&](int i){ return points[i]; },4.0f);
+    int visits=0;
+    Check(g.AnyInCapsule(start,end,1.0f,[&](int i){ ++visits;return i==0; }) && visits==1,
+          "a blocker stops the capsule before subsequent rows");
+    visits=0;
+    Check(g.AnyAround(start,100.0f,[&](int i){ ++visits;return i==0; }) && visits==1,
+          "a match stops a box before subsequent rows");
     struct Case { const char* label; int n; float spread; bool outliers; float cell; };
     const Case kCases[]={{"crowd 4000 / 600 m",4000,600.0f,false,16.0f},{"crowd 3000 / 2 km, outliers",3000,2000.0f,true,16.0f},
                          {"few 7",7,300.0f,false,16.0f},{"one",1,10.0f,false,16.0f},{"empty",0,10.0f,false,16.0f},

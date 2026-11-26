@@ -36,6 +36,15 @@ int PickTarget(const Grid& g,int n,AimOf aimOf,IsCurrent isCurrent,Usable usable
     return best;
 }
 
+// A blocker on either the line or the landing area vetoes the shot. Keep each exact test in its own spatial query.
+template<class FriendAt,class IsSelf>
+bool ShotClear(const Grid& g,const Shot& shot,float maxRadius,FriendAt at,IsSelf self) noexcept {
+    if(g.AnyInCapsule(shot.from,shot.to,maxRadius+shot.spread,[&](int i){ return !self(i) && shot.BlocksLine(at(i)); }))return false;
+    return !(shot.blast>0.0f && g.AnyAround(shot.to,shot.BlastMargin(maxRadius),[&](int i){
+        return !self(i) && shot.BlocksBlast(at(i));
+    }));
+}
+
 // The point nearest `pos` over the ground (Horiz), -1 with none (the scan: d<nd from 1e30, the first of a tie).
 template<class AimOf> int NearestHoriz(const Grid& g,int n,AimOf aimOf,const float* pos) noexcept {
     const auto scan=[&]() noexcept {
