@@ -341,9 +341,9 @@ inline constexpr int kVehicleBodyLast=static_cast<int>(VehicleBody::mech);
 // `payloadKg`: the most its pylons may weigh (the stores' massKg x rounds), 0 = not weighed (2026-10-25, the user: "支援
 // 战前配置是合理的改，不是完全随心所欲"; before, five pylons of 40 AIM-54 each, 90 t, were accepted). A jet's is
 // kPayloadSharePercent of its clean mass, the mass its flight model weighs the stores against (pylib/vcobjects.py JET_MASSES,
-// src/stores.inc kJetMasses: strike 7001 22 t, fighter 7002 16 t, interceptor 7003 20 t, multirole 7004 18 t): a real
-// multirole fighter's external stores in a combat configuration (an F-16C's twelve Mk 82, 2.8 t, sit well inside its
-// 6.4 t). Every stock loadout fits (the strike jet's 4566 kg the heaviest); all bombs, all missiles or guns alone stay
+// src/stores.inc kJetMasses: strike 7001 21.6 t, fighter 7002 19.3 t, interceptor 7003 27.2 t, multirole 7004 21.2 t): a real
+// multirole fighter's external stores in a combat configuration (an F-16C's twelve Mk 82, 2.8 t, sit well inside the
+// fighter's 7.7 t). Every stock loadout fits (the strike jet's 4566 kg the heaviest); all bombs, all missiles or guns alone stay
 // possible (the user, 2026-10-09: "我飞机可以全带炸弹，或者全带导弹，或者带机炮"). tests/support_loadout_ini_test.py derives
 // the four numbers from vcobjects. The tank is not weighed: its rounds carry no mass in kStores; its limits stay its
 // 4 pylons of AP / HE / GLM.
@@ -351,16 +351,16 @@ inline constexpr int kPayloadSharePercent=40;   // 40 % of the clean mass
 struct VehicleBodyRow { VehicleBody body; const wchar_t* name; const wchar_t* base; int most; bool tank; int payloadKg; };
 inline constexpr VehicleBodyRow kVehicleBodies[]={
     {VehicleBody::tank,L"TANK",L"V505_TANK_MISSION.SGO",4,true,0},
-    {VehicleBody::strike,L"STRIKE",L"EDF6VC_DN_SUPPORT_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},
-    {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_DN_SUPPORT_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
-    {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
-    {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_DN_SUPPORT_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
+    {VehicleBody::strike,L"STRIKE",L"EDF6VC_DN_SUPPORT_STRIKE.SGO",5,false,21600*kPayloadSharePercent/100},
+    {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_DN_SUPPORT_FIGHTER.SGO",5,false,19300*kPayloadSharePercent/100},
+    {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",5,false,27200*kPayloadSharePercent/100},
+    {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_DN_SUPPORT_MULTIROLE.SGO",5,false,21200*kPayloadSharePercent/100},
     // A player's own (their clean masses: pylib/vcobjects.py JET_MASSES of marks 7201 / 7202 / 7002 / 7003 / 7004).
-    {VehicleBody::pfighter,L"PFIGHTER",L"EDF6VC_PJET_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
-    {VehicleBody::pstrike,L"PSTRIKE",L"EDF6VC_PJET_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},
-    {VehicleBody::rfighter,L"RFIGHTER",L"EDF6VC_FLY_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
-    {VehicleBody::rinterceptor,L"RINTERCEPTOR",L"EDF6VC_FLY_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
-    {VehicleBody::rmultirole,L"RMULTIROLE",L"EDF6VC_FLY_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
+    {VehicleBody::pfighter,L"PFIGHTER",L"EDF6VC_PJET_FIGHTER.SGO",5,false,19300*kPayloadSharePercent/100},
+    {VehicleBody::pstrike,L"PSTRIKE",L"EDF6VC_PJET_STRIKE.SGO",5,false,21600*kPayloadSharePercent/100},
+    {VehicleBody::rfighter,L"RFIGHTER",L"EDF6VC_FLY_FIGHTER.SGO",5,false,19300*kPayloadSharePercent/100},
+    {VehicleBody::rinterceptor,L"RINTERCEPTOR",L"EDF6VC_FLY_INTERCEPTOR.SGO",5,false,27200*kPayloadSharePercent/100},
+    {VehicleBody::rmultirole,L"RMULTIROLE",L"EDF6VC_FLY_MULTIROLE.SGO",5,false,21200*kPayloadSharePercent/100},
     // No pylons (VehicleLoadout::mech): built on the frame the loadout names; the Nix stands for the family here.
     {VehicleBody::mech,L"MECH",L"V504_BEGARUTA.SGO",0,false,0},
 };

@@ -75,14 +75,14 @@ void Holders() {
 }
 
 void Jets() {
-    // The strike jet (pylib/vcobjects.py _STRIKE over JET_MASSES 7001: 22 t): full, then everything dropped.
+    // The strike jet (pylib/vcobjects.py _STRIKE over JET_MASSES 7001: 21.6 t, the F-15E): full, then everything dropped.
     const Store full[]={Holder(Spec(L"EDF6VC_AGM_"),6,6),Holder(Spec(L"EDF6VC_RKT_"),38,38),Holder(Spec(L"EDF6VC_MK82_"),6,6),
                         Holder(Spec(L"EDF6VC_AAM_S_"),2,2)};
     const Store spent[]={Holder(Spec(L"EDF6VC_AGM_"),6,0),Holder(Spec(L"EDF6VC_RKT_"),38,0),Holder(Spec(L"EDF6VC_MK82_"),6,0),
                          Holder(Spec(L"EDF6VC_AAM_S_"),2,0)};
     float clean=0.0f;
     for(const auto& m:kJetMasses)if(m.mark==7001.0f)clean=m.mass;
-    Check(clean==22000.0f,"the strike jet's clean mass");
+    Check(clean==21600.0f,"the strike jet's clean mass");
     float kg=0.0f,drag=0.0f,pkg=0.0f,pdrag=0.0f;
     for(const auto& h:full){const auto l=burden::HolderLoad(*h.spec,h.rounds,h.ammo);kg+=l.kg;drag+=l.drag;}
     for(const auto& h:spent){const auto l=burden::HolderLoad(*h.spec,h.rounds,h.ammo);pkg+=l.kg;pdrag+=l.drag;}
