@@ -17,15 +17,21 @@
 #include "jetaudio.h"
 #include "crew.h"
 #include "lock_cue.h"
+#include "surround.h"
+#include "wt_clips.h"
 #include "vsynth.h"
 #include <windows.h>
 #include <xaudio2.h>
+#include <xapofx.h>
 #pragma warning(push,0)
 #include <sapi.h>
 #pragma warning(pop)
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -37,11 +43,11 @@ constexpr int kFade=kRate/4;                   // ...their ends cross-faded over
 constexpr float kMaxRatio=4.0f;                // a voice's highest playback rate (pitch and Doppler)
 constexpr int kSlots=40;
 constexpr ULONGLONG kQuietMs=150;              // no beat this long: the game is not running, nor is the sound
-constexpr float kNearCutoff=16000.0f,kFarCutoff=1200.0f;
 
 IXAudio2* engine=nullptr;
 IXAudio2MasteringVoice* master=nullptr;
 UINT32 masterChannels=2;
+surround::Layout layout=surround::LayoutOf(surround::kStereo,2);   // the master's speakers (Start)
 bool tried=false,ok=false,whine=true;
 std::vector<std::int16_t> roarPcm,whinePcm;
 WAVEFORMATEX roarFormat{},whineFormat{};
@@ -150,8 +156,9 @@ std::vector<std::int16_t> SynthWhine() {
     return Loop(std::move(g),0.6f);
 }
 
-// A 16-bit PCM WAV (mono or stereo) as mono samples and their rate; false: none or not that.
-bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate) {
+// A 16-bit PCM WAV (mono or stereo) as mono samples and their rate (`stereo`: a stereo one kept so, interleaved, and
+// its channel count there); false: none or not that.
+bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate,int* stereo=nullptr) {
     const HANDLE f=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
     if(f==INVALID_HANDLE_VALUE)return false;
     LARGE_INTEGER size{};GetFileSizeEx(f,&size);
@@ -170,6 +177,12 @@ bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate) {
             std::memcpy(&rate,body+4,4);bits=body[14]|(body[15]<<8);
         } else if(!std::memcmp(d.data()+at,"data",4) && format==1 && bits==16 && (channels==1 || channels==2)) {
             const std::size_t frames=len/(2*channels);
+            if(stereo) {
+                *stereo=channels;
+                pcm.resize(frames*channels);
+                std::memcpy(pcm.data(),body,frames*channels*2);
+                return frames>static_cast<std::size_t>(rate/100) && rate>=8000 && rate<=192000;
+            }
             pcm.resize(frames);
             for(std::size_t i=0;i<frames;++i) {
                 std::int16_t a,b;std::memcpy(&a,body+i*2*channels,2);
@@ -183,12 +196,13 @@ bool ReadWav(const wchar_t* path,std::vector<std::int16_t>& pcm,UINT32& rate) {
     return false;
 }
 
-WAVEFORMATEX Mono16(UINT32 rate) noexcept {
+WAVEFORMATEX Pcm16Format(UINT32 rate,WORD channels) noexcept {
     WAVEFORMATEX f{};
-    f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=1;f.nSamplesPerSec=rate;f.wBitsPerSample=16;f.nBlockAlign=2;
-    f.nAvgBytesPerSec=rate*2;
+    f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=channels;f.nSamplesPerSec=rate;f.wBitsPerSample=16;
+    f.nBlockAlign=static_cast<WORD>(2*channels);f.nAvgBytesPerSec=rate*2*channels;
     return f;
 }
+WAVEFORMATEX Mono16(UINT32 rate) noexcept { return Pcm16Format(rate,1); }
 
 // <dll path without .dll><suffix> into `path` (MAX_PATH); false when it does not fit.
 bool BesideDll(const wchar_t* suffix,wchar_t* path) noexcept {
@@ -224,10 +238,18 @@ IXAudio2SourceVoice* Voice(const WAVEFORMATEX& format,const std::vector<std::int
     return v;
 }
 
+// The cockpit's tones (not heard from anywhere): mono into the front left and right at these gains (a surround layout's
+// first two channels).
 void Pan(IXAudio2SourceVoice* v,float left,float right) noexcept {
-    float m[XAUDIO2_MAX_AUDIO_CHANNELS]{};   // mono into the master's channels: front left and right (a surround layout's first two)
+    float m[XAUDIO2_MAX_AUDIO_CHANNELS]{};
     m[0]=left;m[1]=masterChannels>1 ? right : 0.5f*(left+right);
     v->SetOutputMatrix(nullptr,1,masterChannels,m);
+}
+// A sound heard from somewhere: a voice of `inputs` channels among the master's speakers (surround.h).
+void Place(IXAudio2SourceVoice* v,int inputs,const surround::Placing& p) noexcept {
+    float m[2*XAUDIO2_MAX_AUDIO_CHANNELS];
+    surround::Matrix(layout,p,inputs,m);
+    v->SetOutputMatrix(nullptr,inputs==2 ? 2 : 1,masterChannels,m);
 }
 
 // The cockpit's own share of the volume (Cfg().warnVolume, the master voice being the game's).
@@ -503,16 +525,39 @@ constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,
                                        0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f};
 // The ultimate's (jetaudio.h UltClip): <dll name>_ult_<name>.wav, the player's recordings only.
 const wchar_t* const kUltClipName[kUltClipCount]={L"charge",L"circle",L"thunder",L"gather",L"beam",L"blast",L"shock"};
-constexpr int kLoops=96,kShots=64;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets: room for them
+constexpr int kLoops=96,kShots=160;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets, a cannon's
+                                     // War Thunder layers ten a shot (sound_event.h): room for them
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
 ClipPcm ultClips[kUltClipCount]{};  // the same; an empty one: no recording
+ClipPcm wtClips[wt::kCount][wt::kMostVariants]{};   // the same (stereo ones kept so); wtThere: every variant read
+bool wtThere[wt::kCount]{};
+// The vehicles' clips War Thunder's recordings stand in for (the synthesised ones gone): the turret's and the loader's. A
+// one-shot plays the group's variants in turn, a loop the group's first; each levelled to the clip's kClipPeak (the whole
+// group by one gain: the vehicles' mix is set by those peaks). The player's own <dll>_veh_<name>.wav still first; a group
+// not read (logged once with the rest): the clip silent.
+struct WtStandIn { int clip,group; };
+constexpr WtStandIn kWtFor[]={{kClipTurret,wt::k_turret_loop},{kClipTurretStop,wt::k_turret_stop},
+                              {kClipBreechOpen,wt::k_reload_open},{kClipEject,wt::k_reload_eject},
+                              {kClipLoad,wt::k_reload_insert},{kClipShellRam,wt::k_reload_insert},
+                              {kClipClose,wt::k_reload_close}};
+int WtForClip(int c) noexcept {
+    for(const WtStandIn& s:kWtFor)if(s.clip==c)return s.group;
+    return -1;
+}
+int wtOf[kClipCount]{};        // set by MakeClips (as clips): the group standing in for a one-shot + 1, 0 none
+float wtLevel[kClipCount]{};   // its gain to the clip's peak
+std::atomic<unsigned> wtTurn{0};
 std::atomic<bool> clipsReady{false};
 bool clipsAsked=false;
 struct LoopVoice { IXAudio2SourceVoice* v; bool used; };
 LoopVoice loops[kLoops]{};
-struct ShotVoice { IXAudio2SourceVoice* v; UINT32 rate; };
+struct ShotVoice { IXAudio2SourceVoice* v; UINT32 rate; WORD channels; };
 ShotVoice shots[kShots]{};
+// The Debug tallies (Note / Count / StatsTick): the voices' use since the last line.
+bool limiterOn=false;
+std::atomic<int> shotsBusyPeak{0},loopsOpen{0},loopsPeak{0};
+std::atomic<unsigned> shotsStarted{0},shotsDropped{0},loopsNoneFree{0};
 UINT32 loopStart=0;                // where the next loop begins to play (spread: two tanks idling are not in phase)
 
 std::vector<float> MadeClip(int c) {
@@ -582,13 +627,15 @@ std::vector<float> MadeClip(int c) {
     }
 }
 void MakeClipsNow() {
-    int own=0;
+    int own=0,made=0;
     for(int c=0;c<kClipCount;++c) {
         wchar_t path[MAX_PATH],suffix[64];
         UINT32 rate=kRate;
         swprintf_s(suffix,L"_veh_%ls.wav",kClipName[c]);
+        wtOf[c]=0;
         if(BesideDll(suffix,path) && ReadWav(path,clips[c].pcm,rate)){++own;Log("SOUND vehicles: %ls from %ls",kClipName[c],path);}
-        else{rate=kRate;clips[c].pcm=Pcm16(MadeClip(c),kClipPeak[c]);}
+        else if(WtForClip(c)>=0){rate=kRate;clips[c].pcm.clear();wtOf[c]=WtForClip(c)+1;}   // filled below, once read
+        else{rate=kRate;clips[c].pcm=Pcm16(MadeClip(c),kClipPeak[c]);++made;}
         clips[c].format=Mono16(rate);
     }
     int ult=0;
@@ -599,9 +646,48 @@ void MakeClipsNow() {
         if(BesideDll(suffix,path) && ReadWav(path,ultClips[c].pcm,rate)){++ult;ultClips[c].format=Mono16(rate);}
         else ultClips[c].pcm.clear();
     }
+    int wtRead=0,wtMissing=0;
+    wchar_t firstMissing[MAX_PATH]{};
+    for(int c=0;c<wt::kCount;++c) {
+        bool all=true;
+        for(int i=0;i<wt::kVariants[c];++i) {
+            wchar_t path[MAX_PATH]{},suffix[96];
+            UINT32 rate=kRate;
+            int channels=1;
+            swprintf_s(suffix,L"_wt\\%ls_%d.wav",wt::kName[c],i+1);
+            ClipPcm& clip=wtClips[c][i];
+            if(BesideDll(suffix,path) && ReadWav(path,clip.pcm,rate,&channels)) {
+                clip.format=Pcm16Format(rate,static_cast<WORD>(channels));
+            } else {
+                clip.pcm.clear();all=false;++wtMissing;
+                if(!firstMissing[0])wcscpy_s(firstMissing,path);
+            }
+        }
+        wtThere[c]=all;
+        if(all)++wtRead;
+    }
+    int stoodIn=0;
+    for(int c=0;c<kClipCount;++c) {
+        const int g=wtOf[c]-1;
+        if(g<0 || !wtThere[g])continue;
+        int most=1;
+        for(int i=0;i<wt::kVariants[g];++i)for(std::int16_t x:wtClips[g][i].pcm)most=(std::max)(most,std::abs(static_cast<int>(x)));
+        wtLevel[c]=kClipPeak[c]*32767.0f/static_cast<float>(most);
+        ++stoodIn;
+        if(!kClipLoops[c])continue;
+        const ClipPcm& from=wtClips[g][0];   // a loop: its own copy at the level (its voice loops one buffer)
+        clips[c].pcm.resize(from.pcm.size());
+        for(std::size_t i=0;i<from.pcm.size();++i)
+            clips[c].pcm[i]=static_cast<std::int16_t>((std::clamp)(std::lround(from.pcm[i]*wtLevel[c]),-32768L,32767L));
+        clips[c].format=from.format;
+        wtOf[c]=0;
+    }
+    if(wtMissing)Log("SOUND vehicles: %d War Thunder recording(s) missing (the first %ls): their %d group(s) stay silent, the "
+                     "install is broken",wtMissing,firstMissing,wt::kCount-wtRead);
     clipsReady.store(true,std::memory_order_release);
-    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's; the ultimate's: %d of %d recorded",kClipCount-own,own,
-        ult,kUltClipCount);
+    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's, %d War Thunder's; the ultimate's: %d of %d recorded; "
+        "War Thunder's: %d of %d groups",made,own,stoodIn,ult,kUltClipCount,
+        wtRead,wt::kCount);
 }
 DWORD WINAPI MakeClips(void*) {
     __try { MakeClipsNow(); }
@@ -609,19 +695,25 @@ DWORD WINAPI MakeClips(void*) {
     return 0;
 }
 
-// The filter a sound `distance` (0..1) off is heard through (as Set's).
-XAUDIO2_FILTER_PARAMETERS FarFilter(float distance) noexcept {
-    const float d=distance<0.0f ? 0.0f : distance>1.0f ? 1.0f : distance;
-    const float cutoff=kNearCutoff*std::pow(kFarCutoff/kNearCutoff,d);
-    const float radians=2.0f*std::sin(3.14159265f*cutoff/static_cast<float>(kRate));
+// The low-pass at `cutoff` Hz. The state-variable one (2 sin(pi f / rate), XAudio2CutoffFrequencyToRadians) reaches only
+// rate / 6 (8 kHz: XAUDIO2_MAX_FILTER_FREQUENCY), which dulled every near sound (it was the 16 kHz asked for); above that
+// the one-pole one (1 - (1 - 2 f / rate)^2, XAudio2CutoffFrequencyToOnePoleCoefficient), nearly open by 16 kHz.
+XAUDIO2_FILTER_PARAMETERS CutoffFilter(float cutoff) noexcept {
+    const float rate=static_cast<float>(kRate);
+    const float f=!(cutoff>20.0f) ? 20.0f : cutoff>0.5f*rate ? 0.5f*rate : cutoff;
+    if(f>=rate/6.0f) {
+        const float open=1.0f-2.0f*f/rate;
+        return XAUDIO2_FILTER_PARAMETERS{LowPassOnePoleFilter,1.0f-open*open,1.0f};
+    }
+    const float radians=2.0f*std::sin(3.14159265f*f/rate);
     return XAUDIO2_FILTER_PARAMETERS{LowPassFilter,radians<XAUDIO2_MAX_FILTER_FREQUENCY ? radians : XAUDIO2_MAX_FILTER_FREQUENCY,1.0f};
 }
 float Ratio(float r) noexcept { return !(r>1.0f/kMaxRatio) ? 1.0f/kMaxRatio : r>kMaxRatio ? kMaxRatio : r; }
-void Hear(IXAudio2SourceVoice* v,const Heard& h) noexcept {
-    const XAUDIO2_FILTER_PARAMETERS f=FarFilter(h.distance);
+void Hear(IXAudio2SourceVoice* v,int inputs,const Heard& h) noexcept {
+    const XAUDIO2_FILTER_PARAMETERS f=CutoffFilter(h.cutoff);
     v->SetFrequencyRatio(Ratio(h.ratio));
     v->SetFilterParameters(&f);
-    Pan(v,std::isfinite(h.left) ? h.left : 0.0f,std::isfinite(h.right) ? h.right : 0.0f);
+    Place(v,inputs,surround::Placing{h.gain,h.side,h.front,h.spread,h.sub});
     v->SetVolume(1.0f);
 }
 }  // namespace
@@ -639,6 +731,20 @@ bool Start() noexcept {
     }
     XAUDIO2_VOICE_DETAILS details{};master->GetVoiceDetails(&details);
     masterChannels=details.InputChannels>=1 && details.InputChannels<=XAUDIO2_MAX_AUDIO_CHANNELS ? details.InputChannels : 2;
+    DWORD mask=0;
+    if(FAILED(master->GetChannelMask(&mask)))mask=0;
+    layout=surround::LayoutOf(mask,static_cast<int>(masterChannels));
+    // A limiter on the output (XAPOFX's mastering limiter, its default release and loudness): the layers of guns firing
+    // together add past full scale, held under it rather than clipped.
+    const char* limiter="none (it failed: loud volleys may clip)";
+    IUnknown* fx=nullptr;
+    FXMASTERINGLIMITER_PARAMETERS lp{FXMASTERINGLIMITER_DEFAULT_RELEASE,FXMASTERINGLIMITER_DEFAULT_LOUDNESS};
+    if(SUCCEEDED(CreateFX(__uuidof(FXMasteringLimiter),&fx,&lp,sizeof(lp))) && fx) {
+        XAUDIO2_EFFECT_DESCRIPTOR d{fx,TRUE,masterChannels};
+        const XAUDIO2_EFFECT_CHAIN chain{1,&d};
+        if(SUCCEEDED(master->SetEffectChain(&chain))){limiter="on";limiterOn=true;}
+        fx->Release();
+    }
     wchar_t path[MAX_PATH]{};
     UINT32 rate=kRate;
     const bool own=BesideDll(L"_jet.wav",path) && ReadWav(path,roarPcm,rate);
@@ -654,7 +760,8 @@ bool Start() noexcept {
     const HANDLE t=CreateThread(nullptr,0,&Watch,nullptr,0,nullptr);
     if(t)CloseHandle(t);
     ok=true;
-    Log("SOUND XAudio2 up: %u output channel(s)",masterChannels);
+    Log("SOUND XAudio2 up: %u output channel(s), mask 0x%lX: %d around the listener, LFE %s; limiter %s",masterChannels,mask,
+        layout.ring,layout.lfe>=0 ? "yes" : "no",limiter);
     return true;
 }
 
@@ -675,21 +782,16 @@ int Open() noexcept {
 void Set(int i,const Mix& m) noexcept {
     if(i<0 || i>=kSlots || !slots[i].used)return;
     const Slot& s=slots[i];
-    const float distance=m.distance<0.0f ? 0.0f : m.distance>1.0f ? 1.0f : m.distance;
-    // The cutoff falls geometrically from kNearCutoff to kFarCutoff.
-    const float cutoff=kNearCutoff*std::pow(kFarCutoff/kNearCutoff,distance);
-    // XAudio2's filter frequency: 2 sin(pi f / rate), at most XAUDIO2_MAX_FILTER_FREQUENCY (XAudio2CutoffFrequencyToRadians).
-    const float radians=2.0f*std::sin(3.14159265f*cutoff/static_cast<float>(kRate));
-    XAUDIO2_FILTER_PARAMETERS f{LowPassFilter,radians<XAUDIO2_MAX_FILTER_FREQUENCY ? radians : XAUDIO2_MAX_FILTER_FREQUENCY,1.0f};
+    const XAUDIO2_FILTER_PARAMETERS f=CutoffFilter(AirCutoff(m.distance));
     auto ratio=[](float r) noexcept { return r<1.0f/kMaxRatio ? 1.0f/kMaxRatio : r>kMaxRatio ? kMaxRatio : r; };
     s.roar->SetFrequencyRatio(ratio(m.roarRatio));
     s.roar->SetFilterParameters(&f);
-    Pan(s.roar,m.roarL,m.roarR);
+    Place(s.roar,1,surround::Placing{m.roar,m.side,m.front,m.spread,false});
     s.roar->SetVolume(1.0f);
     if(s.whine) {
         s.whine->SetFrequencyRatio(ratio(m.whineRatio));
         s.whine->SetFilterParameters(&f);
-        Pan(s.whine,m.whineL,m.whineR);
+        Place(s.whine,1,surround::Placing{m.whine,m.side,m.front,m.spread,false});
         s.whine->SetVolume(1.0f);
     }
 }
@@ -769,7 +871,7 @@ bool ClipsReady() noexcept {
 }
 
 int OpenLoop(int clip) noexcept {
-    if(clip<0 || clip>=kClipCount || !kClipLoops[clip] || !ClipsReady())return -1;
+    if(clip<0 || clip>=kClipCount || !kClipLoops[clip] || !ClipsReady() || clips[clip].pcm.empty())return -1;
     for(int i=0;i<kLoops;++i) {
         if(loops[i].used)continue;
         const ClipPcm& c=clips[clip];
@@ -784,25 +886,36 @@ int OpenLoop(int clip) noexcept {
         Pan(v,0.0f,0.0f);
         v->Start();
         loops[i]=LoopVoice{v,true};
+        const int open=loopsOpen.fetch_add(1,std::memory_order_relaxed)+1;
+        if(open>loopsPeak.load(std::memory_order_relaxed))loopsPeak.store(open,std::memory_order_relaxed);
         return i;
     }
+    loopsNoneFree.fetch_add(1,std::memory_order_relaxed);
     return -1;
 }
 
 void SetLoop(int i,const Heard& h) noexcept {
     if(i<0 || i>=kLoops || !loops[i].used)return;
-    Hear(loops[i].v,h);
+    Hear(loops[i].v,1,h);
 }
 
 void CloseLoop(int i) noexcept {
     if(i<0 || i>=kLoops || !loops[i].used)return;
     loops[i].v->DestroyVoice();
     loops[i]=LoopVoice{};
+    loopsOpen.fetch_sub(1,std::memory_order_relaxed);
 }
 
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept;
 void PlayOnce(int clip,const Heard& h) noexcept {
     if(clip<0 || clip>=kClipCount || kClipLoops[clip] || !ClipsReady())return;
+    if(const int g=wtOf[clip]-1;g>=0) {
+        if(!wtThere[g])return;
+        Heard at=h;
+        at.gain*=wtLevel[clip];
+        PlayPcm(wtClips[g][wtTurn.fetch_add(1,std::memory_order_relaxed)%static_cast<unsigned>(wt::kVariants[g])],at);
+        return;
+    }
     PlayPcm(clips[clip],h);
 }
 bool UltClipThere(int clip) noexcept {
@@ -811,28 +924,115 @@ bool UltClipThere(int clip) noexcept {
 void PlayUlt(int clip,const Heard& h) noexcept {
     if(UltClipThere(clip))PlayPcm(ultClips[clip],h);
 }
+bool WtThere(int clip) noexcept { return clip>=0 && clip<wt::kCount && ClipsReady() && wtThere[clip]; }
+void PlayWt(int clip,int variant,const Heard& h) noexcept {
+    if(WtThere(clip) && variant>=0 && variant<wt::kVariants[clip])PlayPcm(wtClips[clip][variant],h);
+}
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept {
+    if(c.pcm.empty())return;   // a clip not read: silent
     const UINT32 rate=c.format.nSamplesPerSec;
-    // An idle voice already at this clip's rate, else any idle one (remade at it); none idle: dropped (a burst past kShots).
+    const WORD channels=c.format.nChannels;
+    // An idle voice already at this clip's rate and channels, else any idle one (remade so); none idle: dropped (a burst
+    // past kShots).
     ShotVoice* pick=nullptr;
+    auto fits=[&](const ShotVoice& s){ return s.v && s.rate==rate && s.channels==channels; };
+    int busy=0;
     for(auto& s:shots) {
         XAUDIO2_VOICE_STATE st{};
         if(s.v)s.v->GetState(&st,XAUDIO2_VOICE_NOSAMPLESPLAYED);
-        if(s.v && st.BuffersQueued)continue;
-        const bool fits=s.v && s.rate==rate;
-        if(!pick || (fits && !(pick->v && pick->rate==rate)))pick=&s;
+        if(s.v && st.BuffersQueued){++busy;continue;}
+        if(!pick || (fits(s) && !fits(*pick)))pick=&s;
     }
-    if(!pick)return;
-    if(pick->v && pick->rate!=rate){pick->v->DestroyVoice();*pick=ShotVoice{};}
+    if(const int inUse=pick ? busy+1 : busy;inUse>shotsBusyPeak.load(std::memory_order_relaxed))shotsBusyPeak.store(inUse,std::memory_order_relaxed);
+    if(!pick){shotsDropped.fetch_add(1,std::memory_order_relaxed);return;}
+    shotsStarted.fetch_add(1,std::memory_order_relaxed);
+    if(pick->v && !fits(*pick)){pick->v->DestroyVoice();*pick=ShotVoice{};}
     if(!pick->v) {
         if(FAILED(engine->CreateSourceVoice(&pick->v,&c.format,XAUDIO2_VOICE_USEFILTER,kMaxRatio))){*pick=ShotVoice{};return;}
-        pick->rate=rate;
+        pick->rate=rate;pick->channels=channels;
     }
     XAUDIO2_BUFFER b{};
     b.Flags=XAUDIO2_END_OF_STREAM;b.AudioBytes=static_cast<UINT32>(c.pcm.size()*2);b.pAudioData=reinterpret_cast<const BYTE*>(c.pcm.data());
     pick->v->Stop(0);pick->v->FlushSourceBuffers();
     if(FAILED(pick->v->SubmitSourceBuffer(&b)))return;
-    Hear(pick->v,h);
+    Hear(pick->v,channels,h);
     pick->v->Start(0);
+}
+
+// --- The Debug tallies ---
+namespace {
+constexpr ULONGLONG kNoteMs=2000,kStatsMs=5000;
+constexpr int kTallies=64;
+struct Tally { const char* name; unsigned count; ULONGLONG noted; };
+SRWLOCK tallyLock=SRWLOCK_INIT;
+Tally tallies[kTallies]{};
+ULONGLONG statsAt=0;
+// The row of `name` (pointer or text the same), made if it is not there yet; nullptr: the table full.
+Tally* TallyOf(const char* name) noexcept {
+    for(Tally& t:tallies) {
+        if(!t.name){t.name=name;return &t;}
+        if(t.name==name || std::strcmp(t.name,name)==0)return &t;
+    }
+    return nullptr;
+}
+}  // namespace
+
+void Note(const char* event,int layers,float distance,const Heard& first) noexcept {
+    if(!Cfg().debug || !event || !event[0])return;
+    const ULONGLONG now=GetTickCount64();
+    bool log=false;
+    AcquireSRWLockExclusive(&tallyLock);
+    if(Tally* t=TallyOf(event)) {
+        ++t->count;
+        if(!t->noted || now-t->noted>=kNoteMs){t->noted=now;log=true;}
+    }
+    ReleaseSRWLockExclusive(&tallyLock);
+    if(!log)return;
+    float m[XAUDIO2_MAX_AUDIO_CHANNELS]{};
+    surround::Matrix(layout,surround::Placing{first.gain,first.side,first.front,first.spread,first.sub},1,m);
+    char row[XAUDIO2_MAX_AUDIO_CHANNELS*8+1]{};
+    int at=0;
+    for(UINT32 c=0;c<masterChannels && c<XAUDIO2_MAX_AUDIO_CHANNELS && at<static_cast<int>(sizeof(row))-8;++c)
+        at+=std::snprintf(row+at,sizeof(row)-static_cast<std::size_t>(at),c ? " %.3f" : "%.3f",static_cast<double>(m[c]));
+    Log("SOUND event %s: %d layer(s) at %.0f m; first gain %.3f side %.2f front %.2f spread %.2f rate %.3f cutoff %.0f Hz%s; matrix [%s] (%u ch)",
+        event,layers,static_cast<double>(distance),static_cast<double>(first.gain),static_cast<double>(first.side),
+        static_cast<double>(first.front),static_cast<double>(first.spread),static_cast<double>(first.ratio),
+        static_cast<double>(first.cutoff),first.sub ? " LFE" : "",row,masterChannels);
+}
+
+void Count(const char* what,int n) noexcept {
+    if(!Cfg().debug || !what || n<=0)return;
+    AcquireSRWLockExclusive(&tallyLock);
+    if(Tally* t=TallyOf(what))t->count+=static_cast<unsigned>(n);
+    ReleaseSRWLockExclusive(&tallyLock);
+}
+
+void StatsTick() noexcept {
+    if(!Cfg().debug || !ok)return;
+    const ULONGLONG now=GetTickCount64();
+    if(!statsAt){statsAt=now;return;}
+    if(now-statsAt<kStatsMs)return;
+    statsAt=now;
+    char list[1024]{};
+    int at=0;
+    unsigned any=0;
+    AcquireSRWLockExclusive(&tallyLock);
+    for(Tally& t:tallies) {
+        if(!t.name || !t.count)continue;
+        any+=t.count;
+        if(at<static_cast<int>(sizeof(list))-64)
+            at+=std::snprintf(list+at,sizeof(list)-static_cast<std::size_t>(at),"%s%s=%u",at ? " " : "",t.name,t.count);
+        t.count=0;
+    }
+    ReleaseSRWLockExclusive(&tallyLock);
+    const unsigned started=shotsStarted.exchange(0,std::memory_order_relaxed),dropped=shotsDropped.exchange(0,std::memory_order_relaxed);
+    const unsigned noneFree=loopsNoneFree.exchange(0,std::memory_order_relaxed);
+    const int busyPeak=shotsBusyPeak.exchange(0,std::memory_order_relaxed);
+    const int open=loopsOpen.load(std::memory_order_relaxed);
+    const int loopPeak=loopsPeak.exchange(open,std::memory_order_relaxed);
+    if(!any && !started && !dropped && !noneFree)return;
+    Log("SOUND stats %llu s: one-shots started %u dropped %u, busy peak %d/%d; loops open %d peak %d/%d, none free %u; limiter %s, %u ch; %s",
+        static_cast<unsigned long long>(kStatsMs/1000),started,dropped,busyPeak,kShots,open,loopPeak,kLoops,noneFree,
+        limiterOn ? "on" : "off",masterChannels,at ? list : "(no events)");
 }
 }  // namespace crew::audio

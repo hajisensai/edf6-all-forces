@@ -92,7 +92,7 @@ float GameEffectVolume() noexcept { return 1.0f; }
 namespace audio {
 bool ClipsReady() noexcept { return true; }
 void Beat(float) noexcept {}
-void PlayOnce(int clip,const Heard& h) noexcept { if(clip>=0 && clip<kClipCount)++played[clip];playedGain=h.left; }
+void PlayOnce(int clip,const Heard& h) noexcept { if(clip>=0 && clip<kClipCount)++played[clip];playedGain=h.gain*0.70710678f; }   // each front speaker's share
 }  // namespace audio
 }  // namespace crew
 

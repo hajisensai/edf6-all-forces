@@ -19,6 +19,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "sound_place.h"
+#include "surround.h"
 #include <cmath>
 #include <cstring>
 
@@ -33,6 +34,7 @@ constexpr std::size_t kPresetBank=0x20;   // SePreset: its cue (the bank: null p
 constexpr std::size_t kListeners=0x58,kListenerCount=0x68,kListenerFloats=soundplace::kListenerFloats;
 constexpr std::size_t kMasterVolume=0x2E8,kEffectVolume=0x2F0;
 constexpr float kRoarRef=180.0f,kWhineRef=90.0f; // full volume within these; 1/r beyond (the whine's highs fall faster)
+constexpr float kJetSize=15.0f;   // m: a fighter's length, how wide it is heard near (surround.h SpreadAt)
 constexpr float kFarAt=2500.0f;                  // the air's dulling at its fullest this far
 constexpr float kListenerJump=60.0f;             // a camera moving this far in a frame cut: no velocity from it
 constexpr ULONGLONG kStaleMs=200;                // a jet not seen this long (game ms) is gone: its sound stops
@@ -133,7 +135,7 @@ audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,const
     audio::Mix m{};
     SoundPlace p{};
     if(!Place(pos,vel,&p))return m;
-    const float d=p.distance,leftGain=p.left,rightGain=p.right,doppler=p.doppler;
+    const float d=p.distance,doppler=p.doppler;
     // The jet's nose against the line to the camera: the whine carries ahead of it, the roar behind.
     const float* mat=reinterpret_cast<const float*>(v+kMatrix);
     const float ahead=mat[8]*p.toCamera[0]+mat[9]*p.toCamera[1]+mat[10]*p.toCamera[2];
@@ -142,8 +144,8 @@ audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,const
     const float own=Cfg().jetSoundVolume*engine.gain,share=engine.power;
     const float roar=own*(0.45f+0.55f*share)*roarAt*(0.6f+0.4f*(ahead<0.0f ? -ahead : 0.0f));
     const float whine=own*(0.2f+0.8f*share)*whineAt*(0.35f+0.65f*(ahead>0.0f ? ahead : 0.0f));
-    m.roarL=roar*leftGain;m.roarR=roar*rightGain;
-    m.whineL=whine*leftGain;m.whineR=whine*rightGain;
+    m.roar=roar;m.whine=whine;
+    m.side=p.side;m.front=p.front;m.spread=surround::SpreadAt(d,kJetSize,0.0f);
     m.roarRatio=(0.85f+0.3f*share)*doppler;
     m.whineRatio=(0.75f+0.55f*share)*doppler;
     m.distance=d/kFarAt;
@@ -218,6 +220,11 @@ float GameEffectVolume() noexcept {
 
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept { return sigOk && !broken && Place(pos,vel,out); }
 bool SoundListening() noexcept { return sigOk && !broken && hasListener; }
+bool ListenerAt(float* pos) noexcept {
+    if(!SoundListening())return false;
+    std::memcpy(pos,listener,3*sizeof(float));
+    return true;
+}
 
 namespace {
 // --- The lock-on beeps ---
@@ -292,9 +299,11 @@ void JetSoundTick() noexcept {
     __try {
         const bool jets=Cfg().enabled && Cfg().jetSound;
         if(!jets)for(auto& s:sounds)if(s.ref)Silence(s);   // switched off
-        // The camera is the ground vehicles' listener too (vehsound.cpp SoundAt): kept while either sounds. The jets need
-        // it from their first jet on (started); the vehicles from the switch alone, a mission with no jet in it too.
-        if((jets && started) || (Cfg().enabled && Cfg().vehicleSound))Tick();
+        // The camera is the ground vehicles' and the explosions' listener too (vehsound.cpp, blastsound.cpp SoundAt):
+        // kept while any sounds. The jets need it from their first jet on (started); the others from their switch alone,
+        // a mission with no jet in it too.
+        const bool others=Cfg().vehicleSound || Cfg().explosionVolume>0.0f || Cfg().flybyVolume>0.0f;
+        if((jets && started) || (Cfg().enabled && others))Tick();
         else hasListener=false;   // not kept: never a stale camera's place for a consumer switched on later
     } __except(Fault(GetExceptionInformation())){Recover();}
 }

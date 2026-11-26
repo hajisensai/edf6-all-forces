@@ -5238,6 +5238,12 @@
    ],
    "scripts": []
   },
+  "sound_event_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "sound_pack": {
    "labels": [
     "cockpit",
@@ -5593,6 +5599,12 @@
    "scripts": [
     "tests/supportunit_allies_native_audit.py"
    ]
+  },
+  "surround_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
   },
   "sync_load_logic": {
    "labels": [
@@ -6343,6 +6355,22 @@
    "scripts": [
     "tests/test_worldmap_pack.py",
     "tests/worldmap_tiles_test.py"
+   ]
+  },
+  "wt_sound": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/wt_sound_test.py"
    ]
   },
   "wt_tracked_0": {

@@ -249,6 +249,8 @@ struct Config {
     float vehicleGunVolume=1.0f;    // ...the main guns' reports
     float vehicleMgVolume=1.0f;     // ...the machine guns', autocannons' and flak's (their bursts, rounds and cases)
     float vehicleMissileVolume=1.0f;// ...the missiles' and rockets' launches
+    float explosionVolume=1.0f;     // the rounds' explosions as War Thunder layers them (blastsound.cpp), times the game's; 0: the stock ones
+    float flybyVolume=1.0f;         // the rounds going by and coming down (their whiz, crack, incoming whistle; blastsound.cpp); 0: none
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
     float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
@@ -758,11 +760,18 @@ void LockSound(unsigned char* vehicle) noexcept;
 // listener this frame.
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;
 bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
+bool ListenerAt(float* pos) noexcept;   // where that listener (the camera) is this frame; false: none
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
 bool InstallVehicleSound() noexcept;
 void VehicleSound(unsigned char* vehicle) noexcept;
 void ResetVehicleSound() noexcept;
+bool VehicleSoundHeld(const void* preset) noexcept;   // a vehicle's stock sound preset held silent (vehsound.cpp)
+// The rounds' explosions as War Thunder layers them (blastsound.cpp, ini ExplosionVolume): the calls that play a round's
+// AmmoHitSe redirected at load; once a frame (SharedFrameTick, after JetSoundTick: the listener); a new mission.
+bool InstallBlastSound() noexcept;
+void BlastSoundTick() noexcept;
+void ResetBlastSound() noexcept;
 
 // --- EDF.dll layout ---
 // The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):

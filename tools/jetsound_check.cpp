@@ -68,20 +68,20 @@ int main() {
     Put<float>(v,kPosition,100.0f);++nowFrame;nowMs+=16;JetSound(v);
     Check(opens==0,"empty displaced aircraft remains silent");
     occupied=true;playerState=true;flight={false,true,true,false,0.0f,0.0f};
-    JetSound(v);const float idle=lastMix.roarL+lastMix.roarR;
+    JetSound(v);const float idle=lastMix.roar;
     Check(opens==1 && idle>0.0f,"occupied parked aircraft has quiet idle");
     flight={false,true,false,true,0.0f,0.0f};JetSound(v);
-    Check(opens==1 && lastMix.roarL+lastMix.roarR>idle*4.0f,"zero-speed powered hover remains audible");
+    Check(opens==1 && lastMix.roar>idle*4.0f,"zero-speed powered hover remains audible");
     // A rotor craft's throttle is its engine (Hover's power, HoverDone): more of it, a higher and louder engine at one speed.
-    const float hoverNote=lastMix.roarRatio,hoverRoar=lastMix.roarL+lastMix.roarR;
+    const float hoverNote=lastMix.roarRatio,hoverRoar=lastMix.roar;
     flight={false,true,false,true,0.9f,0.0f};JetSound(v);
-    Check(lastMix.roarRatio>hoverNote && lastMix.roarL+lastMix.roarR>hoverRoar,"a rotor craft's engine power raises its note and roar");
+    Check(lastMix.roarRatio>hoverNote && lastMix.roar>hoverRoar,"a rotor craft's engine power raises its note and roar");
     flight={false,true,false,true,0.0f,0.0f};JetSound(v);
     occupied=false;flight={false,true,true,true,0.0f,0.0f};JetSound(v);
     Check(closes==1,"getting out of a parked aircraft closes its voices");
     playerState=false;npcState=true;npc.role=jet::Role::carrier;npc.lastStep=nowMs;
     JetSound(v);
-    Check(opens==2 && lastMix.roarL+lastMix.roarR>idle*4.0f,"NPC carrier hover without a local player remains audible");
+    Check(opens==2 && lastMix.roar>idle*4.0f,"NPC carrier hover without a local player remains audible");
     const float npcNote=lastMix.roarRatio;
     npc.m.power=0.9f;JetSound(v);
     Check(lastMix.roarRatio>npcNote,"an NPC rotor craft's engine follows its Hover power");
