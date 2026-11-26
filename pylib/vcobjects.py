@@ -727,12 +727,15 @@ SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
 # (docs/missile-re.md §MissileBullet02): its CP[7] [frames, factor] the drop before ignition (the launcher's velocity
 # times factor each frame plus AmmoGravityFactor's gravity; own speed AmmoSpeed and no trail), then the motor (own
 # speed + CP[4] a frame to CP[6], the inherited velocity x0.9 a frame and no gravity).
+# Then after Ace Combat 7's Arsenal Bird (the user, 2026-11-26: 「天顶截击机 要 飞行要塞武库鸟 那种…发射的导弹感觉不对劲，发光也
+# 不对劲」; its rhythm only, none of its assets): a cold launch -- the rounds are let go dark, drift down clear of the jet
+# for 0.4 s with no flame, no smoke and no glow, then the motor lights bright and lays a long white trail.
 SALVO_LOCK_CONE = 1.40          # rad, LockonAngle both halves: about 80 deg off the nose (front hemisphere only, 0x22DF30)
-SALVO_EJECT = 0.6               # m a frame off the rail (AmmoSpeed): a push clear, not a shot
-SALVO_DROP = (9.0, 1.0)         # CP[7]: 0.15 s before the motor lights, the launcher's speed kept
-SALVO_DROP_GRAVITY = 12.0       # AmmoGravityFactor, felt only before ignition: ~2 m of drop, 26 m/s down when it lights
+SALVO_EJECT = 0.15              # m a frame off the rail (AmmoSpeed): let go, not pushed (9 m/s: it hangs by the jet)
+SALVO_DROP = (24.0, 1.0)        # CP[7]: 0.4 s dark before the motor lights, the launcher's speed kept
+SALVO_DROP_GRAVITY = 4.0        # AmmoGravityFactor, felt only before ignition: ~4.7 m of drop, 22 m/s down when it lights
 SALVO_FAN = 0.3                 # rad, FireAccuracy: the rounds leave in a 17 deg cone (polar angle uniform in [0, it])
-SALVO_ACCEL = 0.26              # m a frame per frame (CP[4]): own speed SALVO_CHILD_SPEED at the split
+SALVO_ACCEL = 0.27              # m a frame per frame (CP[4]): own speed SALVO_CHILD_SPEED at the split
 SALVO_TOP = 12.0                # m a frame (CP[6])
 SALVO_HOMING_DELAY = 8.0        # frames after ignition before it steers (CP[8]): the fan opens first
 SALVO_SPLIT_AFTER = 40.0        # frames after ignition it splits (CP[12] = [1, it]: by time, the target alive or not)
@@ -743,14 +746,19 @@ SALVO_CHILD_TURN = 0.15         # their CP[5] (the plugin's PN: lateral accelera
 SALVO_CHILD_TOP = 14.0          # their CP[6]
 SALVO_CHILD_HOMING_DELAY = 6.0  # their CP[8]: a second, smaller fan before they turn
 SALVO_CHILD_SPREAD = (0.9, 1.0)  # their CP[10]: top speed x U[0.9, 1], turn x U[1, 1] (MissileBullet01 ctor 0x267910)
-# AmmoColor, HDR like the stock glowing trails (AWEAPON148's [5, 5, 5, 0.25]): the smoke trail (噴射煙_01.dds) takes
-# it as is, the head flare (Particle3_k.dds) as (r x4, g x2, b) (ctor 0x26BEA4): a white-hot head, a blue-white trail.
-SALVO_COLOUR = (3.0, 3.2, 4.0, 0.4)
-SALVO_CHILD_COLOUR = (2.5, 2.5, 3.0, 0.3)    # CP[15][12]: the children's AmmoColor
-# The rounds' own glow (docs/round-glow.md, drawn by the plugin): (r, g, b, intensity, size m). The carrier white-hot,
-# the children blue-white, the same hues as their trails; the round's model untouched.
-SALVO_GLOW = (1.0, 0.95, 0.9, 6.0, 1.6)
-SALVO_CHILD_GLOW = (0.8, 0.9, 1.0, 4.0, 0.9)
+# AmmoColor: the smoke trail (噴射煙_01.dds) takes it as is, the head flare (Particle3_k.dds) as (r x4, g x2, b)
+# (ctor 0x26BEA4). Just over 1 like the other missiles' _HOT: an orange-white flame (5.0, 2.4, 1.15) and a thick white
+# smoke, not the old blue HDR trail (3, 3.2, 4), whose 300 frames of glowing smoke sat over the launch like a light.
+SALVO_COLOUR = (1.25, 1.2, 1.15, 0.8)
+SALVO_CHILD_COLOUR = (1.15, 1.1, 1.05, 0.55)    # CP[15][12]: the children's AmmoColor, a thinner trail
+# The smoke trails' life (CP[2], frames, each node x0.9..1.1): long white smoke hanging in the sky after the rain.
+SALVO_TRAIL = 360.0
+SALVO_CHILD_TRAIL = 240.0
+# The rounds' own glow (docs/round-glow.md, drawn by the plugin while each is alive with its motor lit): (r, g, b,
+# intensity, size m, back m). Small and orange-white on the flame, set back along the nose so it hugs the motor
+# instead of lighting the whole round; the round's model untouched.
+SALVO_GLOW = (1.0, 0.75, 0.45, 5.0, 1.0, 0.5)
+SALVO_CHILD_GLOW = (1.0, 0.8, 0.5, 3.5, 0.6, 0.3)
 STORES['SALVO'] = Store(
     'Salvo cluster missile', 'air', 16.0, 0.002,
     replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
@@ -2545,21 +2553,25 @@ def coax_model(game: Game, name: str) -> bytes:
 
 
 # A round's glow declaration (src/gpufx/gpufx_glow.h, docs/round-glow.md): one more Ammo_CustomParameter entry
-# [GLOW_MARK, r, g, b, intensity, size] at the first index the class's constructor never reads (GLOW_FIRST_FREE: the
+# [GLOW_MARK, r, g, b, intensity, size(, back)] at the first index the class's constructor never reads (GLOW_FIRST_FREE: the
 # stock never looks there). MissileBullet01's CP[12] is read only when present (a bool, 0 when absent): padded with 0.
 GLOW_MARK = 7146.0
 GLOW_FIRST_FREE = {'MissileBullet01': 13, 'MissileBullet02': 16}
 GLOW_PAD = {'MissileBullet01': {12: 0.0}}
 
 def declare_glow(cp: dsgo.Node, ammo_class: str, glow: tuple[float, ...]) -> None:
-    """Appends the glow declaration `glow` (r, g, b, intensity, size) to the Ammo_CustomParameter `cp` of a round of
-    `ammo_class`, padding it up to the class's first free index."""
+    """Appends the glow declaration `glow` (r, g, b, intensity, size, optionally back: m behind the position along the
+    nose) to the Ammo_CustomParameter `cp` of a round of `ammo_class`, padding it up to the class's first free index."""
     free = GLOW_FIRST_FREE.get(ammo_class)
     if free is None:
         raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 读法未核实，不能声明发光')
-    r, g, b, intensity, size = glow
+    if len(glow) not in (5, 6):
+        raise ValueError(f'发光声明应为 5 或 6 个数: {glow}')
+    r, g, b, intensity, size = glow[:5]
+    back = glow[5] if len(glow) == 6 else 0.0
     peak = max(r, g, b)
-    if min(r, g, b) < 0.0 or not 0.0 < peak <= 1.0 or not 0.0 < intensity <= 64.0 or not 0.0 < size <= 50.0:
+    if (min(r, g, b) < 0.0 or not 0.0 < peak <= 1.0 or not 0.0 < intensity <= 64.0 or not 0.0 < size <= 50.0
+            or not 0.0 <= back <= 50.0):
         raise ValueError(f'发光声明越界: {glow}')
     if len(cp.items) > free:
         raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 已有 {len(cp.items)} 项，超过首个空闲位 {free}')
@@ -2568,7 +2580,7 @@ def declare_glow(cp: dsgo.Node, ammo_class: str, glow: tuple[float, ...]) -> Non
         if len(cp.items) not in pad:
             raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 只有 {len(cp.items)} 项，缺原版读的参数')
         cp.items.append(pad[len(cp.items)])
-    cp.items.append(dsgo.Node([GLOW_MARK, float(r), float(g), float(b), float(intensity), float(size)]))
+    cp.items.append(dsgo.Node([GLOW_MARK, *(float(v) for v in glow)]))
 
 def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
     missile = store.weapon
@@ -2613,7 +2625,8 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError('unexpected split missile template')
         child = split[3].items[13]
         if (len(split[3].items[12].items) != 4 or len(child.items) != 12 or len(child.items[10].items) != 2
-                or len(cp.items[7].items) != 2):
+                or len(cp.items[7].items) != 2 or not isinstance(cp.items[2], float)
+                or not isinstance(child.items[2], float)):
             raise ValueError('unexpected split missile template')
         split[0].items[:] = [1.0, SALVO_SPLIT_AFTER]   # Split after launch even when the target has already died.
         split[1].items[:] = [0.0, 0.0, SALVO_SPLIT_CONE]
@@ -2623,11 +2636,13 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         child.items[4], child.items[5], child.items[6] = SALVO_CHILD_ACCEL, SALVO_CHILD_TURN, SALVO_CHILD_TOP
         child.items[8] = SALVO_CHILD_HOMING_DELAY
         child.items[10].items[:] = list(SALVO_CHILD_SPREAD)
+        child.items[2] = SALVO_CHILD_TRAIL
         declare_glow(child, split[3].items[4], SALVO_CHILD_GLOW)
         r.set('AmmoClass', 'MissileBullet02')
         r.set('AmmoGravityFactor', SALVO_DROP_GRAVITY)
         r.get('AmmoColor').items[:] = list(SALVO_COLOUR)
         cp.items[7].items[:] = list(SALVO_DROP)
+        cp.items[2] = SALVO_TRAIL
         # Native guidance for the carrier (src/guidance.cpp's PN), not MissileBullet01's plugin mode.
         cp.items[8], cp.items[9] = SALVO_HOMING_DELAY, 0.0
         cp.items.extend(split)
