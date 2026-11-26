@@ -203,7 +203,7 @@ int main(int argc,char** argv){
         if(r.step!=trace::kVehicleSound)continue;
         ++calls;
         outputs.clear();
-        crew::VehicleSound(static_cast<unsigned char*>(object));
+        crew::VehicleSoundAt(static_cast<unsigned char*>(object),replay::now);
         for(const auto& o:outputs)++tally[o.name];
         for(const auto* o:recorded)++recordedTally[o->name];
         if(exact) {

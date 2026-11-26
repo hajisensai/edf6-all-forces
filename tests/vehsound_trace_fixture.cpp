@@ -47,7 +47,7 @@ void Step(){
     const float c=edf::At<float>(weapon,crew::kCooldown);
     edf::Put<float>(weapon,crew::kCooldown,c>1.0f ? c-1.0f : 0.0f);
     // As crew.cpp's input step: the recording's inputs, the step, its end.
-    crew::TraceVehicleSound(vehicle);crew::VehicleSound(vehicle);crew::TraceEnd();
+    crew::TraceVehicleSound(vehicle,now);crew::VehicleSoundAt(vehicle,now);crew::TraceEnd();
 }
 void Fire(){
     edf::Put<std::int32_t>(weapon,crew::kWeaponAmmo,edf::At<std::int32_t>(weapon,crew::kWeaponAmmo)-1);

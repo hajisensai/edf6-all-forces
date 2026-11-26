@@ -147,9 +147,9 @@ Pending pending[kPending]{};
 wtevent::Rotation rotation{};   // the War Thunder groups' variants, never one twice running
 bool sigOk=false,stopOk=false,broken=false;
 ULONGLONG frameDone=0;
-// The game's time as this step began (VehicleSound): one "now" for the whole step. GameMs reads the tick count, which can
-// move on in the middle of a step: a clip due then played a frame early or late, the recording's replay unable to say
-// which (docs/trace-replay.md).
+// The game's time as this step began (VehicleSoundAt's `ms`): one "now" for the whole step. GameMs reads the tick count,
+// which moves on whenever it likes: read again in the middle of a step (or after the recorder's work, trace_rec.cpp) a clip
+// due then is played a frame early or late, and the recording's replay cannot say which (docs/trace-replay.md).
 ULONGLONG stepMs=0;
 
 struct Sig { unsigned rva; unsigned char bytes[16]; std::size_t size; };
@@ -744,9 +744,10 @@ bool InstallVehicleSound() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-void VehicleSound(unsigned char* v) noexcept {
+void VehicleSound(unsigned char* v) noexcept { VehicleSoundAt(v,GameMs()); }
+void VehicleSoundAt(unsigned char* v,ULONGLONG ms) noexcept {
     if(!sigOk || broken)return;
-    stepMs=GameMs();
+    stepMs=ms;
     __try {
         // Ours only while they can be heard: the sounds made (and the engine up) and the camera's listener placed (jetsound.cpp
         // JetSoundTick, the frame's first step: no listener, no voice of ours would sound). Until then, and whenever

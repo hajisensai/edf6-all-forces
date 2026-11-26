@@ -126,7 +126,10 @@ void JetSound(unsigned char *) noexcept{unexpectedHook();return;}
 void JetSoundTick(void) noexcept{unexpectedHook();return;}
 void JetLeverFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LockSound(unsigned char *) noexcept{unexpectedHook();return;}
-void VehicleSound(unsigned char *) noexcept{unexpectedHook();return;}
+void VehicleSoundAt(unsigned char *,ULONGLONG) noexcept{unexpectedHook();return;}
+void TraceVehicleSound(unsigned char *,ULONGLONG) noexcept{unexpectedHook();return;}
+void TraceEnd() noexcept{}
+void TraceReset() noexcept{}
 void ReloadConfigIfChanged(void) noexcept{unexpectedHook();return;}
 void JetReap(void const *) noexcept{unexpectedHook();return;}
 void ShieldVehicle(unsigned char *) noexcept{unexpectedHook();return;}

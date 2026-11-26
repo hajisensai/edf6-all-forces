@@ -789,10 +789,11 @@ bool ListenerAt(float* pos) noexcept;   // where that listener (the camera) is t
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
 bool InstallVehicleSound() noexcept;
-void VehicleSound(unsigned char* vehicle) noexcept;
+void VehicleSound(unsigned char* vehicle) noexcept;              // VehicleSoundAt at GameMs
+void VehicleSoundAt(unsigned char* vehicle,ULONGLONG ms) noexcept; // `ms`: the step's one "now" (GameMs read once)
 // The offline replay's recording (trace_rec.cpp, ini TraceFile; docs/trace-replay.md): a step's inputs taken before it
 // runs on `vehicle`, what it does recorded until TraceEnd; TraceReset where the plugin resets the step's state (a mission).
-void TraceVehicleSound(unsigned char* vehicle) noexcept;
+void TraceVehicleSound(unsigned char* vehicle,ULONGLONG ms) noexcept;   // `ms`: the step's, as VehicleSoundAt is given
 void TraceEnd() noexcept;
 void TraceReset() noexcept;
 // Inside a recorded step: where its outputs go (null outside one). A pointer, not a function, so that the sources that

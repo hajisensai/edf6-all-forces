@@ -153,11 +153,10 @@ bool Open() noexcept {
     out.Reset();   // it begins where a mission did
     return true;
 }
-void Begin(unsigned char* v) noexcept {
+void Begin(unsigned char* v,ULONGLONG ms) noexcept {
     traceOutput=nullptr;
     if(finished || !armed || !Cfg().traceFile[0] || !v)return;
     if(!opened && !Open())return;
-    const ULONGLONG ms=GameMs();
     if(ms-startMs>static_cast<ULONGLONG>(Cfg().traceSeconds>0 ? Cfg().traceSeconds : 0)*1000ull){Finish("its seconds");return;}
     if(out.Bytes()>kMostBytes){Finish("1 GB");return;}
     out.Call(trace::kVehicleSound,v,GameFrame(),ms);
@@ -171,7 +170,7 @@ void Reset() noexcept {
 }
 }  // namespace tracerec
 
-void TraceVehicleSound(unsigned char* v) noexcept { tracerec::Begin(v); }
+void TraceVehicleSound(unsigned char* v,ULONGLONG ms) noexcept { tracerec::Begin(v,ms); }
 void TraceEnd() noexcept { traceOutput=nullptr; }
 void TraceReset() noexcept { tracerec::Reset(); }
 }  // namespace crew

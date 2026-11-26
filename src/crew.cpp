@@ -743,6 +743,11 @@ using VehicleStep=void(*)(unsigned char*);
 void Guarded(int step,VehicleStep run,unsigned char* v) noexcept {
     __try { run(v); } __except(StepFault(step,GetExceptionInformation())) {}
 }
+// The vehicles' sounds and their recording at one "now", read once before both (vehsound.cpp stepMs): the recording's
+// time is the very one the step ran at.
+ULONGLONG soundMs=0;
+void TraceSoundStep(unsigned char* v) noexcept { TraceVehicleSound(v,soundMs); }
+void SoundStep(unsigned char* v) noexcept { VehicleSoundAt(v,soundMs); }
 void GuardedTick(int step,void(*run)()) noexcept {
     __try { run(); } __except(StepFault(step,GetExceptionInformation())) {}
 }
@@ -970,8 +975,9 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepTurretCam,&TurretCamFrame,v);      // the plugin off too: it lets the camera go then
     Guarded(kStepProteus,&ProteusFrame,v);          // the plugin off too: a reworked Proteus gets its stock numbers back
     Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: the high view goes then
-    if(Cfg().traceFile[0])Guarded(kStepVehicleSound,&TraceVehicleSound,v);   // its inputs, for the offline replay (trace_rec.cpp)
-    Guarded(kStepVehicleSound,&VehicleSound,v);     // the plugin off too: the stock sounds are given back then
+    soundMs=GameMs();                               // one "now" for the step and its recording (vehsound.cpp stepMs)
+    if(Cfg().traceFile[0])Guarded(kStepVehicleSound,&TraceSoundStep,v);   // its inputs, for the offline replay (trace_rec.cpp)
+    Guarded(kStepVehicleSound,&SoundStep,v);        // the plugin off too: the stock sounds are given back then
     TraceEnd();
     Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
     GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
