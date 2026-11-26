@@ -127,9 +127,11 @@ Sound* EntryFor(const unsigned char* v,ULONGLONG ms) noexcept {
         if(!free && (!s.ref || ms-s.seen>kStaleMs))free=&s;
     }
     if(!free)return nullptr;
+    auto* const trail=trails.Ensure(static_cast<std::size_t>(free-sounds),"jet engine sound");
+    if(!trail)return nullptr;
     Silence(*free);
     free->ref=ObjRef::Of(v);
-    trails[static_cast<std::size_t>(free-sounds)].count=0;   // EntryFor runs after trails.Allocate
+    trail->count=0;
     return free;
 }
 
@@ -215,7 +217,6 @@ void Step(unsigned char* v) noexcept {
         if(known)Silence(*known);
         return;
     }
-    if(!trails.Allocate("jet engine sound"))return;   // no heap for the trails: the engines stay silent (logged once)
     Sound* const s=known ? known : EntryFor(v,ms);
     if(!s)return;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);

@@ -123,9 +123,10 @@ void __fastcall ExplodeSe(void* preset,const float* pos,void* handle) {
 // A layer on its way at `due` (the game clock), unless kPending are already: then it is not heard.
 bool Queue(int clip,const audio::Heard& h,ULONGLONG due) noexcept {
     if(!audio::WtThere(clip))return false;
-    for(auto& q:pending)
-        if(q.clip<0){q=Pending{clip,wtevent::Next(rotation,clip),h,due};return true;}
-    return false;
+    auto* const q=pending.FindOrAppend("blast sound",[](const Pending& row){return row.clip<0;});
+    if(!q)return false;
+    *q=Pending{clip,wtevent::Next(rotation,clip),h,due};
+    return true;
 }
 
 // An event heard from `at` (standing still): its layers loud enough at the distance, each after the sound's travel time
@@ -507,7 +508,8 @@ bool InstallBlastSound() noexcept {
 void BlastSoundTick() noexcept {
     if(broken)return;
     __try {
-        const bool ready=Cfg().enabled && pending.Allocate("blast sound") && audio::ClipsReady() && SoundListening();
+        const bool ready=Cfg().enabled && audio::ClipsReady() && SoundListening() &&
+                         (pending.Size()!=0 || pending.Append("blast sound")!=nullptr);
         const bool blasts=ready && sigOk && hooked>0 && Volume(Cfg().explosionVolume)>0.0f;
         // Armed only while ours can sound: until then, and the moment it is switched off, the stock explosions.
         armedUntil.store(blasts ? GetTickCount64()+kArmedMs : 0,std::memory_order_relaxed);

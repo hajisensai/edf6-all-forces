@@ -72,6 +72,20 @@ void FailureKeepsExistingRows() {
     delete first;
 }
 
+void IndexedGrowth() {
+    crew::LazyRows<Row,8> table;
+    const int made=Row::made;
+    Check(!table.Get(1) && !table.Ensure(8,"indexed rows") && table.Size()==0,"invalid indexed access allocates nothing");
+    auto* const third=table.Ensure(2,"indexed rows");
+    Check(third && third==table.Get(2) && table.Size()==3 && Row::made==made+3,"the selected index only grows its prefix");
+    third->held=27;
+    Row::refuse=true;
+    Check(!table.Ensure(4,"indexed rows") && table.Size()==3 && table.Ensure(2,"indexed rows")==third && third->held==27,
+          "a failed indexed grow leaves the existing row and its address intact");
+    Row::refuse=false;
+    for(auto& row:table)delete &row;
+}
+
 void ConcurrentPublish() {
     crew::LazyRows<Row,16> table;
     std::vector<Row*> seen(16,nullptr);
@@ -91,6 +105,7 @@ void ConcurrentPublish() {
 int main() {
     GrowthAndReuse();
     FailureKeepsExistingRows();
+    IndexedGrowth();
     ConcurrentPublish();
     std::printf("lazy_rows_test: %d checks passed\n",checks);
     return 0;

@@ -20,29 +20,21 @@ public:
     T& operator[](std::size_t i) noexcept {return *rows_[i];}
     const T& operator[](std::size_t i) const noexcept {return *rows_[i];}
 
+    T* Get(std::size_t index) noexcept {return index<Size() ? rows_[index] : nullptr;}
+
+    // For rows paired with another fixed table by index. Publish only the prefix needed by that slot.
+    T* Ensure(std::size_t index,const char* what) noexcept {
+        if(T* row=Get(index))return row;
+        return index<N ? Grow(index,what) : nullptr;
+    }
+
     template<class Free>
     T* FindOrAppend(const char* what,Free&& free) noexcept {
         for(T& row:*this)if(free(row))return &row;
         return Append(what);
     }
 
-    // Failure stops further growth and logs once. Existing rows can still be reused.
-    __declspec(noinline) T* Append(const char* what) noexcept {
-        AcquireSRWLockExclusive(&growth_);
-        const auto next=count_.load(std::memory_order_relaxed);
-        if(next==N || growthFailed_) {
-            ReleaseSRWLockExclusive(&growth_);
-            return nullptr;
-        }
-        T* row=new(std::nothrow) T{};
-        if(row) {
-            rows_[next]=row;
-            count_.store(next+1,std::memory_order_release);
-        } else growthFailed_=true;
-        ReleaseSRWLockExclusive(&growth_);
-        if(!row)Log("MEMORY %s: cannot allocate row %zu (%zu bytes)",what,next,sizeof(T));
-        return row;
-    }
+    T* Append(const char* what) noexcept {return Grow(N,what);}
 
     struct End {};
     template<class Ref>
@@ -58,6 +50,30 @@ public:
     End end() const noexcept {return {};}
 
 private:
+    // N requests the next slot. Growth failure logs once, with any initialized rows still available.
+    __declspec(noinline) T* Grow(std::size_t index,const char* what) noexcept {
+        AcquireSRWLockExclusive(&growth_);
+        auto next=count_.load(std::memory_order_relaxed);
+        if(index==N)index=next;
+        std::size_t failed=N;
+        if(index<N && !growthFailed_) {
+            for(;next<=index;++next) {
+                T* const row=new(std::nothrow) T{};
+                if(!row) {
+                    growthFailed_=true;
+                    failed=next;
+                    break;
+                }
+                rows_[next]=row;
+            }
+            count_.store(next,std::memory_order_release);
+        }
+        T* const result=index<next ? rows_[index] : nullptr;
+        ReleaseSRWLockExclusive(&growth_);
+        if(failed!=N)Log("MEMORY %s: cannot allocate row %zu (%zu bytes)",what,failed,sizeof(T));
+        return result;
+    }
+
     T* rows_[N]{};
     std::atomic<std::size_t> count_{0};
     SRWLOCK growth_=SRWLOCK_INIT;
