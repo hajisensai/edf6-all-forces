@@ -21,6 +21,7 @@
 #include "sync_load_probe.h"
 #include "frame_rate.h"
 #include "native_bone_update.h"
+#include "native_body_math.h"
 #include "render_pose.h"
 #include "render_record.h"
 #include "frame_rate_logic.h"
@@ -1338,6 +1339,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     InstallFrameRate();
     if(Cfg().enabled)Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
+    if(Cfg().enabled)Log("PHYSICS attachment matrices: %u/2 native callers redirected",InstallNativeBodyMath());
     if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
         Log("RENDER pose snapshots installed=%d",renderpose::Install());
     if(Cfg().enabled && Cfg().renderRecordThread)
