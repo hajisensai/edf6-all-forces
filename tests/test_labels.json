@@ -6269,6 +6269,12 @@
     "tests/weapon_style_data_check.py"
    ]
   },
+  "wing_engine_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "wing_turn": {
    "labels": [
     "plugin-native"
