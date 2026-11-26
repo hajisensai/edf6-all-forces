@@ -3,7 +3,8 @@ to the desktop and the game window stays off screen, below the others (the user,
 background"). For measurements, e.g. the big map's memory against the stock test range.
 
   python tests/autopilot/drive.py install            copy build/tools/EDF6Autopilot.dll into <game>/Mods/Plugins
-  python tests/autopilot/drive.py launch             start the game (Steam), then put its window off screen, at the back
+  python tests/autopilot/drive.py launch             start the game (LaunchGame.exe from its folder, never through Steam's
+                                                     launch: pylib/gamelaunch.py), its window off screen, at the back
   python tests/autopilot/drive.py key VK[+VK] [ms]   hold the keys (hex virtual-key codes, or names: enter esc up ...;
                                                      pad_a ... pad_rt: the autopilot's virtual pad; stick_*: its
                                                      left stick, look_*: its right stick)
@@ -90,13 +91,12 @@ from collections.abc import Callable
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import gamedir  # noqa: E402
+import gamelaunch  # noqa: E402
 import gamelease  # noqa: E402
-import modfiles  # noqa: E402
 TOOLS = os.path.join(ROOT, 'tools')   # tools/support_config.py (the ini's own editor)
 
 NAME = 'EDF6Autopilot'
 DEFAULT_MISSION = 'range'   # the test range's mission pack (no longer laid over RM015)
-APP_ID = 2291060
 KEYS = {'enter': 0x0D, 'esc': 0x1B, 'space': 0x20, 'left': 0x25, 'up': 0x26, 'right': 0x27, 'down': 0x28,
         'alt': 0x12, 'f4': 0x73, 'shift': 0x10, 'ctrl': 0x11, 'tab': 0x09,
         # the autopilot's virtual pad (0x100 + XInput button bit; 0x110 / 0x111 the triggers)
@@ -490,138 +490,19 @@ def ini_with(game: str, settings: tuple[str, ...]) -> bytes:
     return (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8')
 
 
-def steam_launching_title(steam: str | None = None, language: str | None = None) -> str | None:
-    """The title of Steam's launch progress window ("Launching...") in the client's language: the string
-    GameAction_LaunchingDialog_Title of steamui/localization/steamui_<language>-json.js. None (with the reason printed)
-    when it cannot be read; the launch then moves no Steam window."""
-    import re
-    import winreg
-    try:
-        if steam is None or language is None:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as k:
-                steam = steam or winreg.QueryValueEx(k, 'SteamPath')[0]
-                language = language or winreg.QueryValueEx(k, 'Language')[0]
-        path = os.path.join(steam, 'steamui', 'localization', f'steamui_{language}-json.js')
-        with open(path, encoding='utf-8') as f:
-            text = f.read()
-    except OSError as e:
-        print("Steam's launch window title not read:", e)
-        return None
-    m = re.search(r'"GameAction_LaunchingDialog_Title":"((?:[^"\\]|\\.)*)"', text)
-    if not m:
-        print("Steam's launch window title not in", path)
-        return None
-    return json.loads(f'"{m.group(1)}"')
-
-
-def is_steam_launching_window(title: str, cls: str, exe: str, launching: str | None) -> bool:
-    """Steam's launch progress window and nothing else: the Steam web helper's SDL window with exactly that title. Any
-    other Steam window (a cloud-save conflict, a prompt) can ask the user something and stays where Steam puts it."""
-    return launching is not None and title == launching and cls == 'SDL_app' and exe.lower() == 'steamwebhelper.exe'
-
-
-WINEVENTPROC = ctypes.WINFUNCTYPE(None, wt.HANDLE, wt.DWORD, wt.HWND, wt.LONG, wt.LONG, wt.DWORD, wt.DWORD)
-
-
-def window_exe(hwnd: int) -> str:
-    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    kernel32.OpenProcess.restype = wt.HANDLE
-    pid = wt.DWORD()
-    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    h = kernel32.OpenProcess(0x1000, False, pid.value)   # PROCESS_QUERY_LIMITED_INFORMATION
-    if not h:
-        return ''
-    try:
-        buf = ctypes.create_unicode_buffer(1024)
-        size = wt.DWORD(len(buf))
-        return buf.value.rsplit('\\', 1)[-1] if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)) else ''
-    finally:
-        kernel32.CloseHandle(h)
-
-
-class SteamLaunchWindowMover:
-    """While the game starts, moves Steam's launch progress window off screen as it is shown (a WinEvent hook, so it
-    is gone before it is seen) the way the game's own window is (hide). Started before the steam:// launch, stopped
-    once the game's window is there."""
-
-    def __init__(self, launching: str | None) -> None:
-        self.launching = launching
-        self.moved = 0
-        self.thread_id = 0
-        self.ready = threading.Event()
-        self.thread = threading.Thread(target=self.run, daemon=True)
-
-    def on_event(self, _hook: int, _event: int, hwnd: int, obj: int, _child: int, _thread: int, _time: int) -> None:
-        if obj != 0 or not hwnd or user32.GetAncestor(hwnd, 2) != hwnd:   # OBJID_WINDOW, GA_ROOT: top-level only
-            return
-        title = ctypes.create_unicode_buffer(256)
-        user32.GetWindowTextW(hwnd, title, 256)
-        cls = ctypes.create_unicode_buffer(256)
-        user32.GetClassNameW(hwnd, cls, 256)
-        if is_steam_launching_window(title.value, cls.value, window_exe(hwnd), self.launching):
-            hide(hwnd)
-            self.moved += 1
-
-    def run(self) -> None:
-        user32.SetWinEventHook.restype = wt.HANDLE
-        user32.SetWinEventHook.argtypes = [wt.DWORD, wt.DWORD, wt.HMODULE, WINEVENTPROC, wt.DWORD, wt.DWORD, wt.DWORD]
-        user32.UnhookWinEvent.argtypes = [wt.HANDLE]
-        user32.GetAncestor.restype, user32.GetAncestor.argtypes = wt.HWND, [wt.HWND, wt.UINT]
-        user32.GetWindowTextW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
-        user32.GetClassNameW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
-        user32.GetMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT]
-        user32.DispatchMessageW.argtypes = [ctypes.POINTER(wt.MSG)]
-        user32.PostThreadMessageW.argtypes = [wt.DWORD, wt.UINT, wt.WPARAM, wt.LPARAM]
-        callback = WINEVENTPROC(self.on_event)
-        # EVENT_OBJECT_SHOW .. EVENT_OBJECT_NAMECHANGE (a title set after the show), WINEVENT_OUTOFCONTEXT
-        hook = user32.SetWinEventHook(0x8002, 0x800C, None, callback, 0, 0, 0)
-        self.thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
-        self.ready.set()
-        msg = wt.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            user32.DispatchMessageW(ctypes.byref(msg))
-        if hook:
-            user32.UnhookWinEvent(hook)
-
-    def start(self) -> 'SteamLaunchWindowMover':
-        if self.launching is not None:
-            self.thread.start()
-            self.ready.wait(5)
-        return self
-
-    def stop(self) -> None:
-        if self.thread.is_alive():
-            user32.PostThreadMessageW(self.thread_id, 0x0012, 0, 0)   # WM_QUIT
-            self.thread.join(5)
-
-
-def launch() -> None:
-    require_closed()
-    # A run right after another (or after the user quit) would otherwise land in the seconds Steam still counts the
-    # game as running and only get its 「游戏已在运行」 dialog (pylib/modfiles.py steam_running_app).
-    if not modfiles.wait_steam_released():
-        raise RuntimeError('Steam still counts EDF6 as running 60 s after EDF6.exe is gone: not launching')
+def launch(game: str) -> gamelaunch.Game:
+    """The game started straight from its folder (pylib/gamelaunch.py: LaunchGame.exe as Steam starts it, never
+    steam://, so no Steam dialog can hold it), its window off screen as soon as it shows and the foreground given
+    back. gamelaunch.LaunchFailed, said at once, when it cannot start; what it started is closed again."""
     require_closed()
     before = user32.GetForegroundWindow()
-    # The game only runs launched by Steam (started directly, even with Steam's environment, it stops at a white
-    # window and an integrity error), so steam://; Steam's own launch progress window goes off screen as it shows.
-    mover = SteamLaunchWindowMover(steam_launching_title()).start()
-    try:
-        os.startfile(f'steam://rungameid/{APP_ID}')
-        # Steam dialogs can authorize cloud-save conflicts or unrelated actions: leave all confirmations to the
-        # user and only wait for the game this command requested.
-        deadline = time.time() + 150
-        while time.time() < deadline:
-            hwnd = game_window()
-            if hwnd:
-                hide(hwnd)
-                user32.SetForegroundWindow(before)
-                print('window', hex(hwnd), 'off screen; Steam launch windows moved off screen:', mover.moved)
-                return
-            time.sleep(0.5)
-    finally:
-        mover.stop()
-    raise SystemExit('no game window in 150 s')
+
+    def off_screen(hwnd: int) -> None:
+        hide(hwnd)
+        user32.SetForegroundWindow(before)
+    started = gamelaunch.launch(game, on_window=off_screen)
+    print('window', hex(started.hwnd), f'off screen (EDF6.exe {started.pid}, started by {gamelaunch.LAUNCHER})')
+    return started
 
 
 class RunEnded(RuntimeError):
@@ -783,11 +664,18 @@ def rows(game: str) -> list[str]:
 
 
 def wait_for(game: str, text: str, seconds: float) -> bool:
+    """TEXT in the autopilot's log within SECONDS; False at once when the game exits or shows a message box (its
+    text printed: an error the run would otherwise only time out on)."""
     end = time.time() + seconds
     while time.time() < end:
         if any(text in r for r in rows(game)):
             return True
-        if not game_pids():
+        pids = game_pids()
+        if not pids:
+            return False
+        boxes = [w for w in gamelaunch.windows(set(pids)) if w[2] == gamelaunch.DIALOG_CLASS]
+        if boxes:
+            print('the game shows a message box:', ' | '.join(gamelaunch.dialog_text(w[0]) for w in boxes))
             return False
         time.sleep(1)
     return False
@@ -837,7 +725,11 @@ def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str |
             place_file(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini))
         command(game, '\n'.join([f'mission {mission} {difficulty}' + (' hq' if hq else ''), *extra,
                                  *([cycle_command(*cycle)] if cycle else [])]))
-        launch()
+        try:
+            launch(game)
+        except gamelaunch.LaunchFailed as e:
+            print('the game did not start:', e)
+            return 1
         if not wait_for(game, 'SCRIPT HQMain stays' if hq else 'PlayMission_Offline', 240):
             print('the HQ menu never came (see the log)' if hq else 'the mission never started (see the log)')
             return 1
@@ -1154,7 +1046,15 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
 LEASED = ('install', 'uninstall', 'restore', 'launch', 'hide', 'key', 'cmd', 'run')
 
 
+def wants_help(argv: list[str]) -> bool:
+    """-h / --help anywhere (`run --help` too): the usage only, nothing installed or launched."""
+    return any(a in ('-h', '--help', 'help') for a in argv[:1]) or any(a in ('-h', '--help') for a in argv[1:])
+
+
 def main(argv: list[str]) -> int:
+    if wants_help(argv):
+        print(__doc__)
+        return 0
     cmd = argv[0] if argv else ''
     if cmd not in LEASED:
         return command_main(argv)
@@ -1172,7 +1072,7 @@ def command_main(argv: list[str]) -> int:
     elif cmd == 'restore':
         return 0 if restore_placed(game) else 1
     elif cmd == 'launch':
-        launch()
+        launch(game)
     elif cmd == 'hide':
         hwnd = game_window()
         assert hwnd, 'no game window'

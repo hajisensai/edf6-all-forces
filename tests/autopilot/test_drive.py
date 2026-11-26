@@ -240,7 +240,7 @@ class DriverTest(unittest.TestCase):
             return later if clock[0] >= 1030.0 else ['[   1.0 s] CYCLE armed: leave and enter again 3 times']
         launched: list[bool] = []
         self.pids.side_effect = lambda: [42] if launched and not quit_at else []
-        def launch():
+        def launch(*_):
             launched.append(True)
             if on_launch:
                 on_launch()
@@ -276,7 +276,7 @@ class DriverTest(unittest.TestCase):
         source = self.root / 'load.ini'
         source.write_bytes(b'[Loadout]\nEnabled=1\n')
         seen = []
-        def launch():
+        def launch(*_):
             seen.append((self.plugins / drive.LOADOUT).read_bytes())
         with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
             self.assertEqual(drive.run(self.game, 'RM015', 1, 0, None, loadout=str(source)), 1)
@@ -304,7 +304,7 @@ class DriverTest(unittest.TestCase):
         sgo = self.root / 'X.SGO'
         sgo.write_bytes(b'sgo')
         seen = []
-        def launch():
+        def launch(*_):
             seen.append((dll.read_bytes(), ini.read_bytes(), (self.plugins.parent / 'OBJECT' / 'X.SGO').read_bytes()))
         with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
             drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll', f'{sgo}=OBJECT/X.SGO'),
@@ -322,7 +322,7 @@ class DriverTest(unittest.TestCase):
         dll.write_bytes(b'installed plugin')
         build = self.root / 'build.dll'
         build.write_bytes(b'our build')
-        def launch():
+        def launch(*_):
             dll.write_bytes(b'another session')
         with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
             drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',))
@@ -350,7 +350,7 @@ class DriverTest(unittest.TestCase):
         running = []
         self.pids.side_effect = lambda: list(running)
 
-        def launch():
+        def launch(*_):
             running.append(123)
         with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
             self.assertEqual(drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',
@@ -447,7 +447,7 @@ class DriverTest(unittest.TestCase):
     def test_loadout_changed_during_the_run_is_left(self):
         source = self.root / 'load.ini'
         source.write_bytes(b'ours')
-        def launch():
+        def launch(*_):
             (self.plugins / drive.LOADOUT).write_bytes(b'changed')
         with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
             drive.run(self.game, 'RM015', 1, 0, None, loadout=str(source))
@@ -473,7 +473,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(list(self.plugins.iterdir()), [])
 
     def test_failed_log_copy_still_cleans_install(self):
-        def launch():
+        def launch(*_):
             self.path('.log').write_text('generated')
         with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False):
             with self.assertRaises(OSError):
@@ -521,47 +521,48 @@ class DriverTest(unittest.TestCase):
         g.DeleteDC.assert_called_once_with(0x234567890)
         u.ReleaseDC.assert_called_once_with(0x567890123, 0x123456789)
 
-    def test_launch_never_confirms_steam_dialogs(self):
+    def test_launch_goes_through_gamelaunch_never_steam(self):
+        # pylib/gamelaunch.py starts LaunchGame.exe itself: no steam:// URL is opened, no Steam window clicked.
         u = Mock()
-        with patch.object(drive, 'user32', u), patch.object(drive.os, 'startfile') as start, \
-             patch.object(drive, 'steam_launching_title', return_value=None), \
-             patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'),              patch.object(drive.modfiles, 'steam_running_app', return_value=0):
-            drive.launch()
-        start.assert_called_once_with('steam://rungameid/2291060')
+        u.GetForegroundWindow.return_value = 77
+        seen = []
+
+        def fake(game, on_window=None):
+            seen.append(game)
+            on_window(123)
+            return drive.gamelaunch.Game(9, 123, 8)
+        with patch.object(drive, 'user32', u), patch.object(drive, 'game_pids', return_value=[]),              patch.object(drive.gamelaunch, 'launch', side_effect=fake), patch.object(drive, 'hide') as hide,              patch.object(drive.os, 'startfile', create=True) as start, redirect_stdout(io.StringIO()):
+            self.assertEqual(drive.launch(self.game).pid, 9)
+        self.assertEqual(seen, [self.game])
+        hide.assert_called_once_with(123)
+        u.SetForegroundWindow.assert_called_once_with(77)
+        start.assert_not_called()
         u.PostMessageW.assert_not_called()
 
-    def test_launch_waits_until_steam_releases_the_game(self):
-        # EDF6.exe gone but Steam still counting it running (its RunningAppID lags the exit): no steam:// until clear.
-        states = iter([drive.APP_ID, drive.APP_ID, 0])
-        with patch.object(drive, 'user32', Mock()), patch.object(drive.os, 'startfile') as start,              patch.object(drive.modfiles, 'steam_running_app', side_effect=lambda: next(states)),              patch.object(drive.modfiles.time, 'sleep') as nap,              patch.object(drive, 'steam_launching_title', return_value=None),              patch.object(drive, 'game_window', return_value=123), patch.object(drive, 'hide'):
-            drive.launch()
-        self.assertEqual(nap.call_count, 2)
-        start.assert_called_once_with('steam://rungameid/2291060')
+    def test_launch_failure_ends_the_run_at_once_and_puts_back(self):
+        out = io.StringIO()
+        with patch.object(drive, 'launch', side_effect=drive.gamelaunch.LaunchFailed('Steam is not running')),              patch.object(drive, 'wait_for') as wait, redirect_stdout(out):
+            rc = drive.run(self.game, 'RM015', 1, 45, None)
+        self.assertEqual(rc, 1)
+        wait.assert_not_called()
+        self.assertIn('the game did not start: Steam is not running', out.getvalue())
+        self.assertFalse(drive.anything_left(self.game))
 
-    def test_launch_refuses_while_steam_keeps_the_game(self):
-        with patch.object(drive, 'user32', Mock()), patch.object(drive.os, 'startfile') as start,              patch.object(drive.modfiles, 'wait_steam_released', return_value=False):
-            with self.assertRaisesRegex(RuntimeError, 'Steam still counts'):
-                drive.launch()
-        start.assert_not_called()
+    def test_wait_for_stops_at_a_message_box(self):
+        out = io.StringIO()
+        with patch.object(drive, 'rows', return_value=[]), patch.object(drive, 'game_pids', return_value=[5]),              patch.object(drive.gamelaunch, 'windows', return_value=[(1, 5, '#32770', 'Error')]),              patch.object(drive.gamelaunch, 'dialog_text', return_value='Error / data files missing'),              patch.object(drive.time, 'sleep') as nap, redirect_stdout(out):
+            self.assertFalse(drive.wait_for(self.game, 'PlayMission_Offline', 240))
+        nap.assert_not_called()
+        self.assertIn('data files missing', out.getvalue())
 
-    def test_steam_launching_title_from_the_clients_localization(self):
-        with tempfile.TemporaryDirectory() as steam:
-            folder = Path(steam, 'steamui', 'localization')
-            folder.mkdir(parents=True)
-            folder.joinpath('steamui_schinese-json.js').write_text(
-                'var x={"GameAction_Launching":"Launching","GameAction_LaunchingDialog_Title":"\\u542f\\u52a8\\u4e2d...",'
-                '"GameAction_LaunchingDialog_Starting":"x"}', encoding='utf-8')
-            self.assertEqual(drive.steam_launching_title(steam, 'schinese'), '启动中...')
-            self.assertIsNone(drive.steam_launching_title(steam, 'english'))   # no file: nothing is moved
-
-    def test_only_steams_launch_progress_window_is_moved(self):
-        t = 'Launching...'
-        self.assertTrue(drive.is_steam_launching_window(t, 'SDL_app', 'steamwebhelper.exe', t))
-        self.assertTrue(drive.is_steam_launching_window(t, 'SDL_app', 'SteamWebHelper.EXE', t))
-        for title, cls, exe, launching in ((t, 'SDL_app', 'steamwebhelper.exe', None),        # title unknown
-                                           ('Cloud Sync Conflict', 'SDL_app', 'steamwebhelper.exe', t),
-                                           (t, 'SDL_app', 'chrome.exe', t), (t, 'Other', 'steamwebhelper.exe', t)):
-            self.assertFalse(drive.is_steam_launching_window(title, cls, exe, launching), (title, cls, exe, launching))
+    def test_help_prints_the_usage_and_touches_nothing(self):
+        for argv in (['run', '--help'], ['run', 'RM015', '-h'], ['--help'], ['help'], ['launch', '--help']):
+            out = io.StringIO()
+            with patch.object(drive, 'command_main') as body, patch.object(drive.gamelease, 'lease') as lease,                  redirect_stdout(out):
+                self.assertEqual(drive.main(argv), 0, argv)
+            body.assert_not_called()
+            lease.assert_not_called()
+            self.assertIn('drive.py run [MISSION]', out.getvalue())
 
     def test_nudge_tells_a_pulled_cursor_from_a_free_one(self):
         def fake_user32(pull):
@@ -622,7 +623,7 @@ class DuringRaceTest(DriverTest):
         launched: list = []
         self.pids.side_effect = lambda: pids() if launched else []   # closed for the install, running once launched
         gate = drive.Gate()
-        with patch.object(drive, 'launch', side_effect=lambda: launched.append(1)), \
+        with patch.object(drive, 'launch', side_effect=lambda *_: launched.append(1)), \
              patch.object(drive, 'wait_for', return_value=True), \
              patch.object(drive, 'command', side_effect=command), \
              patch.object(drive, 'restore_placed', side_effect=restore), redirect_stdout(io.StringIO()):
