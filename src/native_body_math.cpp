@@ -1,13 +1,30 @@
 #include "native_body_math.h"
 #include "crew.h"
 #include "edf/memory.h"
+#include "edf/patch.h"
 #include <cfloat>
+#include <cstring>
 #include <emmintrin.h>
 
 namespace crew {
 namespace {
 constexpr unsigned kTransformBox=0x652F0,kBoxArguments=0x109BFD,kBoxCall=0x109C09,kSignMask=0x1C36A90;
 constexpr unsigned kBasis=0x511C0;
+constexpr unsigned kBoxMerge=kBoxArguments,kBoxMergeEnd=0x109C9D,kBoxMergeCall=kBoxMerge+7;
+// Exact straight-line region through the last store to the union; the native body update follows it.
+constexpr unsigned char kBoxMergeStock[]={
+    0x48,0x8D,0x53,0x20,0x4C,0x8D,0x43,0x60,0x48,0x8D,0x4B,0x40,0xE8,0xE2,0xB6,0xF5,
+    0xFF,0x0F,0x10,0x43,0x40,0x4C,0x8D,0x4D,0x20,0x0F,0x10,0x63,0x50,0x4C,0x8D,0x43,
+    0x60,0x0F,0x10,0x5B,0x40,0x0F,0x28,0xD0,0x0F,0x28,0x4D,0x00,0x0F,0x5C,0xD4,0x0F,
+    0xC6,0xC0,0xFF,0x0F,0x58,0xE3,0x0F,0xC6,0xDB,0xFF,0xC7,0x44,0x24,0x20,0x01,0x00,
+    0x00,0x00,0x0F,0xC6,0xD2,0x93,0xF3,0x0F,0x10,0xD0,0x0F,0xC6,0xE4,0x93,0x0F,0xC6,
+    0xD2,0x39,0xF3,0x0F,0x10,0xE3,0x0F,0x5D,0xCA,0x0F,0x29,0x55,0x20,0x0F,0x28,0x55,
+    0x10,0x0F,0x28,0xC1,0x0F,0xC6,0xC1,0x55,0xF3,0x0F,0x11,0x45,0x04,0xF3,0x0F,0x11,
+    0x4D,0x00,0x0F,0xC6,0xC9,0xAA,0xF3,0x0F,0x11,0x4D,0x08,0x0F,0xC6,0xE4,0x39,0x0F,
+    0x5F,0xD4,0x0F,0x29,0x65,0x20,0xF3,0x0F,0x11,0x55,0x10,0x0F,0x28,0xC2,0x0F,0xC6,
+    0xC2,0x55,0xF3,0x0F,0x11,0x45,0x14,0x0F,0xC6,0xD2,0xAA,0xF3,0x0F,0x11,0x55,0x18,
+};
+static_assert(sizeof(kBoxMergeStock)==kBoxMergeEnd-kBoxMerge);
 constexpr unsigned char kBoxSig[]={0x48,0x83,0xEC,0x18,0xF3,0x0F,0x10,0x1D,0x94,0x17,0xBD,0x01};
 constexpr unsigned char kBoxArgumentsSig[]={0x48,0x8D,0x53,0x20,0x4C,0x8D,0x43,0x60,0x48,0x8D,0x4B,0x40};
 constexpr unsigned char kBasisSig[]={0x48,0x8B,0xC4,0x53,0x48,0x81,0xEC,0xD0,0x00,0x00,0x00};
@@ -29,8 +46,10 @@ inline __m128 KeepW(__m128 xyz,__m128 original) noexcept {
     return _mm_or_ps(_mm_and_ps(mask,xyz),_mm_andnot_ps(mask,original));
 }
 
+struct BoxVectors { __m128 centre,half; };
+
 // The verified call passes disjoint centre/extent, matrix and output records. Preserve the native y+x+z(+w) sums.
-void __fastcall TransformBox(float* out,const float* box,const float* matrix) noexcept {
+__forceinline BoxVectors BoxTransform(const float* box,const float* matrix) noexcept {
     const auto centre=_mm_loadu_ps(box),half=_mm_loadu_ps(box+4);
     const auto m0=_mm_loadu_ps(matrix),m1=_mm_loadu_ps(matrix+4),m2=_mm_loadu_ps(matrix+8),m3=_mm_loadu_ps(matrix+12);
     const auto absBits=_mm_castsi128_ps(_mm_set1_epi32(0x7fffffff));
@@ -41,8 +60,52 @@ void __fastcall TransformBox(float* out,const float* box,const float* matrix) no
     const auto y=_mm_mul_ps(_mm_shuffle_ps(centre,centre,0x55),m1);
     const auto z=_mm_mul_ps(_mm_shuffle_ps(centre,centre,0xAA),m2);
     const auto w=_mm_mul_ps(_mm_shuffle_ps(centre,centre,0xFF),m3);
-    _mm_storeu_ps(out+4,KeepW(_mm_add_ps(_mm_add_ps(hy,hx),hz),_mm_set1_ps(1.0f)));
-    _mm_storeu_ps(out,_mm_add_ps(_mm_add_ps(_mm_add_ps(y,x),z),w));
+    return {_mm_add_ps(_mm_add_ps(_mm_add_ps(y,x),z),w),
+            KeepW(_mm_add_ps(_mm_add_ps(hy,hx),hz),_mm_set1_ps(1.0f))};
+}
+
+void __fastcall TransformBox(float* out,const float* box,const float* matrix) noexcept {
+    const auto transformed=BoxTransform(box,matrix);
+    _mm_storeu_ps(out+4,transformed.half);
+    _mm_storeu_ps(out,transformed.centre);
+}
+
+void __fastcall TransformAndMergeBox(float* bounds,float* proxy) noexcept {
+    const auto transformed=BoxTransform(proxy+0x20/sizeof(float),proxy+0x60/sizeof(float));
+    const auto lo=_mm_loadu_ps(bounds),hi=_mm_loadu_ps(bounds+4);
+    const auto shrink=_mm_sub_ps(transformed.centre,transformed.half);
+    const auto grow=_mm_add_ps(transformed.half,transformed.centre);
+    _mm_storeu_ps(proxy+0x50/sizeof(float),transformed.half);
+    _mm_storeu_ps(proxy+0x40/sizeof(float),transformed.centre);
+    _mm_storeu_ps(bounds,KeepW(_mm_min_ps(lo,shrink),lo));
+    _mm_storeu_ps(bounds+4,KeepW(_mm_max_ps(hi,grow),hi));
+}
+
+bool InstallBoxMerge() noexcept {
+    if(!edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return false;
+    auto* const site=image+kBoxMerge;
+    auto* const target=edf::AllocateNearThunk(site,reinterpret_cast<void*>(&TransformAndMergeBox));
+    if(!target)return false;
+    unsigned char code[]={
+        0x48,0x8D,0x4D,0x00,       // lea rcx,[rbp]      bounds
+        0x48,0x8B,0xD3,            // mov rdx,rbx        proxy
+        0xE8,0,0,0,0,              // call fused transform and union
+        0x4C,0x8D,0x4D,0x20,       // lea r9,[rbp+0x20]  native position arguments
+        0x4C,0x8D,0x43,0x60,       // lea r8,[rbx+0x60]
+        0xC7,0x44,0x24,0x20,1,0,0,0,
+        0xE9,0,0,0,0,              // resume the native body update
+    };
+    constexpr unsigned call=kBoxMergeCall-kBoxMerge;
+    constexpr auto resume=static_cast<std::int32_t>(kBoxMergeEnd-kBoxMerge-sizeof(code));
+    const auto delta=reinterpret_cast<std::intptr_t>(target)-reinterpret_cast<std::intptr_t>(site+call+5);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        const auto rel32=static_cast<std::int32_t>(delta);
+        std::memcpy(code+call+1,&rel32,sizeof(rel32));
+        std::memcpy(code+sizeof(code)-sizeof(resume),&resume,sizeof(resume));
+        if(edf::PatchCode(site,kBoxMergeStock,code,sizeof(code)))return true;
+    }
+    VirtualFree(target,0,MEM_RELEASE);
+    return false;
 }
 
 inline bool Normalize3(__m128& v) noexcept {
@@ -92,9 +155,12 @@ unsigned InstallNativeBodyMath() noexcept {
     if(edf::Matches(image,kTransformBox,kBoxSig,sizeof(kBoxSig)) &&
        edf::Matches(image,kBoxArguments,kBoxArgumentsSig,sizeof(kBoxArgumentsSig)) &&
        edf::At<std::uint32_t>(image,kSignMask)==0x7fffffffu) {
-        bool changed=false;
-        edf::RedirectCall(image+kBoxCall,image+kTransformBox,reinterpret_cast<void*>(&TransformBox),changed);
-        installed+=changed;
+        if(InstallBoxMerge())++installed;
+        else {
+            bool changed=false;
+            edf::RedirectCall(image+kBoxCall,image+kTransformBox,reinterpret_cast<void*>(&TransformBox),changed);
+            installed+=changed;
+        }
     }
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
     for(const auto& site:kAttachedBasisCalls) {

@@ -376,3 +376,8 @@ ini 改 `HavokMultithread=1`、保持 `Debug=1`。装 DLL 前核对日志里 `HA
 `#418` 合入后的 `stress:30` 实机用 DLL `649189fc21a39d11`。清洁窗口平均 1,396 敌、662 友。298 次前段 build 平均 3.74 ms，构图和 PreCollide 占 0.458 ms，调度到图结束占 3.281 ms。298 次调度全部走默认队列 mode 0。主线程在这段时间内调用 1,378 次 `WaitForSingleObject`，平均每步累计等 2.169 ms，占调度时间约 66%。前段 finish 0.95 ms，后段 build / finish 是 0.11 / 0.04 ms。
 
 队列执行和图收尾占前段 build 的约 88%，优先把耗时定位到具体碰撞任务。系统等待可能与 worker 执行重合，下一项按任务类型找压住图完成的工作，并记录该任务的依赖、运行线程和结束时间。实机共 100 个有效 PERF 帧，平均 101.03 ms，约 29.7 模拟步/s。游戏正常退出，原 DLL 和配置逐字节还原，租约已释放。
+
+
+### 碰撞任务归因的入口
+
+mode 0 队列在 `0xA0FE5D` 暂存出队记录，`0xA0FE70` 从记录 `+0x58` 取执行对象，`0xA0FE77` 经执行对象的 vtable `+0x10` 调用。碰撞图构造器里的 RTTI 锚点包括 `ProcessNarrowPhaseGridTask`（`0x18C1A58`，process `0xECB1E0`）、`ProcessNarrowPhasePairsTask`（`0x18C4E78`，`0xEB5F90`）、`FinalizeNarrowPhasePairsTask`（`0x18C1AD8`，`0xECCA60`）和 `PrepareNarrowPhaseTask`（`0x18C56F8`，`0xEC82D0`）。对前次 `stress:30` 原始栈按 PE 展开链归类，只命中 5 个 PostCollide、1 个 ProcessNarrowPhaseGrid 和 1 个 PrepareNarrowPhase，采样量不足以排序。按首段图的任务记录和依赖配对，再取执行起止时刻，可以区别最晚结束的任务、总工作量和主线程等待。
