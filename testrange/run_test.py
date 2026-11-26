@@ -26,8 +26,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen  # noqa: E402
-import gamelease  # noqa: E402  (pylib, on the path through gen)
-import modfiles  # noqa: E402
+import gamelaunch  # noqa: E402  (pylib, on the path through gen)
+import gamelease  # noqa: E402
 import weapons  # noqa: E402
 
 user32 = ctypes.windll.user32
@@ -320,21 +320,15 @@ def aim_stats(lines: list[str]) -> list[str]:
 
 
 # ---------- flow ----------
-STEAM_APP = 2291060
-
-def start_game(timeout: float) -> int:
+def start_game(game: str, timeout: float) -> int:
+    """The game started from its folder, not through Steam's launch (pylib/gamelaunch.py): no Steam dialog can hold it,
+    and what a failed start left is closed again."""
     if edf_pid():
         raise RuntimeError('EDF6 已经在运行；先关掉它（或加 --attach 接着用这个进程）')
-    if not modfiles.wait_steam_released(60, STEAM_APP):
-        raise RuntimeError('Steam 仍认为 EDF6 在运行（RunningAppID 60 秒没清零）')
-    os.startfile(f'steam://rungameid/{STEAM_APP}')
-    end = time.time() + timeout
-    while time.time() < end:
-        pid = edf_pid()
-        if pid and window_of(pid):
-            return pid
-        time.sleep(1)
-    raise RuntimeError('等不到 EDF6 窗口')
+    try:
+        return gamelaunch.launch(game, timeout).pid
+    except gamelaunch.LaunchFailed as e:
+        raise RuntimeError(f'游戏没有启动起来：{e}') from e
 
 
 def attach_cdb(pid: int, out_dir: str) -> subprocess.Popen:
@@ -481,7 +475,7 @@ def run(args: argparse.Namespace) -> int:
     offset = log_size(args.game)
     t0 = time.time()
     stage = 'start'
-    pid = edf_pid() if args.attach else start_game(120)
+    pid = edf_pid() if args.attach else start_game(args.game, 120)
     if not pid:
         raise RuntimeError('没有在跑的 EDF6')
     r = Runner(out, pid)

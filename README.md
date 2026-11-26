@@ -796,6 +796,23 @@ EDF5 任务的引导线改为跟随脚本点名的目标。转角会比原版的
   队列按游戏目录分开（`%LOCALAPPDATA%\EDF6TestQueue\<目录哈希>`），对临时游戏副本的测试不会排在真实测试后面。
 - 排队只管会话之间；**用户自己开着的游戏照旧不碰**（各脚本原有的「游戏在运行就拒绝」检查不变）。
 
+实测怎么启动游戏（`pylib/gamelaunch.py`，`drive.py`、`perfrun.py`、`testrange/run_test.py` 共用这一份）：
+
+- **不走 `steam://rungameid`**。经 Steam 启动要过它的交互式流程（手柄配置同步、云同步冲突、EULA 之类），哪一步弹出要人点的框，
+  `LaunchApp` 就停在 `waiting for user response to ...`，外面没有办法取消；脚本等到超时报「150 s 没有游戏窗口」，
+  之后有人点了那个框，Steam 又起一个没人管的游戏（2026-11-26）。
+- 改为在游戏目录直接运行 `LaunchGame.exe`（Steam 本来启动的就是它：EOS 引导程序，拉起 `EDF6.exe` 后自己退出），
+  环境变量带 `SteamAppId=SteamGameId=2291060`。Steam 必须在运行：游戏照常连上 Steam（成就、覆盖层、退出时云同步都正常），
+  只是不经 Steam 的启动流程，不会被它的对话框卡住。不改 Steam 或其它游戏的任何设置。直接运行 `EDF6.exe` 不行（完整性检查报 `ErrorCode: 1_0`）。
+- 启动前拒绝（什么都不启动，直接说原因）：已有 `EDF6.exe` 或 `LaunchGame.exe` 在运行（可能是用户的游戏）、Steam 没在运行、
+  Steam 日志（`<Steam>\logs\console_log.txt` 本次会话部分）里有一次没完成的 2291060 启动（停在等人回应的那一步会写出是哪一步，
+  要在 Steam 里回应或取消、或重启 Steam：否则晚点回应会再起一个游戏）。
+- 哪个游戏是我们的：父进程是我们这次启动的 `LaunchGame.exe` 的那个 `EDF6.exe`。启动前已拒绝了任何在运行的游戏，所以不会认错。
+- 失败马上停：游戏或引导程序弹出消息框（框里的文字写进报错）、`EDF6.exe` 没出窗口就退出、引导程序退出却没起游戏、超时。
+  失败或中途中断时只收拾我们自己起的进程：先按游戏的正常退出（可关闭标志 + `WM_CLOSE`，只认 EDF.dll `0x678CCB46`），30 s 没退再结束进程。
+  用户的游戏从不碰。
+- `tools/vanilla_launch.py`（给玩家的「原版启动」）仍经 Steam 启动：玩家就在电脑前，弹框自己点。
+
 ### 性能实测（perfrun.py）
 
 一条命令测一个场景的帧时间、各线程 CPU、GPU 占用和热点，后台跑、自己排队、结束逐字节还原：
@@ -834,7 +851,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `--trace` 菜单每一步截图；`--keep` 结束时不退出；`--attach` 接着用已在标题画面的游戏；`--cdb` 挂调试器抓崩溃转储。
 - 第一次换到新的槽位先跑 `--learn`：走到那一项后存下说明文字参考图（`testrange/refs/<任务>.png`）并停下，确认截图里光标对了再正常跑。
 - 结果在 `testrange/runs/<时间>/`：`summary.txt`（各类日志行数和首末几行）、`log.txt`、截图。
-- 发键前都会确认 EDF6 在前台，不在就拒绝发键。启动前会等 Steam 的 `RunningAppID` 清零（刚退出时立刻再启动会被 Steam 拒绝）。
+- 发键前都会确认 EDF6 在前台，不在就拒绝发键。游戏由 `pylib/gamelaunch.py` 直接启动（见「实测排队」），启动前会等 Steam 的 `RunningAppID` 清零。
 - 退出走 Alt+F4 对话框：标题菜单里用左方向键、任务中只认 A 键切到「是」，按截图确认选中了才回车；没退成会在 summary 里写明。
 
 ## 调试召唤（默认关闭）
