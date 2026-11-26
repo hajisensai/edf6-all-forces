@@ -49,6 +49,10 @@ constexpr AvoidanceCall kAvoidanceCalls[]{
     {0xD5F604,{0x75,0x08,0x48,0x8B,0xCB,0xE8,0x17,0xEA,0xFF,0xFF}},
 };
 constexpr AvoidanceCall kAvoidancePush{0xD5F5BA,{0x8B,0xD6,0x48,0x8B,0xCB,0xE8,0x51,0x09,0,0}};
+constexpr unsigned kAvoidanceOverflow=kAvoidancePush.call-5,kAvoidancePop=0xD5F5BF,kAvoidanceDone=0xD5F609;
+constexpr unsigned kAvoidanceOverflowCall=kAvoidanceOverflow+3;
+constexpr unsigned char kAvoidanceFirstHeapSkip[]{0xEB,0x0A};
+constexpr unsigned char kAvoidanceDoneSig[]{0x4C,0x8B,0x55,0xF7,0x4C,0x8B,0x5D,0xEF};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+5==kNativeBodyMathSites);
 
@@ -101,6 +105,45 @@ void __fastcall RaiseAvoidanceNeighbor(AvoidanceHeap* heap,int index) noexcept {
     entries[index].distanceSquared=distance;
 }
 
+bool DiscardAvoidanceTail(AvoidanceHeap& heap,int last) noexcept {
+    auto* const entries=heap.entries;
+    const float added=entries[last].distanceSquared;
+    if(!(added>entries[0].distanceSquared))return false;
+    const int tail=(last-1)/2;
+    const float returning=entries[tail].distanceSquared;
+    if(!(added>returning))return false;
+    // If the final slot is a right child, its left sibling stays in the heap.
+    if((last&1)==0 && entries[last-1].distanceSquared>returning)return false;
+    // Verify that stock's pop would retrace the push path, including its right-child tie rule.
+    for(int child=tail;child>0;child=(child-1)/2) {
+        const int parent=(child-1)/2;
+        const float lifted=entries[parent].distanceSquared;
+        if(!(added>lifted) || !(lifted>returning))return false;
+        const bool left=(child&1)!=0;
+        const int sibling=left ? child+1 : child-1;
+        if(sibling<last && (left ? !(lifted>entries[sibling].distanceSquared) :
+                                    entries[sibling].distanceSquared>lifted))return false;
+    }
+    // Stock leaves the displaced parent in the expired slot after the drop.
+    entries[last].handle=entries[tail].handle;
+    entries[last].distanceSquared=returning;
+    heap.count=last;
+    return true;
+}
+
+void __fastcall PushAvoidanceNeighbor(AvoidanceHeap* heap) noexcept {
+    const int last=heap->count-1;
+    if(last==0) {heap->count=0;return;}
+    if(DiscardAvoidanceTail(*heap,last))return;
+    RaiseAvoidanceNeighbor(heap,last);
+    auto* const entries=heap->entries;
+    const bool farther=entries[last].distanceSquared>entries[0].distanceSquared;
+    entries[0].handle=entries[last].handle;
+    entries[0].distanceSquared=entries[last].distanceSquared;
+    heap->count=last;
+    if(!farther)SiftAvoidanceNeighbors(heap,0);
+}
+
 bool AvoidanceKernelMatches(unsigned begin,unsigned end,std::uint64_t expected) noexcept {
     const auto* const code=image+begin;
     const unsigned bytes=end-begin;
@@ -110,6 +153,32 @@ bool AvoidanceKernelMatches(unsigned begin,unsigned end,std::uint64_t expected) 
     return fingerprint==expected;
 }
 
+bool InstallAvoidanceOverflow() noexcept {
+    if(!edf::Matches(image,kAvoidanceOverflow-2,kAvoidanceFirstHeapSkip,sizeof(kAvoidanceFirstHeapSkip)) ||
+       !edf::Matches(image,kAvoidanceDone,kAvoidanceDoneSig,sizeof(kAvoidanceDoneSig)) ||
+       !AvoidanceKernelMatches(kAvoidancePop,kAvoidanceDone,0x01EC66192E650870ull))return false;
+    auto* const start=image+kAvoidanceOverflow;
+    auto* const thunk=edf::AllocateNearThunk(start,reinterpret_cast<void*>(&PushAvoidanceNeighbor));
+    if(!thunk)return false;
+    constexpr auto next=kAvoidanceOverflowCall+5;
+    constexpr auto size=kAvoidancePop-kAvoidanceOverflow;
+    static_assert(kAvoidanceDone-kAvoidancePop<=127);
+    unsigned char code[size]{
+        0x48,0x8B,0xCB,                                      // mov rcx,rbx
+        0xE8,0,0,0,0,                                       // call combined push and pop
+        0xEB,static_cast<unsigned char>(kAvoidanceDone-kAvoidancePop),
+    };
+    static_assert(sizeof(code)==sizeof(kAvoidancePush.stock));
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(image+next);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        const auto relative=static_cast<std::int32_t>(delta);
+        std::memcpy(code+kAvoidanceOverflowCall-kAvoidanceOverflow+1,&relative,sizeof(relative));
+        if(edf::PatchCode(start,kAvoidancePush.stock,code,sizeof(code)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
 unsigned InstallAvoidanceHeap() noexcept {
     const auto redirect=[](const AvoidanceCall& site,unsigned stock,void* replacement) {
         if(!edf::Matches(image,site.call-5,site.stock,sizeof(site.stock)))return false;
@@ -117,12 +186,16 @@ unsigned InstallAvoidanceHeap() noexcept {
         edf::RedirectCall(image+site.call,image+stock,replacement,changed);
         return changed;
     };
-    unsigned installed=0;
-    if(AvoidanceKernelMatches(kAvoidanceSift,kAvoidanceSiftEnd,0xD8C5803BAE3519BBull)) {
+    const bool siftMatches=AvoidanceKernelMatches(kAvoidanceSift,kAvoidanceSiftEnd,0xD8C5803BAE3519BBull);
+    const bool raiseMatches=AvoidanceKernelMatches(kAvoidanceRaise,kAvoidanceRaiseEnd,0x9561D33EE8875421ull);
+    // The first overflow builds the heap in-place and still reaches the original pop.
+    const bool combined=siftMatches && raiseMatches && InstallAvoidanceOverflow();
+    unsigned installed=combined;
+    if(siftMatches) {
         for(const auto& site:kAvoidanceCalls)
             installed+=redirect(site,kAvoidanceSift,reinterpret_cast<void*>(&SiftAvoidanceNeighbors));
     }
-    if(AvoidanceKernelMatches(kAvoidanceRaise,kAvoidanceRaiseEnd,0x9561D33EE8875421ull))
+    if(raiseMatches && !combined)
         installed+=redirect(kAvoidancePush,kAvoidanceRaise,reinterpret_cast<void*>(&RaiseAvoidanceNeighbor));
     return installed;
 }

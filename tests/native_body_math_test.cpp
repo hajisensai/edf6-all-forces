@@ -139,14 +139,44 @@ bool AvoidanceNeighbors() noexcept {
         }))return false;
     }
     const auto stockRaise=reinterpret_cast<Raise>(image+kAvoidanceRaise);
-    if(image[kAvoidancePush.call]!=0xE8)return false;
-    const auto raise=Redirected<Raise>(kAvoidancePush.call);
-    if(raise==stockRaise || !compare(kAvoidancePush.call,[&](AvoidanceHeap& a,AvoidanceHeap& b,int root) {
+    if(!compare(kAvoidancePush.call,[&](AvoidanceHeap& a,AvoidanceHeap& b,int root) {
         stockRaise(&a,root);
-        raise(&b,root);
+        RaiseAvoidanceNeighbor(&b,root);
         return true;
     }))return false;
-    std::printf("native avoidance neighbor heap: %u byte-identical cases per up/down call site\n",cases);
+
+    using Push=void(__fastcall*)(AvoidanceHeap*) noexcept;
+    const auto* const entry=image+kAvoidanceOverflow;
+    if(entry[0]!=0x48 || entry[1]!=0x8B || entry[2]!=0xCB || entry[3]!=0xE8 ||
+       entry[8]!=0xEB || kAvoidancePop+entry[9]!=kAvoidanceDone)return false;
+    const auto overflow=Redirected<Push>(kAvoidanceOverflowCall);
+    if(!compare(kAvoidanceOverflowCall,[&](AvoidanceHeap& a,AvoidanceHeap& b,int root) {
+        if(a.count==0)return true;
+        const int last=a.count-1;
+        if(root%6==0 && last>0) {
+            // A far candidate, with strict distances forward and sideways along its path.
+            for(int i=0;i<last;++i)a.entries[i].distanceSquared=static_cast<float>(last-i);
+            a.entries[last].distanceSquared=FLT_MAX;
+        } else if(root%2==0) {
+            a.count=last;
+            for(int i=last/2;i>0;--i)stockSift(&a,i-1);
+            a.count=last+1;
+        }
+        std::copy_n(a.entries,a.count,b.entries);
+        stockRaise(&a,last);
+        if(last==0) {
+            a.count=0;
+        } else {
+            const bool farther=a.entries[last].distanceSquared>a.entries[0].distanceSquared;
+            a.entries[0].handle=a.entries[last].handle;
+            a.entries[0].distanceSquared=a.entries[last].distanceSquared;
+            a.count=last;
+            if(!farther)stockSift(&a,0);
+        }
+        overflow(&b);
+        return true;
+    }))return false;
+    std::printf("native avoidance heap: %u byte-identical cases per sift, raise, and overflow path\n",cases);
     return true;
 }
 
