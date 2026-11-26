@@ -33,7 +33,7 @@
 - 测前备份、测后逐字节还原：`drive.py` / `run_test.py` / `perfrun.py` 已经逐文件做了（带清单，结束后自动放回）。不要整份复制 `Mods/`（约 10 GB）或游戏目录再逐个算 sha256，那样每次测试要写十几 GB，硬盘会卡死。
 - 游戏排队的细节见 README「实测排队」。
 
-## 合并后打分享包
+## 打分享包（用户要求时才打，合并后不自动打）
 
 - 等这次 main 推送的 CI 跑完、`nightly` 换成该 commit 的安装器后，复制上一版的 `.work/recommend-<sha7>/`，改 sha / 日期 / 更新说明，再打包。流程见 `D:\APP\edf6-share\CLAUDE.md` 与 `make_share.py`。
 - 打包用的源码 worktree 放 `D:\APP\edf6-wt-<MMDD>-share`（detached 在该 main commit 上）。CI 拿不到的模型（`twin_tank` / `drill_tank` / `sazabi` / `dreadnought`，即 `tools/build_release.py` 的 `RELEASE_MODELS` 里没入库的那些）要从 `D:\APP\edf6-models` 补进包。`RELEASE_MODELS` 新增没入库的文件夹时，同步改 `run_export.py` 的 `EXTERNAL_MODELS`。
