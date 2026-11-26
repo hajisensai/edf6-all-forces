@@ -167,6 +167,7 @@ Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain …
   - 声部：dropped 0，busy 峰值 143/160，loops 35/96、none free 0，限幅器 on。
   - 来袭：落在耳边 300 m 内、2.3 s 内落地的候选 87 发，**全部**落角 < 10°（`incoming_flat_under10deg` 87，10°–27° 两档都是 0）。这些是近距离平射：目标都在几百米内，榴弹炮的武器不是 lofted 标记，走低弧；按 240 m/s 算，低弧要 3.2 km 外落角才陡过 26.6°。落角分布在 10° 以下和 26.6° 以上之间没有样本，阈值放到 10°–27° 之间任何位置都不改变结果，放到 10° 以下就会给平射弹放炮弹来袭声，所以条件（陡于 26.6°）不改。测试场方案没法把炮兵放到离耳边 3 km 外再把弹落到耳边，来袭在实机仍未触发。
   - hit_aphe_mid 0 的根因：`Strike`（装甲命中）自己的弹类清单漏了 GrenadeBullet01_MapNoDamage，Flak 88 的 7 m 近炸高爆弹打在狂战士上只出 explosion_ground。已改成和 `KindOf` 共用 `ShellClass`，并加 Debug 计数 `armour_shell_no_hit_se`（高爆弹打在装甲上但原版这一下不放命中声，所以爆炸不带装甲层）。
+- 电磁炮的 `report_rail` 计数改由离线用例 `vehsound_gun`（`tests/vehsound_gun_test.cpp`）验证，不再等实机：把生产代码 `src/vehsound.cpp` 整份编进去，只替换读游戏的函数和发声函数，用假的 403（电磁炮 FireInterval 180、伤害 600、`SolidBullet01Rail`）逐帧走 `VehicleSound`。断言：口径判成 `Bore::rail`、没有战雷事件；每发一次 `report_rail`、近 / 远片段按 340 m/s 的传播延迟播放；同一帧看两次、装填、没开火都不计；联机收到的射击计数（+0x1544）算一发；两门电磁炮同一帧开火只出一声；2 km 外仍有远片段；20 m 内有充电和就绪声；`VehicleGunVolume=0` / `VehicleSound=0` 时原版 FireSe 原样写回。变异核对：删掉 `Report` 里的 Note 后 22 项中 9 项变红。它覆盖不到的只有两点：游戏里 403 的武器字段是否真是这些值（`vsound_check` 已按原版数值查过口径），以及 NPC 会不会真的开主炮（AI 行为，与音效无关）。
 
 ## 没验证的
 

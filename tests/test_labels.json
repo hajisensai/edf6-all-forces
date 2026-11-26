@@ -6135,6 +6135,12 @@
    ],
    "scripts": []
   },
+  "vehsound_gun": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "view_clip_check": {
    "labels": [
     "plugin-native"

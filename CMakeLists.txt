@@ -2939,6 +2939,15 @@ foreach(rtt 250 600)
     endforeach()
 endforeach()
 
+# The vehicles' guns heard (src/vehsound.cpp, the production source with the game's readers and voices replaced): a 403's
+# rail gun reported once a shot (Debug's report_rail), its stock FireSe held and given back; no game needed.
+add_executable(vehsound_gun_test EXCLUDE_FROM_ALL tests/vehsound_gun_test.cpp)
+target_include_directories(vehsound_gun_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(vehsound_gun_test PRIVATE edf6common user32)
+target_compile_options(vehsound_gun_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks vehsound_gun_test)
+add_test(NAME vehsound_gun COMMAND vehsound_gun_test)
+
 # The BMPT's twin barrels in turn (src/twin_cadence.h; docs/feedback-2026-10-21-bmpt-fire.md): the pure cadence against a
 # model of the native cooldown, and its EDF.dll fields (the shot's FireInterval -> cooldown, the update's countdown).
 add_executable(twin_cadence_test EXCLUDE_FROM_ALL tests/twin_cadence_test.cpp)
