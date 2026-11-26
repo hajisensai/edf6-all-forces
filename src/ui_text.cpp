@@ -1,6 +1,8 @@
 // ui_text.h: GDI labels and the sprites as D3D11 textures.
 #include "ui_text.h"
 
+#include "text_fit.h"
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -78,16 +80,82 @@ struct Labels::Impl {
         ComPtr<ID3D11ShaderResourceView> view;
         float w,h;
     };
+    // A fitted line (DrawFit): the request and how text_fit.h laid it, kept as the labels are (measured by GDI once).
+    struct Laying {
+        std::wstring text;
+        float size,maxW,minSize,size2,scale;
+        bool bold;
+        int lang;
+        unsigned used;
+        textfit::Laid laid;
+    };
+    static constexpr std::size_t kLayings=192;
     ID3D11Device* device=nullptr;   // the device the textures are of (a new one: all dropped)
     std::vector<Entry> entries;
+    std::vector<Laying> layings;
     ComPtr<ID3D11ShaderResourceView> disc,ring;
 
     void Bind(ID3D11Device* d) noexcept {
         if(d==device)return;
         entries.clear();
+        layings.clear();
         disc.Reset();
         ring.Reset();
         device=d;
+    }
+
+    // The partial extents of text[0, n) in a font `px` target pixels tall, in pixels; false when GDI fails.
+    static bool Extents(const wchar_t* text,int n,int px,bool bold,hudtext::Lang lang,int* ends) noexcept {
+        HDC dc=CreateCompatibleDC(nullptr);
+        if(!dc)return false;
+        HFONT font=CreateFontW(-px,0,0,0,bold ? FW_BOLD : FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_TT_PRECIS,
+                               CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH|FF_DONTCARE,FaceFor(lang));
+        bool ok=false;
+        if(font) {
+            HGDIOBJ was=SelectObject(dc,font);
+            SIZE size{};
+            ok=GetTextExtentExPointW(dc,text,n,0,nullptr,ends,&size)!=0;
+            SelectObject(dc,was);
+            DeleteObject(font);
+        }
+        DeleteDC(dc);
+        return ok;
+    }
+    static int PixelsOf(float size,float scale) noexcept {
+        const int px=static_cast<int>(std::lround(size*scale));
+        return px<6 ? 6 : px;
+    }
+    // How `text` goes into `fit` (cached; null when it cannot be laid: then it is drawn cut at the width).
+    const textfit::Laid* Lay(const wchar_t* text,float size,bool bold,hudtext::Lang lang,float scale,const Fit& fit,
+                             unsigned frame) noexcept {
+        for(Laying& l:layings)
+            if(l.size==size && l.maxW==fit.maxW && l.minSize==fit.minSize && l.size2==fit.size2 && l.scale==scale &&
+               l.bold==bold && l.lang==static_cast<int>(lang) && l.text==text) {
+                l.used=frame;
+                return &l.laid;
+            }
+        Laying l{};
+        try { l.text=text; } catch(...) { return nullptr; }
+        l.size=size;l.maxW=fit.maxW;l.minSize=fit.minSize;l.size2=fit.size2;l.scale=scale;l.bold=bold;
+        l.lang=static_cast<int>(lang);l.used=frame;
+        const auto measure=[&](const wchar_t* s,int n,float at,float* ends) noexcept -> bool {
+            int px[textfit::kMostChars];
+            if(n<=0 || n>textfit::kMostChars || !Extents(s,n,PixelsOf(at,scale),bold,lang,px))return false;
+            for(int i=0;i<n;++i)ends[i]=static_cast<float>(px[i])/scale;
+            return true;
+        };
+        const textfit::Request r{size,fit.maxW,fit.minSize,fit.size2};
+        if(!textfit::Lay(text,static_cast<int>(std::wcslen(text)),r,measure,&l.laid))return nullptr;
+        std::size_t at=layings.size();
+        if(at>=kLayings) {
+            for(std::size_t i=0;i<layings.size();++i)
+                if(layings[i].used!=frame && (at==layings.size() || layings[i].used<layings[at].used))at=i;
+            if(at==layings.size())return nullptr;
+            layings[at]=std::move(l);
+            return &layings[at].laid;
+        }
+        try { layings.push_back(std::move(l)); } catch(...) { return nullptr; }
+        return &layings.back().laid;
     }
 
     // `text` rasterized `px` target pixels tall: its view and size in pixels; false when GDI or D3D fails.
@@ -196,8 +264,15 @@ ID3D11ShaderResourceView* Labels::Ring(uigpu::Painter& paint) noexcept {
 
 Label Labels::Draw(uigpu::Painter& paint,const wchar_t* text,float x,float y,float size,std::uint32_t argb,Align align,
                    bool bold,hudtext::Lang lang,unsigned frame,float maxW,bool shadow) noexcept {
-    const Label l=Get(paint,text,size,bold,lang,frame);
-    if(!l.view || !(l.w>0.f))return l;
+    Fit fit;
+    fit.maxW=maxW;
+    return DrawFit(paint,text,x,y,size,argb,align,bold,lang,frame,fit,shadow);
+}
+
+namespace {
+// One row: `l` drawn with its anchor at (x, y), cut at `maxW` (0: not) from the anchor's side; its width as drawn.
+float Row(uigpu::Painter& paint,const Label& l,float x,float y,std::uint32_t argb,Align align,float maxW,bool shadow) noexcept {
+    if(!l.view || !(l.w>0.f))return 0.f;
     float x0=align==Align::left ? x : align==Align::centre ? x-l.w*0.5f : x-l.w;
     float cx0=-1e9f,cx1=1e9f;
     if(maxW>0.f && l.w>maxW) {
@@ -208,12 +283,49 @@ Label Labels::Draw(uigpu::Painter& paint,const wchar_t* text,float x,float y,flo
     if(shadow)paint.ImageClipped(l.view,x0+1.5f,y+1.5f,x0+1.5f+l.w,y+1.5f+l.h,0.f,0.f,1.f,1.f,
                                  ((argb>>24)*3/4)<<24,cx0+1.5f,-1e9f,cx1+1.5f,1e9f);
     paint.ImageClipped(l.view,x0,y,x0+l.w,y+l.h,0.f,0.f,1.f,1.f,argb,cx0,-1e9f,cx1,1e9f);
-    return l;
+    return maxW>0.f && l.w>maxW ? maxW : l.w;
+}
+}  // namespace
+
+Label Labels::DrawFit(uigpu::Painter& paint,const wchar_t* text,float x,float y,float size,std::uint32_t argb,Align align,
+                      bool bold,hudtext::Lang lang,unsigned frame,const Fit& fit,bool shadow) noexcept {
+    if(!impl_ || !text || !*text)return Label{};
+    const Label whole=Get(paint,text,size,bold,lang,frame);
+    // no width asked, or it fits as it is (the texture's 2-pixel margins aside): the line as it is
+    const float scale=paint.Scale()>0.f ? paint.Scale() : 1.f;
+    if(!(fit.maxW>0.f) || (whole.view && whole.w-4.f/scale<=fit.maxW)) {
+        Row(paint,whole,x,y,argb,align,fit.maxW,shadow);
+        return whole;
+    }
+    const textfit::Laid* laid=paint.Device() ? impl_->Lay(text,size,bold,lang,scale,fit,frame) : nullptr;
+    if(!laid) {   // not laid (too long, GDI failed): cut at the width
+        Row(paint,whole,x,y,argb,align,fit.maxW,shadow);
+        return whole;
+    }
+    Label out{};
+    for(int k=0;k<laid->rows && k<2;++k) {
+        const textfit::Row& row=laid->row[k];
+        wchar_t line[textfit::kMostChars+2];
+        int n=0;
+        for(int i=0;i<row.len && n<textfit::kMostChars;++i)line[n++]=text[row.from+i];
+        if(row.ellipsis)line[n++]=textfit::kEllipsis;
+        line[n]=0;
+        if(!n)continue;
+        const Label l=Get(paint,line,laid->size,bold,lang,frame);
+        // one row shrunk stays centred on the line it was given; two rows at the tops asked
+        const float top=laid->rows==2 ? fit.rowY[k] : y+(size-laid->size)*0.5f;
+        const float w=Row(paint,l,x,top,argb,align,fit.maxW,shadow);
+        if(!out.view)out.view=l.view;
+        if(w>out.w)out.w=w;
+        if(top-y+l.h>out.h)out.h=top-y+l.h;
+    }
+    return out;
 }
 
 void Labels::Reset() noexcept {
     if(!impl_)return;
     impl_->entries.clear();
+    impl_->layings.clear();
     impl_->disc.Reset();
     impl_->ring.Reset();
     impl_->device=nullptr;
