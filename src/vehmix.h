@@ -10,32 +10,6 @@ namespace crew::vmix {
 inline float Clamp01(float x) noexcept { return x<0.0f ? 0.0f : x>1.0f ? 1.0f : x; }
 inline float Smooth(float x) noexcept { x=Clamp01(x);return x*x*(3.0f-2.0f*x); }
 
-// --- The engine ---
-// The revs (0 idle .. 1 governed top): the load (the stock engine's own, CarBase +0x1A80: how hard it is driven) brings
-// them up at once, the speed holds them (a tank at speed in a low gear is not idling). The engine's pitch rises
-// kRevPitch-fold from idle to the top, each layer as the load says: idle fades out as the load fades the load layer in.
-struct EngineClass { float topSpeed,revPitch,idleGain,loadGain; };
-constexpr EngineClass kHeavy{16.0f,2.3f,0.55f,1.0f},kLight{22.0f,2.6f,0.5f,0.9f},kBike{30.0f,3.2f,0.45f,0.9f};
-inline float Revs(float speed,float load,const EngineClass& c) noexcept {
-    return Clamp01(0.55f*Clamp01(load)+0.6f*Clamp01(std::fabs(speed)/c.topSpeed));
-}
-struct EngineMix { float idle,load,ratio; };
-// `on` 0..1: the engine starting / stopping (its share of running).
-inline EngineMix Engine(float revs,float load,float on,const EngineClass& c) noexcept {
-    const float l=Smooth(0.35f*Clamp01(load)+0.75f*revs);
-    EngineMix m;
-    m.idle=on*c.idleGain*(1.0f-0.6f*l);
-    m.load=on*c.loadGain*l;
-    m.ratio=(1.0f+(c.revPitch-1.0f)*revs)*(0.75f+0.25f*on);   // it winds up as it starts, down as it stops
-    return m;
-}
-// The tracks: silent standing, louder and faster with the speed (made at vsynth::kTrackSpeed).
-struct TrackMix { float gain,ratio; };
-inline TrackMix Tracks(float speed,float made) noexcept {
-    const float s=std::fabs(speed);
-    return TrackMix{0.7f*Smooth(s/3.0f)*(0.6f+0.4f*Clamp01(s/made)),0.35f+0.65f*s/made};
-}
-
 // --- The turret ---
 // `slew` the fastest of the aim's axes against their own top rate (0..1): its drive whines up with it.
 struct TurretMix { float gain,ratio; };
@@ -197,10 +171,10 @@ inline float Muffled(float dulled,float muffle) noexcept { return Clamp01(dulled
 
 // --- Hearing ---
 // Each group's level in the mix (times its ini volume and the game's own) and the distance it is heard at full within
-// (m), the rest falling off as Falloff says: the engine 1 / r beyond kEngineRef, the turret and the loader faster (their
-// sounds are small ones, heard from close by).
-constexpr float kEngineShare=0.6f,kTurretShare=0.5f,kReloadShare=0.7f;   // the guns' shares: kProfiles
-constexpr float kEngineRef=12.0f,kTracksRef=10.0f,kTurretRef=5.0f,kReloadRef=4.0f;
+// (m), the rest falling off as Falloff says: the turret and the loader fast (their sounds are small ones, heard from
+// close by). The engine and its running gear: sound_engine.h's events.
+constexpr float kTurretShare=0.5f,kReloadShare=0.7f;   // the guns' shares: kProfiles
+constexpr float kTurretRef=5.0f,kReloadRef=4.0f;
 constexpr float kTrackHalf=1.8f;   // m: a tank's track from its middle (an E551's half width): turning on the spot runs them
 // Gain at `d` m of a sound heard at full within `ref`, falling as (ref / d)^`fall` beyond.
 inline float Falloff(float d,float ref,float fall) noexcept { return d>ref ? std::pow(ref/d,fall) : 1.0f; }

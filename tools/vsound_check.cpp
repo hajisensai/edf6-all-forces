@@ -109,7 +109,7 @@ void Clips(const std::wstring& dir) {
         WriteWav(dir+L"\\"+kClipName[c]+L".wav",pcm[c],1);
     }
     // What each is for, in its sound.
-    double lowNear,highNear,lowFar,highFar,lowI,highI,lowL,highL,lowH,highH,lowLi,highLi;
+    double lowNear,highNear,lowFar,highFar;
     const std::vector<float> nearX=Floats(pcm[kClipGunNear]),farX=Floats(pcm[kClipGunFar]);
     Bands(nearX,0,s::kRate/2,120.0f,2000.0f,&lowNear,&highNear);
     Bands(farX,0,s::kRate/2,120.0f,2000.0f,&lowFar,&highFar);
@@ -120,32 +120,12 @@ void Clips(const std::wstring& dir) {
     sprintf_s(what,"the report far: the highs gone (over 2 kHz %.2f%% against near's %.1f%%), the rumble kept (under 120 Hz %.0f%%)",highFar*100.0,
               highNear*100.0,lowFar*100.0);
     Check(highFar<highNear*0.2 && lowFar>0.2,what);
-    Bands(Floats(pcm[kClipHeavyIdle]),0,s::kRate*2,120.0f,2000.0f,&lowI,&highI);
-    Bands(Floats(pcm[kClipHeavyLoad]),0,s::kRate*2,120.0f,2000.0f,&lowL,&highL);
-    sprintf_s(what,"the heavy engine: its load layer brighter than its idle (over 2 kHz %.1f%% against %.1f%%)",highL*100.0,highI*100.0);
-    Check(highL>highI,what);
-    Bands(Floats(pcm[kClipHeavyIdle]),0,s::kRate*2,120.0f,2000.0f,&lowH,&highH);
-    Bands(Floats(pcm[kClipLightIdle]),0,s::kRate*2,120.0f,2000.0f,&lowLi,&highLi);
-    sprintf_s(what,"the heavy idle deeper than the light one (under 120 Hz %.0f%% against %.0f%%)",lowH*100.0,lowLi*100.0);
-    Check(lowH>lowLi,what);
 }
 
 // --- The rules ---
 void Rules() {
     using namespace vmix;
     bool ok=true;
-    float last=-1.0f;
-    for(float sp=0.0f;sp<=30.0f;sp+=1.0f){const float r=Revs(sp,0.3f,kHeavy);ok=ok && r>=last && r>=0.0f && r<=1.0f;last=r;}
-    last=-1.0f;
-    for(float l=0.0f;l<=1.0f;l+=0.1f){const float r=Revs(5.0f,l,kHeavy);ok=ok && r>=last;last=r;}
-    Check(ok,"the revs rise with the speed and with the load, 0..1");
-    const EngineMix idle=Engine(Revs(0.0f,0.0f,kHeavy),0.0f,1.0f,kHeavy),full=Engine(Revs(16.0f,1.0f,kHeavy),1.0f,1.0f,kHeavy);
-    const EngineMix off=Engine(0.0f,0.0f,0.0f,kHeavy);
-    Check(idle.idle>full.idle && full.load>idle.load && std::fabs(idle.ratio-1.0f)<1e-4f && full.ratio>2.0f && full.ratio<=kHeavy.revPitch+1e-4f,
-          "the engine: idle layer at rest at its own pitch, the load layer and the pitch up driven hard");
-    Check(off.idle==0.0f && off.load==0.0f,"the engine off: silent");
-    Check(Tracks(0.0f,s::kTrackSpeed).gain==0.0f && Tracks(8.0f,s::kTrackSpeed).gain>Tracks(2.0f,s::kTrackSpeed).gain &&
-          std::fabs(Tracks(s::kTrackSpeed,s::kTrackSpeed).ratio-1.0f)<1e-4f,"the tracks: silent standing, louder with speed, as made at their speed");
     Check(Turret(0.0f).gain==0.0f && Turret(1.0f).gain>Turret(0.3f).gain && Turret(0.3f).gain>0.0f && Turret(1.0f).ratio>Turret(0.0f).ratio,
           "the turret: silent still, louder and higher slewing faster");
     const GunMix g20=Gun(20.0f),g60=Gun(kGunNear),g700=Gun(kGunFar),g1500=Gun(1500.0f);
@@ -357,33 +337,22 @@ void Scenario(const std::wstring& dir) {
     std::vector<float> out(static_cast<std::size_t>(frames*spf),0.0f);
     std::vector<float> clip[kClipCount];
     for(int c=0;c<kClipCount;++c)clip[c]=Floats(pcm[c]);
-    Player idle{&clip[kClipHeavyIdle]},load{&clip[kClipHeavyLoad]},tracks{&clip[kClipTracks]},turret{&clip[kClipTurret]};
-    float on=0.0f,speed=0.0f,engineLoad=0.0f,slew=0.0f,gIdle=0.0f,gLoad=0.0f,gTracks=0.0f,gTurret=0.0f;
+    Player turret{&clip[kClipTurret]};
+    float slew=0.0f,gTurret=0.0f;
     const float camera=14.0f;   // m: the riding camera behind the tank
-    const float atEngine=vmix::Falloff(camera,kEngineRef,1.0f),atTracks=vmix::Falloff(camera,kTracksRef,1.0f);
     const float atTurret=vmix::Falloff(camera,kTurretRef,1.2f),atLoader=vmix::Falloff(camera,kReloadRef,1.3f);
     bool moving=false;
     for(int f=0;f<frames;++f) {
         const float t=static_cast<float>(f)/60.0f;
-        // what the tank does: in at 0.5 s, idles, drives off at 3 s to 12 m/s by 7 s, slews its turret 7.5-9.5 s,
+        // what the tank does (its engine is War Thunder's, not made here): slews its turret 7.5-9.5 s,
         // fires at 10 s (its loader after), and a second tank fires 900 m off at 12 s
-        on=vec::Approach(on,t>0.5f ? 1.0f : 0.0f,1.0f/60.0f/1.2f);
-        const float wantLoad=t>3.0f && t<7.0f ? 0.9f : t>=7.0f ? 0.35f : 0.0f;
-        engineLoad+=(wantLoad-engineLoad)*0.05f;
-        speed=vec::Approach(speed,t>3.0f ? 12.0f : 0.0f,3.0f/60.0f);
         const float want=t>7.5f && t<9.5f ? 1.0f : 0.0f;
         slew=vec::Approach(slew,want,1.0f/60.0f/0.3f);
-        const EngineMix e=Engine(Revs(speed,engineLoad,kHeavy),engineLoad,on,kHeavy);
-        const TrackMix tr=Tracks(speed,s::kTrackSpeed);
         const TurretMix tu=Turret(slew);
-        const float ge=kEngineShare*atEngine*kPan,nIdle=ge*e.idle,nLoad=ge*e.load;
-        const float nTracks=kEngineShare*atTracks*kPan*tr.gain,nTurret=kTurretShare*atTurret*kPan*tu.gain;
+        const float nTurret=kTurretShare*atTurret*kPan*tu.gain;
         const std::size_t at=static_cast<std::size_t>(f*spf);
-        idle.Mix(out,at,static_cast<std::size_t>(spf),e.ratio,gIdle,nIdle);
-        load.Mix(out,at,static_cast<std::size_t>(spf),e.ratio,gLoad,nLoad);
-        tracks.Mix(out,at,static_cast<std::size_t>(spf),tr.ratio,gTracks,nTracks);
         turret.Mix(out,at,static_cast<std::size_t>(spf),tu.ratio,gTurret,nTurret);
-        gIdle=nIdle;gLoad=nLoad;gTracks=nTracks;gTurret=nTurret;
+        gTurret=nTurret;
         if(slew>kTurretMoving)moving=true;
         else if(moving && slew<kTurretStill){moving=false;OneShot(out,clip[kClipTurretStop],at,kTurretShare*atTurret*kPan*0.8f);}
     }
@@ -404,16 +373,16 @@ void Scenario(const std::wstring& dir) {
     char what[160];
     sprintf_s(what,"the scenario at full volume: peak %.2f of full scale (each ear; under 1: no clipping)",peak);
     Check(peak<1.0f && peak>0.3f,what);
-    const double engineRms=Rms(out,at(1.5f),at(2.5f)),gunRms=Rms(out,at(10.05f),at(10.35f));
-    sprintf_s(what,"the gun over the engine: %.1f dB louder in its first 0.3 s than the idle",20.0*std::log10(gunRms/engineRms));
-    Check(gunRms>engineRms*4.0,what);
+    const double turretRms=Rms(out,at(8.0f),at(9.0f)),gunRms=Rms(out,at(10.05f),at(10.35f));
+    sprintf_s(what,"the gun over the turret: %.1f dB louder in its first 0.3 s than the slewing",20.0*std::log10(gunRms/turretRms));
+    Check(gunRms>turretRms*4.0,what);
     std::vector<std::int16_t> pcmOut(out.size()*2);
     for(std::size_t i=0;i<out.size();++i)
         pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));
     WriteWav(dir+L"\\scenario_tank.wav",pcmOut,2);
 }
 
-// The small guns' scenario: a bike riding by (its engine revving up), a Kepler-like gatling firing a 2 s burst at 30 m
+// The small guns' scenario: a Kepler-like gatling firing a 2 s burst at 30 m
 // and stopping (its tail), a machine gun's short bursts, an autocannon's rounds, a missile launched, all as GunStep
 // plays them (the loops at their burst ratio, the rounds one-shots, the cases near).
 void SmallScenario(const std::wstring& dir) {
@@ -424,22 +393,15 @@ void SmallScenario(const std::wstring& dir) {
     std::vector<float> out(static_cast<std::size_t>(frames*spf),0.0f);
     std::vector<float> clip[kClipCount];
     for(int c=0;c<kClipCount;++c)clip[c]=Floats(pcm[c]);
-    Player idle{&clip[kClipBikeIdle]},load{&clip[kClipBikeLoad]},gat{&clip[kClipGatling]},mg{&clip[kClipMg]},brass{&clip[kClipBrass]};
-    float on=0.0f,speed=0.0f,bikeLoad=0.0f,gI=0.0f,gL=0.0f,gG=0.0f,gM=0.0f,gB=0.0f;
-    const float gun=30.0f,bikeAt=10.0f;
+    Player gat{&clip[kClipGatling]},mg{&clip[kClipMg]},brass{&clip[kClipBrass]};
+    float gG=0.0f,gM=0.0f,gB=0.0f;
+    const float gun=30.0f;
     const float atGun=Falloff(gun,kRapidRef,1.0f),atBrass=Falloff(8.0f,kReloadRef,1.3f);
     bool wasGat=false,wasMg=false;
     auto at=[&](float sec){ return static_cast<std::size_t>(sec*static_cast<float>(s::kRate)); };
     for(int f=0;f<frames;++f) {
         const float t=static_cast<float>(f)/60.0f;
-        on=vec::Approach(on,1.0f,1.0f/60.0f/1.2f);
-        bikeLoad+=((t>1.0f && t<4.0f ? 1.0f : 0.2f)-bikeLoad)*0.05f;
-        speed=vec::Approach(speed,t>1.0f && t<4.0f ? 25.0f : 5.0f,6.0f/60.0f);
-        const EngineMix e=Engine(Revs(speed,bikeLoad,kBike),bikeLoad,on,kBike);
-        const float ge=kEngineShare*Falloff(bikeAt,kEngineRef,1.0f)*kPan;
         const std::size_t a=static_cast<std::size_t>(f*spf),n=static_cast<std::size_t>(spf);
-        idle.Mix(out,a,n,e.ratio,gI,ge*e.idle);load.Mix(out,a,n,e.ratio,gL,ge*e.load);
-        gI=ge*e.idle;gL=ge*e.load;
         const bool gatFiring=t>4.0f && t<6.0f,mgFiring=(t>7.0f && t<7.6f) || (t>8.0f && t<8.5f);
         const float nG=gatFiring ? kRapidShare*atGun*kPan : 0.0f,nM=mgFiring ? kRapidShare*atGun*kPan : 0.0f;
         const float nB=gatFiring || mgFiring ? kBrassShare*atBrass*kPan : 0.0f;
@@ -461,9 +423,9 @@ void SmallScenario(const std::wstring& dir) {
     char what[160];
     sprintf_s(what,"the small guns' scenario at full volume: peak %.2f of full scale (under 1: no clipping)",peak);
     Check(peak<1.0f && peak>0.2f,what);
-    const double bike=Rms(out,at(0.5f),at(1.0f)),burst=Rms(out,at(4.5f),at(5.5f));
-    sprintf_s(what,"the gatling over the bike's idle: %.1f dB louder",20.0*std::log10(burst/bike));
-    Check(burst>bike*2.0,what);
+    const double before=Rms(out,at(0.5f),at(1.0f)),burst=Rms(out,at(4.5f),at(5.5f));
+    sprintf_s(what,"the gatling's burst heard (rms %.3f), nothing before it (%.4f)",burst,before);
+    Check(burst>0.01 && before<1e-6,what);
     std::vector<std::int16_t> pcmOut(out.size()*2);
     for(std::size_t i=0;i<out.size();++i)
         pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));

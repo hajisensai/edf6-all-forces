@@ -4,9 +4,7 @@
 //  - Loops are made periodic by construction: their excitation (pulse trains placed modulo the loop, noise tables of the
 //    loop's length) is periodic, and every filter is run round the loop twice, the first time only to reach its steady
 //    state (Steady): the last sample runs into the first as any other two do, no cross-fade, no swell.
-//  - The engine loops are made at their idle (playback rate 1); the mixer raises the rate with the revs. Each engine has
-//    two layers at the same pitch, faded across by the load: idle (the firing pulses through the exhaust's resonances, a
-//    little knock) and load (the same pulses harder, the exhaust's roar, the turbo's whistle on the heavy one).
+//  - No engine nor tracks here: those are War Thunder's layered recordings (sound_engine.h).
 //  - One-shots are made whole (Normalized) and start on their first sample.
 #pragma once
 #include <cmath>
@@ -77,92 +75,6 @@ template<class Shape> void AddWrapped(Wave& x,int at,float len,Shape shape) {
         const int k=((at+i)%n+n)%n;
         x[static_cast<std::size_t>(k)]+=shape(static_cast<float>(i)/static_cast<float>(kRate));
     }
-}
-
-// --- The engines ---
-// What one engine is: the firing rate its idle makes (Hz: rpm / 60 x cylinders / 2), its cylinders (each fires a little
-// differently: the engine's lope), its exhaust's two resonances, how much low rumble, knock and turbo whistle.
-struct EngineSpec { float firing; int cylinders; float res1,res2,rumble,knock,whistle; std::uint32_t seed; };
-// A V12 tank diesel (the E551s, the Titan, the Kepler): idle near 600 rpm, deep and lumpy, a turbo.
-constexpr EngineSpec kHeavyEngine{30.0f,12,85.0f,190.0f,1.0f,0.35f,1.0f,0x51u};
-// An inline-6 truck diesel (the Grape, the trucks): idle near 840 rpm, lighter and higher, no whistle to speak of.
-constexpr EngineSpec kLightEngine{42.0f,6,140.0f,330.0f,0.45f,0.5f,0.15f,0x77u};
-// A V-twin motorcycle's (the bikes, the sidecar): idle near 1500 rpm, two uneven beats, barking, no whistle.
-constexpr EngineSpec kBikeEngine{25.0f,2,160.0f,420.0f,0.3f,0.6f,0.0f,0xB1u};
-constexpr float kEngineLoopSec=2.0f;   // whole firings at all three rates (60, 84 and 50)
-
-// The firing pulses: each cylinder's own strength (fixed per cylinder) and a small jitter of each firing, every pulse a
-// short burst of pressure (decaying noise and a thump) wrapped round the loop.
-inline Wave Firings(const EngineSpec& e,int n,float hard) {
-    Wave x(static_cast<std::size_t>(n),0.0f);
-    Rng r(e.seed);
-    float cyl[16];
-    for(int c=0;c<e.cylinders && c<16;++c)cyl[c]=0.8f+0.4f*r.Uni();
-    const float period=static_cast<float>(kRate)/e.firing;
-    const int firings=static_cast<int>(std::lround(static_cast<float>(n)/period));
-    Rng burst(e.seed*7u+3u);
-    for(int k=0;k<firings;++k) {
-        const float a=cyl[k%e.cylinders]*(0.9f+0.2f*r.Uni());
-        const int at=static_cast<int>(static_cast<float>(k)*period+0.06f*period*r.Next());
-        const float decay=0.004f+0.004f*hard;
-        AddWrapped(x,at,0.03f,[&](float t){ return a*(burst.Next()*std::exp(-t/decay)+1.6f*std::exp(-t/0.003f)); });
-    }
-    return x;
-}
-
-// One engine layer (see the top): `load` false the idle one, true the load one.
-inline Wave EngineLayer(const EngineSpec& e,bool load) {
-    const int n=Samples(kEngineLoopSec);
-    const Wave pulses=Firings(e,n,load ? 1.0f : 0.0f);
-    const Wave hiss=NoiseTable(n,e.seed+11u),hum=NoiseTable(n,e.seed+23u);
-    // The firing envelope (the pulses' level, smoothed): the roar and the rumble pulse with it.
-    Wave env=Steady(pulses,[lp=Lp(e.firing*0.7f)](float v) mutable { return lp.Run(std::fabs(v)); });
-    float envPeak=Peak(env);
-    for(auto& v:env)v/=envPeak>1e-9f ? envPeak : 1.0f;
-    const Wave body=Steady(pulses,[r1=Bp(e.res1,1.8f),r2=Bp(e.res2,2.5f),lp=Lp(1400.0f)](float v) mutable {
-        return 1.6f*r1.Run(v)+0.9f*r2.Run(v)+0.35f*lp.Run(v);
-    });
-    const Wave knock=Steady(pulses,[bp=Bp(2600.0f,1.4f),hp=Hp(1500.0f)](float v) mutable { return hp.Run(bp.Run(v)); });
-    const Wave rumble=Steady(hum,[a=Lp(55.0f),b=Lp(55.0f)](float v) mutable { return b.Run(a.Run(v)); });
-    const Wave roar=Steady(hiss,[a=Lp(700.0f),b=Hp(70.0f)](float v) mutable { return b.Run(a.Run(v)); });
-    // The turbo's whistle: a narrow band of noise round 2.3 kHz over a faint tone, the tone in whole cycles of the loop.
-    const Wave whistleBand=Steady(hiss,[bp=Bp(2300.0f,30.0f)](float v) mutable { return bp.Run(v); });
-    Wave x(static_cast<std::size_t>(n));
-    for(int i=0;i<n;++i) {
-        const std::size_t k=static_cast<std::size_t>(i);
-        const float t=static_cast<float>(i)/static_cast<float>(kRate);
-        const float e1=env[k];
-        float v=body[k]+(load ? 0.7f : 0.3f)*e.knock*knock[k]*4.0f+e.rumble*rumble[k]*14.0f*(0.6f+0.4f*e1);
-        if(load)v+=0.9f*roar[k]*(0.5f+0.5f*e1)*3.0f+
-                   e.whistle*(0.35f*whistleBand[k]*6.0f+0.05f*std::sin(kTau*2300.0f*t));
-        x[k]=v;
-    }
-    // The pressure pulses push one way: the offset they leave taken out (a high-pass round the loop, under the firing).
-    x=Steady(x,[hp=Hp(20.0f)](float v) mutable { return hp.Run(v); });
-    return Normalized(std::move(x),1.0f);
-}
-
-// --- The tracks ---
-// A tank's tracks at kTrackSpeed: the links' clack (kLinkRate a second: a metal tick through two bands), every sixth a
-// road wheel's thud, the drive sprocket's grind under it all. The mixer plays it at speed / kTrackSpeed.
-constexpr float kTrackSpeed=8.0f,kLinkRate=30.0f,kTrackLoopSec=2.0f;
-inline Wave Tracks() {
-    const int n=Samples(kTrackLoopSec);
-    Wave clicks(static_cast<std::size_t>(n),0.0f),thuds(static_cast<std::size_t>(n),0.0f);
-    Rng r(0x7AC4u),burst(0x99u);
-    const int links=static_cast<int>(kTrackLoopSec*kLinkRate);
-    for(int k=0;k<links;++k) {
-        const int at=static_cast<int>((static_cast<float>(k)+0.25f*r.Next())*static_cast<float>(n)/static_cast<float>(links));
-        const float a=0.6f+0.4f*r.Uni();
-        AddWrapped(clicks,at,0.012f,[&](float t){ return a*burst.Next()*std::exp(-t/0.0025f); });
-        if(k%6==0)AddWrapped(thuds,at,0.08f,[&](float t){ return (0.7f+0.3f*a)*std::sin(kTau*70.0f*t)*std::exp(-t/0.022f); });
-    }
-    const Wave grindIn=NoiseTable(n,0x5EEDu);
-    const Wave clack=Steady(clicks,[a=Bp(1700.0f,3.0f),b=Bp(3500.0f,4.0f)](float v) mutable { return 2.0f*a.Run(v)+1.2f*b.Run(v); });
-    const Wave grind=Steady(grindIn,[a=Lp(380.0f),b=Hp(60.0f)](float v) mutable { return b.Run(a.Run(v)); });
-    Wave x(static_cast<std::size_t>(n));
-    for(std::size_t i=0;i<x.size();++i)x[i]=clack[i]+thuds[i]+0.9f*grind[i];
-    return Normalized(std::move(x),1.0f);
 }
 
 // --- The turret ---
