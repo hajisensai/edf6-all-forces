@@ -108,13 +108,26 @@
 - **来袭**（WT `art_shells_incoming` / `bombs_incoming`）：下落陡（竖直速度 < −0.5 × 水平速度）、有爆炸半径（炸弹不要求）的弹，按当前速度和加速度解二次方程算落到耳朵高度的时间和落点；落点在 300 m 内、离落地不到 2.3 s（炮弹）/ 2.0 s（炸弹，= 素材长度）时播一次。电平：master +6、模块 +4、组 +6、art bus −16（炸弹另 +6 GainEffect）；距离曲线 0 m 0 → 600.28 m −80，EQ 22 kHz → 103.1 m 12 kHz → 400 m 1.6 kHz，按落点距离算；70 % 概率；maxVoices 炮弹 4 / 炸弹 1，cooldown 200 ms，都抄 WT。同一发 4 s 内只判一次。声音放在弹当前位置。
   - ours：300 m 的判定半径、陡度阈值、提前量用素材长度。
 
+## 命中装甲 / 跳弹 / 未击穿（`src/blastsound.cpp` `HitSeen`，ini `ExplosionVolume`；逆向见 `docs/hit-sound-re.md`）
+
+- 接管点：每发弹的命中都由 0x230CA0 记录（参数里有被击物体的 body id、命中点、面法线）。4 个调用点（飞行步 0x2321B0 的 0x23238F / 0x23256D，首帧扫掠 0x233CB0 的 0x23403B / 0x234210）改指 `HitSeen`：先跑原版记录，再用 0x108260 取物体，按 RTTI 层级查装甲白名单（载具、机器人及其装备、运输船、移动要塞、UFO / 母舰 / 时间船及其部件、德洛伊、无人机、轰炸机、发电塔、哨戒炮、诱饵等 35 个类，按 vtable 缓存）。
+- 普通弹（SolidBullet01 / Rail，或没有爆炸半径的 SolidExp / Grenade）打到装甲：
+  - 按类定口径：SolidBullet01 是子弹，其余是重弹（EDF 没有口径字段）。
+  - 按 AmmoIsPenetration（core+0xAF4 0x100）定击穿；按入射角定跳弹：|cos| < 0.26（偏离法线约 75°，ours）且没击穿。
+  - 子弹 → `hit_mgun`（跳弹 `rico_mgun`）；重弹 → `hit_big_unpierce`（跳弹 `rico`，击穿 `hit_pierce`）。
+  - 飞行步里命中后，同一次调用会在 0x2325EE 放原版 AmmoHitSe（一帧一次；条件 0x400 置位、0x20 清、击穿 0x100 清或带 0x4、core+0xB04 ≠ 3）。`HitSeen` 按同一条件给这发弹打标，`Take` 见标就拿掉原版那一声：原版命中声和我们的只响一个。首帧扫掠那两处后面没有原版命中声，只放我们的。
+- 爆炸弹打到装甲：爆炸照旧（kBlast*），按档在上面叠 `hit_small_unpierce`（小档）/ `hit_aphe_mid`（中档）/ `hit_aphe_big`（大档、重磅档）的冲击层和远处层。
+- 数值抄 WT：hit_mgun master −4、tank_hit_bullet −6 +10、0 m 0 → 500 m −80、0–200 m 触发、maxVoices 4；rico_mgun +3.84 半音、bullet_whiz 曲线 0 / 11.7 m −3.9 / 23.5 m −11.2 / 60.9 m −16.3 / 98.4 m −80；unpierce gain −22、冲击层 −5 +10、0 m +6 → 23.8 m −2 → 47.7 m −11.6 → 124 m −16.8 → 200.8 m −80、dull 层 0.18 / 0.2 s 起、−6 半音；hit_big master +6 gain −16、冲击层 0 → 99.5 m −2.9 → 500 m −80、远处层 0.19 s 起 −80 → 100 m +10 → 500 m −80；spatialiser 4 m / 80°；maxVoices 3。
+  - ours：EQ 用低通近似（22 kHz → 500 m 4 kHz）、跳弹角阈值、rico 两层的距离曲线、pierce 借用 unpierce 的数值（WT 的 hit_ap 是车内玩家自己被击穿的声音）、各类的 cooldown 和 life。
+- 不接管的：没有物体（打地面、建筑：原版地面材质声照旧）、物体不在白名单（虫、人、步兵）、激光 / 火焰 / 导弹等别的弹类、模块没武装、出错。被击目标自己的受击声（UFO 0x52E110 / 0x5038D0、移动要塞 0x4C60E0 在伤害够大或死亡时放自己的预设）是目标的反应，不是弹的命中声，保留。
+
 ## 炮塔与装填（`src/jetaudio.cpp` `kWtFor`）
 
 - 原来合成的 `turret`（炮塔转动循环）、`turret_stop`、`reload_breech_open`、`reload_eject`、`reload_load`、`reload_shell_ram`、`reload_close` 换成 WT 录音：`turret_turn_loop_1`、`turret_klank_01..03`、`reloading_open` / `reloading_eject_shell` / `reloading_insert_projectile`（推弹和分装的推弹丸共用）/ `reloading_close` 各 4 个变体。
 - 这些 clip 不是 FMOD 事件，没有 WT 的 dB 可抄；载具的混音是按各 clip 的 `kClipPeak` 定的，所以一组按一个增益拉到那个峰值（ours）。单发轮流用变体，循环用第一个（插件拷一份已调好电平的）。
 - 玩家自己放的 `EDF6VehicleCrew_veh_<名字>.wav` 仍然优先。组没读到时（启动日志那一行 missing）这个 clip 不出声，不回到合成音。
 - 时机、音量组（`VehicleTurretVolume` / `VehicleReloadVolume`）、转速调音高都不变，ini 键的含义不变。
-- `reload_charge`（装药模块）、`reload_primer`（底火）WT 素材里没有对应的，仍是合成音。
+- `reload_charge`（装药模块）、`reload_primer`（底火）WT 素材里没有对应的，仍是合成音。已在 War Thunder 全部 bank（`D:\Steam\steamapps\common\War Thunder\sound\*.bank`，含 masterbank.strings）按名字扫过 primer / propellant / powder / charge：只有步兵语音的 melee_charge、海战的 depth_charges 和 KV-220 引擎的 charger loop，坦克装填只有 open / eject / insert / close 和若干枪械的 reload。
 
 ## 联机
 
@@ -125,7 +138,6 @@
 
 用户也说了喷气机和车辆声做得不好。炮声、爆炸、掠过 / 来袭、炮塔和装填已换成 WT 素材，下面这些没做：
 - 喷气机按转速分层、地面载具引擎的 rpm / load 分层 loop：**给 mod 作者的 FMOD 工程里没有引擎录音**。元数据引用了 `/engines_new/jet` 等，但 Assets 只有 common / explosion / explosive / fx / tanks / weapons（15,783 个 wav，没有引擎）。没有素材就换不了，引擎仍是合成音。
-- 装甲命中 / 跳弹声：没有可靠办法区分「打在装甲上」和「打在地面 / 建筑上」，没做。
 
 ## 没验证的
 
