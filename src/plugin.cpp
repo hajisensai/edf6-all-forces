@@ -1412,6 +1412,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     wequip::InstallWeaponEquip();   // the 整备 weapons page's equip (weapon_equip.cpp): signatures only, no patch
+    InstallPackSwitch();    // the HQ's Q / E mission pack switch (pack_switch.cpp): before InstallRoomUi, which wraps its HQ hook
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
     InstallWorldMap();      // the mission select's list as the world map (worldmap.cpp: the select's update, draw, destructor)
     InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)

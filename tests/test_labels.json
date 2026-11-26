@@ -4160,6 +4160,18 @@
    ],
    "scripts": []
   },
+  "pack_switch": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "pack_switch_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": []
+  },
   "pause_clock_check": {
    "labels": [
     "plugin-native"

@@ -155,7 +155,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 # The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
 target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/ui_gpu.cpp src/ui_text.cpp src/armory.cpp src/armory_draw.cpp src/armory_presets.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp src/pack_switch.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
@@ -853,6 +853,12 @@ add_test(NAME weapon_records COMMAND weapon_records_test)
 add_executable(room_dialog_test tests/room_dialog_test.cpp)
 target_compile_options(room_dialog_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_dialog COMMAND room_dialog_test)
+# The HQ's mission pack switch, its pure side: the mode Q / E go to, the routine compiled into MAINSCRIPT, the keys'
+# edge (src/pack_switch_logic.h; src/pack_switch.cpp hooks with it), and its addresses against the real EDF.dll and
+# MAINSCRIPT.AS (tests/pack_switch_native_audit.py, skipped without the game).
+add_executable(pack_switch_test tests/pack_switch_test.cpp)
+target_compile_options(pack_switch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME pack_switch COMMAND pack_switch_test)
 # The PvP unit catalogue: the enemy rows a PvP player can be and their sides (src/pvp_units.h; src/pvp_units.inc is
 # written by tools/gen_pvp_units.py).
 add_executable(pvp_units_test tests/pvp_units_test.cpp)
@@ -1187,6 +1193,9 @@ set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_dialog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_dialog_native_audit.py")
 set_tests_properties(room_dialog_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # 武器页写槽所依据的代码（src/weapon_equip.cpp，tools/weapon_equip_sigs.py）与生成的武器数据对 EDF.dll / Root.cpk（没有游戏则跳过）。
+# The HQ's pack switch against EDF.dll and MAINSCRIPT.AS (src/pack_switch.cpp; skipped without the game).
+add_test(NAME pack_switch_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/pack_switch_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(pack_switch_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
