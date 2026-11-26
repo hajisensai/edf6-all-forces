@@ -149,6 +149,12 @@ Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain …
   - 27 个 5 s 窗口：one-shots dropped 全 0，busy 峰值 ≤ 5/160，loops 峰值 9/96、none free 全 0，限幅器 on（2 声道）；`stock_se_held` 全程 0。
   - 这一轮坦克只开了同轴机枪、场上没有爆炸弹：主炮、爆炸、来袭、装甲上的爆炸层没有触发，留给下一轮（坦克炮击 + 火箭 / 榴弹，打狂战士）。
   - 发现计数错位：`Take` 先看预设有没有 bank 再取标记，没声音的原版预设被记成 `stock_hit_kept`、标记留着过期，`stock_hit_taken` 恒为 0，证明不了「不两个都响」。已改成先取标记、再分「真起播」和「本来没声音」计数（见上一段）。
+- 第二轮（一次启动两段：`perfrun "blast:e602_berserker:4:12:0.3,warm=40" "blast,warm=30"`，各 90 s；DLL sha256 a2dff479…，loading 行 build 64dace3607 相符；两段约 58 fps）：
+  - 狂战士段 15 个窗口合计：hit_mgun 217、rico_mgun 15、hit_aphe_big 22（喀秋莎火箭打在狂战士上：爆炸上叠装甲层）、art_explosion_ground 40、`stock_blast_taken` 112、`stock_silent_armour` 855、`stock_hit_taken` 0、`stock_hit_kept` 0。
+  - 蚂蚁段：hit_mgun 394、rico_mgun 76（打到友军载具）、art_explosion_ground 22、passby 1、`stock_blast_taken` 64、`stock_hit_kept` 374（蚂蚁不是装甲：原版命中声照响，正确）、`stock_silent` 4467、`stock_silent_armour` 889、`stock_hit_taken` 0。
+  - 不双响：命中装甲的 1744 次里，原版预设全是「本来没声音」（`stock_silent_armour`），只响我们的；没有一次「原版真起播又被标成我们的」（`stock_hit_kept` 只出现在非装甲命中上）。爆炸：被顶替的 176 次原版爆炸声都没有起播，我们响 62 次，其余被爆炸预算丢掉（`kBlastBudget`：每档同时在响的至多 6 / 4 / 4 / 3 个，各有冷却与寿命；喀秋莎一次齐射十几发落在同一处），没有双响。
+  - 声部：one-shots dropped 全 0，busy 峰值 93 / 118 of 160，loops 峰值 38/96、none free 0，限幅器 on（2 声道）。`stock_se_held` 0。
+  - 没触发的：战雷主炮事件（这几段的 NPC 坦克是 403 电磁炮：`Bore::rail` 走插件自己的电磁炮声 `Report`，没有战雷事件；那条路原来不记 Debug，已补 `report_rail` / `report_other`）、榴弹炮（伤害统计里 NPC 榴弹炮一发没开）、来袭（喀秋莎火箭弹道平，没有陡落到耳边 300 m 内的弹）、hit_aphe_mid。
 
 ## 没验证的
 

@@ -460,6 +460,9 @@ void Report(const vmix::Profile& pf,const float* at,const float* vel,float gain)
     const vmix::GunMix m=vmix::Gun(p.distance);
     Later(pf.nearClip,p,gain*m.nearGain,0.0f);
     Later(pf.farClip,p,gain*m.farGain,0.0f);
+    // Debug's tally (jetaudio.h Note): the plugin's own report (the railgun's, a bore with no War Thunder event)
+    if(gain*m.nearGain>=0.002f || gain*m.farGain>=0.002f)
+        audio::Note(pf.bore==vmix::Bore::rail ? "report_rail" : "report_other",1,p.distance,HeardAt(p,gain*m.nearGain,1.0f));
 }
 void Cue(int clip,const float* at,const float* vel,float gain,float pitch) noexcept {
     SoundPlace p{};
