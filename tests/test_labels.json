@@ -2602,6 +2602,16 @@
    ],
    "scripts": []
   },
+  "game_launch": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/gamelaunch_test.py"
+   ]
+  },
   "game_lease": {
    "labels": [
     "cockpit",
