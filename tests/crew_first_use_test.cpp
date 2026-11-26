@@ -123,6 +123,7 @@ namespace thermal { void Tick(bool,unsigned) noexcept{unexpectedHook();++thermal
 void BigWorldProbe(void) noexcept{unexpectedHook();return;}
 void JetSound(unsigned char *) noexcept{unexpectedHook();return;}
 void JetSoundTick(void) noexcept{unexpectedHook();return;}
+void JetLeverFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LockSound(unsigned char *) noexcept{unexpectedHook();return;}
 void VehicleSound(unsigned char *) noexcept{unexpectedHook();return;}
 void ReloadConfigIfChanged(void) noexcept{unexpectedHook();return;}

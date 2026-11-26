@@ -18,7 +18,8 @@ void RaiseFault() noexcept {
 ULONGLONG nowMs=1000,nowFrame=60;
 crew::Config config{};
 crew::jetsound::State flight{};
-bool playerState=false,npcState=false,occupied=false;
+bool playerState=false,npcState=false,occupied=false,leverHeard=false;
+crew::jetsound::Lever heardLever{};
 crew::jet::Jet npc{};
 // The voices open (by loop index) and what each was last set to: the engine's level is their sum.
 bool used[256]{};
@@ -46,6 +47,7 @@ PluginBody BodyOf(const void*) noexcept {return PluginBody::jet;}
 bool IsStoreWeapon(const unsigned char*) noexcept {return false;}
 namespace jetsound {
 bool PlayerState(const unsigned char*,State* out) noexcept {*out=flight;return playerState;}
+bool HeardLever(const unsigned char*,Lever* out) noexcept {*out=heardLever;return leverHeard;}
 }
 namespace jet {
 Jet* FindJet(const unsigned char*) noexcept {if(jetFaults)RaiseFault();return npcState ? &npc : nullptr;}
@@ -119,13 +121,27 @@ int main() {
     Check(Open()==0,"deleted or no-longer-updated aircraft is reaped");
     npc.lastStep=nowMs+16;frameOn();ResetJetSound();
     Check(Open()==0,"mission reset releases the remaining aircraft voices");
-    // Another player's jet online: no flight record here, someone in it: heard from its motion alone.
+    // A registered jet another machine runs (online): no flight record here. With no lever heard of it, someone in it
+    // idles, however fast it moves (no guess from its speed: 250 m/s lit the afterburner before).
     hasListener=true;   // (the reset let the camera go: the next frame's Tick places it again)
     npcState=false;playerState=false;occupied=true;
-    for(int i=0;i<60;++i){Put<float>(v,kPosition+8,static_cast<float>(i)*3.0f);frameOn();}
-    Check(Open()>0,"another player's moving jet is heard with no flight record of ours");
+    for(int i=0;i<300;++i){Put<float>(v,kPosition+8,static_cast<float>(i)*250.0f/60.0f);frameOn();}
+    Check(Open()>0 && std::fabs(rpm()-engine::AiRpm(engine::kJetIdle))<1.0f && sounds[0].spool.wep<0.01f,
+          "another machine's fast jet, no lever heard: idling, no afterburner from its speed");
+    // Its lever heard (jet_lever_net.cpp): the engine and the afterburner follow it, as ours.
+    // (Back by the camera and still: what is heard is the lever, not the motion.)
+    Put<float>(v,kPosition+8,0.0f);
+    leverHeard=true;heardLever={1.0f,false,false};
+    for(int i=0;i<300;++i)frameOn();
+    Check(rpm()>engine::AiRpm(engine::kJetIdle)+300.0f && sounds[0].spool.wep>0.99f,"its heard lever full: spooled up, the afterburner lit");
+    heardLever={0.55f,false,false};
+    for(int i=0;i<300;++i)frameOn();
+    Check(sounds[0].spool.wep<0.01f,"its heard lever at cruise: the afterburner out");
+    // An unmanned one (a drone) is heard by its lever alone.
     occupied=false;frameOn();
-    Check(Open()==0,"...and silent once nobody is in it");
+    Check(Open()>0,"an empty jet with its lever heard still sounds");
+    leverHeard=false;frameOn();
+    Check(Open()==0,"...and silent once nobody is in it and no lever is heard");
     ResetJetSound();
     const auto fast=jetsound::For({true,true,false,false,1.0f,150.0f});
     const auto taxi=jetsound::For({true,true,false,false,0.1f,3.0f});

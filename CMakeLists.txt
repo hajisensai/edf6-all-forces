@@ -85,6 +85,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/barrage.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/andryusha.cpp)
 # The sorties: one pass at the mark, then away (src/jet_sortie.cpp, src/heli.cpp HeliSortie, src/sortie_plan.h).
 target_sources(EDF6VehicleCrew PRIVATE src/jet_sortie.cpp)
+# A registered jet's engine lever online (src/jet_lever_net.cpp; the wire src/jet_lever_protocol.h, tests/jet_lever_net_test.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/jet_lever_net.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus_net.cpp)
@@ -2168,6 +2170,11 @@ add_executable(barrage_net_test EXCLUDE_FROM_ALL tests/barrage_net_test.cpp)
 target_compile_options(barrage_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks barrage_net_test)
 add_test(NAME barrage_net COMMAND barrage_net_test)
+# A registered jet's engine lever online (src/jet_lever_protocol.h): its byte, pacing and message, offline.
+add_executable(jet_lever_net_test EXCLUDE_FROM_ALL tests/jet_lever_net_test.cpp)
+target_compile_options(jet_lever_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks jet_lever_net_test)
+add_test(NAME jet_lever_net COMMAND jet_lever_net_test)
 # The marker's name from the game's own name tag source (src/player_name.cpp), read from EDF.dll without running it.
 add_test(NAME player_name_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_name_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)

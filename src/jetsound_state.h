@@ -19,4 +19,12 @@ inline Engine For(const State& s) noexcept {
 }
 // False: this aircraft has no current player-flight record. No ownership is acquired.
 bool PlayerState(const unsigned char* vehicle,State* out) noexcept;
+// An aircraft's engine lever (0..1 of full thrust: the player's throttle, an NPC wing's wing_engine.h lever, a rotor's
+// power) and how it is heard.
+struct Lever { float lever=0.0f; bool rotor=false,parked=false; };
+// Where this machine flies it now: its player's (PlayerState) or its live NPC flight's (jet.cpp); false: neither.
+bool LocalLever(const unsigned char* vehicle,Lever* out) noexcept;
+// Sent by the machine that runs it (jet_lever_net.cpp, a registered jet this one does not run), heard lately and not
+// off; false otherwise.
+bool HeardLever(const unsigned char* vehicle,Lever* out) noexcept;
 }  // namespace crew::jetsound

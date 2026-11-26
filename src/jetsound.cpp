@@ -43,8 +43,7 @@ constexpr std::size_t kMasterVolume=0x2E8,kEffectVolume=0x2F0;
 constexpr float kJetSize=15.0f;   // m: a fighter's length, how wide it is heard near (surround.h SpreadAt)
 constexpr float kFarAt=2500.0f;                  // the air's dulling at its fullest this far
 constexpr float kJetTop=245.0f;                  // m/s: the fastest attack speed (jet.cpp kKinds' interceptor), a
-                                                 // jet of no record's (another player's) top: its speed_relative
-constexpr float kParked=3.0f;                    // m/s: another player's jet slower than this stands
+                                                 // jet of no record's (another machine's) top: its speed_relative
 constexpr float kListenerJump=60.0f;             // a camera moving this far in a frame cut: no velocity from it
 constexpr ULONGLONG kStaleMs=200;                // a jet not seen this long (game ms) is gone: its sound stops
 constexpr int kSounds=32;
@@ -57,7 +56,7 @@ struct Sound {
     engine::Inputs heard{};                  // the parameters last heard (its one-shots cross from them)
     bool hasHeard=false;
     unsigned turn=0;                         // the one-shots' variants in turn
-    float last[3]{},vel[3]{},speed=0.0f,accel=0.0f;
+    float last[3]{},vel[3]{},speed=0.0f;
     ULONGLONG lastFrame=0,seen=0,logAt=0;
 };
 Sound sounds[kSounds]{};
@@ -172,6 +171,13 @@ void Voices(Sound& s,const engine::Heard* h,int n,const SoundPlace& p,float gain
     }
 }
 
+// `v`'s live NPC flight (jet.cpp): one stepped lately, a stationary carrier's hover too. A retained entry alone
+// (Adopt/hand-back, or an old command) is not evidence of an engine running.
+const jet::Jet* LiveNpc(const unsigned char* v,ULONGLONG ms) noexcept {
+    const jet::Jet* const j=jet::FindJet(v);
+    return j && !j->reap && j->lastStep && ms-j->lastStep<=kStaleMs ? j : nullptr;
+}
+
 void Step(unsigned char* v) noexcept {
     const ULONGLONG ms=GameMs(),frame=GameFrame();
     jetsound::State state{};
@@ -179,32 +185,29 @@ void Step(unsigned char* v) noexcept {
     bool burner=false,record=flown;
     float top=kJetTop;
     if(flown)burner=!state.rotor && state.throttle>0.95f;   // the player's: the throttle's last notch
-    else {
-        // A live NPC flight includes a stationary carrier's hover. A retained entry
-        // alone (Adopt/hand-back, or an old command) is not evidence of an engine running.
-        const jet::Jet* const j=jet::FindJet(v);
-        if(j && !j->reap && j->lastStep && ms-j->lastStep<=kStaleMs) {
-            const jet::Kind& kind=jet::KindOf(j->role);
-            record=true;
-            state.commanded=true;state.parked=false;
-            state.rotor=kind.flight==jet::FlightModel::rotor;
-            state.speed=std::sqrt(Dot(j->m.vel,j->m.vel));
-            state.throttle=j->m.power;   // its engine: a rotor's (Hover), a wing's lever (JetSteer, wing_engine.h)
-            top=kind.attack>1.0f ? kind.attack : kJetTop;
-            // Ours: lit where the thrust its flight commands is saturated (wing_engine.h), the player's lever's last notch.
-            burner=!state.rotor && jet::wing::Burner(j->m.power);
-        }
+    else if(const jet::Jet* const j=LiveNpc(v,ms)) {
+        const jet::Kind& kind=jet::KindOf(j->role);
+        record=true;
+        state.commanded=true;state.parked=false;
+        state.rotor=kind.flight==jet::FlightModel::rotor;
+        state.speed=std::sqrt(Dot(j->m.vel,j->m.vel));
+        state.throttle=j->m.power;   // its engine: a rotor's (Hover), a wing's lever (JetSteer, wing_engine.h)
+        top=kind.attack>1.0f ? kind.attack : kJetTop;
+        // Ours: lit where the thrust its flight commands is saturated (wing_engine.h), the player's lever's last notch.
+        burner=!state.rotor && jet::wing::Burner(j->m.power);
     }
     state.occupied=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none;
     Sound* known=nullptr;
     for(auto& old:sounds)if(old.ref.Is(v)){known=&old;break;}
-    if(!record && state.occupied && known) {
-        // Another player's jet (online: no flight of ours, someone in it): its power from what this machine sees of it,
-        // its speed against the top and its acceleration (ours), parked when it stands.
-        state.commanded=true;state.parked=known->speed<kParked;
-        state.speed=known->speed;
-        state.throttle=jetsound::Unit(known->speed/kJetTop+known->accel/20.0f);
-        burner=known->speed>=kJetTop-5.0f;
+    jetsound::Lever heard{};
+    if(!record && jetsound::HeardLever(v,&heard)) {
+        // A registered jet another machine runs (online: no flight of ours): the lever that machine flies it at
+        // (jet_lever_net.cpp; the same lever as ours, so the same afterburner), its speed what this machine sees of it.
+        // None heard: no guess from its speed; an occupied one idles (jetsound::For).
+        state.commanded=true;state.parked=heard.parked;state.rotor=heard.rotor;
+        state.speed=known ? known->speed : 0.0f;
+        state.throttle=heard.lever;
+        burner=!heard.rotor && jet::wing::Burner(heard.lever);
     }
     const jetsound::Engine engine=v[kDead] ? jetsound::Engine{} : jetsound::For(state);
     if(engine.gain<=0.0f) {
@@ -223,7 +226,6 @@ void Step(unsigned char* v) noexcept {
         dt=1.0f/k;
         for(int i=0;i<3;++i)s->vel[i]+=((pos[i]-s->last[i])*k-s->vel[i])*0.3f;
         const float speed=std::sqrt(Dot(s->vel,s->vel));
-        s->accel+=((speed-s->speed)*k-s->accel)*0.1f;
         s->speed=speed;
     } else if(s->lastFrame==frame)return;   // heard this frame already
     std::memcpy(s->last,pos,12);s->lastFrame=frame;
@@ -371,6 +373,16 @@ bool InstallJetSound() noexcept {
         Log("HOOK jet sound=%d lock-on beeps (NPC seats quiet)=%d",sigOk,lockOk);
         return sigOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool jetsound::LocalLever(const unsigned char* v,Lever* out) noexcept {
+    if(!v || !out)return false;
+    State st{};
+    if(PlayerState(v,&st)){*out=Lever{st.throttle,st.rotor,st.parked};return true;}
+    const jet::Jet* const j=LiveNpc(v,GameMs());
+    if(!j)return false;
+    *out=Lever{j->m.power,jet::KindOf(j->role).flight==jet::FlightModel::rotor,false};
+    return true;
 }
 
 void JetSound(unsigned char* v) noexcept {
