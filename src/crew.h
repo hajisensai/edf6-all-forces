@@ -317,6 +317,8 @@ struct Config {
                                  //    blast particles and vehicle guns' muzzle effects off
     bool gpuFxEfs=false;         // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
                                  //    (with GpuFxNative 1 / 3)
+    bool gpuFxTrails=false;      // ...the efs renderer's trails (ExtLine / LocusExtendLine / EmittingExtendLine: smoke trails,
+                                 //    tracers) drawn by the GPU renderer with the stock trail shaders, batched (with GpuFxNative 1 / 2)
     bool gpuFxProbe=false;       // ...render state, matrices, light block and stock particle state to the log
     int devFrameCap=0;           // the game held to at most this many frames a second (0 off): test runs not about the frame rate
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default

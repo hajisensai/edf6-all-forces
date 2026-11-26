@@ -76,9 +76,10 @@ std::vector<std::uint32_t> publishedIds;   // each one's spawn serial (the fill 
 // at 1080p); past it the biggest puffs are thinned to a stable subset drawn with its opacity raised.
 constexpr float kFillPixels=50.0e6f;
 std::vector<float> fillScratch;
-std::atomic<bool> optEnabled{false},optProbe{false},optLayers{false},optEfs{false};
+std::atomic<bool> optEnabled{false},optProbe{false},optLayers{false},optEfs{false},optTrails{false};
 std::atomic<int> optTest{0};   // GpuFxTest: 1 the test cards, 2 the cards and the stress (the ultimate strike, three times)
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
+bool trailsInstalled=false;   // Install: the trail draws redirected and their slots hooked
 std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right)
 std::atomic<bool> optLitA{false};   // GpuFxLitA: the lit set 0xA40 taken over too (off: it stays stock, docs/gpufx-re.md)
 std::atomic<bool> anchorReady{false};
@@ -117,16 +118,19 @@ struct NativeBatch {
     ComPtr<ID3D11ShaderResourceView> texture;
     Kind kind;int frames,grid,start,count,litSet;float litWeights[3];int geom=-1;
     ComPtr<ID3D11ShaderResourceView> more[Batch::kMore];int moreCount=0;
+    int depthFunc=0;   // the trail kinds: the stock draw's compare (0 none, 1 LESS, 2 LESS_EQUAL); start / count in nativeTrail
 };
 std::vector<Instance> nativeInstances;
+std::vector<TrailQuad> nativeTrail;   // the taken-over trail draws' quads (the trail kinds' records index these)
 std::vector<NativeBatch> nativeBatches;
 // The records coalesced (gpufx_batch.h): one draw per key in a run of additive records, the stock order kept elsewhere.
 Coalescing<NativeBatch> coalescing;
 std::vector<NativeBatch> drawBatches;
 std::vector<Instance> drawInstances;
+std::vector<TrailQuad> drawTrail;
 // One draw's state but for its textures.
 bool SameLayout(const NativeBatch& a,const NativeBatch& b) noexcept {
-    return a.kind==b.kind && a.geom==b.geom && a.frames==b.frames && a.grid==b.grid &&
+    return a.kind==b.kind && a.geom==b.geom && a.frames==b.frames && a.grid==b.grid && a.depthFunc==b.depthFunc &&
            a.litSet==b.litSet && std::memcmp(a.litWeights,b.litWeights,sizeof(a.litWeights))==0;
 }
 bool SameBatch(const NativeBatch& a,const NativeBatch& b) noexcept {
@@ -137,11 +141,12 @@ bool SameBatch(const NativeBatch& a,const NativeBatch& b) noexcept {
 bool StockKind(Kind k) noexcept { return k==Kind::nativeAlpha || k==Kind::nativeAdditive || k==Kind::nativeLitAlpha || k==Kind::nativeLitAdditive; }
 // Additive colour with no depth write (ours draws them all depth-tested against a copy, never writing it): any order
 // gives the same sum. The efs additive blend writes alpha ONE/ZERO (the last quad's alpha) as the stock's does; the
-// stock's own order of those quads is the effect list's, and ours already draws them all after the stock's draws.
+// stock's own order of those quads is the effect list's, and ours already draws them all after the stock's draws. The
+// additive trails (no depth write either, the same blend) likewise.
 bool OrderFree(const NativeBatch& b) noexcept {
-    return b.kind==Kind::nativeAdditive || b.kind==Kind::nativeLitAdditive || b.kind==Kind::efsAdditive;
+    return b.kind==Kind::nativeAdditive || b.kind==Kind::nativeLitAdditive || b.kind==Kind::efsAdditive || b.kind==Kind::trailAdditive;
 }
-void ClearCollected() noexcept { nativeInstances.clear();nativeBatches.clear();coalescing.Reset(); }
+void ClearCollected() noexcept { nativeInstances.clear();nativeTrail.clear();nativeBatches.clear();coalescing.Reset(); }
 // Room for one more draw (checked before a stock draw is copied).
 bool DrawRoom() noexcept { return coalescing.draws<Renderer::kMaxBatches-1; }
 std::vector<Batch> batches;
@@ -156,7 +161,7 @@ struct Probe {
     unsigned coreCalls=0,coreReplaced=0,refusedLit=0,refusedBlend=0,refusedGrid=0,stateLogged=0;
     unsigned litReplaced=0,litSetB=0,litCaptures=0,litCaptureFailed=0;
     unsigned records=0,draws=0,views=0;   // per probe log: the stock draws' records and the draws they coalesced into
-    unsigned kinds[8]{};                  // the records by kind
+    unsigned kinds[16]{};                 // the records by kind
     unsigned ownBefore=0,ownDrawn=0,ownViews=0;float covered=0.0f,coveredMax=0.0f,keepMin=1.0f;   // the fill budget
     unsigned tableJoins=0;                // stock draws joined to the last draw by its texture table
     unsigned breakKind=0,breakTexture=0,breakLayout=0,breakOther=0;   // why a record opened a new draw after the last
@@ -195,7 +200,7 @@ bool AppendBatch(NativeBatch&& b) noexcept {
         else if(last.texture.Get()!=b.texture.Get())++probe.breakTexture;
         else ++probe.breakOther;
     }
-    ++probe.kinds[static_cast<unsigned>(b.kind)&7u];
+    ++probe.kinds[static_cast<unsigned>(b.kind)&15u];
     try {
         nativeBatches.push_back(std::move(b));
         coalescing.Added(nativeBatches,SameBatch,OrderFree);
@@ -494,9 +499,10 @@ bool Split(const unsigned char* core,const NativeView& n,std::size_t start,int g
 
 // The probe's stock side (docs/gpufx-re.md "集 A 的开销"): once a probe log, one world view's stock particle and efs
 // draws each wrapped in a timestamp pair and a pipeline statistics query, summed per bucket like Stats (1 unlit,
-// 2 lit 0xC08, 3 lit 0xA40, 4 efs) and logged next to ours: the same cards' GPU time and pixels, stock against ours.
+// 2 lit 0xC08, 3 lit 0xA40, 4 efs, 5 the efs trails: their quads) and logged next to ours: the same cards' GPU time and
+// pixels, stock against ours.
 struct StockProfile {
-    static constexpr int kMost=1024,kBuckets=5;
+    static constexpr int kMost=1024,kBuckets=Stats::kBuckets;
     ComPtr<ID3D11Query> disjoint;
     std::vector<ComPtr<ID3D11Query>> begin,end,pipe;
     std::vector<unsigned char> bucket;
@@ -1026,6 +1032,201 @@ bool InstallEfs() noexcept {
     return false;
 }
 
+// ---- the efs renderer's trails (docs/gpufx-re.md "trails", gpufx_trail.h) ----
+// The RenderInfo kinds ExtLine, LocusExtendLine and EmittingExtendLine update and draw in their vtable slot 3 (one
+// call a trail and frame): the points into a vector, then one stock draw call (ExtLine 0x10C2240, Locus 0x10C1E20:
+// renderer, ctx, the trail's transform, the points, their count, the material byte (0 the plain trail material
+// renderer+0xCA0), a float and a lighting pointer read only with a nonzero byte). Ours redirects those three draw calls
+// (the draws' other callers stay stock) and copies the points into quads (gpufx_trail.h) drawn at the world's end with
+// the stock trail shaders themselves (Renderer::PrepareTrails), many trails a draw. The slot 3 hooks only say which
+// trail is drawing: its texture object.
+constexpr unsigned kTrailExtSlot=0x1A3A2F8,kTrailExtUpdate=0x10F0FE0,kTrailExtSite=0x10F12B3;
+constexpr unsigned kTrailLocusSlot=0x1A3A3F8,kTrailLocusUpdate=0x10F1690,kTrailLocusSite=0x10F19B7;
+constexpr unsigned kTrailEmitSlot=0x1A3A478,kTrailEmitUpdate=0x10F0FB0,kTrailEmitSite=0x10EED9D;   // via 0x10EEAA0
+constexpr unsigned kTrailExtDraw=0x10C2240,kTrailLocusDraw=0x10C1E20;
+// Prologues up to their first relative instruction.
+constexpr unsigned char kTrailExtUpdateCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,
+    0x56,0x41,0x57,0x48,0x8D,0x68,0xA8};
+constexpr unsigned char kTrailLocusUpdateCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,
+    0x56,0x41,0x57,0x48,0x8D,0x68,0xA1};
+constexpr unsigned char kTrailEmitUpdateCode[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x4D,0x8B,0x00,0x48,0x8B,0xD9};
+constexpr unsigned char kTrailExtDrawCode[]={0x40,0x55,0x56,0x57,0x41,0x55,0xB8,0x48,0xAE,0x01,0x00};
+constexpr unsigned char kTrailLocusDrawCode[]={0x40,0x53,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0xB8,0x58,
+    0xD0,0x00,0x00};
+// The texture object of each kind (the SRV through trailTextureChain, as EfsSrv).
+constexpr std::size_t kTrailExtTexture=0x140,kTrailLocusTexture=0x150,kTrailEmitTexture=0x158;
+// The renderer's shader mode (*(renderer+8)+0xFF8): 1 its shader index 0, 2 / 3 index 2, else index 1 (the forward
+// set): only the forward one is taken over (its VS 0x198B4C0 / PS 0x1989E20, ":EFS_DUTIL:g_effect_ext_line"), its
+// g_color (PS b2) the constant at 0x1765B90.
+constexpr std::size_t kRendererState=0x08,kRendererMode=0xFF8;
+constexpr unsigned kTrailVs=0x198B4C0,kTrailVsBytes=0x10F4,kTrailPs=0x1989E20,kTrailPsBytes=0x4C4,kTrailColor=0x1765B90;
+using TrailUpdateFn=void(__fastcall*)(void*,void*,void*);   // ExtLine / Locus take (self, ctx), Emitting (self, ctx, p3)
+using TrailDrawFn=void(__fastcall*)(void*,void*,const float*,const TrailPoint*,unsigned,unsigned char,float,const void*);
+TrailDrawFn trailExtNext=nullptr,trailLocusNext=nullptr;
+enum TrailWhich { kTrailExt=0,kTrailLocus=1,kTrailEmit=2 };
+// The slot 3 call drawing now (render thread): its texture object, null outside the three.
+const unsigned char* trailTexture=nullptr;
+ComPtr<ID3D11Buffer> trailSystem;            // the stock trail draw's VS b0 (xgl_system, at least 576 bytes)
+ComPtr<ID3D11SamplerState> trailSampler;     // its PS s0
+ComPtr<ID3D11RasterizerState> trailRaster;   // its rasterizer state (null: the D3D default)
+bool trailCaptured=false;                    // the three above taken from a stock forward draw
+int trailTextureChain=0;                     // 1 T+0x10, 2 T+0x08, 3 T+0x10 -> +0x10 (EfsSrv)
+bool trailWanted=false;                      // a trail draw met with the takeover on: WorldEnd prepares the pipeline
+int trailPrepared=0;                         // 0 not tried, 1 ready, -1 refused (logged once; trails stay stock)
+struct TrailProbe {
+    unsigned calls[3]{},replaced=0,quads=0,outside=0,refusedFlag=0,refusedMode=0,refusedRead=0,refusedBlend=0,refusedDepth=0,
+        refusedTexture=0,refusedSystem=0,refusedPipeline=0,refusedRoom=0,splitStock=0,systemChanged=0,textureMismatch=0;
+    int blendsLogged=0,stateLogged=0;
+};
+TrailProbe trailProbe;
+
+// The renderer's shader mode is the forward one.
+int TrailShaderMode(const unsigned char* r) noexcept {
+    if(!Readable(r,kRendererState+8))return -1;
+    const auto* st=At<const unsigned char*>(r,kRendererState);
+    return Readable(st+kRendererMode,4) ? At<int>(st,kRendererMode) : -1;
+}
+bool TrailForward(int mode) noexcept { return mode>=0 && (mode<1 || mode>3); }
+
+// One DXBC blob of `bytes` in the image (its magic and its own total size).
+bool DxbcAt(const unsigned char* p,std::size_t bytes) noexcept {
+    return Readable(p,bytes) && std::memcmp(p,"DXBC",4)==0 && At<std::uint32_t>(p,24)==bytes;
+}
+
+// After a stock forward trail draw: its system constants, sampler, rasterizer and the texture chain.
+void TrailAfterStock(ID3D11DeviceContext* c,const unsigned char* texture) noexcept {
+    ComPtr<ID3D11Buffer> cb;c->VSGetConstantBuffers(0,1,&cb);
+    if(cb && cb.Get()!=trailSystem.Get() && LitCapture::Bytes(cb.Get())>=576) {
+        if(trailSystem)++trailProbe.systemChanged;
+        else Log("GPUFX trail system constants %p (%u bytes)",static_cast<void*>(cb.Get()),LitCapture::Bytes(cb.Get()));
+        trailSystem=cb;
+    }
+    ComPtr<ID3D11SamplerState> sm;c->PSGetSamplers(0,1,&sm);
+    ComPtr<ID3D11RasterizerState> rs;c->RSGetState(&rs);
+    if(sm.Get()!=trailSampler.Get() || rs.Get()!=trailRaster.Get() || !trailCaptured) {
+        if(trailCaptured && trailProbe.stateLogged<4) {
+            ++trailProbe.stateLogged;
+            Log("GPUFX trail state changed: sampler %p -> %p, rasterizer %p -> %p",static_cast<void*>(trailSampler.Get()),
+                static_cast<void*>(sm.Get()),static_cast<void*>(trailRaster.Get()),static_cast<void*>(rs.Get()));
+        }
+        trailSampler=sm;trailRaster=rs;trailCaptured=true;
+    }
+    const void* bound=texture ? BoundTexture(c) : nullptr;
+    if(!bound)return;
+    if(!trailTextureChain) {
+        for(int k=1;k<=3;++k) {
+            if(EfsSrv(texture,k)!=bound)continue;
+            trailTextureChain=k;
+            Log("GPUFX trail texture chain %d (%s) is the bound SRV",k,k==1 ? "T+0x10" : k==2 ? "T+0x08" : "T+0x10 -> +0x10");
+            break;
+        }
+    } else if(EfsSrv(texture,trailTextureChain)!=bound) {
+        ++trailProbe.textureMismatch;
+    }
+}
+
+// One stock trail draw into quads (true: drawn by ours, or nothing to draw).
+bool TrailTakeOver(TrailWhich which,const unsigned char* r,const unsigned char* ctx,const float* m,const TrailPoint* p,
+                   unsigned count,unsigned char flag) noexcept {
+    if(!inWorld){++trailProbe.outside;return false;}
+    if(flag!=0){++trailProbe.refusedFlag;return false;}
+    if(!trailTexture || !Readable(ctx,kCtxDepthFunc+4)){++trailProbe.refusedRead;return false;}
+    if(!TrailForward(TrailShaderMode(r))){++trailProbe.refusedMode;return false;}
+    const int blend=EfsBlend(ctx),depth=EfsDepth(ctx);
+    if(blend<0 || depth<0) {
+        if(blend<0)++trailProbe.refusedBlend;else ++trailProbe.refusedDepth;
+        if(optProbe.load(std::memory_order_relaxed) && trailProbe.blendsLogged<8) {
+            ++trailProbe.blendsLogged;
+            int b[6];std::memcpy(b,ctx+kCtxBlend,sizeof(b));
+            Log("GPUFX trail refused: blend on=%u %d %d %d %d %d %d depth write=%d func=%d",At<unsigned char>(ctx,kCtxBlendOn),b[0],b[1],
+                b[2],b[3],b[4],b[5],At<int>(ctx,kCtxDepthWrite),At<int>(ctx,kCtxDepthFunc));
+        }
+        return false;
+    }
+    if(trailPrepared!=1){trailWanted=true;++trailProbe.refusedPipeline;return false;}
+    const void* srv=trailTextureChain ? EfsSrv(trailTexture,trailTextureChain) : nullptr;
+    if(!srv){++trailProbe.refusedTexture;return false;}
+    if(!trailSystem || !trailCaptured){++trailProbe.refusedSystem;return false;}
+    const unsigned quads=which==kTrailExt ? count/2u : count>=2u ? count-1u : 0u;
+    if(quads==0)return true;   // the stock draws nothing either
+    if(!Readable(p,sizeof(TrailPoint)*static_cast<std::size_t>(count)) || !Readable(m,64)){++trailProbe.refusedRead;return false;}
+    const std::size_t start=nativeTrail.size();
+    if(start+quads>static_cast<std::size_t>(Renderer::kMaxTrailQuads) || !DrawRoom()){++trailProbe.refusedRoom;return false;}
+    try { nativeTrail.resize(start+quads); } catch(...) { nativeTrail.resize(start);return false; }
+    TrailQuad* out=nativeTrail.data()+start;
+    if(which==kTrailExt)ExtLineQuads(p,count,m,out);else LocusQuads(p,count,m,out);
+    // GpuFxNative=2, the split: a trail with a corner left of the view's centre stays stock whole.
+    if(optNative.load(std::memory_order_relaxed)==2) {
+        for(unsigned q=0;q<quads;++q)for(const TrailVertex& v:out[q].v) {
+            float s[4];TransformPoint(v.pos,splitView,s);
+            if(!(s[0]>0.0f)){nativeTrail.resize(start);++trailProbe.splitStock;return false;}
+        }
+    }
+    NativeBatch b{};
+    b.texture=static_cast<ID3D11ShaderResourceView*>(const_cast<void*>(srv));
+    b.kind=blend==0 ? Kind::trailAlpha : blend==1 ? Kind::trailAdditive : Kind::trailSubtract;
+    b.frames=1;b.grid=1;b.start=static_cast<int>(start);b.count=static_cast<int>(quads);b.litSet=0;b.depthFunc=depth;
+    if(!AppendBatch(std::move(b))){nativeTrail.resize(start);return false;}
+    ++trailProbe.replaced;trailProbe.quads+=quads;
+    return true;
+}
+
+void TrailDraw(TrailWhich which,TrailDrawFn next,void* r,void* ctx,const float* m,const TrailPoint* p,unsigned count,
+               unsigned char flag,float f,const void* lit) {
+    ++trailProbe.calls[which];
+    const int mode=optNative.load(std::memory_order_relaxed);
+    const bool want=optTrails.load(std::memory_order_relaxed) && optEnabled.load(std::memory_order_relaxed) && (mode==1 || mode==2);
+    const auto* c=static_cast<const unsigned char*>(ctx);
+    if(want && TrailTakeOver(which,static_cast<const unsigned char*>(r),c,m,p,count,flag))return;
+    ID3D11DeviceContext* dc=Readable(c,kCtxDevice+8) ? At<ID3D11DeviceContext*>(c,kCtxDevice) : nullptr;
+    const unsigned quads=which==kTrailExt ? count/2u : count>=2u ? count-1u : 0u;
+    const int profiled=inWorld && dc && quads>0 ? stockProfile.Before(dc,5,static_cast<int>(quads)) : -1;
+    next(r,ctx,m,p,count,flag,f,lit);
+    if(profiled>=0)stockProfile.After(dc,profiled);
+    if(inWorld && dc && want && flag==0 && quads>0 && TrailForward(TrailShaderMode(static_cast<const unsigned char*>(r))))
+        TrailAfterStock(dc,trailTexture);
+}
+void __fastcall TrailExtDrawHook(void* r,void* ctx,const float* m,const TrailPoint* p,unsigned count,unsigned char flag,float f,
+                                 const void* lit) { TrailDraw(kTrailExt,trailExtNext,r,ctx,m,p,count,flag,f,lit); }
+void __fastcall TrailLocusDrawHook(void* r,void* ctx,const float* m,const TrailPoint* p,unsigned count,unsigned char flag,float f,
+                                   const void* lit) { TrailDraw(kTrailLocus,trailLocusNext,r,ctx,m,p,count,flag,f,lit); }
+void __fastcall TrailEmitDrawHook(void* r,void* ctx,const float* m,const TrailPoint* p,unsigned count,unsigned char flag,float f,
+                                  const void* lit) { TrailDraw(kTrailEmit,trailLocusNext,r,ctx,m,p,count,flag,f,lit); }
+
+// The slot 3 hooks: the trail's texture object while its update draws.
+template<unsigned kUpdate,std::size_t kTextureAt>
+void __fastcall TrailUpdateHook(void* self,void* ctx,void* p3) {
+    const unsigned char* was=trailTexture;
+    trailTexture=Readable(self,kTextureAt+8) ? At<const unsigned char*>(self,kTextureAt) : nullptr;
+    reinterpret_cast<TrailUpdateFn>(image+kUpdate)(self,ctx,p3);
+    trailTexture=was;
+}
+
+bool InstallTrails() noexcept {
+    struct Kind3 { unsigned slot,update;const unsigned char* code;std::size_t size;void* hook; };
+    const Kind3 kinds[3]{{kTrailExtSlot,kTrailExtUpdate,kTrailExtUpdateCode,sizeof(kTrailExtUpdateCode),
+                          reinterpret_cast<void*>(&TrailUpdateHook<kTrailExtUpdate,kTrailExtTexture>)},
+                         {kTrailLocusSlot,kTrailLocusUpdate,kTrailLocusUpdateCode,sizeof(kTrailLocusUpdateCode),
+                          reinterpret_cast<void*>(&TrailUpdateHook<kTrailLocusUpdate,kTrailLocusTexture>)},
+                         {kTrailEmitSlot,kTrailEmitUpdate,kTrailEmitUpdateCode,sizeof(kTrailEmitUpdateCode),
+                          reinterpret_cast<void*>(&TrailUpdateHook<kTrailEmitUpdate,kTrailEmitTexture>)}};
+    for(const Kind3& k:kinds)
+        if(!Matches(k.update,k.code,k.size) || *reinterpret_cast<void**>(image+k.slot)!=image+k.update)return false;
+    if(!Matches(kTrailExtDraw,kTrailExtDrawCode,sizeof(kTrailExtDrawCode)) ||
+       !Matches(kTrailLocusDraw,kTrailLocusDrawCode,sizeof(kTrailLocusDrawCode)))return false;
+    // The draws' redirects first (a draw met before its slot hook stays stock: no texture object), then the slots.
+    trailExtNext=reinterpret_cast<TrailDrawFn>(image+kTrailExtDraw);
+    trailLocusNext=reinterpret_cast<TrailDrawFn>(image+kTrailLocusDraw);
+    bool changed=false;
+    const bool sites=RedirectCall(image+kTrailExtSite,image+kTrailExtDraw,reinterpret_cast<void*>(&TrailExtDrawHook),changed) &&
+                     RedirectCall(image+kTrailLocusSite,image+kTrailLocusDraw,reinterpret_cast<void*>(&TrailLocusDrawHook),changed) &&
+                     RedirectCall(image+kTrailEmitSite,image+kTrailLocusDraw,reinterpret_cast<void*>(&TrailEmitDrawHook),changed);
+    if(!sites)return false;   // a redirect already made keeps working: its hook draws stock without a texture object
+    bool slots=true;
+    for(const Kind3& k:kinds)slots=PatchVtableSlot(reinterpret_cast<void**>(image+k.slot),image+k.update,k.hook) && slots;
+    return slots;
+}
+
 void PublishOptions() noexcept {
     const Config& c=Cfg();
     optEnabled.store(c.enabled && c.gpuFx,std::memory_order_relaxed);
@@ -1033,6 +1234,7 @@ void PublishOptions() noexcept {
     optNative.store(c.gpuFxNative,std::memory_order_relaxed);
     optLitA.store(c.gpuFxLitA,std::memory_order_relaxed);
     optEfs.store(c.enabled && c.gpuFx && c.gpuFxEfs && efsDrawNext,std::memory_order_relaxed);
+    optTrails.store(c.enabled && c.gpuFx && c.gpuFxTrails && trailsInstalled,std::memory_order_relaxed);
     optProbe.store(c.gpuFxProbe,std::memory_order_relaxed);
     optTest.store(c.gpuFxTest,std::memory_order_relaxed);
 }
@@ -1534,6 +1736,9 @@ bool Install() noexcept {
         if(c.enabled && c.gpuFx) {
             const bool efs=InstallEfs();
             Log("GPUFX efs quad draw EDF+%X (slot EDF+%X): %s",kEfsQuadDraw,kEfsQuadSlot,efs ? "hooked" : "not as expected; stays stock");
+            trailsInstalled=InstallTrails();
+            Log("GPUFX efs trail draws EDF+%X / EDF+%X (sites EDF+%X EDF+%X EDF+%X): %s",kTrailExtDraw,kTrailLocusDraw,kTrailExtSite,
+                kTrailLocusSite,kTrailEmitSite,trailsInstalled ? "hooked" : "not as expected; trails stay stock");
         }
         PublishOptions();
     } __except(EXCEPTION_EXECUTE_HANDLER) {Log("GPUFX profile fault; stock particles untouched");ok=false;}
@@ -1647,7 +1852,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire) || view!=currentView || !inWorld) {inWorld=false;return;}
     inWorld=false;
     stockProfile.ViewEnds(context);
-    if(probeReset.exchange(false,std::memory_order_acq_rel)){probe=Probe{};efsProbe=EfsProbe{};}
+    if(probeReset.exchange(false,std::memory_order_acq_rel)){probe=Probe{};efsProbe=EfsProbe{};trailProbe=TrailProbe{};}
     const bool enabled=optEnabled.load(std::memory_order_relaxed);
     const bool wantProbe=optProbe.load(std::memory_order_relaxed);
     if(!enabled || !context){ClearCollected();return;}
@@ -1677,6 +1882,17 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         vp.lights=litCapture.Lights();
         EfsReadGeometry(context);
         vp.efsSystem=efsSystem.Get();
+        if(trailWanted && trailPrepared==0) {
+            // The stock trail shaders out of the image (their DXBC headers checked), once: refused, trails stay stock.
+            const unsigned char* tvs=image+kTrailVs;const unsigned char* tps=image+kTrailPs;
+            const bool blobs=DxbcAt(tvs,kTrailVsBytes) && DxbcAt(tps,kTrailPsBytes) && Readable(image+kTrailColor,16);
+            const bool made=blobs && renderer.PrepareTrails(context,tvs,kTrailVsBytes,tps,kTrailPsBytes,
+                                                           reinterpret_cast<const float*>(image+kTrailColor));
+            trailPrepared=made ? 1 : -1;
+            Log("GPUFX trail shaders VS EDF+%X (%u bytes) PS EDF+%X (%u bytes): %s",kTrailVs,kTrailVsBytes,kTrailPs,kTrailPsBytes,
+                made ? "ready, trails taken over" : blobs ? "refused by the device; trails stay stock" : "not as expected; trails stay stock");
+        }
+        vp.trailSystem=trailSystem.Get();vp.trailSampler=trailSampler.Get();vp.trailRaster=trailRaster.Get();
         if(optProbe.load(std::memory_order_relaxed) && efsSysDumps>=1 && efsSysDumps<8 && efsProbe.replaced>0)EfsDumpSystem(context,efsSystem.Get(),"at world end");
         batches.clear();
         if(!renderOwn.empty() && renderOwnIds.size()==renderOwn.size()) {
@@ -1692,12 +1908,26 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());
             batches.push_back(b);
         }
-        Coalesce(nativeBatches,nativeInstances,drawBatches,drawInstances,SameBatch,OrderFree);
+        // The records' payloads regrouped: instances, or a trail kind's quads.
+        drawInstances.clear();drawInstances.reserve(nativeInstances.size());
+        drawTrail.clear();drawTrail.reserve(nativeTrail.size());
+        CoalesceWith(nativeBatches,drawBatches,SameBatch,OrderFree,[&](const NativeBatch& r) {
+            if(IsTrail(r.kind)) {
+                const std::size_t at=drawTrail.size();
+                drawTrail.insert(drawTrail.end(),nativeTrail.begin()+r.start,nativeTrail.begin()+r.start+r.count);
+                return at;
+            }
+            const std::size_t at=drawInstances.size();
+            drawInstances.insert(drawInstances.end(),nativeInstances.begin()+r.start,nativeInstances.begin()+r.start+r.count);
+            return at;
+        });
         probe.records+=static_cast<unsigned>(nativeBatches.size());probe.draws+=static_cast<unsigned>(drawBatches.size());++probe.views;
         for(const auto& nb:drawBatches) {
             Batch b{};b.texture=nb.texture.Get();b.kind=nb.kind;b.frames=nb.frames;
             b.gridX=b.gridY=nb.grid;b.frames=nb.frames;b.cornerScale=0.70710678f;b.uInset=0.0005f;b.sorted=false;
-            b.instances=drawInstances.data()+nb.start;b.count=nb.count;
+            if(IsTrail(nb.kind)){b.trail=drawTrail.data()+nb.start;b.depthFunc=nb.depthFunc;}
+            else b.instances=drawInstances.data()+nb.start;
+            b.count=nb.count;
             b.litSet=nb.litSet;std::memcpy(b.litWeights,nb.litWeights,sizeof(b.litWeights));
             b.moreCount=nb.moreCount;
             for(int i=0;i<nb.moreCount;++i)b.more[i]=nb.more[i].Get();
@@ -1723,18 +1953,19 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             st.viewport[3],source,format,st.reversed,st.lookNegZ,st.drawn,st.batches,drew ? "" : " refused: ",drew ? "" : (st.refused ? st.refused : "nothing to draw"),
             probe.cpuSamples ? probe.cpuMs/probe.cpuSamples : 0.0,st.gpuMs,
             st.pixelsShaded>=0.0 && st.viewport[2]>0.0f ? st.pixelsShaded/(static_cast<double>(st.viewport[2])*st.viewport[3]) : -1.0);
-        Log("GPUFX   gpu by bucket (ms, instances): ours %.3f %d, stock %.3f %d, lit 0xC08 %.3f %d, lit 0xA40 %.3f %d, efs %.3f %d",
+        Log("GPUFX   gpu by bucket (ms, instances): ours %.3f %d, stock %.3f %d, lit 0xC08 %.3f %d, lit 0xA40 %.3f %d, efs %.3f %d, trails %.3f %d",
             st.bucketMs[0],st.bucketDrawn[0],st.bucketMs[1],st.bucketDrawn[1],st.bucketMs[2],st.bucketDrawn[2],st.bucketMs[3],st.bucketDrawn[3],
-            st.bucketMs[4],st.bucketDrawn[4]);
+            st.bucketMs[4],st.bucketDrawn[4],st.bucketMs[5],st.bucketDrawn[5]);
         {
             const double screen=st.viewport[2]>0.0f ? static_cast<double>(st.viewport[2])*st.viewport[3] : 3840.0*2160.0;
-            Log("GPUFX   ours px by bucket (screens): ours %.2f, stock %.2f, lit 0xC08 %.2f, lit 0xA40 %.2f, efs %.2f",st.bucketPixels[0]/screen,
-                st.bucketPixels[1]/screen,st.bucketPixels[2]/screen,st.bucketPixels[3]/screen,st.bucketPixels[4]/screen);
+            Log("GPUFX   ours px by bucket (screens): ours %.2f, stock %.2f, lit 0xC08 %.2f, lit 0xA40 %.2f, efs %.2f, trails %.2f",
+                st.bucketPixels[0]/screen,st.bucketPixels[1]/screen,st.bucketPixels[2]/screen,st.bucketPixels[3]/screen,st.bucketPixels[4]/screen,
+                st.bucketPixels[5]/screen);
             const StockProfile& sp=stockProfile;
             if(sp.have)Log("GPUFX   stock draws by bucket (ms, draws, cards, px screens): unlit %.3f %d %d %.2f, lit 0xC08 %.3f %d %d %.2f, "
-                "lit 0xA40 %.3f %d %d %.2f, efs %.3f %d %d %.2f",sp.ms[1],sp.draws[1],sp.cardsDone[1],sp.pixels[1]/screen,sp.ms[2],sp.draws[2],
-                sp.cardsDone[2],sp.pixels[2]/screen,sp.ms[3],sp.draws[3],sp.cardsDone[3],sp.pixels[3]/screen,sp.ms[4],sp.draws[4],sp.cardsDone[4],
-                sp.pixels[4]/screen);
+                "lit 0xA40 %.3f %d %d %.2f, efs %.3f %d %d %.2f, trails %.3f %d %d %.2f",sp.ms[1],sp.draws[1],sp.cardsDone[1],sp.pixels[1]/screen,
+                sp.ms[2],sp.draws[2],sp.cardsDone[2],sp.pixels[2]/screen,sp.ms[3],sp.draws[3],sp.cardsDone[3],sp.pixels[3]/screen,sp.ms[4],sp.draws[4],
+                sp.cardsDone[4],sp.pixels[4]/screen,sp.ms[5],sp.draws[5],sp.cardsDone[5],sp.pixels[5]/screen);
             if(stockProfile.state==0)stockProfile.state=1;
         }
         const float* P=vp.proj;const float* V=vp.view;
@@ -1764,6 +1995,13 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             efsProbe.calls,efsProbe.replaced,efsProbe.quads,efsProbe.outside,efsProbe.refusedRead,efsProbe.refusedLit,efsProbe.refusedSoft,
             efsProbe.refusedBlend,efsProbe.refusedDepth,efsProbe.refusedGeom,efsProbe.refusedTexture,efsProbe.refusedRoom,efsProbe.splitStock,
             efsProbe.systemChanged,efsTextureChain,efsProbe.textureMismatch,static_cast<unsigned>(efsGeoms.size()));
+        Log("GPUFX   trails %s (shaders %s): draws ext %u locus %u emitting %u, taken over %u (quads %u) outside %u; refused material %u "
+            "mode %u read %u blend %u depth %u pipeline %u texture %u system %u room %u, split stock %u; system changed %u, texture chain %d "
+            "(differs from the bound %u)",optTrails.load(std::memory_order_relaxed) ? "on" : "off",
+            trailPrepared==1 ? "ready" : trailPrepared<0 ? "refused" : "not yet",trailProbe.calls[0],trailProbe.calls[1],trailProbe.calls[2],
+            trailProbe.replaced,trailProbe.quads,trailProbe.outside,trailProbe.refusedFlag,trailProbe.refusedMode,trailProbe.refusedRead,
+            trailProbe.refusedBlend,trailProbe.refusedDepth,trailProbe.refusedPipeline,trailProbe.refusedTexture,trailProbe.refusedSystem,
+            trailProbe.refusedRoom,trailProbe.splitStock,trailProbe.systemChanged,trailTextureChain,trailProbe.textureMismatch);
         Log("GPUFX   lit taken over=%u (set 0xC08 %u); lighting captured in %u views, incomplete %u",probe.litReplaced,probe.litSetB,
             probe.litCaptures,probe.litCaptureFailed);
         Log("GPUFX   layers %s: shots %u blasts %u -> particles %u, queue full %u",optLayers.load(std::memory_order_relaxed) ? "on" : "off",
@@ -1773,8 +2011,9 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             exposure,fade.bytes,fade.known ? "read" : "not yet",fade.mul,fade.add);
         if(probe.views)Log("GPUFX   coalesced: %u stock draws taken in %u views -> %u draws (%.1f -> %.1f a view)",probe.records,probe.views,
             probe.draws,static_cast<double>(probe.records)/probe.views,static_cast<double>(probe.draws)/probe.views);
-        if(probe.views)Log("GPUFX   records by kind %u %u %u %u %u %u %u %u; a new draw after a different kind %u, layout %u, texture %u, other %u; joined by texture table %u",
+        if(probe.views)Log("GPUFX   records by kind %u %u %u %u %u %u %u %u | trails %u %u %u; a new draw after a different kind %u, layout %u, texture %u, other %u; joined by texture table %u",
             probe.kinds[0],probe.kinds[1],probe.kinds[2],probe.kinds[3],probe.kinds[4],probe.kinds[5],probe.kinds[6],probe.kinds[7],
+            probe.kinds[8],probe.kinds[9],probe.kinds[10],
             probe.breakKind,probe.breakLayout,probe.breakTexture,probe.breakOther,probe.tableJoins);
         std::memset(probe.kinds,0,sizeof(probe.kinds));probe.breakKind=probe.breakTexture=probe.breakLayout=probe.breakOther=probe.tableJoins=0;
         probe.records=probe.draws=probe.views=0;

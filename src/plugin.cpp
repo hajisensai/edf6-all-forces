@@ -871,6 +871,7 @@ void LoadConfig() noexcept {
     n.gpuFxProbe=ReadBool(L"GpuFxProbe",n.gpuFxProbe);
     n.gpuFxLayers=ReadBool(L"GpuFxLayers",n.gpuFxLayers);
     n.gpuFxEfs=ReadBool(L"GpuFxEfs",n.gpuFxEfs);
+    n.gpuFxTrails=ReadBool(L"GpuFxTrails",n.gpuFxTrails);
     n.gpuFxLitA=ReadBool(L"GpuFxLitA",n.gpuFxLitA);
     n.devFrameCap=static_cast<int>(FixInt("DevFrameCap",ReadInt(L"DevFrameCap",static_cast<DWORD>(n.devFrameCap)),0,240));
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
