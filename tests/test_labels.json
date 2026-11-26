@@ -611,9 +611,22 @@
   },
   "cockpit_panoramic": {
    "labels": [
-    "test-data"
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
    ],
-   "scripts": []
+   "scripts": [
+    "tests/cockpit_panoramic_test.py"
+   ]
   },
   "cockpit_retrofit": {
    "labels": [
@@ -6341,6 +6354,12 @@
    ],
    "scripts": []
   },
+  "world_text_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "worldmap": {
    "labels": [
     "plugin-native",
@@ -7772,6 +7791,7 @@
     "_read",
     "_recoil_game",
     "_refuses",
+    "_reported",
     "_rmpa_points",
     "_rows_copy",
     "_run_one",
@@ -11039,6 +11059,26 @@
     "xm_units"
    ]
   },
+  "heartbeat_keeps_watchers_cache": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "pylib-model",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "heartbeat_keeps_watchers_cache",
+    "os",
+    "src",
+    "tempfile"
+   ]
+  },
   "heli_mouse_aim_wired": {
    "labels": [
     "autoturret-tools",
@@ -11515,6 +11555,7 @@
     "_read",
     "_recoil_game",
     "_refuses",
+    "_reported",
     "_rmpa_points",
     "_rows_copy",
     "_run_one",
@@ -13659,6 +13700,7 @@
     "_read",
     "_recoil_game",
     "_refuses",
+    "_reported",
     "_rmpa_points",
     "_rows_copy",
     "_run_one",

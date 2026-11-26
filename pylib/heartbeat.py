@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import threading
 import time
 from typing import Callable, Iterator
@@ -69,3 +70,25 @@ def beating(label: str, status: Callable[[], str] | None = None,
     finally:
         stop.set()
         beat.join()
+
+
+def parts_progress(results: dict[str, tuple[int, float]], logs: dict[str, str]) -> str:
+    """What check.py's heartbeat line says: each part done (ok / FAIL) or running, with ctest's and selftest's count so far."""
+    said = []
+    for part, log in logs.items():
+        if part in results:
+            said.append(f"{part} {'ok' if not results[part][0] else 'FAIL'}")
+            continue
+        try:
+            with open(log, encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            continue   # not started (or not asked for)
+        if part == 'ctest':
+            done = re.findall(r'^\s*(\d+)/(\d+) Test\s+#', text, re.M)
+            said.append(f'ctest {done[-1][0]}/{done[-1][1]}' if done else 'ctest running')
+        elif part == 'selftest':
+            said.append(f"selftest {len(re.findall(r'^(?:ok  |FAIL)  ', text, re.M))} done")
+        else:
+            said.append(f'{part} running')
+    return ', '.join(said)

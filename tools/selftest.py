@@ -16044,7 +16044,7 @@ def heartbeat_keeps_watchers_cache() -> None:
     """The maintainer, 2026-11-21: 「优化下测试的时候会把缓存清空的问题，不要出现这种问题」 (a Claude Code subagent's 5-minute
     prompt cache running out while it waits on a check) and 「不要改1小时」. pylib/heartbeat.py says a line well inside the
     5 minutes while a long step runs, only then, with what is done so far; a failing status still says the line. Every
-    long wait and run says them: check.py (with its parts' progress), selftest.py, the check slot's wait, the game queue's."""
+    long wait and run says them: check.py (its parts' progress: heartbeat.parts_progress), selftest.py, the check slot's wait, the game queue's."""
     import time
     import heartbeat
     assert 0 < heartbeat.DEFAULT <= heartbeat.CACHE_TTL - 30, 'a line must reach the watcher well before its cache runs out'
@@ -16081,18 +16081,14 @@ def heartbeat_keeps_watchers_cache() -> None:
             os.environ.pop(heartbeat.ENV, None)
         else:
             os.environ[heartbeat.ENV] = saved
-    import importlib.util
-    spec = importlib.util.spec_from_file_location('check_tool', os.path.join(HERE, 'check.py'))
-    check = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(check)
     with tempfile.TemporaryDirectory() as tmp:
         logs = {k: os.path.join(tmp, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
         with open(logs['ctest'], 'w', encoding='utf-8') as f:
             f.write('      Start  1: a\n 1/310 Test   #1: a ....   Passed    1.0 sec\n 2/310 Test  #12: b ....   Passed\n')
         with open(logs['selftest'], 'w', encoding='utf-8') as f:
             f.write('ok    one  (1.0 s)\nFAIL  two  (2.0 s)\nsome output\n')
-        assert check.progress({'build': (0, 9.0)}, logs) == 'build ok, ctest 2/310, selftest 2 done', check.progress({'build': (0, 9.0)}, logs)
-    for path, want in (('tools/check.py', "heartbeat.beating('check.py'"), ('tools/selftest.py', "heartbeat.beating('selftest.py'"),
+        assert heartbeat.parts_progress({'build': (0, 9.0)}, logs) == 'build ok, ctest 2/310, selftest 2 done', heartbeat.parts_progress({'build': (0, 9.0)}, logs)
+    for path, want in (('tools/selftest.py', "heartbeat.beating('selftest.py'"),
                        ('pylib/checklock.py', 'heartbeat.beating('), ('pylib/gamelease.py', 'heartbeat.beating(')):
         assert want in src(path), f'{path}: its long wait / run says no heartbeat'
 
