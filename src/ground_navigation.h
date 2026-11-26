@@ -4,6 +4,9 @@
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 namespace npc::navigation {
 struct Point { float x{},y{},z{}; };
 inline float Horizontal(Point a,Point b) noexcept {return std::hypot(a.x-b.x,a.z-b.z);}
@@ -63,6 +66,44 @@ struct BasicState {
     static_assert(N<=65535);
     static constexpr unsigned kBuckets=N<=kNodes ? 512 : 1024;
     std::uint16_t cells[kBuckets]{};
+    static constexpr int kIndexedFrontier=768;
+    static constexpr int kFrontierWords=(N+63)/64;
+    std::uint64_t open[kFrontierWords]{};
+
+    void SetClosed(int index,bool closed) noexcept {
+        nodes[index].closed=closed;
+        if(count<kIndexedFrontier)return;
+        auto& word=open[index/64];
+        const auto bit=std::uint64_t{1}<<(index%64);
+        if(closed)word&=~bit;
+        else word|=bit;
+    }
+
+    template<class Visit>
+    void VisitOpen(Visit visit) const noexcept {
+        if(count<kIndexedFrontier) {
+            for(int index=0;index<count;++index)if(!nodes[index].closed)visit(index);
+            return;
+        }
+        // Preserve insertion order because the floating tie rule depends on that order.
+        for(int i=0;i<(count+63)/64;++i) {
+            for(auto bits=open[i];bits;bits&=bits-1) {
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
+                unsigned long offset;
+                _BitScanForward64(&offset,bits);
+#elif defined(_MSC_VER)
+                unsigned long offset;
+                const auto lower=static_cast<unsigned long>(bits);
+                _BitScanForward(&offset,lower ? lower : static_cast<unsigned long>(bits>>32));
+                if(!lower)offset+=32;
+#else
+                const auto offset=__builtin_ctzll(bits);
+#endif
+                visit(i*64+static_cast<int>(offset));
+            }
+        }
+    }
+
 
     static unsigned Bucket(int x,int z) noexcept {
         const std::uint32_t hash=std::uint32_t(x)*0x8da6b343u ^ std::uint32_t(z)*0xd8163841u;
@@ -82,6 +123,13 @@ struct BasicState {
         node.nextInBucket=head;
         nodes[count++]=node;
         head=static_cast<std::uint16_t>(count);
+        if(count==kIndexedFrontier) {
+            std::fill_n(open,kFrontierWords,std::uint64_t{0});
+            for(int i=0;i<count;++i)if(!nodes[i].closed)open[i/64]|=std::uint64_t{1}<<(i%64);
+        } else if(count>kIndexedFrontier && !node.closed) {
+            const int i=count-1;
+            open[i/64]|=std::uint64_t{1}<<(i%64);
+        }
     }
     void ResetNodes(Node start) noexcept {
         std::fill_n(cells,kBuckets,std::uint16_t{0});
@@ -226,12 +274,12 @@ Result Search(State& s,Point from,std::uint64_t ms,Query& edge,const Profile& p,
             // "Equal" allows the float sums' drift over a long route (g adds hundreds of hypot steps): kTie per metre.
             constexpr float kTie=1e-5f;
             float best=1e30f,deepest=-1.0f;
-            for(int i=0;i<s.count;++i) {
+            s.VisitOpen([&](int i) noexcept {
                 const Node& n=s.nodes[i];
                 const float tie=1e-3f+kTie*n.f;
-                if(n.closed || n.f>best+tie || (n.f>=best-tie && n.g<=deepest))continue;
+                if(n.f>best+tie || (n.f>=best-tie && n.g<=deepest))return;
                 best=n.f;deepest=n.g;s.active=i;
-            }
+            });
             if(s.active<0)return PartialOrFail(s,from,ms) ? Result::pending : Result::blocked;
             // The horizon reached: the best node there is as far as this search goes (its prefix is walked first).
             if(p.horizon>0.0f && Horizontal(s.nodes[s.active].at,s.origin)>=p.horizon && Partial(s,s.active,from,ms))
@@ -277,10 +325,10 @@ Result Search(State& s,Point from,std::uint64_t ms,Query& edge,const Profile& p,
                 if(s.count==State::kCapacity)return PartialOrFail(s,from,ms) ? Result::pending : Result::blocked;
                 s.AddNode({at,g,g+p.greed*GridEstimate(at,s.aim),x,z,s.active,false});
             } else if(g<s.nodes[found].g) {
-                auto& n=s.nodes[found];n.g=g;n.f=g+p.greed*GridEstimate(at,s.aim);n.parent=s.active;n.closed=false;
+                auto& n=s.nodes[found];n.g=g;n.f=g+p.greed*GridEstimate(at,s.aim);n.parent=s.active;s.SetClosed(found,false);
             }
         }
-        if(s.direction==8){s.nodes[s.active].closed=true;s.active=-1;}
+        if(s.direction==8){s.SetClosed(s.active,true);s.active=-1;}
     }
     return Result::pending;
 }

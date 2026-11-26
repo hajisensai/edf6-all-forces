@@ -1,6 +1,7 @@
 #include "../src/ground_navigation.h"
 #include <cstdio>
 #include <memory>
+#include <vector>
 using namespace npc::navigation;
 namespace {
 int failures=0,cases=0;
@@ -462,5 +463,30 @@ void Ahead() {
         Check(FinalLeft(s,{27,0,0})<0.0f,"FinalLeft: a leg's end is a corner, no ease");
     }
 }
+void IndexedFrontier() {
+    auto route=std::make_unique<RouteState>();
+    route->ResetNodes({{},0,0,0,0,-1,true});
+    const auto visit=[&] {
+        std::vector<int> out;
+        route->VisitOpen([&](int i){out.push_back(i);});
+        return out;
+    };
+    const int pivot=RouteState::kIndexedFrontier;
+    for(int i=1;i<pivot-1;++i)
+        route->AddNode({{static_cast<float>(i),0,0},0,0,i,0,-1,i!=63 && i!=64});
+    Check(visit()==std::vector<int>{63,64},"a short frontier retains insertion order");
+    route->AddNode({{static_cast<float>(pivot-1),0,0},0,0,pivot-1,0,-1,false});
+    route->AddNode({{static_cast<float>(pivot),0,0},0,0,pivot,0,-1,true});
+    Check(visit()==std::vector<int>{63,64,pivot-1},"frontier index builds from the current open slots");
+    route->SetClosed(64,true);
+    route->SetClosed(62,false);
+    route->SetClosed(pivot,false);
+    Check(visit()==std::vector<int>{62,63,pivot-1,pivot},"closing and reopening indexed slots retains insertion order");
+    route->ResetNodes({{},0,0,0,0,-1,false});
+    for(int i=1;i<pivot;++i)
+        route->AddNode({{static_cast<float>(i),0,0},0,0,i,0,-1,true});
+    Check(visit()==std::vector<int>{0},"a new indexed search drops the previous frontier");
 }
-int main(){CellIndex();CentreGroundProbe();Routing();LongRoutes();Horizon();BoardFarSide();Ahead();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+
+}
+int main(){CellIndex();IndexedFrontier();CentreGroundProbe();Routing();LongRoutes();Horizon();BoardFarSide();Ahead();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
