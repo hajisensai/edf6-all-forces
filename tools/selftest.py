@@ -2077,8 +2077,8 @@ def sortie_copies_agree() -> None:
     dispatch = src('src/support_dispatch.cpp')
     # The second wave goes with its first's pt (2026-10-27 review): queued once the first is made offline, held under its
     # open request online and settled by its outcome.
-    assert 'else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0);' in dispatch
-    assert 'SupportFollowUpQueue(index,target,localRequest.id);' in dispatch
+    assert 'else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0,plan.run);' in dispatch
+    assert 'SupportFollowUpQueue(index,target,localRequest.id,run);' in dispatch
     assert 'SupportFollowUpSettle(request,true);' in dispatch and 'SupportFollowUpSettle(request,false);' in dispatch
     assert 'GuardedTick(kStepFollowUp,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
     heli = src('src/heli.cpp')
