@@ -79,6 +79,7 @@ constexpr float kStrafeLow=160.0f,kStrafeTop=600.0f;      // m over the mark: th
 constexpr float kStrafeLeadMost=1100.0f;                  // m: the rockets' reach (jet_combat.cpp kRocketOpen) inside
 constexpr float kStrafeCross=65.0f;                       // m beside its line a jet strafes it from
 constexpr float kStrafeAngle=0.35f;                       // rad off its line a jet strafes it at (20 deg)
+constexpr float kStrafeSettleS=2.0f;                      // s its nose is on the point before the window opens
 inline float StrafeLead(float half,float over,float least,float most) noexcept {
     const float ratio=over/kStrafeFloor;
     float lead=ratio>1.05f ? 2.0f*half/std::log(ratio) : most;
@@ -108,13 +109,19 @@ inline float CaptureDistance(float cross,float angle,float radius) noexcept {
     if(a>=kPi*0.5f)return 1e9f;
     const float r=radius>1.0f ? radius : 1.0f;
     const float arc=r*(1.0f-std::cos(a));   // the sideways an arc of `a` covers
-    if(a>1e-3f && cross*angle<0.0f && std::fabs(cross)>=arc)
-        return (std::fabs(cross)-arc)/std::tan(a)+r*std::sin(a);   // closing: straight, then one arc onto it
     const float left=std::fabs(cross+(angle>0.0f ? arc : -arc));
     const float first=r*std::sin(a);
-    if(left>=2.0f*r)return first+2.0f*r;
-    const float c=1.0f-left/(2.0f*r);
-    return first+2.0f*r*std::sin(std::acos(c<-1.0f ? -1.0f : c>1.0f ? 1.0f : c));
+    float turned;   // turned straight, then the S across what is left
+    if(left>=2.0f*r)turned=first+2.0f*r;
+    else {
+        const float c=1.0f-left/(2.0f*r);
+        turned=first+2.0f*r*std::sin(std::acos(c<-1.0f ? -1.0f : c>1.0f ? 1.0f : c));
+    }
+    if(a>1e-3f && cross*angle<0.0f && std::fabs(cross)>=arc) {   // closing: straight on, then one arc onto it
+        const float closing=(std::fabs(cross)-arc)/std::tan(a)+r*std::sin(a);
+        return closing<turned ? closing : turned;   // a shallow closing angle: steeper by an S instead
+    }
+    return turned;
 }
 
 // Helicopters

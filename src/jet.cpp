@@ -668,7 +668,9 @@ void JetFrame(unsigned char* v) noexcept {
     const float* targetAnchor=anchor;
     if(j->sortie.runHalf>0.0f) {
         const auto& line=j->sortie.line;
-        const float along=Clamp(sortie::Along(line,pos),-j->sortie.runHalf,j->sortie.runHalf);
+        // Its targets where its nose is on the line (the strafe's lead ahead), not under it: those its guns, rockets and
+        // missiles can reach.
+        const float along=Clamp(sortie::Along(line,pos)+j->sortie.strafeLead,-j->sortie.runHalf,j->sortie.runHalf);
         for(int i=0;i<3;++i)runAnchor[i]=line.at[i]+line.dir[i]*along;
         targetAnchor=runAnchor;
     }
