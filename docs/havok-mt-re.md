@@ -368,3 +368,6 @@ ini 改 `HavokMultithread=1`、保持 `Debug=1`。装 DLL 前核对日志里 `HA
 
 
 分轮探针补测：`System::update` 的两处调用分别从 `system+0x10` 和 `system+0x130` 取包装对象。按调用点标记前后阶段即可复用原图计时。`stress:10` 有效样本平均 417 敌、242 友，前段 build / finish 各 298 次，合计 449.574 ms。后段各 298 次，合计 40.936 ms。对象更新前一段占 91.7% 的任务图样本时间。下一项集中测前段 build 内的任务图构造、队列处理和等待。
+
+
+前段碰撞图的分解使用三个边界。`0xDAF931 → 0xDAAD40` 覆盖构图和 PreCollide 处理。`0xDAF9BB`、`0xDAF9E0` 原样调用队列的 `+0xA8` 槽，测到从提交、执行到返回的总时间。默认队列 mode 0 从 `0xA15AF0` 进入 `0xA0F4F0`，其中 `0xA0FC48 → 0x9EAE60` 是 `WaitForSingleObject`。报告单列这个系统等待及 mode 0 的覆盖率。等待时间包含在调度总时长里，可能与其他 worker 有效计算重叠。探针只记录对象更新前的 build，原有集成和步进路径沿用原版分派。

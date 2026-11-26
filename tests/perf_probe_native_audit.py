@@ -41,13 +41,30 @@ for site, target in (('kInputCall', 'kInput'), ('kFenceCall', 'kFence'), ('kPres
                      ('kUpdateCall', 'kUpdate'), ('kDrawCall', 'kDraw'), ('kResolveCall', 'kResolve'),
                      ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette'),
                      ('kHavokBeforeCall', 'kHavokStep'), ('kHavokAfterCall', 'kHavokStep'),
-                     ('kHavokBuildCall', 'kHavokBuild'), ('kHavokFinishCall', 'kHavokFinish')):
+                     ('kHavokBuildCall', 'kHavokBuild'), ('kHavokFinishCall', 'kHavokFinish'),
+                     ('kCollideConstructCall', 'kCollideConstruct'), ('kCollideSleepCall', 'kCollideSleep')):
     call(value(site), value(target))
     checked += 1
 for sites, target in (('kSubmitCalls', 'kSubmit'), ('kMeshCalls', 'kMesh')):
     for at in values(sites):
         call(at, value(target))
         checked += 1
+# Both dispatch calls use the same argument setup and secondary queue vtable slot.
+sig = bytes.fromhex('488b06488d5424204533c0488bceff90a8000000')
+for at in values('kCollideDispatchCalls'):
+    assert binary[at - 14:at + 6] == sig
+    checked += 1
+vt = value('kDefaultQueueInterface')
+assert struct.unpack_from('<Q', binary, vt + 0xA8)[0] - pe.OPTIONAL_HEADER.ImageBase == 0x9EB5D0
+# The mode check selects the runner containing the signed sleep call. The sleep thunk loads a handle, then tail-calls WaitForSingleObject.
+assert value('kDefaultQueueMode') == 0x36C
+assert binary[0xA15AFE:0xA15B05] == bytes.fromhex('458b806c030000')
+jump = value('kCollideSleep') + 8
+assert binary[jump:jump+3] == bytes.fromhex('48ff25')
+slot = jump + 7 + struct.unpack_from('<i', binary, jump+3)[0]
+pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
+assert any(entry.address - pe.OPTIONAL_HEADER.ImageBase == slot and entry.name == b'WaitForSingleObject'
+           for library in pe.DIRECTORY_ENTRY_IMPORT for entry in library.imports)
 # The Present command's rcx: lea rcx, [rip+disp] at 0x11A308E, the renderer.
 assert binary[0x11A308E:0x11A3091] == bytes.fromhex('488d0d')
 assert 0x11A3095 + struct.unpack_from('<i', binary, 0x11A3091)[0] == value('kRenderer')

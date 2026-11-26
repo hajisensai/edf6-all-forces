@@ -316,6 +316,7 @@ def probe_parsing() -> None:
         perf = c_format('src/crew.cpp', 'PERF %u frames, %u steps')
         frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
         havok = c_format('src/perf_probe.cpp', 'PERF HAVOK %sbuild')
+        collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE')
         render = c_format('src/perf_probe.cpp', 'PERF RENDER %u presents')
         net = c_format('src/perf_probe.cpp', 'PERF NET CHANNELS')
         gpu = c_format('src/perf_probe.cpp', 'PERF GPU a frame')
@@ -330,6 +331,9 @@ def probe_parsing() -> None:
             f.write('[13:00:20.000] ' + havok % ('', 200, 600.0, 6.0, 200, 200.0, 4.0) + '\n')
             f.write('[13:00:20.000] ' + havok % ('before ', 100, 100.0, 2.0, 100, 50.0, 1.0) + '\n')
             f.write('[13:00:20.000] ' + havok % ('after ', 100, 500.0, 6.0, 100, 150.0, 4.0) + '\n')
+            f.write('[13:00:15.000] ' + collide % (100, 50.0, 60, 60.0, 60, 20, 10.0) + '\n')
+            f.write('[13:00:20.000] ' + collide % (150, 80.0, 150, 150.0, 120, 0, 0.0) + '\n')
+            f.write('[13:00:40.000] ' + collide % (9, 9.0, 9, 9.0, 9, 9, 9.0) + '\n')
             f.write('[13:00:20.000] ' + render % (400, 0.2, 3.0, 12.5, 40.0, 20.0, 45.0, 90.0, 2,
                                                   1200, 300, 0, 0, 0, 7, 2500) + '\n')
             f.write('[13:00:15.000] ' + gpu % (40.0, 12.0, 0.0, 0.25, 0.0, 1.5, 300.0, 0.8) + '\n')
@@ -356,6 +360,9 @@ def probe_parsing() -> None:
         check(h['before objects build'] == (100, 1.0, 2.0) and h['after objects build'] == (100, 5.0, 6.0)
               and h['before objects finish'] == (100, 0.5, 1.0) and h['after objects finish'] == (100, 1.5, 4.0),
               'Havok reports the two steps separately without double counting the legacy totals')
+        c = perf_report.read_collide(log, w)
+        check(c == {'construct': (250, 130.0), 'dispatch': (210, 210.0), 'sleep': (20, 10.0), 'mode0': 180},
+              'collision timing keeps empty graphs, non-mode-0 dispatches and waits distinct')
         r = perf_report.read_render(log, w)
         check(r['presents'] == 400 and r['stepped_worst'] == 90.0 and r['unpaired'] == 2 and r['submits'][0] == 1200
               and r['meshes'] == 2500, 'PERF RENDER: presents, input to present, submits by pass (gpu-2, latency-2)')

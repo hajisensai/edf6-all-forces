@@ -10,6 +10,7 @@
 
 #include "crew.h"
 #include "memory.h"
+#include "edf/patch.h"
 #include "net_counters.h"
 
 namespace crew::perfprobe {
@@ -29,6 +30,13 @@ constexpr unsigned kResolveCall=0x11B6B1D,kResolve=0x12D6110;
 constexpr unsigned kHavokBeforeCall=0x1199359,kHavokAfterCall=0x1199479,kHavokStep=0x11AD780;
 constexpr unsigned kHavokBuildCall=0x11AD814,kHavokBuild=0xDAF820;
 constexpr unsigned kHavokFinishCall=0x11AD827,kHavokFinish=0xDAFA30;
+constexpr unsigned kCollideConstructCall=0xDAF931,kCollideConstruct=0xDAAD40;
+constexpr unsigned kCollideDispatchCalls[]={0xDAF9BB,0xDAF9E0};
+constexpr unsigned kCollideSleepCall=0xA0FC48,kCollideSleep=0x9EAE60;
+constexpr unsigned kDefaultQueueInterface=0x182EC80,kDefaultQueueMode=0x36C;
+// mov rax,[rsi]; lea rdx,[rsp+0x20]; xor r8d,r8d; mov rcx,rsi; call [rax+0xA8]
+constexpr unsigned char kCollideDispatchSig[]={0x48,0x8B,0x06,0x48,0x8D,0x54,0x24,0x20,0x45,0x33,0xC0,
+                                               0x48,0x8B,0xCE,0xFF,0x90,0xA8,0,0,0};
 // The draw submits (system, object, pass in r8d) of the scene's lists, and the mesh draws.
 constexpr unsigned kSubmitCalls[]={0x11E255C,0x11E25F9,0x11E3A3F,0x11E4029,0x11E40BC};
 constexpr unsigned kSubmit=0x11E1630;
@@ -60,6 +68,8 @@ using QueryFn=bool(__fastcall*)(void*,void*,void*,void*,std::uint8_t);
 using HavokStepFn=void(__fastcall*)(void*,void*,void*,float);
 using HavokBuildFn=void(__fastcall*)(void*,void*,void*);
 using HavokFinishFn=void(__fastcall*)(void*,void*);
+using CollideDispatchFn=void(__fastcall*)(void*,void*,std::uint32_t);
+using CollideSleepFn=DWORD(__fastcall*)(void*);
 
 InputFn nextInput=nullptr;
 UpdateFn nextUpdate=nullptr;
@@ -73,11 +83,14 @@ PassFn nextPalette=nullptr;
 HavokStepFn nextHavokStep[2]{};
 HavokBuildFn nextHavokBuild=nullptr;
 HavokFinishFn nextHavokFinish=nullptr;
+HavokBuildFn nextCollideConstruct=nullptr;
+CollideSleepFn nextCollideSleep=nullptr;
 bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
 std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
 bool anchored=false;                // the frame anchor chained
-bool havokTiming=false,havokSplit=false;
+bool havokTiming=false,havokSplit=false,collideTiming=false;
+thread_local bool profileCollide=false,profileCollideSleep=false;
 unsigned havokPhase=2;    // game thread only: 0 before objects, 1 after, 2 outside either tagged step
 
 double tickMs=0.0;   // ms a QPC tick
@@ -94,6 +107,11 @@ struct HavokPart {
 struct HavokGraphs { HavokPart build,finish; };
 // The untagged bucket also keeps the total usable if either step call cannot be redirected.
 HavokGraphs havokGraphs[3]{};
+struct CollideTimes {
+    HavokPart construct,dispatch,sleep;
+    unsigned modeZero=0;
+};
+CollideTimes collideTimes;
 
 template<unsigned phase>
 void __fastcall HavokStepHook(void* context,void* services,void* queue,float dt) {
@@ -108,7 +126,13 @@ void __fastcall HavokStepHook(void* context,void* services,void* queue,float dt)
 
 void __fastcall HavokBuildHook(void* world,void* step,void* queue) {
     const LONGLONG start=Qpc();
-    nextHavokBuild(world,step,queue);
+    const bool previous=profileCollide;
+    profileCollide=collideTiming && havokPhase==0;
+    __try {
+        nextHavokBuild(world,step,queue);
+    } __finally {
+        profileCollide=previous;
+    }
     havokGraphs[havokPhase].build.Add(Qpc()-start);
 }
 
@@ -136,6 +160,76 @@ bool Chain(unsigned rva,unsigned stock,void* hook,void** next) noexcept {
         *next=nullptr;
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+void __fastcall CollideConstructHook(void* world,void* step,void* graph) {
+    if(!profileCollide) {
+        nextCollideConstruct(world,step,graph);
+        return;
+    }
+    const auto start=Qpc();
+    nextCollideConstruct(world,step,graph);
+    collideTimes.construct.Add(Qpc()-start);
+}
+
+void __fastcall CollideDispatchHook(void* queue,void* graph,std::uint32_t flags) {
+    const auto table=At<const unsigned char*>(static_cast<const unsigned char*>(queue),0);
+    const auto original=At<CollideDispatchFn>(table,0xA8);
+    if(!profileCollide) {
+        original(queue,graph,flags);
+        return;
+    }
+    const bool previous=profileCollideSleep;
+    // The audited sleep is specific to the default queue's mode-0 runner.
+    profileCollideSleep=table==image+kDefaultQueueInterface &&
+                        At<int>(static_cast<const unsigned char*>(queue),kDefaultQueueMode)==0;
+    if(profileCollideSleep)++collideTimes.modeZero;
+    const auto start=Qpc();
+    __try {
+        original(queue,graph,flags);
+    } __finally {
+        profileCollideSleep=previous;
+    }
+    collideTimes.dispatch.Add(Qpc()-start);
+}
+
+DWORD __fastcall CollideSleepHook(void* event) {
+    if(!profileCollideSleep)return nextCollideSleep(event);
+    const auto start=Qpc();
+    const DWORD result=nextCollideSleep(event);
+    collideTimes.sleep.Add(Qpc()-start);
+    return result;
+}
+
+bool InstallCollideDispatch(unsigned call) noexcept {
+    constexpr auto size=sizeof(kCollideDispatchSig);
+    constexpr unsigned argumentBytes=14;
+    static_assert(size-argumentBytes==6);
+    const auto at=image+call;
+    if(!edf::Matches(image,call-argumentBytes,kCollideDispatchSig,size))return false;
+    auto* const thunk=static_cast<unsigned char*>(edf::AllocateNearThunk(at,reinterpret_cast<void*>(&CollideDispatchHook)));
+    if(!thunk)return false;
+    // Preserve the six-byte virtual call's footprint.
+    unsigned char code[]={0xE8,0,0,0,0,0x90};
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(at+5);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        const auto rel32=static_cast<std::int32_t>(delta);
+        std::memcpy(code+1,&rel32,sizeof(rel32));
+        if(edf::PatchCode(at,kCollideDispatchSig+argumentBytes,code,sizeof(code)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
+void InstallCollideProbe() noexcept {
+    const bool construct=Chain(kCollideConstructCall,kCollideConstruct,reinterpret_cast<void*>(&CollideConstructHook),
+                              reinterpret_cast<void**>(&nextCollideConstruct));
+    const bool sleep=Chain(kCollideSleepCall,kCollideSleep,reinterpret_cast<void*>(&CollideSleepHook),
+                          reinterpret_cast<void**>(&nextCollideSleep));
+    unsigned dispatch=0;
+    for(const auto call:kCollideDispatchCalls)dispatch+=InstallCollideDispatch(call);
+    collideTiming=construct && sleep && dispatch==std::size(kCollideDispatchCalls);
+    Log("HOOK perf Havok collide construct=%d dispatch=%u/%zu sleep=%d",construct,dispatch,std::size(kCollideDispatchCalls),sleep);
 }
 
 // --- The frame (game thread only) ---
@@ -402,6 +496,7 @@ void Install() noexcept {
         const bool after=Chain(kHavokAfterCall,kHavokStep,reinterpret_cast<void*>(&HavokStepHook<1>),
                                reinterpret_cast<void**>(&nextHavokStep[1]));
         havokSplit=before && after;
+        if(havokSplit)InstallCollideProbe();
         Log("HOOK perf Havok build=%d finish=%d before=%d after=%d",build,finish,before,after);
     } else {
         Log("HOOK perf Havok build=%d finish=%d",build,finish);
@@ -450,6 +545,13 @@ void Report(unsigned frames) noexcept {
             report("before ",havokGraphs[0]);
             report("after ",havokGraphs[1]);
         }
+    }
+    if(collideTiming && collideTimes.construct.calls) {
+        const auto& c=collideTimes;
+        Log("PERF COLLIDE construct %u calls %.3f ms, dispatch %u calls %.3f ms, mode0 %u, sleep %u calls %.3f ms",
+            c.construct.calls,static_cast<double>(c.construct.ticks)*tickMs,c.dispatch.calls,
+            static_cast<double>(c.dispatch.ticks)*tickMs,c.modeZero,c.sleep.calls,static_cast<double>(c.sleep.ticks)*tickMs);
+        collideTimes={};
     }
     for(auto& graphs:havokGraphs)graphs={};
     const unsigned p=presents.exchange(0,std::memory_order_relaxed),u=unpaired.exchange(0,std::memory_order_relaxed);

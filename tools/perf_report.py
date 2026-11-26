@@ -433,6 +433,21 @@ def read_havok(log: str, window: tuple[float, float]) -> dict[str, tuple[int, fl
     return out
 
 
+COLLIDE_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE construct (\d+) calls ([\d.]+) ms, '
+                          r'dispatch (\d+) calls ([\d.]+) ms, mode0 (\d+), sleep (\d+) calls ([\d.]+) ms')
+
+
+def read_collide(log: str, window: tuple[float, float]) -> dict:
+    """Totals from the first Havok build; mode-0 sleep is included in dispatch."""
+    rows = _rows(log, COLLIDE_TIME, window)
+    if not rows:
+        return {}
+    out = {name: (sum(int(m[i]) for m in rows), sum(float(m[i + 1]) for m in rows))
+           for name, i in (('construct', 4), ('dispatch', 6), ('sleep', 9))}
+    out['mode0'] = sum(int(m[8]) for m in rows)
+    return out
+
+
 def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
     """The PERF RENDER rows in `window`: means weighted by presents, worsts the max. {} without them."""
     rows = _rows(log, RENDER, window)
@@ -936,6 +951,17 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
         out += ['', '## Havok task graphs (direct timing, including waits)', '']
         out += [f'- {phase}: {count} calls, {mean:.2f} ms/call (worst {worst:.2f})'
                 for phase, (count, mean, worst) in havok.items()]
+    collide = read_collide(log, cw)
+    if collide:
+        n, construct_ms = collide['construct']
+        dispatches, dispatch_ms = collide['dispatch']
+        sleeps, sleep_ms = collide['sleep']
+        if n:
+            out += ['', '## Havok first build (collision graph)', '',
+                    f'- Construction and pre-collision callbacks: {construct_ms / n:.3f} ms/build ({n} calls)',
+                    f'- Queue dispatch and execution: {dispatch_ms / n:.3f} ms/build ({dispatches} dispatches)',
+                    f'- Main-thread mode-0 event wait within dispatch: {sleep_ms / n:.3f} ms/build '
+                    f"({sleeps} waits, {collide['mode0']}/{dispatches} dispatches used mode 0)"]
     render = read_render(log, cw)
     if render:
         sub = ' / '.join(f'{v:.0f}' for v in render['submits'])
