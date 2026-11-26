@@ -908,6 +908,7 @@ void CloseLoop(int i) noexcept {
 
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept;
 void PlayOnce(int clip,const Heard& h) noexcept {
+    if(TraceRecording()){const float d[2]={static_cast<float>(clip),h.gain};TraceOutput("once",d,sizeof(d));}
     if(clip<0 || clip>=kClipCount || kClipLoops[clip] || !ClipsReady())return;
     if(const int g=wtOf[clip]-1;g>=0) {
         if(!wtThere[g])return;
@@ -926,6 +927,7 @@ void PlayUlt(int clip,const Heard& h) noexcept {
 }
 bool WtThere(int clip) noexcept { return clip>=0 && clip<wt::kCount && ClipsReady() && wtThere[clip]; }
 void PlayWt(int clip,int variant,const Heard& h) noexcept {
+    if(TraceRecording()){const float d[3]={static_cast<float>(clip),static_cast<float>(variant),h.gain};TraceOutput("wt",d,sizeof(d));}
     if(WtThere(clip) && variant>=0 && variant<wt::kVariants[clip])PlayPcm(wtClips[clip][variant],h);
 }
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept {
@@ -978,6 +980,10 @@ Tally* TallyOf(const char* name) noexcept {
 }  // namespace
 
 void Note(const char* event,int layers,float distance,const Heard& first) noexcept {
+    if(TraceRecording() && event) {   // the offline replay's record of it (trace_rec.cpp), Debug or not
+        char name[64];std::snprintf(name,sizeof(name),"note.%s",event);
+        const float d[3]={static_cast<float>(layers),distance,first.gain};TraceOutput(name,d,sizeof(d));
+    }
     if(!Cfg().debug || !event || !event[0])return;
     const ULONGLONG now=GetTickCount64();
     bool log=false;

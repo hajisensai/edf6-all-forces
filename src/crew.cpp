@@ -965,7 +965,9 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepTurretCam,&TurretCamFrame,v);      // the plugin off too: it lets the camera go then
     Guarded(kStepProteus,&ProteusFrame,v);          // the plugin off too: a reworked Proteus gets its stock numbers back
     Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: the high view goes then
+    if(Cfg().traceFile[0])Guarded(kStepVehicleSound,&TraceVehicleSound,v);   // its inputs, for the offline replay (trace_rec.cpp)
     Guarded(kStepVehicleSound,&VehicleSound,v);     // the plugin off too: the stock sounds are given back then
+    TraceEnd();
     Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
     GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
     GuardedTick(kStepSazabi,&SazabiSoundTick);      // the plugin off too: the Sazabi's loops stop then (once a frame)

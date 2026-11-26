@@ -188,6 +188,7 @@ void MissionStart() noexcept {
     ResetGear();
     ResetJetSound();
     ResetVehicleSound();
+    TraceReset();   // after it: the replay resets where the game did (trace_rec.cpp)
     ResetBlastSound();
     ResetSazabiSound();
     ResetMissiles();

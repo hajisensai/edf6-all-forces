@@ -756,6 +756,8 @@ void LoadConfig() noexcept {
     n.lockToneBeeps=ReadInt(L"LockToneBeeps",static_cast<DWORD>(n.lockToneBeeps));
     n.lockToneLockedMs=ReadInt(L"LockToneLockedMs",static_cast<DWORD>(n.lockToneLockedMs));
     n.vehicleSound=ReadBool(L"VehicleSound",n.vehicleSound);
+    GetPrivateProfileStringW(L"VehicleCrew",L"TraceFile",L"",n.traceFile,static_cast<DWORD>(std::size(n.traceFile)),iniPath);
+    n.traceSeconds=ReadInt(L"TraceSeconds",n.traceSeconds);
     n.vehicleEngineVolume=ReadFloat(L"VehicleEngineVolume",n.vehicleEngineVolume);
     n.vehicleTurretVolume=ReadFloat(L"VehicleTurretVolume",n.vehicleTurretVolume);
     n.vehicleReloadVolume=ReadFloat(L"VehicleReloadVolume",n.vehicleReloadVolume);
