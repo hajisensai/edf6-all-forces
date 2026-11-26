@@ -5228,6 +5228,12 @@
    ],
    "scripts": []
   },
+  "sound_engine_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "sound_event_check": {
    "labels": [
     "plugin-native"
