@@ -293,20 +293,20 @@ float4 SlotWrap(uint slot, float2 uv, float2 dx, float2 dy) {
     }
     return t;
 }
-// Ours (kind 0) clamps its own flipbook; the stock kinds sample as the stock does (linear, wrap). Kind is the draw's.
-float4 SampleSlot(uint slot, float2 uv) {
+// Ours (kind 0) clamps its own flipbook; the stock kinds sample as the stock does (linear, wrap).
+float4 SampleSlot(uint slot, float2 uv, bool clampUv) {
     float2 dx = ddx(uv), dy = ddy(uv);
-    float4 t;
-    [branch] if (Kind == 0u) t = SlotClamp(slot, uv, dx, dy);
-    else t = SlotWrap(slot, uv, dx, dy);
-    return t;
+    return clampUv ? SlotClamp(slot, uv, dx, dy) : SlotWrap(slot, uv, dx, dy);
 }
 
-float4 Ps(V i) : SV_Target0 {
-    if (Kind >= 5u) return EfsPs(i);
-    float4 t = lerp(SampleSlot(i.slot, i.uv.xy), SampleSlot(i.slot, i.uv.zw), i.misc.x);
+// One pixel shader per group of kinds (the group a literal: each entry point compiles only its own path, so the
+// stock cards do not pay the registers of our lit smoke or of the stock lit path): 0 ours, 1 the stock unlit kinds,
+// 2 the stock lit kinds, 3 the efs kinds.
+float4 PsGroup(V i, const uint group) {
+    if (group == 3u) return EfsPs(i);
+    float4 t = lerp(SampleSlot(i.slot, i.uv.xy, group == 0u), SampleSlot(i.slot, i.uv.zw, group == 0u), i.misc.x);
     float fade = saturate((SceneDistance(i.pos.xy) - i.misc.y) / max(i.misc.z, 0.001));
-    if (Kind == 0u) {
+    if (group == 0u) {
         fade *= saturate((i.misc.y - 0.3) / max(Ambient.w, 0.001));   // ours only: no card cuts the near plane
         float a = t.a * i.color.a * fade;
         float thick = t.b;
@@ -342,15 +342,24 @@ float4 Ps(V i) : SV_Target0 {
     // The stock forward PS (0x19670A0): rgb = texel * colour (no saturate: HDR), a = sat(texel.a * colour.a) times
     // sat(the VS's distance fade); ours adds the soft depth fade.
     float a = saturate(t.a * i.color.a) * saturate(1.0 - (i.vpos.w * Fade.x + Fade.y)) * fade;
-    if (Kind >= 3u) {
-        if (LitSet == 2u && t.a * i.color.a < 0.001) discard;   // the set 0xC08's clip
-        float3 light = LitSet == 2u ? i.vlight : StockLight(i.vpos.xyz, normalize(i.nrm), i.pos.xy);
+    if (group == 2u) {
+        // The set 0xC08 lit per vertex; the set 0xA40 per pixel (a branch: a ?: would evaluate both).
+        float3 light = i.vlight;
+        [branch] if (LitSet == 2u) {
+            if (t.a * i.color.a < 0.001) discard;   // the set 0xC08's clip
+        } else {
+            light = StockLight(i.vpos.xyz, normalize(i.nrm), i.pos.xy);
+        }
         float3 rgb = t.rgb * i.color.rgb * light;
         return Kind == 3u ? float4(rgb * a, a) : float4(rgb * fade, a);
     }
     if (Kind == 1u) return float4(t.rgb * i.color.rgb * a, a);
     return float4(t.rgb * i.color.rgb * fade, a);
 }
+float4 PsOurs(V i) : SV_Target0 { return PsGroup(i, 0u); }
+float4 PsStock(V i) : SV_Target0 { return PsGroup(i, 1u); }
+float4 PsStockLit(V i) : SV_Target0 { return PsGroup(i, 2u); }
+float4 PsEfs(V i) : SV_Target0 { return PsGroup(i, 3u); }
 )hlsl";
 
 using CompileFunction=HRESULT(WINAPI*)(LPCVOID,SIZE_T,LPCSTR,const D3D_SHADER_MACRO*,ID3DInclude*,LPCSTR,LPCSTR,UINT,UINT,
@@ -401,7 +410,7 @@ struct Renderer::Impl final {
     ComPtr<ID3D11DeviceContext1> context1;
     ComPtr<ID3DDeviceContextState> isolated;
     ComPtr<ID3D11VertexShader> vs;
-    ComPtr<ID3D11PixelShader> ps;
+    ComPtr<ID3D11PixelShader> ps[4];   // PsOurs, PsStock, PsStockLit, PsEfs
     ComPtr<ID3D11BlendState> blend,blendStockAlpha,blendStockAdd,blendEfsAdd,blendEfsSubtract;
     ComPtr<ID3D11DepthStencilState> noDepth,testDepth,testDepthReversed;
     // The scene depth bound for the hardware test (read-only, no write) of the particle kinds: a view of the depth
@@ -464,10 +473,15 @@ struct Renderer::Impl final {
         static_assert(sizeof(address)==sizeof(compile),"Windows function pointer size");
         std::memcpy(&compile,&address,sizeof(compile));
         if(!compile)return false;
-        ComPtr<ID3DBlob> vsCode,psCode;
-        if(!Compile("Vs","vs_5_0",vsCode) || !Compile("Ps","ps_5_0",psCode))return false;
-        if(FAILED(device->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs)) ||
-           FAILED(device->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps)))return false;
+        ComPtr<ID3DBlob> vsCode;
+        if(!Compile("Vs","vs_5_0",vsCode))return false;
+        static constexpr const char* kPs[4]={"PsOurs","PsStock","PsStockLit","PsEfs"};
+        for(int k=0;k<4;++k) {
+            ComPtr<ID3DBlob> psCode;
+            if(!Compile(kPs[k],"ps_5_0",psCode) ||
+               FAILED(device->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps[k])))return false;
+        }
+        if(FAILED(device->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs)))return false;
         D3D11_BLEND_DESC b{};
         auto& rt=b.RenderTarget[0];
         rt.BlendEnable=TRUE;rt.SrcBlend=D3D11_BLEND_ONE;rt.DestBlend=D3D11_BLEND_INV_SRC_ALPHA;rt.BlendOp=D3D11_BLEND_OP_ADD;
@@ -776,7 +790,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         context->RSSetViewports(1,&vp);
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         context->VSSetShader(s.vs.Get(),nullptr,0);
-        context->PSSetShader(s.ps.Get(),nullptr,0);
+        ID3D11PixelShader* psBound=nullptr;
         ID3D11Buffer* cbs[]={s.frameCb.Get(),s.batchCb.Get()};
         context->VSSetConstantBuffers(0,2,cbs);
         context->PSSetConstantBuffers(0,2,cbs);
@@ -833,6 +847,9 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
                 batch.kind==Kind::efsAlpha ? s.blendStockAlpha.Get() : batch.kind==Kind::efsAdditive ? s.blendEfsAdd.Get() :
                 batch.kind==Kind::efsSubtract ? s.blendEfsSubtract.Get() : s.blend.Get();
             context->OMSetBlendState(bs,nullptr,0xFFFFFFFFu);
+            const int group=efs ? 3 : lit ? 2 : batch.kind==Kind::smoke ? 0 : 1;
+            ID3D11PixelShader* const pss=s.ps[group].Get();
+            if(pss!=psBound){context->PSSetShader(pss,nullptr,0);psBound=pss;}
             ID3D11DepthStencilState* const dss=efs ? s.noDepth.Get() : tested;
             if(dss!=depthBound){context->OMSetDepthStencilState(dss,0);depthBound=dss;}
             const int drawn=efs ? ranges[b].count/2 : ranges[b].count;
