@@ -32,6 +32,8 @@ struct WarningView {
     float pt[kWarnPoints][3];
     float label[3];         // where its words go
     wchar_t text[40];       // its name and the time left ("火箭齐射 12s")
+    std::uint32_t id;       // which warning it is (one a warning made; the map's preview one of its own, kPreviewWarning),
+                            // for the HUD's world label on it to keep its facing by while it moves (the preview)
 };
 constexpr int kWarningViews=17;
 int SupportWarningViews(WarningView* out,int most) noexcept;

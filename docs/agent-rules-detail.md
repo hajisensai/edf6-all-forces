@@ -25,6 +25,7 @@
 - 快速看单个用例：`ctest --test-dir build -R <名字>`；`cmake --build build --target <x>_check && build\<x>_check.exe`。`python tools/selftest.py` 单独跑也会排同一个队，默认 8 个工作进程、按上次耗时从长到短排，`-j 1` 是串行。
 - ctest 用例互不共享输出，可以并行；新用例别写固定的共享路径，也别按墙钟判断时效。ctest 已给每个用例设 `OPENBLAS_NUM_THREADS=1`（`-j` 并行时，numpy 每个进程都开满核会超订）。
 - 测试的墙钟由最长的单个用例决定：一个用例超过约 3 分钟就拆分片（`cockpit_build_<I>`、`edf5_campaign_lifecycle_<I>` 用 `--shard I/N`，C++ 检查 `hail_glide_<I>` 由 `tests/hail_glide_shard.py` 按 `--list` 列出的单元分，`wt_tracked_<I>` 用 `EDF6_TEST_SHARD`）。分片按 `pylib/testshard.py` 用入库的实测耗时表装箱（`--seconds` 顺序跑一遍重写耗时表），不按名字轮转。只验证某一样东西的测试，别顺带走「生成全部载具」的安装路径（patch 掉 `gen.placeable_derived` 之类，那些载具由各自的测试覆盖）。
+- 子代理跑长测试不空等超过 5 分钟（2026-11-21：子代理的提示缓存只活 5 分钟；不改 1 小时缓存，那样更费额度）。`check.py`、单跑 `selftest.py`、check 槽位排队和 `gamequeue` 排队每 4 分钟打一行 `[heartbeat] …`（`pylib/heartbeat.py`，带进度）。做法：先用 `Bash run_in_background` 把输出重定向进日志（如 `python tools/check.py > build/check-run.log 2>&1`），再开 `Monitor`：`tail -n +1 -f build/check-run.log | grep --line-buffered -E '\[heartbeat\]|waiting|: ok|FAIL|passed'`，`timeout_ms` 1800000，到期重开；每次心跳醒来只回一句，等完成通知再读结果。不要让 Monitor 直接跑测试命令（到期会杀掉它）。几分钟内必然跑完的 `ctest -R` / 单个 `_check.exe` 照常前台跑。
 - 需要游戏文件的 native 审计测试靠缓存变量 `EDF6_NATIVE_DLL` / `EDF6_GAME_DIR`，不设就跳过。
 - CI 只有 `.github/workflows/build.yml`（windows-latest）：build → offline_checks + ctest（全套）→ py_compile → 生成文件 `--check`（含 `test_domains.py --check`）→ selftest（全套） → 打安装包。push 到 main 会重建 `nightly` 预发布，并镜像到测试站的 nightly 通道；手动 dispatch 镜像到 `test` 通道；推 `v*` 标签发正式版。
 

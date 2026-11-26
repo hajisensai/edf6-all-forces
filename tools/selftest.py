@@ -4097,8 +4097,10 @@ def hud_scale_one_source() -> None:
     assert 's=HudScaleOf(w,h)' in draw and 'text.s=s' in draw
     assert 'hudscale::Of(uiW,uiH,w,h,Cfg().hudScale)' in hud
     assert 's=hudscale::FitMap(s,width,height);' in hud and 'if(text)text->s=s;' in hud, 'map panel fitting must share geometry and font scale'
+    # a 3D world line (src/world_text.h) carries its own grid-snapped font scale; every other line is times the HUD's
+    assert 'float FontOf(const Text& t,const Line& l) noexcept { return l.world.on ? l.world.fd : hudscale::Font(l.scale,t.s); }' in hud
     for fn in ('void Measure(Text& t,Line& l)', 'void Draw(Text& t,const Line& l)'):
-        assert 'Font(t,hudscale::Font(l.scale,t.s))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
+        assert 'Font(t,FontOf(t,l))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
     assert 'for(const auto& u:kUiSigs)' in hud and '0x94E24F' in hud
     assert 'L"HudScale"' in plugin and 'Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax)' in plugin
     assert re.search(r'^HudScale=1\.0', ini, re.M) and '`HudScale`' in readme
@@ -16038,6 +16040,64 @@ def _cjk_outside_tr(path: str, functions: tuple[str, ...] | None) -> list[str]:
 
 
 @test
+def heartbeat_keeps_watchers_cache() -> None:
+    """The maintainer, 2026-11-21: 「优化下测试的时候会把缓存清空的问题，不要出现这种问题」 (a Claude Code subagent's 5-minute
+    prompt cache running out while it waits on a check) and 「不要改1小时」. pylib/heartbeat.py says a line well inside the
+    5 minutes while a long step runs, only then, with what is done so far; a failing status still says the line. Every
+    long wait and run says them: check.py (with its parts' progress), selftest.py, the check slot's wait, the game queue's."""
+    import time
+    import heartbeat
+    assert 0 < heartbeat.DEFAULT <= heartbeat.CACHE_TTL - 30, 'a line must reach the watcher well before its cache runs out'
+    saved = os.environ.get(heartbeat.ENV)
+    try:
+        os.environ.pop(heartbeat.ENV, None)
+        assert heartbeat.interval() == heartbeat.DEFAULT
+        os.environ[heartbeat.ENV] = '0'
+        said: list[str] = []
+        with heartbeat.beating('off', say=said.append):
+            time.sleep(0.1)
+        assert not said and heartbeat.interval() == 0
+        os.environ[heartbeat.ENV] = '0.05'
+        with heartbeat.beating('quick', say=said.append):
+            pass
+        assert not said, 'a step shorter than the interval says nothing'
+        calls = iter([ValueError('boom')])
+
+        def status() -> str:
+            e = next(calls, None)
+            if e:
+                raise e
+            return '3/7 done'
+        with heartbeat.beating('run', status, say=said.append):
+            time.sleep(0.4)
+        assert len(said) >= 3, said
+        assert all(line.startswith(heartbeat.PREFIX + ' run: ') for line in said), said
+        assert 'status failed: boom' in said[0] and said[-1].endswith(', 3/7 done'), said
+        n = len(said)
+        time.sleep(0.15)
+        assert len(said) == n, 'no line once the block is over'
+    finally:
+        if saved is None:
+            os.environ.pop(heartbeat.ENV, None)
+        else:
+            os.environ[heartbeat.ENV] = saved
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('check_tool', os.path.join(HERE, 'check.py'))
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+    with tempfile.TemporaryDirectory() as tmp:
+        logs = {k: os.path.join(tmp, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
+        with open(logs['ctest'], 'w', encoding='utf-8') as f:
+            f.write('      Start  1: a\n 1/310 Test   #1: a ....   Passed    1.0 sec\n 2/310 Test  #12: b ....   Passed\n')
+        with open(logs['selftest'], 'w', encoding='utf-8') as f:
+            f.write('ok    one  (1.0 s)\nFAIL  two  (2.0 s)\nsome output\n')
+        assert check.progress({'build': (0, 9.0)}, logs) == 'build ok, ctest 2/310, selftest 2 done', check.progress({'build': (0, 9.0)}, logs)
+    for path, want in (('tools/check.py', "heartbeat.beating('check.py'"), ('tools/selftest.py', "heartbeat.beating('selftest.py'"),
+                       ('pylib/checklock.py', 'heartbeat.beating('), ('pylib/gamelease.py', 'heartbeat.beating(')):
+        assert want in src(path), f'{path}: its long wait / run says no heartbeat'
+
+
+@test
 def installer_speaks_english() -> None:
     """The maintainer, 2026-11-10: 「同时支持一下英文版本」. The installer's language follows Windows' display language
     (Chinese for any Chinese LANGID, English otherwise), --lang zh|en overrides it and is handed to the processes it starts
@@ -16078,9 +16138,13 @@ def main(argv: list[str] | None = None) -> int:
     Took ~21 min in one process (2026-10-25)."""
     argv = sys.argv[1:] if argv is None else argv
     import checklock   # below normal and one full check on the machine at a time (pylib/checklock.py)
+    import heartbeat   # a line every few minutes for whoever watches the run (pylib/heartbeat.py): a test can be silent for long
     checklock.below_normal()
-    with checklock.held(f'tools/selftest.py ({os.path.basename(ROOT)})'):
+    with checklock.held(f'tools/selftest.py ({os.path.basename(ROOT)})'),             heartbeat.beating('selftest.py', lambda: f'{_reported[0]}/{len(TESTS)} done'):
         return _main(argv)
+
+
+_reported = [0]   # the tests reported so far (_main's report): the heartbeat's count
 
 
 def _main(argv: list[str]) -> int:
@@ -16102,6 +16166,7 @@ def _main(argv: list[str]) -> int:
         nonlocal failed
         name = TESTS[index].__name__
         took[name] = round(sec, 2)
+        _reported[0] += 1
         sys.stdout.write(text)
         print(f'{"ok  " if ok else "FAIL"}  {name}  ({sec:.1f} s)', flush=True)
         failed += 0 if ok else 1

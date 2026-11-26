@@ -158,7 +158,8 @@ constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 // `groups`: the RTS groups it is in (bit N-1: group N, mapcmd_logic.h GroupKey); `ways`: its Shift-queued points after
 // the one it is on its way to (`way`, mapcmd_logic.h Waypoints).
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false;
-    std::uint16_t groups=0; std::uint8_t ways=0; float way[mapcmd::kWaypointsMost][3]{}; };
+    std::uint16_t groups=0; std::uint8_t ways=0; float way[mapcmd::kWaypointsMost][3]{};
+    std::uint64_t of=0; };   // `of`: the unit (its top's identity; the list is sorted by address, so not its index)
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=64;
 constexpr int kMapSupportHits=kMapSupports*2;   // its rows and chips as hit (MapCommandSupportButtons)
@@ -199,6 +200,7 @@ struct MapCommandReadout {
     int march;                 // the march's formation (formation.h Shape)
     bool hover;                // an enemy under the pointer (the screen centre with a pad): Q marks it, H focuses on it
     float hoverAt[3];          // its lock point
+    std::uint64_t hoverOf;     // ...the enemy it is (the HUD's world label keeps its facing by it)
     int supportArmed;          // the support call armed by its bar (or C): the next left click is its point; -1 none
     int supportPick;           // the call [ / ] picked (C arms it)
     // The armed support's composition panel (map_buttons.h ComposePanel): its entry (-1: closed), its seats, the load.

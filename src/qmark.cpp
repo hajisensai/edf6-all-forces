@@ -103,13 +103,19 @@ void PlayCues() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
+// A point sent by a peer (it stands where it was put): its bits as what it is of.
+std::uint64_t PointOf(const float* p) noexcept {
+    std::uint32_t b[3];std::memcpy(b,p,12);
+    return (static_cast<std::uint64_t>(b[0])<<32 ^ b[1]) ^ static_cast<std::uint64_t>(b[2])*0x9E3779B97F4A7C15ull;
+}
 void Publish(ULONGLONG now) noexcept {
     QMarkView v[kQMarkViews]{};
     int n=0;
     const void* enemy=nullptr;
     float at[3];
-    if(NpcMarkOwn(&enemy,at))v[n++]=QMarkView{true,true,-1,{at[0],at[1],at[2]},{}};
-    if(ownPoint.on && now<ownPoint.until)v[n++]=QMarkView{true,false,-1,{ownPoint.at[0],ownPoint.at[1],ownPoint.at[2]},{}};
+    if(NpcMarkOwn(&enemy,at))v[n++]=QMarkView{true,true,-1,{at[0],at[1],at[2]},{},reinterpret_cast<std::uintptr_t>(enemy)};
+    if(ownPoint.on && now<ownPoint.until)
+        v[n++]=QMarkView{true,false,-1,{ownPoint.at[0],ownPoint.at[1],ownPoint.at[2]},{},ownPoint.until};   // its making's time
     else ownPoint.on=false;
     for(std::uint32_t p=1;p<=peerCount && n<kQMarkViews;++p) {
         const Tracked& t=tracked[p];
@@ -119,12 +125,12 @@ void Publish(ULONGLONG now) noexcept {
             const bool found=static_cast<bool>(t.enemy);
             if(!found || npcmark::Alive(t.enemy)) {
                 const float* e=found ? t.enemyAt : r.state.enemyAt;
-                v[n]=QMarkView{false,true,t.slot,{e[0],e[1],e[2]},{}};
+                v[n]=QMarkView{false,true,t.slot,{e[0],e[1],e[2]},{},found ? reinterpret_cast<std::uintptr_t>(t.enemy.obj) : PointOf(e)};
                 std::memcpy(v[n++].name,t.name,sizeof(t.name));
             }
         }
         if(inbox.Point(p,now) && n<kQMarkViews) {
-            v[n]=QMarkView{false,false,t.slot,{r.state.pointAt[0],r.state.pointAt[1],r.state.pointAt[2]},{}};
+            v[n]=QMarkView{false,false,t.slot,{r.state.pointAt[0],r.state.pointAt[1],r.state.pointAt[2]},{},PointOf(r.state.pointAt)};
             std::memcpy(v[n++].name,t.name,sizeof(t.name));
         }
     }

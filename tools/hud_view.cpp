@@ -108,7 +108,9 @@ float Width(const wchar_t* text) {
     return w*kGlyphH*fontScale;
 }
 // The text lines a scene drew (while `recording`) and its glyphs: (character, font scale in kTextScaleStep units).
-struct Drew { float x0,y0,x1,y1; std::wstring text; };
+// `world`: a world line's face (hud.cpp WorldLabel), its box the face's on the screen; `key` its label's (one object's
+// labels share it: a unit's group digits, follow word and name).
+struct Drew { float x0,y0,x1,y1; std::wstring text; bool world=false; std::uint64_t key=0; };
 std::vector<Drew> drew;
 std::set<std::pair<wchar_t,int>> glyphs;
 
@@ -137,23 +139,88 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
                      rgba[0],rgba[1],rgba[2],rgba[3]);
 }
 int activeTextRenderers=0;
-void* __fastcall MakeRec(void*,void* r) { ++activeTextRenderers;return r; }
-void __fastcall BeginRec(void*,void*,void* font) { fontScale=*reinterpret_cast<const float*>(static_cast<unsigned char*>(font)+4); }
+// The renderer's Core (*(renderer+0x18), docs/world-text-re.md §1): its projection (+0x2F0) and view (+0x330). The stand-in
+// begin leaves the projection zero for "the HUD's orthographic" (the game's begin writes that there); a world line's
+// (hud.cpp DrawWorld) writes the camera's viewProj over it, which the stand-in draw then puts the glyphs' corners through,
+// as the game's vertex shader does. The draw reads the outline from the font begun (as the game's draw does, §1.2).
+alignas(16) unsigned char textCore[0x400]{};
+const unsigned char* begunFont=nullptr;  // the font of the last begin
+float recordW=1920.0f,recordH=1080.0f;   // the screen being recorded (Record): a world line's viewport
+int worldDraws=0;                        // world lines' faces drawn while recording (the layer with the glow)
+int worldLayers=0;                       // world lines' layers behind their faces drawn while recording
+bool lastDrawWorld=false;                // the last text draw left the camera's projection in
+// The frame's text as the game would be left by it (any draw, recording or not; Record counts them a scene):
+//  - a world line drawn and the next text draw not the restore (hud.cpp RestoreOrtho: invisible, orthographic), or no
+//    text draw after it at all: the game's own HUD after it drawn through the camera's projection;
+//  - a draw meant invisible (its colour clear) with its outline showing: a dot on the screen (the restore's at the top left);
+//  - a world line's face drawn with no layer behind it, or a layer behind it nearer the camera than its face (drawn after
+//    the layers, the face must be the nearest: no depth test).
+bool owedRestore=false;
+int unrestored=0,visibleClear=0,layerOrderBad=0;
+int backsSinceFace=0;float backNearest=1e30f;
+void* __fastcall MakeRec(void*,void* r) { ++activeTextRenderers;*reinterpret_cast<void**>(static_cast<unsigned char*>(r)+0x18)=textCore;return r; }
+void __fastcall BeginRec(void*,void*,void* font) {
+    begunFont=static_cast<const unsigned char*>(font);
+    fontScale=*reinterpret_cast<const float*>(begunFont+4);
+    std::memset(textCore+kCoreProjection,0,64);
+}
 void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bool) {
     size[0]=Width(text);size[1]=kGlyphH*fontScale;
 }
 void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar_t* text,std::int64_t) {
-    tallest=std::fmax(tallest,kGlyphH*fontScale);
-    if(boxing){++drawn;Grow(m[12],m[13]);Grow(m[12]+Width(text),m[13]+kGlyphH*fontScale);}
+    // Where its glyphs land: a world line's corners through m and the camera's viewProj (the view an identity), else m's
+    // translation in pixels.
+    const float* proj=reinterpret_cast<const float*>(textCore+kCoreProjection);
+    bool world=false;
+    for(int i=0;i<16;++i)world=world || proj[i]!=0.0f;
+    lastDrawWorld=world;
+    const float* outline=begunFont ? reinterpret_cast<const float*>(begunFont+0x1C) : nullptr;
+    const bool outlineShows=outline && outline[3]>0.0f && *reinterpret_cast<const float*>(begunFont+0x2C)>0.0f;
+    const float tw=Width(text),th=kGlyphH*fontScale;
+    float x0=m[12],y0=m[13],x1=m[12]+tw,y1=m[13]+th;
+    if(world) {
+        owedRestore=true;
+        x0=y0=1e30f;x1=y1=-1e30f;
+        for(int i=0;i<4;++i) {
+            float p[3],sx=0.0f,sy=0.0f;
+            worldtext::Local(m,(i&1) ? tw : 0.0f,(i&2) ? th : 0.0f,p);worldtext::ToScreen(proj,recordW,recordH,p,&sx,&sy);
+            x0=std::fmin(x0,sx);y0=std::fmin(y0,sy);x1=std::fmax(x1,sx);y1=std::fmax(y1,sy);
+        }
+        // How far its middle is from the eye (the layers are parallel planes: the one further along the eye's ray is
+        // under the nearer one; the clip w, the depth along the view's axis, misorders a plate far off the axis).
+        float c[3],eye[3]{};worldtext::Local(m,tw*0.5f,th*0.5f,c);worldtext::EyeOf(proj,eye);
+        const float depth=std::sqrt((c[0]-eye[0])*(c[0]-eye[0])+(c[1]-eye[1])*(c[1]-eye[1])+(c[2]-eye[2])*(c[2]-eye[2]));
+        if(!outlineShows) {   // a layer behind its face
+            ++backsSinceFace;backNearest=std::fmin(backNearest,depth);
+            if(recording)++worldLayers;
+            if(out && rgba[3]>0.0f) {
+                char narrow[256];
+                WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
+                std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",x0,y0,y1-y0,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
+            }
+            return;
+        }
+        if(backsSinceFace==0 || backNearest<depth-1e-3f)++layerOrderBad;
+        backsSinceFace=0;backNearest=1e30f;
+        if(recording)++worldDraws;
+    } else {
+        const bool clear=rgba[3]<=0.0f;
+        if(clear && outlineShows)++visibleClear;
+        if(owedRestore && !clear)++unrestored;
+        owedRestore=false;
+    }
+    if(rgba[3]<=0.0f)return;   // the world lines' restore (hud.cpp RestoreOrtho): nothing to see
+    tallest=std::fmax(tallest,y1-y0);
+    if(boxing){++drawn;Grow(x0,y0);Grow(x1,y1);}
     if(recording) {
-        drew.push_back(Drew{m[12],m[13],m[12]+Width(text),m[13]+kGlyphH*fontScale,text});
+        drew.push_back(Drew{x0,y0,x1,y1,text,world,world ? worldDrawingKey : 0});
         const int step=static_cast<int>(std::lround(fontScale/kTextScaleStep));
         for(const wchar_t* c=text;*c;++c)if(*c!=L' ')glyphs.insert({*c,step});
     }
     if(!out)return;
     char narrow[256];
     WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
-    std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",m[12],m[13],kGlyphH*fontScale,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
+    std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",x0,y0,y1-y0,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
 }
 void __fastcall EndRec(void*,void*) {}
 void __fastcall FreeRec(void*) { --activeTextRenderers; }
@@ -457,8 +524,17 @@ std::string Narrow(const std::wstring& w) {
 // `draw` recorded as scene `name` on a screen `width` x `height`: its text on the screen, its overlaps none English lacks.
 template<class F> void Record(const wchar_t* name,F draw,int width,int height=1080) {
     drew.clear();glyphs.clear();panels.clear();recording=true;NextStep();
+    recordW=static_cast<float>(width);recordH=static_cast<float>(height);worldDraws=worldLayers=0;lastDrawWorld=false;
+    owedRestore=false;unrestored=visibleClear=layerOrderBad=0;backsSinceFace=0;backNearest=1e30f;
+    worldFacings=worldtext::Facings{};   // every scene's plates made facing its own camera
     draw();
     recording=false;
+    if(owedRestore)++unrestored;
+    if(unrestored || visibleClear || layerOrderBad) {
+        std::printf("FAIL  %s %ls: world text: %d frames' text left in the camera's projection, %d invisible draws with an outline, "
+                    "%d faces not drawn over their layers\n",hudtext::Name(hudtext::InUse()),name,unrestored,visibleClear,layerOrderBad);
+        ++textFailed;
+    }
     SceneText t;
     const float w=static_cast<float>(width),h=static_cast<float>(height);
     for(std::size_t i=0;i<drew.size();++i) {
@@ -482,6 +558,9 @@ template<class F> void Record(const wchar_t* name,F draw,int width,int height=10
         for(std::size_t k=0;k<i;++k) {
             const Drew& b=drew[k];
             if(b.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+            // Two plates of different things may cross on the screen as the view has them (drawn far to near); a 2D
+            // line over any line, or two plates of one thing (laid out apart round it), count.
+            if(a.world && b.world && a.key!=b.key)continue;
             if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1)t.overlaps.insert({static_cast<int>(k),static_cast<int>(i)});
         }
     }
@@ -500,6 +579,83 @@ template<class F> void Record(const wchar_t* name,F draw,int width,int height=10
     std::printf("      %s %ls: %zu lines, %zu glyphs, %zu overlapping pairs\n",hudtext::Name(hudtext::InUse()),name,drew.size(),glyphs.size(),
                 t.overlaps.size());
     if(glyphs.size()>mostGlyphs){mostGlyphs=glyphs.size();mostGlyphsAt=Narrow(name)+" ("+hudtext::Name(hudtext::InUse())+")";}
+}
+
+// The world text (src/world_text.h, hud.cpp WorldLabel): a scene's labels drawn as plates (`world`: their faces,
+// `worldN` of them, `layersN` layers behind those, the HUD's projection put back after them: `restored`) against the same
+// scene flat (`flat`, none a world line: `flatN`). Each plate's face near where the flat line is (the plate stands at its
+// anchor, its offset in metres along it: near the 2D offset, not to the pixel), its height on the screen within
+// world_text.h's bounds of the flat one's (a little more for the perspective across the plate). The map's grid labels
+// lie on the ground north up (turned on the screen with the map's heading, foreshortened by its look down: world_text_check
+// checks their shape): counted, not held to the flat lines' boxes. Returns its failures.
+int WorldTextAgainstFlat(const wchar_t* name,const std::vector<Drew>& world,int worldN,int layersN,bool restored,
+                         const std::vector<Drew>& flat,int flatN) {
+    int bad=0,matched=0,ground=0;
+    const auto fail=[&](const char* what,const std::wstring& text,float a=0.0f,float b=0.0f){
+        ++bad;std::printf("FAIL  world text %ls: %s \"%s\" (%.2f, %.2f)\n",name,what,Narrow(text).c_str(),a,b);};
+    if(worldN<=0)fail("no world line drawn",L"");
+    if(layersN<worldN)fail("no layers behind the faces (no thickness)",L"",static_cast<float>(layersN),static_cast<float>(worldN));
+    if(!restored)fail("the camera's projection left in after the world lines",L"");
+    if(flatN!=0)fail("a world line drawn with WorldText3D=0",L"");
+    for(const Drew& w:world) {
+        if(w.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+        if(w.world && w.key==kGroundKey){++ground;continue;}
+        for(const Drew& f:flat) {
+            if(f.text!=w.text)continue;
+            ++matched;
+            const float wx=(w.x0+w.x1)*0.5f,wy=(w.y0+w.y1)*0.5f,fx=(f.x0+f.x1)*0.5f,fy=(f.y0+f.y1)*0.5f;
+            const float fh=f.y1-f.y0,fw=f.x1-f.x0,k=(w.y1-w.y0)/fh;
+            if(std::fabs(wy-fy)>std::fmax(6.0f,fh*0.6f))fail("not where the flat line is (up / down)",w.text,wy-fy,fh);
+            if(std::fabs(wx-fx)>std::fmax(6.0f,fw*0.3f))fail("not where the flat line is (across)",w.text,wx-fx,fw);
+            if(!(k>=worldtext::kFarLeast*0.9f && k<=worldtext::kNearMost*1.15f))fail("size out of its bounds",w.text,k);
+            break;
+        }
+    }
+    std::printf("%s  world text %ls: %d plates (%d on the ground), %d layers behind them, %d against the flat ones, "
+                "restored %d\n",bad ? "FAIL" : "ok  ",name,worldN,ground,layersN,matched,restored);
+    return bad;
+}
+// The stand-in catches the two ways the world lines' restore can go wrong (the real path drawn, then each mistake):
+// the restore left out (a 2D line next, through the camera's projection: hud.cpp DrawAll without RestoreOrtho) and the
+// restore's invisible "." drawn with the plain text's black outline (a dot at the top left every frame).
+int RestoreCaught() {
+    int bad=0;
+    const auto check=[&](bool ok,const char* what){if(!ok){++bad;std::printf("FAIL  world text restore: %s\n",what);}};
+    alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
+    static unsigned char ctx[16]{};
+    Text text{};
+    text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);
+    float vp[16];
+    const float eye[3]={0.0f,2.0f,0.0f},look[3]={0.0f,0.0f,1.0f},anchor[3]={1.0f,3.0f,25.0f};
+    Camera(eye,look,1920.0f,1080.0f,vp);
+    text.vp=vp;text.width=1920.0f;text.height=1080.0f;
+    Line lines[2]{};
+    int at=0;
+    worldFacings=worldtext::Facings{};
+    WorldLabel(&text,lines,&at,vp,1920.0f,1080.0f,anchor,WorldKey(kWorldPing,0),0.0f,-20.0f,1,kLineScale,kAmber,L"%ls",L"PLATE");
+    Label(&text,lines,&at,960.0f,900.0f,1,kLineScale,kWhite,L"%ls",L"FLAT");
+    check(at==2 && lines[0].world.on && !lines[1].world.on,"a world line and a flat one laid out");
+    const auto run=[&](auto draw){owedRestore=false;unrestored=visibleClear=layerOrderBad=0;backsSinceFace=0;backNearest=1e30f;draw();if(owedRestore)++unrestored;};
+    run([&]{DrawAll(text,lines,at);});
+    check(unrestored==0 && visibleClear==0 && layerOrderBad==0,"DrawAll: restored, no dot, faces over their layers");
+    run([&]{DrawWorld(text,lines[0],GetTickCount64(),1);Draw(text,lines[1]);});
+    check(unrestored==1,"the restore left out: caught");
+    run([&]{DrawWorld(text,lines[0],GetTickCount64(),1);});
+    check(unrestored==1,"the restore left out with nothing after: caught");
+    run([&]{
+        DrawWorld(text,lines[0],GetTickCount64(),1);
+        Font(text,hudscale::Font(kLineScale,text.s),kOutline,1.7f,1);   // the restore as it was: the black outline
+        reinterpret_cast<TextBeginFn>(image+kTextBegin)(text.renderer,text.ctx,text.font);
+        alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, 0.0f,0.0f,0.0f,1.0f};
+        reinterpret_cast<TextDrawFn>(image+kTextDraw)(text.renderer,text.ctx,m,kClear,L".",-1);
+        reinterpret_cast<TextEndFn>(image+kTextEnd)(text.renderer,text.ctx);
+    });
+    check(visibleClear==1 && unrestored==0,"the restore's outline showing: caught");
+    run([&]{RestoreOrtho(text);});
+    check(visibleClear==0,"RestoreOrtho: no outline");
+    FreeText(text);
+    std::printf("%s  world text restore: the stand-in catches a restore left out and its outline showing\n",bad ? "FAIL" : "ok  ");
+    return bad;
 }
 
 // A unit at (x, y, z) heading `headingDeg` (compass: 0 +z, growing to its right, -x), on flat ground at 0.
@@ -1059,7 +1215,7 @@ template<class F> Box Measured(F draw,float s=1.0f) {
     static unsigned char ctx[16]{};
     Text text{};
     text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
-    Line lines[kMaxLines];
+    Line lines[kMaxLines]{};
     int at=0;
     box=Box{};boxing=true;
     draw(&text,lines,&at);
@@ -2469,6 +2625,11 @@ int Scenes(const std::wstring& dir) {
     sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
     sceneMarkOn=true;sceneMark[0]=ground[0]+25.0f;sceneMark[1]=ground[1]+6.0f;sceneMark[2]=ground[2]+180.0f;
     Scene(dir,L"npc_mark",ground);
+    {   // the marks' words standing in the world, and flat (WorldText3D=0)
+        const std::vector<Drew> world=drew;const int worldN=worldDraws,layersN=worldLayers;const bool restored=!lastDrawWorld;
+        config.worldText3D=false;Scene(dir,L"npc_mark_flat",ground);config.worldText3D=true;
+        failed+=WorldTextAgainstFlat(L"npc_mark",world,worldN,layersN,restored,drew,worldDraws);
+    }
     // The formation banner just after the key (the longest name: bounding overwatch) with the mark up: on the screen,
     // apart from the mark's text, naming the shape and the key.
     sceneFormation=static_cast<int>(npc::formation::Shape::bounding);
@@ -2561,6 +2722,11 @@ int Scenes(const std::wstring& dir) {
     std::memcpy(sceneHeli.sym.nose,noseWas,12);
     // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.
     MapScene(dir,L"map_mid",700.0f,60.0f,20.0f,false);
+    {   // The map's labels at 60 degrees down standing in the world (made square on to the map's camera), and flat.
+        const std::vector<Drew> world=drew;const int worldN=worldDraws,layersN=worldLayers;const bool restored=!lastDrawWorld;
+        config.worldText3D=false;MapScene(dir,L"map_mid_flat",700.0f,60.0f,20.0f,false);config.worldText3D=true;
+        failed+=WorldTextAgainstFlat(L"map_mid",world,worldN,layersN,restored,drew,worldDraws);
+    }
     MapScene(dir,L"map_high_pad",3000.0f,85.0f,-40.0f,true);
     MapScene(dir,L"map_low",200.0f,32.0f,0.0f,false);
     MapScene(dir,L"map_nine_squads",700.0f,60.0f,20.0f,false,9);
@@ -2691,8 +2857,9 @@ int wmain(int argc,wchar_t** argv) {
     *reinterpret_cast<void**>(image+kUiScreen)=uiHolder;
     *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
     SetScreen(1920,1080);
-    quadOk=textOk=uiOk=true;
+    quadOk=textOk=uiOk=worldTextOk=true;
     int failed=PhysicalInstrumentFeedChecks();
+    failed+=RestoreCaught();
     for(int l=0;l<hudtext::kLangs;++l) {   // English first: the others are compared with it
         const hudtext::Lang lang=static_cast<hudtext::Lang>(l);
         if(only>1 && only!=l+1 && lang!=hudtext::Lang::en)continue;

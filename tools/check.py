@@ -41,6 +41,7 @@ BUILD = os.path.join(ROOT, 'build')
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import checklock  # noqa: E402
 import gamedir  # noqa: E402
+import heartbeat  # noqa: E402
 import test_domains  # noqa: E402  (tools/, this script's folder)
 
 BUSY = 3   # exit code: this worktree's check is already queued or running
@@ -233,6 +234,28 @@ def gen_checks(log: str) -> tuple[int, float]:
     return (1 if failed else 0), time.perf_counter() - started
 
 
+def progress(results: dict[str, tuple[int, float]], logs: dict[str, str]) -> str:
+    """What a heartbeat line says: each part done (ok / FAIL) or running, with ctest's and selftest's count so far."""
+    said = []
+    for part, log in logs.items():
+        if part in results:
+            said.append(f"{part} {'ok' if not results[part][0] else 'FAIL'}")
+            continue
+        try:
+            with open(log, encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            continue   # not started (or not asked for)
+        if part == 'ctest':
+            done = re.findall(r'^\s*(\d+)/(\d+) Test\s+#', text, re.M)
+            said.append(f'ctest {done[-1][0]}/{done[-1][1]}' if done else 'ctest running')
+        elif part == 'selftest':
+            said.append(f"selftest {len(re.findall(r'^(?:ok  |FAIL)  ', text, re.M))} done")
+        else:
+            said.append(f'{part} running')
+    return ', '.join(said)
+
+
 def main(argv: list[str]) -> int:
     known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run', '--base'}
     if any(a.startswith('-') and a not in known for a in argv):
@@ -288,7 +311,12 @@ def _main(argv: list[str], jobs: int) -> int:
     os.makedirs(BUILD, exist_ok=True)
     results: dict[str, tuple[int, float]] = {}
     logs = {k: os.path.join(BUILD, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
-    with slot(argv) as (sel, waited):
+    # the parts' output goes to their logs: a line every few minutes for whoever watches this run (pylib/heartbeat.py),
+    # from when the slot is ours (checklock says its own while waiting)
+    with slot(argv) as (sel, waited), heartbeat.beating('check.py', lambda: progress(results, logs)):
+        for log in logs.values():   # a part's log is this run's from its start on: progress() never reads a stale one
+            with contextlib.suppress(OSError):
+                os.remove(log)
         # taken inside the lock: it carries checklock.HELD, so selftest.py under this check does not wait for it
         env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
         started = time.perf_counter()   # the queue is not the check's time
