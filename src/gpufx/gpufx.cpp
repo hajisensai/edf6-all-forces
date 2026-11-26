@@ -1258,8 +1258,10 @@ RecentShot recentShots[16]{};
 // Weapon fields (docs/gpufx-re.md, layers): the owner +0x120, the stock muzzle effect +0x480 (0x697F85 skips a null
 // one), AmmoExplosion +0x8B0, the muzzle list +0x1D0 / count +0x1E0, stride 0xF0, an entry's forward +0x70 and
 // position +0x80.
+// AmmoSpeed +0x894 (m a frame) and AmmoDamage +0x89C (the SGO's, vehmix.h) size the shot (gpufx_layers.h ShotPower).
 constexpr std::size_t kWeaponOwner=0x120,kWeaponMuzzleEffect=0x480,kWeaponBlast=0x8B0,kWeaponMuzzles=0x1D0,
-    kWeaponMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleForward=0x70,kMuzzlePosition=0x80;
+    kWeaponMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleForward=0x70,kMuzzlePosition=0x80,kWeaponSpeed=0x894,
+    kWeaponDamage=0x89C;
 
 // EffectGenUtil::Explosion 0x2E5ED0: its head hook (the 15-byte prologue, no relative instructions) and the two
 // "nothing to spawn" branches made unconditional so its own particles are ours: 0x2E68BC (the three ParticleObjects'
@@ -1772,9 +1774,11 @@ bool ExplosionBigHooked() noexcept { return explosionBigNext!=nullptr; }
 void* ShotBegin(unsigned char* weapon) noexcept {
     if(!optLayers.load(std::memory_order_relaxed))return nullptr;
     __try {
-        if(!Readable(weapon,kWeaponBlast+4,true))return nullptr;
-        const float blast=At<float>(weapon,kWeaponBlast);
-        if(!(blast>=kCannonBlast) || !KnownVehicle(At<const void*>(weapon,kWeaponOwner)))return nullptr;
+        if(!Readable(weapon,kWeaponBlast+4,true) || !KnownVehicle(At<const void*>(weapon,kWeaponOwner)))return nullptr;
+        bool launch=false;
+        const float power=ShotPower(At<float>(weapon,kWeaponBlast),At<float>(weapon,kWeaponDamage),At<float>(weapon,kWeaponSpeed),
+                                    true,launch);
+        if(launch || !(power>=kCannonBlast))return nullptr;   // a launch keeps its stock tube puff
         void* effect=At<void*>(weapon,kWeaponMuzzleEffect);
         *reinterpret_cast<void**>(weapon+kWeaponMuzzleEffect)=nullptr;   // ours draws a vehicle gun's flash and smoke
         return effect;
@@ -1785,7 +1789,11 @@ void ShotEnd(unsigned char* weapon,unsigned muzzle,void* muzzleEffect) noexcept 
     __try {
         if(muzzleEffect)*reinterpret_cast<void**>(weapon+kWeaponMuzzleEffect)=muzzleEffect;
         if(!optLayers.load(std::memory_order_relaxed) || !Readable(weapon,kWeaponBlast+4))return;
-        const float blast=At<float>(weapon,kWeaponBlast);
+        const unsigned char* owner=At<const unsigned char*>(weapon,kWeaponOwner);
+        const bool vehicle=KnownVehicle(owner);
+        bool launch=false;
+        const float blast=ShotPower(At<float>(weapon,kWeaponBlast),At<float>(weapon,kWeaponDamage),At<float>(weapon,kWeaponSpeed),
+                                    vehicle,launch);
         if(!(blast>=kCannonBlast))return;
         const unsigned char* list=At<const unsigned char*>(weapon,kWeaponMuzzles);
         const std::uint64_t count=At<std::uint64_t>(weapon,kWeaponMuzzleCount);
@@ -1796,8 +1804,7 @@ void ShotEnd(unsigned char* weapon,unsigned muzzle,void* muzzleEffect) noexcept 
         const float len=std::sqrt(e.dir[0]*e.dir[0]+e.dir[1]*e.dir[1]+e.dir[2]*e.dir[2]);
         if(!(len>1e-3f) || !std::isfinite(e.pos[0]) || !std::isfinite(e.pos[1]) || !std::isfinite(e.pos[2]))return;
         for(float& v:e.dir)v/=len;
-        const unsigned char* owner=At<const unsigned char*>(weapon,kWeaponOwner);
-        e.vehicle=KnownVehicle(owner);
+        e.vehicle=vehicle;e.launch=launch;
         e.ground=Readable(owner,edf::kPosition+12) ? At<float>(owner,edf::kPosition+4) : e.pos[1]-10.0f;
         e.blast=blast;
         // A fast gun: the full layers once per kShotRefire, a thin shot (a fifth) between.

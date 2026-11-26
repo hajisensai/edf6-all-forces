@@ -20,6 +20,18 @@ namespace crew::gpufx {
 
 constexpr float kCannonBlast=2.0f;   // m: a shot of a weapon with at least this AmmoExplosion makes smoke
 constexpr float kHeavyBlast=12.0f;   // m: a blast of at least this radius adds the wide dust cloud
+// A vehicle gun's shot is as big as its AmmoExplosion or, for a round that bursts not at all (an APFSDS: 0 m, 350 a
+// round), its AmmoDamage / kDamagePerBlast: a tank's AP shot as big as its HE (8 m, 350), an autocannon's AP (40) or a
+// machine gun's none. A round that leaves slower than kLaunchSpeed (m a frame: a missile off its rail, a rocket out of
+// its tube, 0.3..2) is a launch, not a gun's blast: no flash, no shock ring, its puffs blown back out of the tube, and
+// off the ground nothing (Ace Combat's rail launch: the round drops, then its own motor lights; docs/feature-projectile-look.md).
+constexpr float kDamagePerBlast=40.0f,kLaunchSpeed=2.5f;
+inline float ShotPower(float blast,float damage,float speed,bool vehicle,bool& launch) noexcept {
+    launch=std::isfinite(speed) && speed<kLaunchSpeed;
+    float p=std::isfinite(blast) ? blast : 0.0f;
+    if(vehicle && !launch && std::isfinite(damage))p=(std::max)(p,damage/kDamagePerBlast);
+    return p;
+}
 
 struct LayerDescs {
     int flash=-1,ring=-1,groundDust=-1,muzzleSmoke=-1;
@@ -117,6 +129,7 @@ struct ShotEvent {
     float blast=0.0f;    // the weapon's AmmoExplosion, m
     float ground=0.0f;   // the ground's height under the muzzle (the shooter's feet / hull)
     bool vehicle=false;  // a vehicle's gun (else a hand-held launcher)
+    bool launch=false;   // a missile's or a rocket's launch (ShotPower)
 };
 struct BlastEvent {
     float pos[3];
@@ -131,6 +144,12 @@ inline ShotCounts CountShot(const ShotEvent& e,float lod) noexcept {
     const float k=std::clamp(e.blast/10.0f,0.4f,1.6f)*std::clamp(lod,0.0f,1.0f);
     const bool nearGround=e.pos[1]-e.ground<5.0f;
     auto n=[](float v){return static_cast<int>(v+0.5f);};
+    if(e.launch) {   // the tube's backblast on the ground; a rail launch in the air leaves the motor's own trail alone
+        if(!nearGround)return c;
+        c.dust=n(10.0f*k);
+        c.smoke=(std::max)(k>0.0f ? 2 : 0,n(6.0f*k));
+        return c;
+    }
     if(e.vehicle) {
         c.flash=k>0.0f ? 2 : 0;
         c.ring=n(14.0f*k);
@@ -206,7 +225,7 @@ int SpawnShot(Pool<N>& pool,const LayerDescs& l,Rng& rng,const ShotEvent& e,floa
     for(int i=0;i<c.smoke;++i) {
         // Along the bore, the first puffs fastest (they travel furthest before the drag stops them).
         const float f=c.smoke>1 ? static_cast<float>(i)/static_cast<float>(c.smoke-1) : 0.0f;
-        const float speed=(28.0f-20.0f*f)*s+rng.Range(-2.0f,2.0f);
+        const float speed=((28.0f-20.0f*f)*s+rng.Range(-2.0f,2.0f))*(e.launch ? -0.4f : 1.0f);   // a launch's out back
         float v[3];for(int k=0;k<3;++k)v[k]=e.dir[k]*speed+(a[k]*rng.Range(-1.0f,1.0f)+b[k]*rng.Range(-1.0f,1.0f))*2.5f*s;
         made+=pool.Spawn(l.muzzleSmoke,e.pos,v,rng,g*1.5f*s)>=0;
     }

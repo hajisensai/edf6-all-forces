@@ -218,6 +218,23 @@ class Bomb:
 
 
 ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
+# War Thunder's gun rounds (the user, 2026-11-26: 「抄抄战雷」; docs/feature-projectile-look.md): a bright tracer, no smoke
+# trail. A RocketBullet01 round (the stock bursting tank and autocannon shells) trails white smoke, CP[2] frames a node
+# (the stock 105 mm's 100; white whatever AmmoColor, 0x17A3B60), behind a flame CP[1] frames long in AmmoColor
+# (docs/missile-re.md, RocketBullet01): the smoke off, the flame a short hot streak, its tracer. A SolidBullet01 round's
+# tracer is a 12-point streak of AmmoColor as long as its frame's travel (0x28B6A0): AP_TRACER over the stock's blue.
+SHELL_TRACER_CP = {1: 14.0, 2: 0.0}
+AP_TRACER = (3.6, 1.4, 0.5, 1.0)
+
+
+def wt_tracer(r: dsgo.Node, where: str) -> None:
+    """A RocketBullet01 round's smoke trail off and its flame a tracer (SHELL_TRACER_CP), in place; ValueError when `r`
+    is not one of the stock four-entry RocketBullet01 rounds."""
+    cp = r.get('Ammo_CustomParameter')
+    if r.get('AmmoClass') != 'RocketBullet01' or not isinstance(cp, dsgo.Node) or len(cp.items) != 4:
+        raise ValueError(f'{where} 不是四项 CP 的 RocketBullet01 弹')
+    for i, value in SHELL_TRACER_CP.items():
+        cp.items[i] = value
 
 
 @dataclass(frozen=True)
@@ -495,7 +512,7 @@ STORES: dict[str, Store] = {
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
     # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
     # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
-    'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap'),
+    'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap', colour=AP_TRACER),
                 _local('APFSDS', 'APFSDS（徹甲弾）', 'APFSDS（穿甲彈）', 'APFSDS（穿甲弹）', 'APFSDS（철갑탄）')),
     # Its high-explosive round: the Blacker E's 105 mm round (V_505TANK_CANNON01: RocketBullet01, 3 m a frame rising to
     # its top speed, full gravity, an 8 m blast, 350): the stock E series.
@@ -542,7 +559,7 @@ STORES: dict[str, Store] = {
     # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
     # (V_401STRIKER_CANNONS01: SolidBullet01, penetrating, 40), its HE the Grape's own bursting round
     # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32).
-    'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap'),
+    'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap', colour=AP_TRACER),
                    _local('AP belt', 'AP弾帯（徹甲）', 'AP彈鏈（穿甲）', 'AP弹链（穿甲）', 'AP 탄띠（철갑）')),
     'AC_HE': Store('HE belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNON.SGO', 'RocketBullet01', 'he'),
                    _local('HE belt', 'HE弾帯（榴弾）', 'HE彈鏈（高爆）', 'HE弹链（高爆）', 'HE 탄띠（고폭）')),
@@ -2301,6 +2318,8 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
     _check_round(shell, r, made=True)
+    if shell.ammo_class == 'RocketBullet01':
+        wt_tracer(r, shell.template)
     if shell.colour is not None:
         colour = r.get('AmmoColor')
         if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
