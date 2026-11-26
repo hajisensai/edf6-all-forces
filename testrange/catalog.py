@@ -413,6 +413,10 @@ def edf5dlc_files(sgo: str) -> list[str]:
 # (sgo, label, the files of it in Mods). The sedan (tools/make_sedan.py: V512_KEITRUCK's SGO on the city car's model).
 INSTALLER_VEHICLES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ('edf6vc_sedan', '民用轿车', ('OBJECT/EDF6VC_SEDAN.SGO', 'OBJECT/EDF6VC_SEDAN.MRAB', 'OBJECT/EDF6VC_SEDAN.SHKT')),
+    # the aura trucks (tools/make_aura_vehicles.py: V512_KEITRUCK's SGO on its own model; the stock collision)
+    ('edf6vc_aura_cmd', '指挥车', ('OBJECT/EDF6VC_AURA_CMD.SGO', 'OBJECT/EDF6VC_AURA_CMD.MRAB')),
+    ('edf6vc_aura_rep', '维修车', ('OBJECT/EDF6VC_AURA_REP.SGO', 'OBJECT/EDF6VC_AURA_REP.MRAB')),
+    ('edf6vc_aura_amo', '弹药车', ('OBJECT/EDF6VC_AURA_AMO.SGO', 'OBJECT/EDF6VC_AURA_AMO.MRAB')),
 )
 # ... and the X-Morph cars the same way (pylib/xm_units.py car: pylib/car_model.py keeps the V512's mission_setup).
 INSTALLER_VEHICLES += tuple((f'edf6vc_{u.key}', xm_units.label(u),

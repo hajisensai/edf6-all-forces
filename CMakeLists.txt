@@ -3057,6 +3057,9 @@ add_executable(aura_logic_test EXCLUDE_FROM_ALL tests/aura_logic_test.cpp)
 target_compile_options(aura_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks aura_logic_test)
 add_test(NAME aura_logic COMMAND aura_logic_test)
+# The aura trucks' registries (tools/make_aura_vehicles.py, calls, vcobjects, cockpits, ledger, installer, range) and,
+# where the game is, their built models (each its marker under body).
+add_test(NAME aura_vehicles_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/aura_vehicles_guard.py")
 
 # Last, over every test above: one BLAS thread a test process. ctest runs -j N of them side by side and numpy's OpenBLAS
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.

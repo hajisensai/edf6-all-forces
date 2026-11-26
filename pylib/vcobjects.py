@@ -1200,6 +1200,11 @@ ANDRYUSHA_ROCKETS = 'EDF6VC_ANDRYUSHA_ROCKETS.SGO'
 GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'sedan': GroundVehicle('EDF6VC_SEDAN', 'V512_KEITRUCK', 'EWEAPON401',
                            ('EWEAPON401',), (), 300., 'make_sedan', (.8, 30., .0075, .7, .075, .3, .6)),
+    # The aura trucks (tools/make_aura_vehicles.py, docs/feature-aura-vehicles.md): the stock kei truck, unarmed, its
+    # request the sedan's (the V512's handling).
+    **{key: GroundVehicle(f'EDF6VC_{key.upper()}', 'V512_KEITRUCK', 'EWEAPON401', ('EWEAPON401',), (), 1000.,
+                          'make_aura_vehicles', (.8, 30., .0075, .7, .075, .3, .6))
+       for key in ('aura_cmd', 'aura_rep', 'aura_amo')},
     'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
                               ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),

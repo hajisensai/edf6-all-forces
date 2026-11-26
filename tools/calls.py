@@ -333,6 +333,14 @@ CALLS: tuple[Call, ...] = (
     # firing incendiary cluster rockets with an impact or a proximity fuse (tools/make_katyusha.py, src/andryusha.cpp).
     Call('EDF6VC_CALL_ANDRYUSHA', 0, 'andryusha', False, 0, 7500, 1.0, 'vehicle', vehicle='EDF6VC_ANDRYUSHA',
          ground='andryusha'),
+    # Appended 2026-11-27: the aura trucks (tools/make_aura_vehicles.py, src/aura.cpp, docs/feature-aura-vehicles.md):
+    # the stock kei truck carrying a command / repair / ammo aura for the friendly units near it.
+    Call('EDF6VC_CALL_AURA_CMD', 0, 'aura_cmd', False, 0, 3000, 0.5, 'vehicle', vehicle='EDF6VC_AURA_CMD',
+         ground='aura_cmd'),
+    Call('EDF6VC_CALL_AURA_REP', 0, 'aura_rep', False, 0, 3000, 0.5, 'vehicle', vehicle='EDF6VC_AURA_REP',
+         ground='aura_rep'),
+    Call('EDF6VC_CALL_AURA_AMO', 0, 'aura_amo', False, 0, 3000, 0.5, 'vehicle', vehicle='EDF6VC_AURA_AMO',
+         ground='aura_amo'),
 )
 
 
@@ -408,6 +416,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'X-Morph cargo truck (2026-10-30)': IDS[:108],
     'X-Morph walkers (2026-10-30)': IDS[:110],
     'Andryusha (2026-11-10)': IDS[:111],
+    'aura trucks (2026-11-27)': IDS[:114],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -560,6 +569,24 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'CN': ('民用轎車', '請求一輛沒有武器的民用轎車，單駕駛席。按通常的上車鍵駕駛，V 切換第一人稱，按住滑鼠中鍵或手柄 L3 轉動視角自由觀察。'),
         'JA': ('民間セダン', '非武装のセダンを要請する。運転席は一つ。通常の搭乗キーで運転、V で一人称切替。マウス中ボタンまたは L3 を押しながら見回す。'),
         'EN': ('Civilian Sedan', 'Requests an unarmed sedan with one driver seat. Board normally, press V for first person, hold middle mouse or L3 and look to observe.'),
+    },
+    'aura_cmd': {
+        'SC': ('指挥车', '请求一辆指挥车（轻型卡车，无武器）。有人驾驶或停稳时，车周围（默认 60 米，ini AuraRadius）的友军（玩家、NPC、载具，联机时所有人）攻击力提高（默认 +30%，ini AuraCommandAttack）。同类光环不叠加，取最高。地面显示范围圈，受益时画面上有提示。'),
+        'CN': ('指揮車', '請求一輛指揮車（輕型卡車，無武器）。有人駕駛或停穩時，車周圍（預設 60 公尺，ini AuraRadius）的友軍（玩家、NPC、載具，連線時所有人）攻擊力提高（預設 +30%，ini AuraCommandAttack）。同類光環不疊加，取最高。地面顯示範圍圈，受益時畫面上有提示。'),
+        'JA': ('指揮車', '指揮車（軽トラック、非武装）を要請する。誰かが運転しているか停車している間、周囲（既定 60 m、ini AuraRadius）の味方（プレイヤー、NPC、車両、オンラインでは全員）の攻撃力が上がる（既定 +30%、ini AuraCommandAttack）。同種のオーラは重ならず、最も高いものが効く。地面に範囲の輪、効果中は画面に表示。'),
+        'EN': ('Command Truck', 'Requests a command truck (a light truck, unarmed). While someone drives it or it stands parked, the friendly units around it (60 m by default, ini AuraRadius: players, NPCs, vehicles, everyone online) deal more damage (+30% by default, ini AuraCommandAttack). Auras of one kind do not stack: the strongest counts. A ring on the ground shows the range; a line on the screen shows when it reaches you.'),
+    },
+    'aura_rep': {
+        'SC': ('维修车', '请求一辆维修车（轻型卡车，无武器）。有人驾驶或停稳时，车周围（默认 60 米，ini AuraRadius）的友军（玩家、NPC、载具，联机时所有人）持续回复耐久（默认每秒 2% 最大耐久，ini AuraRepairShare）。同类光环不叠加，取最高。地面显示范围圈，受益时画面上有提示。'),
+        'CN': ('維修車', '請求一輛維修車（輕型卡車，無武器）。有人駕駛或停穩時，車周圍（預設 60 公尺，ini AuraRadius）的友軍（玩家、NPC、載具，連線時所有人）持續回復耐久（預設每秒 2% 最大耐久，ini AuraRepairShare）。同類光環不疊加，取最高。地面顯示範圍圈，受益時畫面上有提示。'),
+        'JA': ('修理車', '修理車（軽トラック、非武装）を要請する。誰かが運転しているか停車している間、周囲（既定 60 m、ini AuraRadius）の味方（プレイヤー、NPC、車両、オンラインでは全員）の耐久が回復し続ける（既定 毎秒最大耐久の 2%、ini AuraRepairShare）。同種のオーラは重ならず、最も高いものが効く。地面に範囲の輪、効果中は画面に表示。'),
+        'EN': ('Repair Truck', 'Requests a repair truck (a light truck, unarmed). While someone drives it or it stands parked, the friendly units around it (60 m by default, ini AuraRadius: players, NPCs, vehicles, everyone online) regain armor over time (2% of the maximum a second by default, ini AuraRepairShare). Auras of one kind do not stack: the strongest counts. A ring on the ground shows the range; a line on the screen shows when it reaches you.'),
+    },
+    'aura_amo': {
+        'SC': ('弹药车', '请求一辆弹药车（轻型卡车，无武器）。有人驾驶或停稳时，车周围（默认 60 米，ini AuraRadius）的友军（玩家、NPC、载具，联机时所有人）持续补充弹药：步兵按比例补弹（默认每秒 10% 弹匣，ini AuraAmmoShare），载具武器同样补充，正在装填的武器按同样比例缩短装填。同类光环不叠加，取最高。地面显示范围圈，受益时画面上有提示。'),
+        'CN': ('彈藥車', '請求一輛彈藥車（輕型卡車，無武器）。有人駕駛或停穩時，車周圍（預設 60 公尺，ini AuraRadius）的友軍（玩家、NPC、載具，連線時所有人）持續補充彈藥：步兵按比例補彈（預設每秒 10% 彈匣，ini AuraAmmoShare），載具武器同樣補充，正在裝填的武器按同樣比例縮短裝填。同類光環不疊加，取最高。地面顯示範圍圈，受益時畫面上有提示。'),
+        'JA': ('弾薬車', '弾薬車（軽トラック、非武装）を要請する。誰かが運転しているか停車している間、周囲（既定 60 m、ini AuraRadius）の味方（プレイヤー、NPC、車両、オンラインでは全員）の弾薬を補充し続ける：歩兵は割合で（既定 毎秒弾倉の 10%、ini AuraAmmoShare）、車両の武器も同様、リロード中の武器はリロードが同じ割合で縮む。同種のオーラは重ならず、最も高いものが効く。地面に範囲の輪、効果中は画面に表示。'),
+        'EN': ('Ammo Truck', 'Requests an ammo truck (a light truck, unarmed). While someone drives it or it stands parked, the friendly units around it (60 m by default, ini AuraRadius: players, NPCs, vehicles, everyone online) have their ammunition topped up: infantry by a share of the magazine (10% a second by default, ini AuraAmmoShare), vehicle weapons alike; a reload under way shortens at the same rate. Auras of one kind do not stack: the strongest counts. A ring on the ground shows the range; a line on the screen shows when it reaches you.'),
     },
     'fly_interceptor': {
         'SC': ('截击机（自驾）', '请求一架由你自己驾驶的截击机，空着送到信号弹处：机炮和 4 远距、2 中距、2 近距空空导'
@@ -1161,7 +1188,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
-GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
+GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'aura_cmd': PLUGIN_NOTES, 'aura_rep': PLUGIN_NOTES, 'aura_amo': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
 GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.requested()})   # pylib/xm_units.py
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
