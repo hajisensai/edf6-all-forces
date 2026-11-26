@@ -9,6 +9,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #define GetWindowThreadProcessId markinput::Process
 #include "../src/npcai.cpp"
 #undef GetWindowThreadProcessId
+#include "../tests/ground_ray_batch_fixture.h"
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>

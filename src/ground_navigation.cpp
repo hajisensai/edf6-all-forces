@@ -8,6 +8,8 @@ namespace {
 // cannot consume it all.
 std::uint64_t frame=~std::uint64_t{0};int queries=0;
 const void* start=nullptr;const void* nextStart=nullptr;bool waiting=false;
+GroundProbeStats probeStats{};
+
 // The frame's turn: whether `state`'s call waits for the first caller the last frame denied (the call then returns
 // pending at once, its waypoint its `from`). The frame's budget is begun here, by whichever asks first: the call or
 // GroundNavigateDeferred, so the order of the turn is the same whether a caller asked before calling or not.
@@ -23,7 +25,7 @@ bool Deferred(const void* state) noexcept {
 }
 template<class State>
 npc::navigation::Result Navigate(State& state,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile,Hull hull) noexcept {
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile,Hull hull,GroundRayBatch* batch=nullptr) noexcept {
     using namespace npc::navigation;
     if(Deferred(&state)) {
         waypoint[0]=from[0];waypoint[1]=from[1];waypoint[2]=from[2];return Result::pending;
@@ -32,6 +34,9 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
     if(!hull.clear)hull.object=nullptr;
     // A route searched round another body (or round none) is not this one's: search again (Begin).
     if(state.hull!=hull.object){state.hull=hull.object;state.initialized=false;}
+    GroundRayBatch local;
+    auto& rays=batch ? *batch : local;
+    bool sampled=false;
     auto edge=[&](Point a,Point b,Point& out) noexcept {
         const float distance=Horizontal(a,b);
         if(distance>profile.cell*3.0f)return Edge::blocked;
@@ -47,12 +52,15 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
         bool waterUnknown=false;
         auto ground=[&](Point at,float step,float& y) noexcept {
             cast+=2;
+            if(!sampled){sampled=true;++probeStats.batches;}
+            ++probeStats.floor;
             const float top[3]={at.x,at.y+step,at.z},bottom[3]={at.x,at.y-step,at.z};float hit[3];
-            if(MapFloorRay(top,bottom,hit)<0.0f || !std::isfinite(hit[1]))return false;
+            if(rays.Floor(top,bottom,hit)<0.0f || !std::isfinite(hit[1]))return false;
             float surface=0.0f;
-            const Sea sea=SeaAt(at.x,at.z,&surface);
-            // A valid empty water-area list yields land, including dry caves.
-            // unknown means the native probe is unavailable, not "underground".
+            ++probeStats.water;
+            const Sea sea=rays.Water(at.x,at.z,&surface);
+            if(rays.Dry())++probeStats.dryWater;
+            // Unknown water defers the edge instead of treating it as dry ground.
             if(sea==Sea::unknown || (sea==Sea::water && !std::isfinite(surface))) {
                 waterUnknown=true;return false;
             }
@@ -61,8 +69,9 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
         };
         auto clear=[&](Point a0,Point b0) noexcept {
             ++cast;
-            const float a1[3]={a0.x,a0.y,a0.z},b1[3]={b0.x,b0.y,b0.z};float hit[3];
-            return MapRay(a1,b1,hit)<0.0f;
+            ++probeStats.clearance;
+            const float a1[3]={a0.x,a0.y,a0.z},b1[3]={b0.x,b0.y,b0.z};
+            return rays.Clear(a1,b1);
         };
         auto body=[&](Point a0,Point b0) noexcept {
             if(!hull.clear)return true;
@@ -82,10 +91,15 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
     waypoint[0]=next.x;waypoint[1]=next.y;waypoint[2]=next.z;return result;
 }
 }  // namespace
+GroundProbeStats TakeGroundProbeStats() noexcept {
+    const auto result=probeStats;
+    probeStats={};
+    return result;
+}
 bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept { return Deferred(&state); }
 npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile,Hull hull) noexcept {
-    return Navigate(state,from,to,stop,ms,waypoint,profile,hull);
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile,Hull hull,GroundRayBatch* batch) noexcept {
+    return Navigate(state,from,to,stop,ms,waypoint,profile,hull,batch);
 }
 npc::navigation::Result GroundCoast(npc::navigation::State& state,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,Hull hull) noexcept {

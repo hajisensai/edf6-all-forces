@@ -317,6 +317,7 @@ def probe_parsing() -> None:
         frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
         havok = c_format('src/perf_probe.cpp', 'PERF HAVOK %sbuild')
         collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE construct')
+        nav_rays = c_format('src/perf_probe.cpp', 'PERF NAV RAYS')
         graph = c_format('src/perf_probe.cpp', 'PERF COLLIDE GRAPH %u')
         node = c_format('src/perf_probe.cpp', 'PERF COLLIDE NODE')
         contact = c_format('src/perf_probe.cpp', 'PERF COLLIDE CONTACT')
@@ -339,6 +340,9 @@ def probe_parsing() -> None:
             f.write('[13:00:15.000] ' + collide % (100, 50.0, 60, 60.0, 60, 20, 10.0) + '\n')
             f.write('[13:00:20.000] ' + collide % (150, 80.0, 150, 150.0, 120, 0, 0.0) + '\n')
             f.write('[13:00:40.000] ' + collide % (9, 9.0, 9, 9.0, 9, 9, 9.0) + '\n')
+            f.write('[13:00:15.000] ' + nav_rays % (4, 400, 1150, 390, 350) + '\n')
+            f.write('[13:00:20.000] ' + nav_rays % (6, 600, 1850, 590, 550) + '\n')
+            f.write('[13:00:40.000] ' + nav_rays % (9, 100, 300, 100, 0) + '\n')
             f.write('[13:00:20.000] ' + graph % (1, 2, 2, 0, 1, 3.0) + '\n')
             f.write('[13:00:20.000] ' + graph % (2, 1, 2, 0, 0, 1.0) + '\n')
             f.write('[13:00:40.000] ' + graph % (3, 1, 1, 0, 0, 9.0) + '\n')
@@ -380,6 +384,9 @@ def probe_parsing() -> None:
         check(h['before objects build'] == (100, 1.0, 2.0) and h['after objects build'] == (100, 5.0, 6.0)
               and h['before objects finish'] == (100, 0.5, 1.0) and h['after objects finish'] == (100, 1.5, 4.0),
               'Havok reports the two steps separately without double counting the legacy totals')
+        check(perf_report.read_nav_rays(log, w) ==
+              {'batches': 10, 'floor': 1000, 'clearance': 3000, 'water': 980, 'dry': 900},
+              'navigation query batches use the clean window')
         c = perf_report.read_collide(log, w)
         check(c == {'construct': (250, 130.0), 'dispatch': (210, 210.0), 'sleep': (20, 10.0), 'mode0': 180},
               'collision timing keeps empty graphs, non-mode-0 dispatches and waits distinct')

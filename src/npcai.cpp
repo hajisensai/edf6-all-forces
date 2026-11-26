@@ -819,11 +819,11 @@ constexpr float kAirborneProbe=80.0f;   // m under the soldier the floor its rou
 //  - with the next leg (and the route on to a goal that moved) searched from the end of the one it walks while it walks
 //    it (Profile::ahead; testhub #41 / #47: followers stood at every leg's end and whenever their point moved 16 m).
 npc::navigation::Profile SoldierRoute() noexcept { npc::navigation::Profile p;p.horizon=kRouteHorizon;p.ahead=true;return p; }
-void RouteStart(const float* pos,float* from) noexcept {
+void RouteStart(GroundRayBatch& rays,const float* pos,float* from) noexcept {
     from[0]=pos[0];from[1]=pos[1];from[2]=pos[2];
     const float above[3]={pos[0],pos[1]+0.3f,pos[2]},below[3]={pos[0],pos[1]-kAirborneProbe,pos[2]};
     float floor[3];
-    if(MapFloorRay(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
+    if(rays.Floor(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
 }
 // Both ends on the floor under them (RouteStart): a route is the ground's. A goal left in the air (a flying top followed,
 // a Wing Diver held where she hovers) is never reached from the floor: every search ran out its nodes, failed, and
@@ -855,8 +855,9 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     // an attack-move's stand or a new order waits its turn standing.
     if(GroundNavigateDeferred(soldier->navigation))route=GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull);
     else {
-        RouteStart(pos,from);RouteStart(to,goal);
-        route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull);
+        GroundRayBatch rays;
+        RouteStart(rays,pos,from);RouteStart(rays,to,goal);
+        route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull,&rays);
     }
     if(route!=npc::navigation::Result::moving || !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     if(!(pace>0.0f)){Stand(h);return;}

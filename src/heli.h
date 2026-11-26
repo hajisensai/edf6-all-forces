@@ -67,6 +67,21 @@ float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std
 // highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
 enum class Sea { unknown, land, water };
 Sea SeaAt(float x,float z,float* surface) noexcept;
+
+// Build one read-only view of the world for a synchronous ground-navigation query.
+class GroundRayBatch {
+public:
+    float Floor(const float* a,const float* b,float* hit) noexcept;
+    bool Clear(const float* a,const float* b) noexcept;
+    Sea Water(float x,float z,float* surface) noexcept;
+    bool Dry() const noexcept {return waterHead && !waterCount;}
+private:
+    unsigned char* World() noexcept;
+    unsigned char* world=nullptr;
+    unsigned char* waterHead=nullptr;
+    std::uint64_t waterCount=0;
+    bool opened=false,waterChecked=false;
+};
 // Every enemy lock point of `vehicle`'s side.
 using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;

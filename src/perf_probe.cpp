@@ -10,6 +10,7 @@
 #include <new>
 
 #include "crew.h"
+#include "ground_navigation.h"
 #include "memory.h"
 #include "edf/patch.h"
 #include "net_counters.h"
@@ -976,6 +977,10 @@ void Report(unsigned frames) noexcept {
         collideTimes={};
     }
     if(taskTrace)ReportTaskGraphs();
+    const auto ground=TakeGroundProbeStats();
+    if(Cfg().perfProbe && ground.floor)
+        Log("PERF NAV RAYS %u batches, %u floor, %u clearance, %u water, %u dry",
+            ground.batches,ground.floor,ground.clearance,ground.water,ground.dryWater);
     for(auto& graphs:havokGraphs)graphs={};
     const unsigned p=presents.exchange(0,std::memory_order_relaxed),u=unpaired.exchange(0,std::memory_order_relaxed);
     const unsigned pr=paired.exchange(0,std::memory_order_relaxed);

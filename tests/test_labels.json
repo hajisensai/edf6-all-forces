@@ -697,7 +697,8 @@
   },
   "command_native_dispatch": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },
@@ -3866,7 +3867,8 @@
   },
   "npc_action_look": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },
@@ -3964,7 +3966,8 @@
   },
   "npc_core_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },
@@ -3979,7 +3982,8 @@
   },
   "npc_driver_payload": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },
@@ -4013,7 +4017,8 @@
   },
   "npc_gunners_online": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },
@@ -4753,7 +4758,8 @@
   },
   "real_npc_crew": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },
@@ -5518,7 +5524,8 @@
   },
   "support_infantry_route": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },

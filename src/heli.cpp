@@ -318,11 +318,16 @@ constexpr std::uint32_t kMapLayer=0x16;
 constexpr std::uint32_t kObjectLayer=0x0B;   // the bullets' object layer (ObjectRay)
 // `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn). `body`: the hit body's id
 // (collector +0x78, docs/raycast-re.md §2.2).
-float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
-              std::uint32_t filter=kMapLayer,float* normal=nullptr,std::uint32_t* body=nullptr) noexcept {
-    if(!rayOk)return -1.0f;
+unsigned char* RayWorld() noexcept {
+    if(!rayOk)return nullptr;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
-    if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
+    return Readable(g,0x70) && At<const void*>(g,0x68) ? g : nullptr;
+}
+
+float CastRayIn(unsigned char* g,const float* a,const float* b,float* hit=nullptr,bool any=false,
+                std::uint32_t* flags=nullptr,std::uint32_t filter=kMapLayer,float* normal=nullptr,
+                std::uint32_t* body=nullptr) noexcept {
+    if(!g)return -1.0f;
     const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
     RayHits col{};
     *reinterpret_cast<const void**>(col.raw)=image+(any ? kHitVtbl : kGroundVtbl);
@@ -337,6 +342,11 @@ float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,st
     if(body)std::memcpy(body,col.raw+0x78,4);
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
     return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
+
+float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
+              std::uint32_t filter=kMapLayer,float* normal=nullptr,std::uint32_t* body=nullptr) noexcept {
+    return CastRayIn(RayWorld(),a,b,hit,any,flags,filter,normal,body);
 }
 
 // What a hit body is (map_floor.h Body): its flags read from hknpWorld's body array. The world is *(g+0x68)+0x20
@@ -401,17 +411,24 @@ void LogSea(Sea sea,std::size_t areas,float y) noexcept {
     else Log("WATER %s: %zu water area(s) on the map",sea==Sea::land ? "no water here" : "unknown",areas);
 }
 
-Sea SeaProbe(float x,float z,float* surface) noexcept {
-    if(!rayOk || !waterOk)return Sea::unknown;
+struct WaterAreas { unsigned char* head;std::uint64_t count; };
+WaterAreas ReadWaterAreas() noexcept {
+    if(!waterOk)return {};
     __try {
-        const auto g=At<unsigned char*>(image,kHavokGlobal);
         const auto top=At<unsigned char*>(image,kMoveAreas);
-        if(!Readable(g,0x70) || !At<const void*>(g,0x68) || !top)return Sea::unknown;
+        if(!top)return {};
         const auto mgr=top-8;
-        if(!Readable(mgr+0x30,0x10))return Sea::unknown;
+        if(!Readable(mgr+0x30,0x10))return {};
         const auto head=At<unsigned char*>(mgr,0x30);
         const auto count=At<std::uint64_t>(mgr,0x38);
-        if(!Readable(head,8) || count>256)return Sea::unknown;
+        return Readable(head,8) && count<=256 ? WaterAreas{head,count} : WaterAreas{};
+    } __except(EXCEPTION_EXECUTE_HANDLER){return {};}
+}
+
+Sea CastWaterAreas(unsigned char* g,WaterAreas areas,float x,float z,float* surface) noexcept {
+    const auto [head,count]=areas;
+    if(!head)return Sea::unknown;
+    __try {
         bool found=false;float best=0.0f;
         std::uint64_t n=0;
         for(auto node=At<unsigned char*>(head,0);node!=head && n<count;node=At<unsigned char*>(node,0),++n) {
@@ -437,6 +454,14 @@ Sea SeaProbe(float x,float z,float* surface) noexcept {
         LogSea(sea,static_cast<std::size_t>(count),best);
         if(found && surface)*surface=best;
         return sea;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return Sea::unknown;}
+}
+
+Sea SeaProbe(float x,float z,float* surface) noexcept {
+    if(!waterOk)return Sea::unknown;
+    __try {
+        auto* const g=RayWorld();
+        return g ? CastWaterAreas(g,ReadWaterAreas(),x,z,surface) : Sea::unknown;
     } __except(EXCEPTION_EXECUTE_HANDLER){return Sea::unknown;}
 }
 
@@ -3986,11 +4011,7 @@ bool InstallDoorGuns() noexcept {
     return doorOk;
 }
 
-bool MapRayReady() noexcept {
-    if(!rayOk)return false;
-    const auto world=At<const unsigned char*>(image,kHavokGlobal);
-    return Readable(world,0x70) && At<const void*>(world,0x68)!=nullptr;
-}
+bool MapRayReady() noexcept {return RayWorld()!=nullptr;}
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
 float MapFixedRay(const float* a,const float* b,float* hit) noexcept {
     return mapfloor::Fixed(a,b,
@@ -4095,6 +4116,31 @@ void LearnMapNormals(const float* standing) noexcept {
 }
 float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
     return mapfloor::Floor(a,b,mapNormals,&FloorHit,hit);
+}
+unsigned char* GroundRayBatch::World() noexcept {
+    if(!opened){world=RayWorld();opened=true;}
+    return world;
+}
+float GroundRayBatch::Floor(const float* a,const float* b,float* hit) noexcept {
+    auto* const g=World();
+    if(!g)return -1.0f;
+    return mapfloor::Floor(a,b,mapNormals,[g](const float* from,const float* to,float* point,float* normal) noexcept {
+        return CastRayIn(g,from,to,point,false,nullptr,kMapLayer,normal);
+    },hit);
+}
+bool GroundRayBatch::Clear(const float* a,const float* b) noexcept {
+    return CastRayIn(World(),a,b)<0.0f;
+}
+Sea GroundRayBatch::Water(float x,float z,float* surface) noexcept {
+    auto* const g=World();
+    if(!g)return Sea::unknown;
+    if(!waterChecked) {
+        const auto areas=ReadWaterAreas();
+        waterHead=areas.head;waterCount=areas.count;waterChecked=true;
+        if(Dry())LogSea(Sea::land,0,0.0f);
+    }
+    if(Dry())return Sea::land;
+    return CastWaterAreas(g,{waterHead,waterCount},x,z,surface);
 }
 bool MapGroundNear(float x,float z,float y,float* h,bool standable) noexcept {
     const float top[3]={x,y+4000.0f,z},bottom[3]={x,y-4000.0f,z};

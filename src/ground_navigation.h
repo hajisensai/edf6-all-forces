@@ -448,6 +448,9 @@ inline npc::navigation::Profile GroundVehicleProfile() noexcept {
 // frame's turn as the call would (the same order after it); a caller that gets true may skip the call and its own
 // work for it (npcai.cpp MoveTo: the two floor rays of its ends) and take the pending.
 bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;
+
+struct GroundProbeStats { unsigned batches=0,floor=0,clearance=0,water=0,dryWater=0; };
+GroundProbeStats TakeGroundProbeStats() noexcept;
 // The bodies the route must go round that the map ray (layer 22: terrain and buildings, no units or vehicles;
 // docs/raycast-re.md §3) does not see: the vehicles' (npcai.cpp HullClear, every soldier's route through MoveTo). Blind
 // to them, a route ran straight into a parked or driven vehicle in its way and the soldier stood pressed against its hull
@@ -463,8 +466,10 @@ struct Hull {
     const void* object=nullptr;
     float inside[3]{};float room=0.0f;
 };
+class GroundRayBatch;
+// An optional batch belongs to this call's endpoint projections and edge probes.
 npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={},Hull hull={}) noexcept;
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={},Hull hull={},GroundRayBatch* batch=nullptr) noexcept;
 npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
 // A caller GroundNavigateDeferred keeps waiting this frame: npc::navigation::Coast with the arguments it would have

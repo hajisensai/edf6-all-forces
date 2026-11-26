@@ -3,6 +3,7 @@
 #include "../src/crew.h"
 #include "../src/heli.h"
 #include "../src/ground_navigation.h"
+#include "ground_ray_batch_fixture.h"
 #include <cstdio>
 #include <array>
 #include <cmath>
@@ -57,6 +58,24 @@ void Water() {
     Check(Advance(*s,from,to,next)==Result::moving,"deferred water probe recovers without dropping route");
     Scene(-30,crew::Sea::water,0);*s={};
     Check(Advance(*s,from,from,next)==Result::blocked,"arrival check cannot certify a deep-water spawn point");
+}
+void GroundBatchScope() {
+    auto s=std::make_unique<State>();
+    Scene(0,crew::Sea::land);
+    crew::TakeGroundProbeStats();
+    const float from[3]={0,0,0},goal[3]={24,0,20};float next[3]{};
+    Check(Advance(*s,from,goal,next)==Result::moving,"multi-edge route keeps its result with a shared world view");
+    const auto stats=crew::TakeGroundProbeStats();
+    Check(stats.batches>0 && stats.floor==static_cast<unsigned>(floors) &&
+          stats.water==static_cast<unsigned>(waters) && floors==waters,
+          "one world view per active batch preserves the logical floor and water queries");
+
+    *s={};Scene(0,crew::Sea::land);
+    Check(crew::GroundNavigate(*s,from,from,0.1f,frame*16,next)==Result::arrived,"live ground supports arrival");
+    const int first=floors;
+    floorHeight=-3; // Same frame and coordinates, changed world before another invocation.
+    Check(crew::GroundNavigate(*s,from,from,0.1f,frame*16,next)==Result::blocked && floors>first,
+          "a new invocation checks current geometry even in the same frame");
 }
 void Corners() {
     auto s=std::make_unique<State>();Profile vehicle{};vehicle.cell=4;vehicle.waypointRadius=1.5f;
@@ -345,4 +364,4 @@ void VehicleRoute() {
     Check(blind>0 && seeing*100>=blind*50,"the vehicles' unspent rays given back to the frame's shared budget");
 }
 }
-int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+int main(){Water();GroundBatchScope();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
