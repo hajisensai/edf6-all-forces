@@ -68,12 +68,85 @@ void KeyEdges() {
     Expect(Pressed(q,e)==1,"Q released and E down in one frame: E");
     Expect(Pressed(both,q)==0,"one of both released: the other was already down");
 }
+// The 2026-11-27 run's keys over HQ frames (pack_switch.cpp HqUpdate + CoRoutineHook): E four times, ESC three times on the
+// HQ's root, Q, ESC, E, Q, each switch closing the HQ, the script taking the pending mode at its next routine, the old HQ
+// and the new one both updating (neither owning the input) before the new one does. Every press on an owning HQ switches:
+// 0 -> 2 -> 4 -> 6 -> 8 -> 6 -> 8 -> 6 as the log has it; nothing stays pending after a switch.
+struct Hq {
+    ModeView m[kMaxModes]{};
+    int count=0,current=0;
+    Keys was{};
+    Pending pending;
+    int switches=0,path[16]{};
+    // One frame of an HQ: `owned` its input, `now` the keys down. True when it switched (closed for a mode).
+    bool Frame(bool owned,const Keys& now) {
+        const int dir=HqFrame(was,now,owned,pending);
+        if(!dir)return false;
+        const int to=Step(m,count,current,dir);
+        if(to<0 || !Ask(pending,to))return false;
+        return true;
+    }
+    // The script's next routine: the pending mode applied (ApplyModeNo), none left.
+    void Routine() {
+        const int to=Take(pending);
+        if(to>=0){current=to;if(switches<16)path[switches]=to;++switches;}
+    }
+};
+void Scenario() {
+    Hq hq;
+    const bool all[10]={true,true,true,true,true,true,true,true,true,true};
+    hq.count=Table(hq.m,all);
+    const Keys up{},q{true,false},e{false,true};
+    const auto press=[&](const Keys& k) {   // held for a few frames, then released, the HQ owning its input
+        bool switched=false;
+        for(int f=0;f<9;++f) {
+            const bool s=hq.Frame(true,k);
+            Expect(!(switched && s),"a held key switches once");
+            switched|=s;
+        }
+        for(int f=0;f<3;++f)hq.Frame(true,up);
+        return switched;
+    };
+    const auto transition=[&](const Keys& held) {   // the HQ closing, the routine, both HQs updating without input
+        for(int f=0;f<5;++f)Expect(!hq.Frame(false,held) && !hq.Frame(true,held),"while a switch is pending: nothing more asked");
+        Expect(!hq.Frame(true,e) && hq.Frame(true,up)==false,"E pressed while the switch is pending: not asked again");
+        hq.Routine();
+        Expect(hq.pending.mode.load()<0,"the routine took the pending mode: none left");
+        for(int f=0;f<16;++f){hq.Frame(false,up);hq.Frame(false,up);}
+    };
+    const Keys esc=up;   // ESC is neither Q nor E: the keys as the switch reads them are all up
+    for(int i=0;i<4;++i){Expect(press(e),"E on the HQ: switched");transition(up);}
+    for(int i=0;i<3;++i)Expect(!press(esc),"ESC on the HQ's root: no switch");
+    Expect(press(q),"Q after three ESC: switched");
+    transition(up);
+    Expect(!press(esc),"ESC again");
+    Expect(press(e),"E: switched");
+    transition(up);
+    Expect(press(q),"Q: switched");
+    transition(up);
+    const int expect[7]={2,4,6,8,6,8,6};
+    bool same=hq.switches==7;
+    for(int i=0;same && i<7;++i)same=hq.path[i]==expect[i];
+    Expect(same,"seven switches, the modes the run logged");
+    // A key held down through the transition does not switch the new HQ once it owns the input.
+    Hq held;
+    held.count=Table(held.m,all);
+    Expect(!held.Frame(true,up) && held.Frame(true,e),"E: switched");
+    for(int f=0;f<4;++f)held.Frame(false,e);
+    held.Routine();
+    Expect(!held.Frame(true,e) && !held.Frame(true,e) && held.current==2,"E still held when the new HQ owns its input: not again");
+    // A key pressed while the HQ is covered (a sub-screen, a transition) is not kept for later.
+    Expect(!held.Frame(false,up) && !held.Frame(false,q) && !held.Frame(true,q),"Q pressed while covered: never");
+    Expect(!Ask(held.pending,-1) && Ask(held.pending,4) && !Ask(held.pending,6) && Take(held.pending)==4 && Take(held.pending)==-1,
+           "Ask: one pending mode at a time, taken once");
+}
 }  // namespace
 
 int main() {
     Steps();
     Routines();
     KeyEdges();
+    Scenario();
     std::printf("%d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }
