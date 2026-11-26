@@ -7,6 +7,7 @@ namespace crew {
 VehicleLookInput::VehicleLookInput(unsigned char*) noexcept {}
 VehicleLookInput::~VehicleLookInput() noexcept {}
 DriveGearInput::DriveGearInput(unsigned char*) noexcept {}
+void TestDriveInput(unsigned char*) noexcept {}
 DriveGearInput::~DriveGearInput() noexcept {}
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
 bool BoardingRequest(unsigned char*) noexcept { return false; }   // TestBoardVehicle (off here)
