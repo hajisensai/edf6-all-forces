@@ -42,4 +42,4 @@
 - GrandMother：EDF6_GrandMother、EDF6_GrandMotherPartsBase、EDF6_GrandMother_Arm。
 - 其他：DropBoat512、SoldierDroneBase、BombingPlane、GeneratorPoll、SentryGunBullet_Open01、Decoy、DecoyBody01、EDF6_Jormungand_AdditionalParts。
 
-弹类按弹的 vtable 判断（`blastsound.cpp` `KindOf` 那几个）：SolidBullet01 0x17A3F78、Rail 0x17A4038、SolidExpBullet01 0x17A4498、GrenadeBullet01 0x17A17E0。
+弹类按弹的 vtable 判断（`blastsound.cpp` `KindOf` 那几个）：SolidBullet01 0x17A3F78、Rail 0x17A4038、SolidExpBullet01 0x17A4498、GrenadeBullet01 0x17A17E0、GrenadeBullet01_MapNoDamage 0x17A16E8（玻尔斯和插件近炸高爆弹的弹类，不毁建筑；RTTI 里三张虚表与 GrenadeBullet01 同在 0 / 0x120 / 0xE90，同一对象布局）；只看落下的 RocketBullet01 0x17A38E8、RocketBullet01_LowLight 0x17A39A8、BombBullet01 0x17A47D0。2026-11-26 之前漏了两个派生类，近炸高爆弹没有掠过声和来袭声。

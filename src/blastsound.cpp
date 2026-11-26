@@ -211,13 +211,16 @@ constexpr std::size_t kSystemSentinel=8,kNodeCore=0x10,kBulletCore=0x140;
 constexpr std::size_t kCorePos=0xB80,kCoreVel=0xB90,kCoreAcc=0xBA0,kCoreAge=0xAF8;
 constexpr int kMostWalked=4096;   // more rounds than that in a frame: the rest not looked at (a broken list: not looped)
 // The classes: SolidBullet01 (the guns' rounds, the enemies' too), its Rail, SolidExpBullet01 (the explosive shells),
-// GrenadeBullet01 (the grenades, the mortars and howitzers); RocketBullet01 and BombBullet01 only coming down.
-constexpr unsigned kSolid=0x17A3F78,kRail=0x17A4038,kSolidExp=0x17A4498,kGrenade=0x17A17E0,kRocket=0x17A38E8,kBomb=0x17A47D0;
+// GrenadeBullet01 (the grenades, the mortars and howitzers) and its GrenadeBullet01_MapNoDamage (the Bohr's and the
+// plugin's flak HE: buildings spared, the same object, its RTTI's vtables at the same offsets 0 / 0x120 / 0xE90);
+// RocketBullet01 (and its RocketBullet01_LowLight, the same way) and BombBullet01 only coming down.
+constexpr unsigned kSolid=0x17A3F78,kRail=0x17A4038,kSolidExp=0x17A4498,kGrenade=0x17A17E0,kGrenadeMapSafe=0x17A16E8,
+                   kRocket=0x17A38E8,kRocketLowLight=0x17A39A8,kBomb=0x17A47D0;
 enum class Kind : std::uint8_t { none, round, shell, falling, bomb };
 Kind KindOf(const unsigned char* core) noexcept {
     const std::uintptr_t vt=At<std::uintptr_t>(core-kBulletCore,0)-reinterpret_cast<std::uintptr_t>(image);
-    return vt==kSolid || vt==kRail ? Kind::round : vt==kSolidExp || vt==kGrenade ? Kind::shell :
-           vt==kRocket ? Kind::falling : vt==kBomb ? Kind::bomb : Kind::none;
+    return vt==kSolid || vt==kRail ? Kind::round : vt==kSolidExp || vt==kGrenade || vt==kGrenadeMapSafe ? Kind::shell :
+           vt==kRocket || vt==kRocketLowLight ? Kind::falling : vt==kBomb ? Kind::bomb : Kind::none;
 }
 constexpr float kFrameSeconds=1.0f/60.0f;   // the age's frames (core+0xAF8, int32)
 constexpr float kSteep=0.5f;                // ours: coming down at least this steep (its fall over its way across) to whistle
@@ -272,16 +275,40 @@ bool SeenBefore(const void* core,ULONGLONG now) noexcept {
     return false;
 }
 
+// Debug's tally of why a round coming down near the ear was not heard (docs/feature-wt-sound.md 实机数据): each
+// reason counted once a round (its own table, as SeenBefore's, so the tally does not touch which rounds are heard).
+Seen whyNot[8][16]{};
+void NotHeard(int why,const char* what,const void* core,ULONGLONG now) noexcept {
+    if(!Cfg().debug)return;
+    for(const Seen& s:whyNot[why])if(s.core==core && now<s.until)return;
+    Seen* free=&whyNot[why][0];
+    for(Seen& s:whyNot[why])if(s.until<free->until)free=&s;
+    *free=Seen{core,now+kIncomingOnce};
+    audio::Count(what);
+}
+
 void Incoming(const unsigned char* core,bool bomb,const float* pos,const float* vel,const float* ear,float vol,ULONGLONG now) noexcept {
-    const float across=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
-    if(!(vel[1]<-kSteep*across) || (!bomb && Radius(core)<=0.0f))return;   // a flat shot, rising, or nothing to burst
+    // The same rounds heard as before the tally (every test below is needed), only tested in an order that tells why
+    // one landing near the ear within its lead was not: too flat (by how steep it came down), no burst, or too far.
+    if(!(vel[1]<0.0f))return;   // rising
     const float* acc=reinterpret_cast<const float*>(core+kCoreAcc);
     float t=0.0f,land[3];
     if(!wtevent::Lands(pos,vel,acc,ear[1],&t,land) || t>(bomb ? wtevent::kIncomingLeadBomb : wtevent::kIncomingLeadArt))return;
     const float d[3]={land[0]-ear[0],land[1]-ear[1],land[2]-ear[2]};
     const float off=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
-    if(off>wtevent::kIncomingWithin || SeenBefore(core,now))return;
-    if(!(Roll()<wtevent::kIncomingChance) || !Budgeted(incomingStarted[bomb],wtevent::kIncomingBudget[bomb],off,now))return;
+    if(off>wtevent::kIncomingWithin)return;
+    const float across=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+    if(!(vel[1]<-kSteep*across)) {   // a flat shot: by its fall over its way across (tan 10 deg 0.176, 20 deg 0.364)
+        const float fall=-vel[1];
+        if(fall<0.176f*across)NotHeard(0,"incoming_flat_under10deg",core,now);
+        else if(fall<0.364f*across)NotHeard(1,"incoming_flat_under20deg",core,now);
+        else NotHeard(2,"incoming_flat_under27deg",core,now);
+        return;
+    }
+    if(!bomb && Radius(core)<=0.0f){NotHeard(3,"incoming_no_burst",core,now);return;}   // nothing to burst
+    if(SeenBefore(core,now))return;
+    if(!(Roll()<wtevent::kIncomingChance)){audio::Count("incoming_rolled_out");return;}   // SeenBefore: once a round
+    if(!Budgeted(incomingStarted[bomb],wtevent::kIncomingBudget[bomb],off,now)){audio::Count("incoming_over_budget");return;}
     SoundPlace p{};
     if(SoundAt(pos,nullptr,&p))PlayEvent(bomb ? wtevent::kIncomingBomb : wtevent::kIncomingArt,p,off,vol,now,false);
 }
