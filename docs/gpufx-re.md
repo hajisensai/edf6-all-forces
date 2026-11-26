@@ -147,6 +147,49 @@
   - 深度：本机绑定的 DSV 是 D32_FLOAT（`fmt=40`），没有 24 位量化；原版 efs 的比较按 ctx `+0x1A0` 逐绘制带进实例（0 不测、1 LESS、2 LESS_EQUAL）。深度目标若是 D24，PS 先把片元深度按 24 位 UNORM 取整再比（硬件测试比较的是换成目标格式后的值），`gpufx_gpu` 在 D24 上覆盖「场景深度正好等于卡片深度：LESS 不画、LESS_EQUAL 画」。
   - 画面对照：`GpuFxNative=2` 按卡片中心分屏，测试场里 Fencer 挥刀的 efs 四边形中心全在右半屏（探针 `split stock 0`），原版那一半没有可比的卡片；改成两次运行对照（`efsab3` `GpuFxEfs=0` / `efsab4` `GpuFxEfs=1`，同一 DLL t15，`GpuFxNative=1`），整轮只有约 45 个 efs 四边形（每秒约 2 个），0.25 s 一张的截图一张都没拍到，两次运行的场景本身也会分叉（爆炸、车辆位置）。所以 efs 的画面一致还没有被截图证实，`GpuFxEfs` 保持默认关。要证实需要让 efs 四边形落在左半屏的测试（转身挥刀或在左侧生成 `CreateEfs`），本轮没做。
 
+## efs 拖尾（trails：ExtLine / LocusExtendLine / EmittingExtendLine，`GpuFxTrails`，默认关）
+
+- 三种 RenderInfo 都在 vtable 槽 3 里一次做完更新和绘制（每条拖尾每帧一次）：先把点拼进向量（每点 0x30 字节：位置、颜色、v、半宽），再调一次原版绘制。
+  - ExtLine 的槽 3 是 `[0x1A3A2F8] = 0x10F0FE0`，在 `0x10F12B3` 调 `0x10C2240`。
+  - LocusExtendLine 的槽 3 是 `[0x1A3A3F8] = 0x10F1690`，在 `0x10F19B7` 调 `0x10C1E20`。
+  - EmittingExtendLine 的槽 3 是 `[0x1A3A478] = 0x10F0FB0`，它调 `0x10EEAA0(self, ctx, *p3)`，再在 `0x10EED9D` 调 `0x10C1E20`；变换用全局 `0x1FFF3D0`。
+  - 两个绘制函数另有调用点 `0x10C08B9`（`0x10C2240`）和 `0x10C0729`（`0x10C1E20`），不接管，留原版。
+- 绘制函数的签名是 `(renderer, ctx, 变换 float[16], 点, u32 count, u8 材质字节, float, 光照指针)`（核对 `0x10F1291..12B3` 的传参）。
+  - 材质字节为 0 时用 `renderer+0xCA0` 的普通拖尾材质，float 和光照指针只在字节非 0 时才读。
+  - 着色器组由 `*(*(renderer+8)+0xFF8)` 决定：1 → 组 0，2 / 3 → 组 2，其余 → 组 1（前向）。前向 VS 在 `0x198B4C0`（0x10F4 字节），PS 在 `0x1989E20`（0x4C4 字节），即 `:EFS_DUTIL:g_effect_ext_line`。
+  - ExtLine 每两点一个四边形，每点 4 个顶点，各对之间用两个退化索引缝起来，1000 点一批全部画完。
+  - Locus 每点 2 个顶点、一条连续条带，512 点一批，下一批从上一批的最后一点重开；不足两点不画。
+- 原版着色器（DXBC 反汇编）：
+  - 顶点格式：步长 0x34，依次为 POSITION、COLOR（+0x0C）、UV_SIZE（+0x1C：u、v、带符号半宽）、FRONT（+0x28）。
+  - VS 先算 `world = (pos,1)·xgl_transform`，再沿 `normalize(cross(world − 相机, FRONT 转到世界))` 偏移 `UV_SIZE.z`；相机位置是 `cb0[4..6].w`。投影用 `cb0[12..15]`，视图用 `cb0[0..2]`，雾 / 淡出用 `cb0[34..35]`，所以 xgl_system 至少要 576 字节。
+  - PS 只绑 b2（`g_color`）、t0、s0，输出 `tex·g_color·COLOR`，alpha 再乘 `sat(FOG_FADE.y)`。运行时 `g_color` 是常量 `0x1765B90 = (1,1,1,1)`。
+- 混合和深度跟 efs 四边形一样从 ctx 读：`+0x84 / +0x88` 是混合表 `0x10FAEE0` 的 alpha / 加 / 反减三种，`+0x19C` 是深度写（须为 0），`+0x1A0` 是比较方式（ALWAYS / LESS / LESS_EQUAL）。
+- 我方接管（`gpufx_trail.h` 和 `gpufx.cpp` 的 "trails" 段）：
+  - 三个调用点 `RedirectCall` 到我方：先核对两个绘制函数和三个槽 3 函数的序言，以及槽内容。
+  - 槽 3 包一层：只在原函数运行期间记下这条拖尾的贴图对象。ExtLine 在 `self+0x140`，Locus 在 `+0x150`，Emitting 在 `+0x158`。SRV 的取法从原版绘制后绑定的 t0 反查（与 efs 相同的三种指针链，单独记 `trail texture chain`）。
+  - 接管条件：
+    - 在主世界视图内，`GpuFxNative` 为 1 / 2；
+    - 着色器组是前向，材质字节为 0；
+    - 混合与深度是上面那几种；
+    - 着色器管线已建好；
+    - 已经从一次原版前向拖尾绘制拿到 VS b0（576 字节以上）、PS s0 和光栅化状态；
+    - 点和变换都可读，本视图四边形不超过 16384 个。
+  - 不满足时原版自己画，原版那一次绘制按桶 5 计时。
+  - 点在 CPU 上按原版的方式拆成四边形（a b c d 按条带顺序，三角形 a b c 与 c b d，正反面与原版条带的奇偶三角形一致），变换直接乘进顶点。我方的 xgl_transform 是单位阵，所以不同变换的拖尾能合进一次绘制。
+  - 画法：用原版 VS / PS 字节码本身（运行时从 EDF.dll 映像里取，核对 `DXBC` 头和总长，不符就记一行日志、拖尾留原版），配 TRIANGLELIST 和 16 位索引。xgl_system、采样器、光栅化状态都用原版绘制绑的那份，深度比较按 ctx 逐绘制带上，不写深度。
+- 顺序：被接管的拖尾和接管的粒子卡片、efs 四边形按调用顺序一起进 `nativeBatches`，在 WorldEnd 一起画，等价性论证和 efs 四边形相同。
+  - alpha / 反减的记录不跨越任何记录合并。
+  - 加色拖尾不写深度、ONE/ZERO 写 alpha，与 efs 加色一样算作次序无关（`OrderFree`）。
+  - 记录之间若有原版自己画的东西，会被我方挪到 WorldEnd 之后，这一点与已接管的 efs 四边形和粒子卡片相同。
+- 不做：
+  - Line / LocusLine 是 1 像素的 LINELIST / LINESTRIP，用 `g_effect_color` 材质，填充量可以忽略。
+  - Distortion 和 Model 不在本段范围。
+- 对照台：`GpuFxTest=3 / 4` 另加两个拖尾源，ExtLine 用 `app:/object/ev601_plant.efarc` 的 `smoke.esb`，Locus 用 `app:/weapon/effect/v601_tank_cannon.efarc` 的 `bullet01.esb`。没找到单独放 EmittingExtendLine 的 esb，它和 Locus 共用绘制函数与我方代码路径。阶段表加了 `trails` 开关，负载台多一个阶段「接管但拖尾留原版」。探针把拖尾记在桶 5（我方的四边形数 / 原版的绘制数、四边形数、毫秒、像素）和 `GPUFX   trails` 一行。
+- 离线核对：
+  - `gpufx_sim` 把四边形逐三角形对照原版条带：ExtLine 1000 点分批、Locus 512 点重开、奇数点、0 / 1 点都覆盖到。
+  - `gpufx_gpu` 在 WARP 上用等价 HLSL 编出的字节码验证：坏字节码被拒，三种混合、淡出、LESS / LESS_EQUAL、条带覆盖、与卡片交错的绘制顺序。
+- 未实机验证：画面一致和 GPU 时间要跑 `GpuFxTest=3 / 4` 对照（命令见 PR 说明）。
+
 ## 性能（第 2 段，`perfrun blast`，3840×2160，`GpuFxNative=1`，20 s 干净窗口）
 
 | | 帧数 | 平均 | 超 20 ms | 每 5 s 最差的中位 / 最大 | GPU 3D 均值 / P95 | gpufx 本身 GPU |
@@ -198,5 +241,6 @@
 
 ## 未验证 / 未做
 
-- efs 以外的 RenderInfo（Distortion、Model、Locus/Line 系）未接。
+- efs RenderInfo 里 Distortion、Model、Line / LocusLine 未接（ExtLine / LocusExtendLine / EmittingExtendLine 已接，见「efs 拖尾」；Line 系的理由同节）。
+- 拖尾接管未实机验证：画面与 GPU 时间待 `GpuFxTest=3 / 4` 对照。
 - 集 A 带光照卡片在大量点光下比原版贵（见上一节），根因需要 GPU 抓帧对比。
