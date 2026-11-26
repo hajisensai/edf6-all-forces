@@ -163,6 +163,23 @@ class CMakeEffects(unittest.TestCase):
             got, why = self.effects(new)
             self.assertTrue(why, new)
 
+    def test_a_call_of_the_file_s_own_function_is_placed(self) -> None:
+        """A new edf6_feedback_fixture(<target> <test> <source>) line selects its names, not every test (2026-11-26);
+        a change inside the function selects what every call of it names."""
+        nl = chr(10)
+        fn = nl.join(('function(fixture target test_name source)',
+                      '  add_executable(${target} ${source})',
+                      '  add_test(NAME ${test_name} COMMAND ${target})',
+                      'endfunction()',
+                      'fixture(a_check py_test tests/a.cpp)', ''))
+        self.OLD = CMakeEffects.OLD + fn   # this test's own
+        self.assertEqual(self.effects(self.OLD + 'fixture(c_check b_check tests/c.cpp)' + nl),
+                         ({'c_check', 'b_check'}, None))
+        self.assertEqual(self.effects(self.OLD.replace('COMMAND ${target})', 'COMMAND ${target} --x)')),
+                         ({'a_check', 'py_test'}, None))
+        got, why = self.effects(self.OLD + 'fixture(nothing_known x y)' + nl)
+        self.assertTrue(why)
+
     def test_commands_span_lines_and_quotes(self) -> None:
         cmds = td.cmake_commands('set(A\n  x "y z" # c\n  w)\nadd_test(NAME n COMMAND "a(b)")\n')
         self.assertEqual(cmds, [(1, 3, 'set', ['A', 'x', 'y z', 'w']), (4, 4, 'add_test', ['NAME', 'n', 'COMMAND', 'a(b)'])])
