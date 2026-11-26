@@ -355,7 +355,7 @@ constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20
 constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
-              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+10==kNativeBodyMathSites);
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+11==kNativeBodyMathSites);
 
 using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
 using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
@@ -729,6 +729,66 @@ bool InstallMotionIdLimit() noexcept {
 
 
 
+constexpr unsigned kMotionGrowSignal=0xE15236,kMotionGrowReload=0xE152AA;
+constexpr unsigned kMotionGrowClear=0xE152A2,kMotionGrowSlot=0x1AE2EC0,kMotionGrowCallback=0x11AE920;
+constexpr unsigned char kMotionGrowStock[]{
+    0x48,0x8B,0x43,0x38,0x4C,0x8D,0x73,0x38,0x48,0x83,0xE0,0xFD,0x48,0x83,0xC8,1,
+    0x48,0x8B,0xC8,0x48,0x89,0x43,0x38,0x48,0x83,0xE1,0xFC,0x74,0x4F,
+    0x0F,0x1F,0x40,0,0x66,0x0F,0x1F,0x84,0,0,0,0,0,
+};
+static_assert(kMotionGrowSignal+sizeof(kMotionGrowStock)==0xE15260);
+
+bool __fastcall SkipExhaustedMotionGrowth(const unsigned char* library) noexcept {
+    if(edf::At<int>(library,0x48)<kMotionSlots)return false;
+    const auto head=edf::At<std::uintptr_t>(library,0x38);
+    if(!head)return true;
+    if(head&3u)return false;
+    const auto* const node=reinterpret_cast<const void*>(head);
+    const auto* const vtable=edf::At<const void*>(node,0);
+    // The single stock listener only calls the capped reserve function with a larger request.
+    return !edf::At<std::uintptr_t>(node,8) && vtable==image+kMotionGrowSlot &&
+           edf::At<const void*>(vtable,0x18)==image+kMotionGrowCallback;
+}
+
+bool InstallExhaustedMotionGrowthGate() noexcept {
+    constexpr unsigned char callbackStart[]{
+        0x48,0x89,0x4C,0x24,8,0x48,0x83,0xEC,0x28,0x44,0x8B,0x42,0x48,0x48,0x8B,0xCA,
+        0x41,0x81,0xC0,0,4,0,0,0x48,0x8D,0x54,0x24,0x30,
+    };
+    constexpr unsigned char callbackEnd[]{0x48,0x83,0xC4,0x28,0xC3};
+    if(!edf::Matches(image,kMotionGrowSignal,kMotionGrowStock,sizeof(kMotionGrowStock)) ||
+       !edf::Matches(image,kMotionGrowCallback,callbackStart,sizeof(callbackStart)) ||
+       !edf::Matches(image,kMotionGrowthCall+5,callbackEnd,sizeof(callbackEnd)))return false;
+    auto* const site=image+kMotionGrowSignal;
+    auto* const thunk=edf::AllocateNearThunk(site,reinterpret_cast<void*>(&SkipExhaustedMotionGrowth));
+    if(!thunk)return false;
+    constexpr auto reload=static_cast<unsigned char>(kMotionGrowReload-(kMotionGrowSignal+12));
+    constexpr auto clear=static_cast<unsigned char>(kMotionGrowClear-(kMotionGrowSignal+35));
+    unsigned char patched[]{
+        0x48,0x8B,0xCB,0xE8,0,0,0,0,   // mov rcx,rbx; call capacity/listener check
+        0x84,0xC0,0x75,reload,           // test al,al; jnz reload the free index
+        0x4C,0x8D,0x73,0x38,           // lea r14,[rbx+38h]
+        0x49,0x8B,0x06,                // mov rax,[r14]
+        0x24,0xFD,0x0C,1,              // set the native dispatch tag
+        0x48,0x8B,0xC8,0x49,0x89,0x06, // mov rcx,rax; mov [r14],rax
+        0x48,0x83,0xE1,0xFC,0x74,clear, // and rcx,-4; jz stock cleanup
+        0x0F,0x1F,0x80,0,0,0,0,
+    };
+    static_assert(sizeof(patched)==sizeof(kMotionGrowStock));
+    static_assert(reload<=INT8_MAX);
+    static_assert(clear<=INT8_MAX);
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+8);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        const auto offset=static_cast<std::int32_t>(delta);
+        std::memcpy(patched+4,&offset,sizeof(offset));
+        if(edf::PatchCode(site,kMotionGrowStock,patched,sizeof(patched)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
+
+
 inline __m128 XyzMask() noexcept { return _mm_castsi128_ps(_mm_set_epi32(0,-1,-1,-1)); }
 
 inline __m128 KeepW(__m128 xyz,__m128 original) noexcept {
@@ -929,6 +989,7 @@ unsigned InstallNativeBodyMath() noexcept {
         ++installed;
         boundedMotionSearch=InstallMotionIdLimit();
         installed+=boundedMotionSearch;
+        if(boundedMotionSearch)installed+=InstallExhaustedMotionGrowthGate();
     }
     installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;

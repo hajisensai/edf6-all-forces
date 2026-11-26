@@ -398,6 +398,78 @@ bool MotionPresetWeakCache() {
 
 
 
+struct TestMotionGrowthListener {
+    const void* table;
+    std::uintptr_t next;
+    unsigned calls;
+};
+
+void __fastcall TestMotionGrowth(TestMotionGrowthListener* listener,void* library) {
+    ++listener->calls;
+    auto* const rows=edf::At<unsigned char*>(library,0x40);
+    edf::Put(rows,20*kMotionEntrySize,0xFFFFFFu);
+    edf::Put(library,0x5C,20u);
+}
+
+bool MotionGrowthGateCases(void* library,const unsigned char* key) {
+    const auto add=reinterpret_cast<AddMotionFn>(image+kMotionAdd);
+    auto* const lib=static_cast<unsigned char*>(library);
+    TestMotionGrowthListener stock{image+kMotionGrowSlot,0,0};
+    edf::Put(lib,0x48,kMotionSlots);
+    edf::Put(lib,0x5C,0xFFFFFFu);
+    edf::Put(lib,0x38,&stock);
+    if(!SkipExhaustedMotionGrowth(lib))return false;
+    stock.next=1;
+    if(SkipExhaustedMotionGrowth(lib))return false;
+    stock.next=0;
+    edf::Put(lib,0x48,kMotionSlots-1);
+    if(SkipExhaustedMotionGrowth(lib))return false;
+    edf::Put(lib,0x48,kMotionSlots);
+    edf::Put(lib,0x38,reinterpret_cast<std::uintptr_t>(&stock)|1u);
+    if(SkipExhaustedMotionGrowth(lib))return false;
+    edf::Put(lib,0x38,&stock);
+    std::uint16_t id=0;
+    if(add(lib,&id,key)!=&id || id!=0xFFFF || edf::At<const void*>(lib,0x38)!=&stock)return false;
+
+    const void* const alternateTable[]{nullptr,nullptr,nullptr,reinterpret_cast<void*>(&TestMotionGrowth)};
+    TestMotionGrowthListener alternate{alternateTable,0,0};
+    stock.next=reinterpret_cast<std::uintptr_t>(&alternate);
+    if(SkipExhaustedMotionGrowth(lib))return false;
+    if(add(lib,&id,key)!=&id || id!=20 || alternate.calls!=1 || edf::At<const void*>(lib,0x38)!=&stock)return false;
+    const auto* const rows=edf::At<const unsigned char*>(lib,0x40);
+    if(std::memcmp(rows+20*kMotionEntrySize,key,kMotionEntrySize)!=0)return false;
+
+    // On a private test mapping, compare the stock notification with the installed gate using the same cap.
+    stock.next=0;
+    edf::Put(lib,0x5C,0xFFFFFFu);
+    auto* const site=image+kMotionGrowSignal;
+    unsigned char installed[sizeof(kMotionGrowStock)];
+    std::memcpy(installed,site,sizeof(installed));
+    DWORD protection=0;
+    if(!VirtualProtect(site,sizeof(installed),PAGE_EXECUTE_READWRITE,&protection))return false;
+    const auto measure=[&](const unsigned char* code) {
+        std::memcpy(site,code,sizeof(installed));
+        FlushInstructionCache(GetCurrentProcess(),site,sizeof(installed));
+        return Time([&](unsigned){add(lib,&id,key);});
+    };
+    std::array<double,5> before{},after{};
+    for(unsigned i=0;i<before.size();++i) {
+        if(i&1){after[i]=measure(installed);before[i]=measure(kMotionGrowStock);}
+        else {before[i]=measure(kMotionGrowStock);after[i]=measure(installed);}
+    }
+    std::memcpy(site,installed,sizeof(installed));
+    FlushInstructionCache(GetCurrentProcess(),site,sizeof(installed));
+    DWORD discarded=0;
+    if(!VirtualProtect(site,sizeof(installed),protection,&discarded))return false;
+    std::sort(before.begin(),before.end());
+    std::sort(after.begin(),after.end());
+    std::printf("500,000 exhausted motion growth checks: %.3f -> %.3f ms (median of five runs)\n",
+                before[2],after[2]);
+    return id==0xFFFF && edf::At<const void*>(lib,0x38)==&stock;
+}
+
+
+
 bool MotionLibraryCases(bool bounded) {
     using Row=std::array<std::uint32_t,28>;
     using Add=std::uint16_t*(__fastcall*)(void*,std::uint16_t*,const void*);
@@ -503,7 +575,8 @@ bool MotionLibraryCases(bool bounded) {
         release(library,65534);
         return edf::At<std::uint32_t>(library,0x60)==2 &&
                (edf::At<std::uint32_t>(library,0x5C)&0xFFFFFFu)==65534u &&
-               finds(kMotionSlots,exclusive,65534u);
+               finds(kMotionSlots,exclusive,65534u) &&
+               MotionGrowthGateCases(library,reinterpret_cast<const unsigned char*>(exclusive.data()));
 
     };
     const bool valid=verify();
