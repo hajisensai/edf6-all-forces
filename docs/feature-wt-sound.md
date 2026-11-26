@@ -11,7 +11,7 @@
 
 ## 素材
 
-- 来源是 Gaijin 官方给 mod 作者的 FMOD 工程 `GaijinEntertainment/fmod_studio_warthunder_for_modders`，提交 `07fd12ef`。处理脚本是 `tools/wt_sound.py`，产物在 `assets/sound/wt/`：257 个 WAV，共 104.75 MiB（上限 110 MB），另有 `SOURCE.md`。其中引擎 65 个、39.49 MiB（引擎单独上限 40 MB），来自战雷游戏自带的 `sound/aircraft_engines.assets.bank` 和 `sound/tanks_engines.assets.bank`（vgmstream 解出，给 mod 作者的工程里没有引擎录音）。用户允许把它们提交进仓库。
+- 来源是 Gaijin 官方给 mod 作者的 FMOD 工程 `GaijinEntertainment/fmod_studio_warthunder_for_modders`，提交 `07fd12ef`。处理脚本是 `tools/wt_sound.py`，产物在 `assets/sound/wt/`：299 个 WAV，共 110.94 MiB（上限 120 MB），另有 `SOURCE.md`。其中引擎 65 个、39.49 MiB（引擎单独上限 40 MB），来自战雷游戏自带的 `sound/aircraft_engines.assets.bank` 和 `sound/tanks_engines.assets.bank`（vgmstream 解出，给 mod 作者的工程里没有引擎录音）。用户允许把它们提交进仓库。
 - 处理方法如下：
   - 转成 48 kHz 16 位 PCM，保留原声道数（低频层、远处层、掠过声、炮塔和装填混成单声道，清单见 `wt_sound.MONO`），加 20 Hz 高通。
   - **不逐个文件拉响度**。FMOD 事件里的 dB 值是按素材之间原本的相对电平定的。只在整套素材的峰值超过 0.98 时，所有文件统一乘同一个增益，本次是 0.680167。
@@ -109,13 +109,26 @@
 - **来袭**（WT `art_shells_incoming` / `bombs_incoming`）：下落陡（竖直速度 < −0.5 × 水平速度）、有爆炸半径（炸弹不要求）的弹，按当前速度和加速度解二次方程算落到耳朵高度的时间和落点；落点在 300 m 内、离落地不到 2.3 s（炮弹）/ 2.0 s（炸弹，= 素材长度）时播一次。电平：master +6、模块 +4、组 +6、art bus −16（炸弹另 +6 GainEffect）；距离曲线 0 m 0 → 600.28 m −80，EQ 22 kHz → 103.1 m 12 kHz → 400 m 1.6 kHz，按落点距离算；70 % 概率；maxVoices 炮弹 4 / 炸弹 1，cooldown 200 ms，都抄 WT。同一发 4 s 内只判一次。声音放在弹当前位置。
   - ours：300 m 的判定半径、陡度阈值、提前量用素材长度。
 
+## 命中装甲 / 跳弹 / 未击穿（`src/blastsound.cpp` `HitSeen`，ini `ExplosionVolume`；逆向见 `docs/hit-sound-re.md`）
+
+- 接管点：每发弹的命中都由 0x230CA0 记录（参数里有被击物体的 body id、命中点、面法线）。4 个调用点（飞行步 0x2321B0 的 0x23238F / 0x23256D，首帧扫掠 0x233CB0 的 0x23403B / 0x234210）改指 `HitSeen`：先跑原版记录，再用 0x108260 取物体，按 RTTI 层级查装甲白名单（载具、机器人及其装备、运输船、移动要塞、UFO / 母舰 / 时间船及其部件、德洛伊、无人机、轰炸机、发电塔、哨戒炮、诱饵等 35 个类，按 vtable 缓存）。
+- 普通弹（SolidBullet01 / Rail，或没有爆炸半径的 SolidExp / Grenade）打到装甲：
+  - 按类定口径：SolidBullet01 是子弹，其余是重弹（EDF 没有口径字段）。
+  - 按 AmmoIsPenetration（core+0xAF4 0x100）定击穿；按入射角定跳弹：|cos| < 0.26（偏离法线约 75°，ours）且没击穿。
+  - 子弹 → `hit_mgun`（跳弹 `rico_mgun`）；重弹 → `hit_big_unpierce`（跳弹 `rico`，击穿 `hit_pierce`）。
+  - 飞行步里命中后，同一次调用会在 0x2325EE 放原版 AmmoHitSe（一帧一次；条件 0x400 置位、0x20 清、击穿 0x100 清或带 0x4、core+0xB04 ≠ 3）。`HitSeen` 按同一条件给这发弹打标，`Take` 见标就拿掉原版那一声：原版命中声和我们的只响一个。首帧扫掠那两处后面没有原版命中声，只放我们的。
+- 爆炸弹打到装甲：爆炸照旧（kBlast*），按档在上面叠 `hit_small_unpierce`（小档）/ `hit_aphe_mid`（中档）/ `hit_aphe_big`（大档、重磅档）的冲击层和远处层。
+- 数值抄 WT：hit_mgun master −4、tank_hit_bullet −6 +10、0 m 0 → 500 m −80、0–200 m 触发、maxVoices 4；rico_mgun +3.84 半音、bullet_whiz 曲线 0 / 11.7 m −3.9 / 23.5 m −11.2 / 60.9 m −16.3 / 98.4 m −80；unpierce gain −22、冲击层 −5 +10、0 m +6 → 23.8 m −2 → 47.7 m −11.6 → 124 m −16.8 → 200.8 m −80、dull 层 0.18 / 0.2 s 起、−6 半音；hit_big master +6 gain −16、冲击层 0 → 99.5 m −2.9 → 500 m −80、远处层 0.19 s 起 −80 → 100 m +10 → 500 m −80；spatialiser 4 m / 80°；maxVoices 3。
+  - ours：EQ 用低通近似（22 kHz → 500 m 4 kHz）、跳弹角阈值、rico 两层的距离曲线、pierce 借用 unpierce 的数值（WT 的 hit_ap 是车内玩家自己被击穿的声音）、各类的 cooldown 和 life。
+- 不接管的：没有物体（打地面、建筑：原版地面材质声照旧）、物体不在白名单（虫、人、步兵）、激光 / 火焰 / 导弹等别的弹类、模块没武装、出错。被击目标自己的受击声（UFO 0x52E110 / 0x5038D0、移动要塞 0x4C60E0 在伤害够大或死亡时放自己的预设）是目标的反应，不是弹的命中声，保留。
+
 ## 炮塔与装填（`src/jetaudio.cpp` `kWtFor`）
 
 - 原来合成的 `turret`（炮塔转动循环）、`turret_stop`、`reload_breech_open`、`reload_eject`、`reload_load`、`reload_shell_ram`、`reload_close` 换成 WT 录音：`turret_turn_loop_1`、`turret_klank_01..03`、`reloading_open` / `reloading_eject_shell` / `reloading_insert_projectile`（推弹和分装的推弹丸共用）/ `reloading_close` 各 4 个变体。
 - 这些 clip 不是 FMOD 事件，没有 WT 的 dB 可抄；载具的混音是按各 clip 的 `kClipPeak` 定的，所以一组按一个增益拉到那个峰值（ours）。单发轮流用变体，循环用第一个（插件拷一份已调好电平的）。
 - 玩家自己放的 `EDF6VehicleCrew_veh_<名字>.wav` 仍然优先。组没读到时（启动日志那一行 missing）这个 clip 不出声，不回到合成音。
 - 时机、音量组（`VehicleTurretVolume` / `VehicleReloadVolume`）、转速调音高都不变，ini 键的含义不变。
-- `reload_charge`（装药模块）、`reload_primer`（底火）WT 素材里没有对应的，仍是合成音。
+- `reload_charge`（装药模块）、`reload_primer`（底火）WT 素材里没有对应的，仍是合成音。已在 War Thunder 全部 bank（`D:\Steam\steamapps\common\War Thunder\sound\*.bank`，含 masterbank.strings）按名字扫过 primer / propellant / powder / charge：只有步兵语音的 melee_charge、海战的 depth_charges 和 KV-220 引擎的 charger loop，坦克装填只有 open / eject / insert / close 和若干枪械的 reload。
 
 ## 联机
 
@@ -177,15 +190,25 @@
 
 ## 没做的
 
-- 装甲命中 / 跳弹声：没有可靠办法区分「打在装甲上」和「打在地面 / 建筑上」，没做。
 - 原版直升机的旋翼声不换（保持原版）。
+
+## 实机数据：炮声 / 命中 / 爆炸（Debug=1，2026-11-26）
+
+Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain … side … front … spread … rate … cutoff … Hz; matrix [...] (N ch)`（同名每 2 s 至多一行）与每 5 s 一行的 `SOUND stats 5 s: one-shots started X dropped Y, busy peak P/160; loops open O peak Q/96, none free Z; limiter on|off, N ch; 名=次数 ...`。计数里：`stock_hit_kept` 是原版命中声真的起播（预设有 bank），`stock_hit_taken` / `stock_blast_taken` 是被我们顶替的，`stock_silent` / `stock_silent_armour` 是原版预设本来就没声音（后者是命中装甲、只响我们的），`stock_se` 是全部原版预设起播（0x7AA8C0 探针），`stock_se_held` 是载具扣住的预设仍起播（应为 0）。
+
+- 第一轮（测试场狂战士波次 + 3 辆 NPC 403 + 3 队士兵，`tools/perfrun.py swarm:e602_berserker:4:12:0.3`，120 s，DLL sha256 836b6fc0…，日志 loading 行 build 4b0eacb451 与之相符）：
+  - 挂钩：`HOOK blast sound=1 (8/8)`、`HOOK armour hit sound=1 (4/4)`、`HOOK stock sound probe (Debug) 4/4`；`War Thunder's: 78 of 78 groups`。
+  - 出现的事件：12mm_m2_ai / _last（NPC 机枪）、hit_mgun 53、rico_mgun 9、hit_pierce 8、passby 2、turret_loop 16 / turret_stop 14、reload_insert 31。
+  - 27 个 5 s 窗口：one-shots dropped 全 0，busy 峰值 ≤ 5/160，loops 峰值 9/96、none free 全 0，限幅器 on（2 声道）；`stock_se_held` 全程 0。
+  - 这一轮坦克只开了同轴机枪、场上没有爆炸弹：主炮、爆炸、来袭、装甲上的爆炸层没有触发，留给下一轮（坦克炮击 + 火箭 / 榴弹，打狂战士）。
+  - 发现计数错位：`Take` 先看预设有没有 bank 再取标记，没声音的原版预设被记成 `stock_hit_kept`、标记留着过期，`stock_hit_taken` 恒为 0，证明不了「不两个都响」。已改成先取标记、再分「真起播」和「本来没声音」计数（见上一段）。
 
 ## 没验证的
 
-- 炮声 / 爆炸 / 掠过只做了离线检查，没在游戏里试听：各口径的音量平衡、近距层淡出距离、500 m 外 1/d 衰减的手感、机枪 grain 的连贯性。
+- 没在游戏里试听（只有上面的日志数据）：各口径的音量平衡、近距层淡出距离、500 m 外 1/d 衰减的手感、机枪 grain 的连贯性。
 - 真实 5.1 / 7.1 设备上的方位，以及 `FXMasteringLimiter` 在用户机器上能否挂上（看日志）。
 - 联机时远端开炮、爆炸、掠过的覆盖：只确认了代码路径相同，没实测。
-- 爆炸 hook 的 8 个调用点、子弹链表的偏移都只做了静态核对（vanilla.py 反汇编），没在游戏里跑过；掠过的触发频率、来袭提前量的手感、炮塔 / 装填按峰值对齐后的响度都没试听。
+- 爆炸 hook 的 8 个调用点已在游戏里挂上（上面），爆炸事件本身还没在实机触发过；掠过的触发频率、来袭提前量的手感、炮塔 / 装填按峰值对齐后的响度都没试听。
 - 自己坦克的刹车 / 倒车段：eng_live2 里玩家上车晚（任务开始约 95 s 后），任务结束前只走到 40% 巡航段。
 - NPC 战机的加力：改成「过 cruise 到 attack 的一半」后，eng_live2 里的 fighter 最快只到 736 km/h（204 m/s，阈值 222.5），没冲刺过，所以还没在实机里看到点燃。战雷的 AI 事件本来就没有点燃单发，加力层随 speed_relative 走。
 - `turret_turn_loop_1` 的首尾接缝只看了样点连续（首 953、尾 1346，同向），没试听。

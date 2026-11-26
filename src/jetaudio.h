@@ -85,4 +85,11 @@ int LoopsOpen() noexcept;                 // the loop voices in use (the log's v
 // everything until the next beat, at `volume` (the game's master and effect volume; each sound's own share is its
 // caller's: the engines' JetSoundVolume / VehicleEngineVolume in their Heard, the cockpit's Cfg().warnVolume here).
 void Beat(float volume) noexcept;
+// The Debug tallies (Cfg().debug; docs/feature-wt-sound.md §验证): an event started (its name, the layers queued, the
+// distance and how its first layer is heard: logged with its output matrix at most once per kNoteMs per name, counted
+// always), a count of anything else (`what` a string literal: the stock SE starts, the stock hit sounds taken), and once
+// every kStatsMs with anything counted a line of them with the one-shot and loop voices' use and the limiter.
+void Note(const char* event,int layers,float distance,const Heard& first) noexcept;
+void Count(const char* what,int n=1) noexcept;
+void StatsTick() noexcept;
 }  // namespace crew::audio

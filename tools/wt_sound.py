@@ -41,7 +41,7 @@ PEAK_LIMIT = 0.98
 TAIL_FLOOR = 10 ** (-60 / 20)
 TAIL_FADE = 0.020
 CUT_FADE = 0.300
-MAX_MB = 110           # the whole set (the guns' about 66 MiB, the engines' under ENGINE_MAX_MB)
+MAX_MB = 120           # the whole set (the guns' about 72 MiB, the engines' under ENGINE_MAX_MB)
 W = 'tanks/weapon/'
 CLOSE = W + 'cannons/cannons_close_modules/close_17_12_2021/'
 TAILS = W + 'cannons/cannon_common_tails/'
@@ -54,8 +54,10 @@ DEBRIS = 'tanks/impacts_objects/object_material_debris/'
 PASSBY = 'tanks/effects/projectile_passby/'
 TURRET = 'tanks/effects/turret_move/'
 RELOAD = W + 'cannons/cannon_reloading/'
+HITS = 'tanks/impacts/hits_recorded/'
 
-# (name, directory under the project root, file name with {} for the 1-based number, variants)
+# (name, directory under the project root, file name with {} for the 1-based number, variants: a count (1..n) or the
+# numbers taken)
 _SPEC = (
     # the ground guns (sound_event.h kMedium .. kHowitzer, kM2, kMg42)
     ('shot_mid', CLOSE, 'cannon_02_shot-{:03d}', 3), ('shot_big', CLOSE, 'cannon_01_shot-{:03d}', 3),
@@ -115,17 +117,33 @@ _SPEC = (
     ('turret_loop', TURRET, 'turret_turn_loop_{}', 1), ('turret_stop', TURRET, 'turret_klank_{:02d}', 3),
     ('reload_open', RELOAD, 'reloading_open-{:03d}', 4), ('reload_eject', RELOAD, 'reloading_eject_shell-{:03d}', 4),
     ('reload_insert', RELOAD, 'reloading_insert_projectile-{:03d}', 4), ('reload_close', RELOAD, 'reloading_close-{:03d}', 4),
+    # the rounds hitting armour (sound_event.h kHitBullet .. kRico): hit_mgun, hit_small_unpierce, hit_big_unpierce,
+    # hit_big, hit_aphe_big(_unpierce), rico_mgun, rico (tank_hit_big 1 and 3 peak over the set's peak: one gain for the set
+    # would turn every other file down, so they are left out)
+    ('hit_bullet', HITS, 'tank_hit_bullet-{:03d}', 6), ('hit_small', HITS, 'tank_hit_small-{:03d}', 3),
+    ('hit_mid', HITS, 'tank_hit_mid-{:03d}', 3), ('hit_big', HITS, 'tank_hit_big-{:03d}', (2, 4)),
+    ('hit_pierce', HITS, 'tank_hit_pierce-{:03d}', 3),
+    ('dull_small', HITS + 'adds/', 'hit_dull_small-{:03d}', 3), ('dull_med', HITS + 'adds/', 'hit_dull_med-{:03d}', 3),
+    ('hit_small_far', 'tanks/impacts/hit_far/', 'hit_small_far-{:03d}', 3),
+    ('hit_med_far', 'tanks/impacts/hit_far/', 'hit_med_far-{:03d}', 3),
+    ('hit_big_far', 'tanks/impacts/hit_far/', 'hit_big_far-{:03d}', 3),
+    ('rico_hit', 'tanks/impacts/hit_rico/', 'rico_hit-{:03d}', 3), ('rico_whiz', 'tanks/impacts/hit_rico/', 'rico_whiz-{:03d}', 3),
+    ('bullet_whiz', 'tanks/effects/projectile_whiz_rico/', 'bullet_whiz-{:03d}', 4),
 )
-SOURCES = {n: [d + f.format(i) + '.wav' for i in range(1, k + 1)] for n, d, f, k in _SPEC}
+SOURCES = {n: [d + f.format(i) + '.wav' for i in (k if isinstance(k, tuple) else range(1, k + 1))] for n, d, f, k in _SPEC}
 # Mixed down to mono: the low layers (the LFE's alone), the far layers (a point that far off) and the rounds going by (one
 # point placed where the round passes: the recordings' own pans are not where it passes here), the turret and the loader (one
 # point on the vehicle; the loop's voice is a mono one).
 MONO = {'sub', 'ex_sub', 'xs_far', 'ex_attack_far', 'art_attack_far', 'bomb_far', 'whiz', 'crack_bullet', 'crack_small',
         'crack_mid', 'crack_big', 'bypass_bullet', 'bypass_big', 'whiz_small', 'whiz_med', 'whiz_big', 'turret_loop',
-        'turret_stop', 'reload_open', 'reload_eject', 'reload_insert', 'reload_close'}
+        'turret_stop', 'reload_open', 'reload_eject', 'reload_insert', 'reload_close', 'hit_bullet', 'hit_small', 'hit_mid',
+        'hit_big', 'hit_pierce', 'dull_small', 'dull_med', 'hit_small_far', 'hit_med_far', 'hit_big_far', 'rico_hit',
+        'rico_whiz', 'bullet_whiz'}
 # Loops: kept whole (no tail cut, no fade: the end runs back into the start).
 LOOPS = {'turret_loop'}
-MAX_SECONDS = {'close_150': 5.0, 'tail_heavy': 7.0, 'crack_big': 2.5, 'bypass_big': 2.0}
+MAX_SECONDS = {'close_150': 5.0, 'tail_heavy': 7.0, 'crack_big': 2.5, 'bypass_big': 2.0, 'hit_small': 2.0, 'hit_mid': 2.0,
+               'hit_big': 2.5, 'hit_pierce': 2.0, 'hit_small_far': 2.0, 'hit_med_far': 2.0, 'hit_big_far': 2.5,
+               'rico_hit': 1.5, 'rico_whiz': 2.0}
 
 # The engines (src/sound_engine.h): (name, bank, ((subsong, stream name), ...)), an entry a variant. Jets: Master/aircraft/
 # engines/engine05_ej200_WEP (the listener's own), engine05_ej200_WEP_ai and engine_jet_far_ai (the others'). Ground:

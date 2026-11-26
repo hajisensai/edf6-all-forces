@@ -27,6 +27,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -475,6 +476,10 @@ struct LoopVoice { IXAudio2SourceVoice* v; int inputs; bool used; };
 LoopVoice loops[kLoops]{};
 struct ShotVoice { IXAudio2SourceVoice* v; UINT32 rate; WORD channels; };
 ShotVoice shots[kShots]{};
+// The Debug tallies (Note / Count / StatsTick): the voices' use since the last line.
+bool limiterOn=false;
+std::atomic<int> shotsBusyPeak{0},loopsOpen{0},loopsPeak{0};
+std::atomic<unsigned> shotsStarted{0},shotsDropped{0},loopsNoneFree{0};
 UINT32 loopStart=0;                // where the next loop begins to play (spread: two tanks idling are not in phase)
 
 std::vector<float> MadeClip(int c) {
@@ -652,7 +657,7 @@ bool Start() noexcept {
     if(SUCCEEDED(CreateFX(__uuidof(FXMasteringLimiter),&fx,&lp,sizeof(lp))) && fx) {
         XAUDIO2_EFFECT_DESCRIPTOR d{fx,TRUE,masterChannels};
         const XAUDIO2_EFFECT_CHAIN chain{1,&d};
-        if(SUCCEEDED(master->SetEffectChain(&chain)))limiter="on";
+        if(SUCCEEDED(master->SetEffectChain(&chain))){limiter="on";limiterOn=true;}
         fx->Release();
     }
     beatAt=GetTickCount64();
@@ -747,8 +752,11 @@ int OpenLoop(int clip) noexcept {
         Pan(v,0.0f,0.0f);
         v->Start();
         loops[i]=LoopVoice{v,1,true};
+        const int open=loopsOpen.fetch_add(1,std::memory_order_relaxed)+1;
+        if(open>loopsPeak.load(std::memory_order_relaxed))loopsPeak.store(open,std::memory_order_relaxed);
         return i;
     }
+    loopsNoneFree.fetch_add(1,std::memory_order_relaxed);
     return -1;
 }
 
@@ -761,6 +769,7 @@ void CloseLoop(int i) noexcept {
     if(i<0 || i>=kLoops || !loops[i].used)return;
     loops[i].v->DestroyVoice();
     loops[i]=LoopVoice{};
+    loopsOpen.fetch_sub(1,std::memory_order_relaxed);
 }
 int OpenWtLoop(int group) noexcept {
     if(!WtThere(group))return -1;
@@ -780,8 +789,11 @@ int OpenWtLoop(int group) noexcept {
         Place(v,c.format.nChannels,surround::Placing{0.0f,0.0f,1.0f,0.0f,false});   // silent until set
         v->Start();
         loops[i]=LoopVoice{v,static_cast<int>(c.format.nChannels),true};
+        const int open=loopsOpen.fetch_add(1,std::memory_order_relaxed)+1;
+        if(open>loopsPeak.load(std::memory_order_relaxed))loopsPeak.store(open,std::memory_order_relaxed);
         return i;
     }
+    loopsNoneFree.fetch_add(1,std::memory_order_relaxed);
     return -1;
 }
 int LoopsOpen() noexcept {
@@ -820,13 +832,16 @@ void PlayPcm(const ClipPcm& c,const Heard& h) noexcept {
     // past kShots).
     ShotVoice* pick=nullptr;
     auto fits=[&](const ShotVoice& s){ return s.v && s.rate==rate && s.channels==channels; };
+    int busy=0;
     for(auto& s:shots) {
         XAUDIO2_VOICE_STATE st{};
         if(s.v)s.v->GetState(&st,XAUDIO2_VOICE_NOSAMPLESPLAYED);
-        if(s.v && st.BuffersQueued)continue;
+        if(s.v && st.BuffersQueued){++busy;continue;}
         if(!pick || (fits(s) && !fits(*pick)))pick=&s;
     }
-    if(!pick)return;
+    if(const int inUse=pick ? busy+1 : busy;inUse>shotsBusyPeak.load(std::memory_order_relaxed))shotsBusyPeak.store(inUse,std::memory_order_relaxed);
+    if(!pick){shotsDropped.fetch_add(1,std::memory_order_relaxed);return;}
+    shotsStarted.fetch_add(1,std::memory_order_relaxed);
     if(pick->v && !fits(*pick)){pick->v->DestroyVoice();*pick=ShotVoice{};}
     if(!pick->v) {
         if(FAILED(engine->CreateSourceVoice(&pick->v,&c.format,XAUDIO2_VOICE_USEFILTER,kMaxRatio))){*pick=ShotVoice{};return;}
@@ -838,5 +853,82 @@ void PlayPcm(const ClipPcm& c,const Heard& h) noexcept {
     if(FAILED(pick->v->SubmitSourceBuffer(&b)))return;
     Hear(pick->v,channels,h);
     pick->v->Start(0);
+}
+
+// --- The Debug tallies ---
+namespace {
+constexpr ULONGLONG kNoteMs=2000,kStatsMs=5000;
+constexpr int kTallies=64;
+struct Tally { const char* name; unsigned count; ULONGLONG noted; };
+SRWLOCK tallyLock=SRWLOCK_INIT;
+Tally tallies[kTallies]{};
+ULONGLONG statsAt=0;
+// The row of `name` (pointer or text the same), made if it is not there yet; nullptr: the table full.
+Tally* TallyOf(const char* name) noexcept {
+    for(Tally& t:tallies) {
+        if(!t.name){t.name=name;return &t;}
+        if(t.name==name || std::strcmp(t.name,name)==0)return &t;
+    }
+    return nullptr;
+}
+}  // namespace
+
+void Note(const char* event,int layers,float distance,const Heard& first) noexcept {
+    if(!Cfg().debug || !event || !event[0])return;
+    const ULONGLONG now=GetTickCount64();
+    bool log=false;
+    AcquireSRWLockExclusive(&tallyLock);
+    if(Tally* t=TallyOf(event)) {
+        ++t->count;
+        if(!t->noted || now-t->noted>=kNoteMs){t->noted=now;log=true;}
+    }
+    ReleaseSRWLockExclusive(&tallyLock);
+    if(!log)return;
+    float m[XAUDIO2_MAX_AUDIO_CHANNELS]{};
+    surround::Matrix(layout,surround::Placing{first.gain,first.side,first.front,first.spread,first.sub},1,m);
+    char row[XAUDIO2_MAX_AUDIO_CHANNELS*8+1]{};
+    int at=0;
+    for(UINT32 c=0;c<masterChannels && c<XAUDIO2_MAX_AUDIO_CHANNELS && at<static_cast<int>(sizeof(row))-8;++c)
+        at+=std::snprintf(row+at,sizeof(row)-static_cast<std::size_t>(at),c ? " %.3f" : "%.3f",static_cast<double>(m[c]));
+    Log("SOUND event %s: %d layer(s) at %.0f m; first gain %.3f side %.2f front %.2f spread %.2f rate %.3f cutoff %.0f Hz%s; matrix [%s] (%u ch)",
+        event,layers,static_cast<double>(distance),static_cast<double>(first.gain),static_cast<double>(first.side),
+        static_cast<double>(first.front),static_cast<double>(first.spread),static_cast<double>(first.ratio),
+        static_cast<double>(first.cutoff),first.sub ? " LFE" : "",row,masterChannels);
+}
+
+void Count(const char* what,int n) noexcept {
+    if(!Cfg().debug || !what || n<=0)return;
+    AcquireSRWLockExclusive(&tallyLock);
+    if(Tally* t=TallyOf(what))t->count+=static_cast<unsigned>(n);
+    ReleaseSRWLockExclusive(&tallyLock);
+}
+
+void StatsTick() noexcept {
+    if(!Cfg().debug || !ok)return;
+    const ULONGLONG now=GetTickCount64();
+    if(!statsAt){statsAt=now;return;}
+    if(now-statsAt<kStatsMs)return;
+    statsAt=now;
+    char list[1024]{};
+    int at=0;
+    unsigned any=0;
+    AcquireSRWLockExclusive(&tallyLock);
+    for(Tally& t:tallies) {
+        if(!t.name || !t.count)continue;
+        any+=t.count;
+        if(at<static_cast<int>(sizeof(list))-64)
+            at+=std::snprintf(list+at,sizeof(list)-static_cast<std::size_t>(at),"%s%s=%u",at ? " " : "",t.name,t.count);
+        t.count=0;
+    }
+    ReleaseSRWLockExclusive(&tallyLock);
+    const unsigned started=shotsStarted.exchange(0,std::memory_order_relaxed),dropped=shotsDropped.exchange(0,std::memory_order_relaxed);
+    const unsigned noneFree=loopsNoneFree.exchange(0,std::memory_order_relaxed);
+    const int busyPeak=shotsBusyPeak.exchange(0,std::memory_order_relaxed);
+    const int open=loopsOpen.load(std::memory_order_relaxed);
+    const int loopPeak=loopsPeak.exchange(open,std::memory_order_relaxed);
+    if(!any && !started && !dropped && !noneFree)return;
+    Log("SOUND stats %llu s: one-shots started %u dropped %u, busy peak %d/%d; loops open %d peak %d/%d, none free %u; limiter %s, %u ch; %s",
+        static_cast<unsigned long long>(kStatsMs/1000),started,dropped,busyPeak,kShots,open,loopPeak,kLoops,noneFree,
+        limiterOn ? "on" : "off",masterChannels,at ? list : "(no events)");
 }
 }  // namespace crew::audio

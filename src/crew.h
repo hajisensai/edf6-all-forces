@@ -767,6 +767,7 @@ bool ListenerAt(float* pos) noexcept;   // where that listener (the camera) is t
 bool InstallVehicleSound() noexcept;
 void VehicleSound(unsigned char* vehicle) noexcept;
 void ResetVehicleSound() noexcept;
+bool VehicleSoundHeld(const void* preset) noexcept;   // a vehicle's stock sound preset held silent (vehsound.cpp)
 // The rounds' explosions as War Thunder layers them (blastsound.cpp, ini ExplosionVolume): the calls that play a round's
 // AmmoHitSe redirected at load; once a frame (SharedFrameTick, after JetSoundTick: the listener); a new mission.
 bool InstallBlastSound() noexcept;
