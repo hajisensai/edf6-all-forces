@@ -142,6 +142,13 @@ plugin_net::Channel SupportPointsNetChannel() noexcept {
     plugin_net::Channel c;c.name="support pt";c.magic=0x53545053u;c.version=1;
     c.minSize=c.maxSize=56;c.receive=&ReceiveSupportPoints;return c;
 }
+// A registered jet's engine lever (jet_lever_net.cpp): AFJL states, not under test here.
+bool ReceiveJetLever(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+bool JetLeverState(const void*,std::size_t) noexcept {return true;}
+plugin_net::Channel JetLeverNetChannel() noexcept {
+    plugin_net::Channel c;c.name="jet lever";c.magic=0x4C4A4641u;c.version=1;
+    c.minSize=c.maxSize=44;c.receive=&ReceiveJetLever;c.takesState=&JetLeverState;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}

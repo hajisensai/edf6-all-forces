@@ -1,10 +1,7 @@
-// The jets' engine sound, played by the plugin (see jetaudio.h). An XAudio2 engine of its own on the default output,
-// two looping mono voices per jet:
-//  - the roar: the exhaust's broadband noise, heard mostly behind and to the side of a jet;
-//  - the whine: the fan's blade-pass tone and its harmonics over a narrow band of noise, heard mostly ahead of it.
-// Both are made here once (Synth*, seamless loops). A <dll name>_jet.wav next to the DLL (16-bit PCM, mono or
-// stereo, any rate) replaces the roar and silences the whine: a recording carries both.
-// Each voice has a low-pass filter (the air takes a far engine's highs) and an output matrix (left / right ear).
+// The plugin's own sounds (see jetaudio.h), on an XAudio2 engine of its own on the default output. Every voice has a
+// low-pass filter (the air takes a far sound's highs) and an output matrix over the speakers (surround.h).
+// The engines (jetsound.cpp, vehsound.cpp, sound_engine.h decide them) are War Thunder's layered loops (wt_clips.h),
+// one voice a layer (OpenWtLoop); nothing about an engine is made here.
 // A watchdog thread silences the master voice once the game stops beating (Beat): paused, loading, in a menu; the
 // game's own sounds stop then too.
 // The cockpit's sounds play here as well (LockTone, Warn): the lock tones, the threat beeps and the launch warble on a
@@ -38,20 +35,14 @@
 namespace crew::audio {
 namespace {
 constexpr UINT32 kRate=48000;
-constexpr int kLoopSamples=kRate*3;            // the made loops: 3 s
-constexpr int kFade=kRate/4;                   // ...their ends cross-faded over 0.25 s
 constexpr float kMaxRatio=4.0f;                // a voice's highest playback rate (pitch and Doppler)
-constexpr int kSlots=40;
 constexpr ULONGLONG kQuietMs=150;              // no beat this long: the game is not running, nor is the sound
 
 IXAudio2* engine=nullptr;
 IXAudio2MasteringVoice* master=nullptr;
 UINT32 masterChannels=2;
 surround::Layout layout=surround::LayoutOf(surround::kStereo,2);   // the master's speakers (Start)
-bool tried=false,ok=false,whine=true;
-std::vector<std::int16_t> roarPcm,whinePcm;
-WAVEFORMATEX roarFormat{},whineFormat{};
-struct Slot { IXAudio2SourceVoice* roar; IXAudio2SourceVoice* whine; bool used; };
+bool tried=false,ok=false;
 // The lock tone (LockTone): a 1 kHz sine loop, whole cycles; what it sounds when, and for how long, lock_cue.h decides
 // (locked it plays at kLockedRatio, locking it beeps as the lock closes in; both only for the first few cues).
 constexpr float kToneHz=1000.0f,kToneVolume=0.25f;
@@ -89,72 +80,8 @@ IXAudio2SourceVoice* hornVoice=nullptr;
 int calling=-1;                    // the callout playing (-1: none), till callEnd
 ULONGLONG callEnd=0,dueAt[kCallCount]{},warnAt=0;
 unsigned callsOn=0;                // the callouts on last frame (a rise makes one due at once)
-Slot slots[kSlots]{};
 std::atomic<ULONGLONG> beatAt{0};
 std::atomic<float> masterVolume{1.0f};
-
-// --- Making the sounds ---
-struct Noise {
-    std::uint32_t s=0x9E3779B9u;
-    float Next() noexcept { s^=s<<13;s^=s>>17;s^=s<<5;return static_cast<float>(s)/2147483648.0f-1.0f; }
-};
-// A one-pole low-pass at `hz`.
-struct Low {
-    float a,y=0.0f;
-    explicit Low(float hz) noexcept : a(1.0f-std::exp(-6.2831853f*hz/static_cast<float>(kRate))) {}
-    float Run(float x) noexcept { y+=a*(x-y);return y; }
-};
-// A band-pass (RBJ biquad, constant peak gain) at `hz`, quality `q`.
-struct Band {
-    float b0,b2,a1,a2,x1=0,x2=0,y1=0,y2=0;
-    Band(float hz,float q) noexcept {
-        const float w=6.2831853f*hz/static_cast<float>(kRate),al=std::sin(w)/(2.0f*q),a0=1.0f+al;
-        b0=al/a0;b2=-al/a0;a1=-2.0f*std::cos(w)/a0;a2=(1.0f-al)/a0;
-    }
-    float Run(float x) noexcept { const float y=b0*x+b2*x2-a1*y1-a2*y2;x2=x1;x1=x;y2=y1;y1=y;return y; }
-};
-
-// `gen` made kLoopSamples + kFade long into a seamless loop of kLoopSamples, peak `peak`, 16-bit.
-std::vector<std::int16_t> Loop(std::vector<float> gen,float peak) {
-    std::vector<float> out(gen.begin(),gen.begin()+kLoopSamples);
-    for(int i=0;i<kFade;++i) {   // the tail laid over the head with equal power: no click, no dip
-        const float t=static_cast<float>(i)/kFade;
-        out[i]=gen[i]*std::sqrt(t)+gen[kLoopSamples+i]*std::sqrt(1.0f-t);
-    }
-    float top=1e-6f;
-    for(float x:out)top=std::fabs(x)>top ? std::fabs(x) : top;
-    std::vector<std::int16_t> pcm(out.size());
-    for(std::size_t i=0;i<out.size();++i)pcm[i]=static_cast<std::int16_t>(std::lround(out[i]/top*peak*32767.0f));
-    return pcm;
-}
-
-// The roar: rumble (noise under 90 Hz), body (under 450 Hz) and hiss (a band round 1.8 kHz), slowly swelling.
-std::vector<std::int16_t> SynthRoar() {
-    Noise n;Low rumble(90.0f),rumble2(90.0f),body(450.0f),swell(3.0f);Band hiss(1800.0f,0.7f);
-    std::vector<float> g(kLoopSamples+kFade);
-    for(auto& x:g) {
-        const float w=n.Next();
-        const float s=0.8f+0.4f*swell.Run(n.Next()*8.0f);
-        x=(2.6f*rumble2.Run(rumble.Run(w))+1.1f*body.Run(w)+0.35f*hiss.Run(w))*s;
-    }
-    return Loop(std::move(g),0.85f);
-}
-
-// The whine: the blade-pass tone kBlade and its harmonics (whole cycles in the loop: seamless on their own), a
-// lower shaft tone, and the narrow band of noise round the blade-pass the tone rides on, its level wavering a little.
-std::vector<std::int16_t> SynthWhine() {
-    constexpr float kBlade=1400.0f,kShaft=470.0f;
-    Noise n;Band band(kBlade,9.0f),band2(2.0f*kBlade,12.0f);Low waver(4.0f);
-    std::vector<float> g(kLoopSamples+kFade);
-    for(int i=0;i<static_cast<int>(g.size());++i) {
-        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=n.Next();
-        const float m=1.0f+0.25f*waver.Run(n.Next()*6.0f);
-        const float tone=0.55f*std::sin(6.2831853f*kBlade*t)+0.22f*std::sin(6.2831853f*2.0f*kBlade*t)+
-                         0.10f*std::sin(6.2831853f*3.0f*kBlade*t)+0.18f*std::sin(6.2831853f*kShaft*t);
-        g[i]=(tone*m+2.2f*band.Run(w)+1.2f*band2.Run(w));
-    }
-    return Loop(std::move(g),0.6f);
-}
 
 // A 16-bit PCM WAV (mono or stereo) as mono samples and their rate (`stereo`: a stereo one kept so, interleaved, and
 // its channel count there); false: none or not that.
@@ -501,32 +428,27 @@ void ThreatTone(int state,bool launch,ULONGLONG now) noexcept {
 }
 
 // --- The ground vehicles' sounds ---
-const wchar_t* const kClipName[kClipCount]={L"engine_heavy_idle",L"engine_heavy_load",L"engine_light_idle",L"engine_light_load",
-                                            L"tracks",L"turret",L"turret_stop",L"gun_near",L"gun_far",L"reload_eject",
-                                            L"reload_load",L"reload_close",L"engine_bike_idle",L"engine_bike_load",L"mg_burst",
-                                            L"gatling_burst",L"burst_tail",L"autocannon",L"brass",L"case_small",L"missile_launch",
-                                            L"sazabi_beam_shot",L"sazabi_beam_hit",L"sazabi_saber_on",L"sazabi_saber_off",
-                                            L"sazabi_whoosh",L"sazabi_saber_hit",L"sazabi_cannon_shot",L"sazabi_funnel_launch",
-                                            L"sazabi_funnel_shot",L"sazabi_funnel_dock",L"sazabi_footstep",L"sazabi_land",
-                                            L"sazabi_dash",L"sazabi_thrusters",L"sazabi_saber_hum",L"sazabi_cannon_charge",
-                                            L"gun_medium_near",L"gun_medium_far",L"howitzer_near",L"howitzer_far",L"gun_heavy_near",
-                                            L"gun_heavy_far",L"railgun_shot",L"railgun_far",L"railgun_charge",L"railgun_ready",
-                                            L"grenade_shot",L"rocket_rail_launch",L"rocket_rail_load",L"case_medium",L"case_stub",
-                                            L"case_grenade",L"reload_breech_open",L"reload_shell_ram",L"reload_charge",L"reload_primer",
-                                            L"mark_own",L"mark_team",L"mark_off",L"sazabi_shield_block"};
-constexpr bool kClipLoops[kClipCount]={true,true,true,true,true,true,false,false,false,false,false,false,true,true,true,true,false,
-                                       false,true,false,false,false,false,false,false,false,false,false,false,false,false,false,
-                                       false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,
-                                       false,false,false,false,false,false,false,false,false,false,false,false,false,false};
+const wchar_t* const kClipName[kClipCount]={L"turret",L"turret_stop",L"gun_near",L"gun_far",L"reload_eject",L"reload_load",L"reload_close",L"mg_burst",
+                                            L"gatling_burst",L"burst_tail",L"autocannon",L"brass",L"case_small",L"missile_launch",L"sazabi_beam_shot",
+                                            L"sazabi_beam_hit",L"sazabi_saber_on",L"sazabi_saber_off",L"sazabi_whoosh",L"sazabi_saber_hit",
+                                            L"sazabi_cannon_shot",L"sazabi_funnel_launch",L"sazabi_funnel_shot",L"sazabi_funnel_dock",L"sazabi_footstep",
+                                            L"sazabi_land",L"sazabi_dash",L"sazabi_thrusters",L"sazabi_saber_hum",L"sazabi_cannon_charge",
+                                            L"gun_medium_near",L"gun_medium_far",L"howitzer_near",L"howitzer_far",L"gun_heavy_near",L"gun_heavy_far",
+                                            L"railgun_shot",L"railgun_far",L"railgun_charge",L"railgun_ready",L"grenade_shot",L"rocket_rail_launch",
+                                            L"rocket_rail_load",L"case_medium",L"case_stub",L"case_grenade",L"reload_breech_open",L"reload_shell_ram",
+                                            L"reload_charge",L"reload_primer",L"mark_own",L"mark_team",L"mark_off",L"sazabi_shield_block"};
+constexpr bool kClipLoops[kClipCount]={true,false,false,false,false,false,false,true,true,false,false,true,false,false,false,false,false,false,false,
+                                       false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,
+                                       false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
 // Peak of each clip as made, of full scale: the loops a little under (several play at once), the gun's report at the top.
-constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.85f,0.8f,
-                                       0.95f,0.6f,0.8f,0.9f,0.95f,0.9f,0.8f,0.8f,0.8f,0.95f,0.98f,0.8f,0.85f,0.8f,0.95f,0.98f,
-                                       0.9f,0.8f,0.7f,0.7f,0.98f,0.95f,0.98f,0.95f,0.98f,0.95f,0.95f,0.9f,0.75f,0.7f,0.9f,0.9f,0.8f,
-                                       0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f};
+constexpr float kClipPeak[kClipCount]={0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.85f,0.85f,0.8f,0.95f,0.6f,0.8f,0.9f,0.95f,0.9f,0.8f,0.8f,0.8f,0.95f,
+                                       0.98f,0.8f,0.85f,0.8f,0.95f,0.98f,0.9f,0.8f,0.7f,0.7f,0.98f,0.95f,0.98f,0.95f,0.98f,0.95f,0.95f,0.9f,0.75f,
+                                       0.7f,0.9f,0.9f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f};
 // The ultimate's (jetaudio.h UltClip): <dll name>_ult_<name>.wav, the player's recordings only.
 const wchar_t* const kUltClipName[kUltClipCount]={L"charge",L"circle",L"thunder",L"gather",L"beam",L"blast",L"shock"};
-constexpr int kLoops=96,kShots=160;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets, a cannon's
-                                     // War Thunder layers ten a shot (sound_event.h): room for them
+constexpr int kLoops=256,kShots=160;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets, a cannon's
+                                     // War Thunder layers ten a shot (sound_event.h), an engine up to
+                                     // engine::kMostEventLayers a vehicle: room for them
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
 ClipPcm ultClips[kUltClipCount]{};  // the same; an empty one: no recording
@@ -550,7 +472,7 @@ float wtLevel[kClipCount]{};   // its gain to the clip's peak
 std::atomic<unsigned> wtTurn{0};
 std::atomic<bool> clipsReady{false};
 bool clipsAsked=false;
-struct LoopVoice { IXAudio2SourceVoice* v; bool used; };
+struct LoopVoice { IXAudio2SourceVoice* v; int inputs; bool used; };
 LoopVoice loops[kLoops]{};
 struct ShotVoice { IXAudio2SourceVoice* v; UINT32 rate; WORD channels; };
 ShotVoice shots[kShots]{};
@@ -563,11 +485,6 @@ UINT32 loopStart=0;                // where the next loop begins to play (spread
 std::vector<float> MadeClip(int c) {
     namespace s=vsynth;
     switch(c) {
-    case kClipHeavyIdle: return s::EngineLayer(s::kHeavyEngine,false);
-    case kClipHeavyLoad: return s::EngineLayer(s::kHeavyEngine,true);
-    case kClipLightIdle: return s::EngineLayer(s::kLightEngine,false);
-    case kClipLightLoad: return s::EngineLayer(s::kLightEngine,true);
-    case kClipTracks: return s::Tracks();
     case kClipTurret: return s::Turret();
     case kClipTurretStop: return s::TurretStop();
     case kClipGunNear: return s::GunNear(s::kTankReport);
@@ -575,8 +492,6 @@ std::vector<float> MadeClip(int c) {
     case kClipEject: return s::ReloadEject();
     case kClipLoad: return s::ReloadLoad(s::kRoundRam);
     case kClipClose: return s::ReloadClose();
-    case kClipBikeIdle: return s::EngineLayer(s::kBikeEngine,false);
-    case kClipBikeLoad: return s::EngineLayer(s::kBikeEngine,true);
     case kClipMg: return s::MachineGun();
     case kClipGatling: return s::Gatling();
     case kClipBurstTail: return s::BurstTail();
@@ -745,17 +660,6 @@ bool Start() noexcept {
         if(SUCCEEDED(master->SetEffectChain(&chain))){limiter="on";limiterOn=true;}
         fx->Release();
     }
-    wchar_t path[MAX_PATH]{};
-    UINT32 rate=kRate;
-    const bool own=BesideDll(L"_jet.wav",path) && ReadWav(path,roarPcm,rate);
-    if(own) {
-        whine=false;
-        Log("SOUND engine sound from %ls (%u Hz, %.1f s)",path,rate,static_cast<double>(roarPcm.size())/rate);
-    } else {
-        roarPcm=SynthRoar();whinePcm=SynthWhine();
-        Log("SOUND engine sound made in the plugin (no %ls)",path);
-    }
-    roarFormat=Mono16(rate);whineFormat=Mono16(kRate);
     beatAt=GetTickCount64();
     const HANDLE t=CreateThread(nullptr,0,&Watch,nullptr,0,nullptr);
     if(t)CloseHandle(t);
@@ -763,44 +667,6 @@ bool Start() noexcept {
     Log("SOUND XAudio2 up: %u output channel(s), mask 0x%lX: %d around the listener, LFE %s; limiter %s",masterChannels,mask,
         layout.ring,layout.lfe>=0 ? "yes" : "no",limiter);
     return true;
-}
-
-int Open() noexcept {
-    if(!ok)return -1;
-    for(int i=0;i<kSlots;++i) {
-        Slot& s=slots[i];
-        if(s.used)continue;
-        s.roar=Voice(roarFormat,roarPcm);
-        s.whine=whine ? Voice(whineFormat,whinePcm) : nullptr;
-        if(!s.roar){if(s.whine)s.whine->DestroyVoice();s=Slot{};return -1;}
-        s.used=true;
-        return i;
-    }
-    return -1;
-}
-
-void Set(int i,const Mix& m) noexcept {
-    if(i<0 || i>=kSlots || !slots[i].used)return;
-    const Slot& s=slots[i];
-    const XAUDIO2_FILTER_PARAMETERS f=CutoffFilter(AirCutoff(m.distance));
-    auto ratio=[](float r) noexcept { return r<1.0f/kMaxRatio ? 1.0f/kMaxRatio : r>kMaxRatio ? kMaxRatio : r; };
-    s.roar->SetFrequencyRatio(ratio(m.roarRatio));
-    s.roar->SetFilterParameters(&f);
-    Place(s.roar,1,surround::Placing{m.roar,m.side,m.front,m.spread,false});
-    s.roar->SetVolume(1.0f);
-    if(s.whine) {
-        s.whine->SetFrequencyRatio(ratio(m.whineRatio));
-        s.whine->SetFilterParameters(&f);
-        Place(s.whine,1,surround::Placing{m.whine,m.side,m.front,m.spread,false});
-        s.whine->SetVolume(1.0f);
-    }
-}
-
-void Close(int i) noexcept {
-    if(i<0 || i>=kSlots || !slots[i].used)return;
-    if(slots[i].roar)slots[i].roar->DestroyVoice();
-    if(slots[i].whine)slots[i].whine->DestroyVoice();
-    slots[i]=Slot{};
 }
 
 bool Running() noexcept { return ok; }
@@ -885,7 +751,7 @@ int OpenLoop(int clip) noexcept {
         if(FAILED(v->SubmitSourceBuffer(&b))){v->DestroyVoice();return -1;}
         Pan(v,0.0f,0.0f);
         v->Start();
-        loops[i]=LoopVoice{v,true};
+        loops[i]=LoopVoice{v,1,true};
         const int open=loopsOpen.fetch_add(1,std::memory_order_relaxed)+1;
         if(open>loopsPeak.load(std::memory_order_relaxed))loopsPeak.store(open,std::memory_order_relaxed);
         return i;
@@ -896,7 +762,7 @@ int OpenLoop(int clip) noexcept {
 
 void SetLoop(int i,const Heard& h) noexcept {
     if(i<0 || i>=kLoops || !loops[i].used)return;
-    Hear(loops[i].v,1,h);
+    Hear(loops[i].v,loops[i].inputs,h);
 }
 
 void CloseLoop(int i) noexcept {
@@ -904,6 +770,36 @@ void CloseLoop(int i) noexcept {
     loops[i].v->DestroyVoice();
     loops[i]=LoopVoice{};
     loopsOpen.fetch_sub(1,std::memory_order_relaxed);
+}
+int OpenWtLoop(int group) noexcept {
+    if(!WtThere(group))return -1;
+    const ClipPcm& c=wtClips[group][0];
+    const UINT32 frames=static_cast<UINT32>(c.pcm.size()/c.format.nChannels);
+    if(!frames)return -1;
+    for(int i=0;i<kLoops;++i) {
+        if(loops[i].used)continue;
+        IXAudio2SourceVoice* v=nullptr;
+        if(FAILED(engine->CreateSourceVoice(&v,&c.format,XAUDIO2_VOICE_USEFILTER,kMaxRatio)))return -1;
+        XAUDIO2_BUFFER b{};
+        b.AudioBytes=static_cast<UINT32>(c.pcm.size()*2);b.pAudioData=reinterpret_cast<const BYTE*>(c.pcm.data());
+        b.LoopCount=XAUDIO2_LOOP_INFINITE;
+        loopStart=(loopStart+7919u*61u)%frames;
+        b.PlayBegin=loopStart;   // two engines of a kind are not in phase
+        if(FAILED(v->SubmitSourceBuffer(&b))){v->DestroyVoice();return -1;}
+        Place(v,c.format.nChannels,surround::Placing{0.0f,0.0f,1.0f,0.0f,false});   // silent until set
+        v->Start();
+        loops[i]=LoopVoice{v,static_cast<int>(c.format.nChannels),true};
+        const int open=loopsOpen.fetch_add(1,std::memory_order_relaxed)+1;
+        if(open>loopsPeak.load(std::memory_order_relaxed))loopsPeak.store(open,std::memory_order_relaxed);
+        return i;
+    }
+    loopsNoneFree.fetch_add(1,std::memory_order_relaxed);
+    return -1;
+}
+int LoopsOpen() noexcept {
+    int n=0;
+    for(const LoopVoice& l:loops)n+=l.used ? 1 : 0;
+    return n;
 }
 
 void PlayPcm(const ClipPcm& c,const Heard& h) noexcept;

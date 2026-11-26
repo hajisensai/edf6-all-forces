@@ -736,6 +736,8 @@ void LoadConfig() noexcept {
     if(n.airdropTest)Log("CONFIG AirdropTest=%d (tests only): a container airdrop asked once a mission",n.airdropTest);
     n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);
     if(n.npcCrewTest)Log("CONFIG NpcCrewTest=1 (tests only): empty vehicles are crewed without a player having driven them");
+    n.testDriveCycle=ReadBool(L"TestDriveCycle",n.testDriveCycle);
+    if(n.testDriveCycle)Log("CONFIG TestDriveCycle=1 (tests only): the player driver's throttle runs a fixed cycle (idle, full, half, brake)");
     n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
     n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
     n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
