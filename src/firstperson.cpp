@@ -1677,9 +1677,15 @@ void FollowSticks(const RideView& ride) noexcept {
     const unsigned char* seat=ride.seat>=0 && static_cast<unsigned>(ride.seat)<SeatCount(ride.vehicle) ?
                               SeatAt(ride.vehicle,static_cast<unsigned>(ride.seat)) : nullptr;
     const bool read=seat && Readable(seat+0x2C0,0x18);
+    float want[4]{};
     for(int i=0;i<4;++i) {
-        const float want=read ? fpview::Clamp(At<float>(seat,kSeatSticks[i]),-1.0f,1.0f) : 0.0f;
-        s.stick[i]=instruments::StickFollow(s.stick[i],want,dt);
+        want[i]=read ? fpview::Clamp(At<float>(seat,kSeatSticks[i]),-1.0f,1.0f) : 0.0f;
+        s.stick[i]=instruments::StickFollow(s.stick[i],want[i],dt);
+    }
+    static ULONGLONG logged=0;
+    if(Cfg().debug && now-logged>=500 && (want[0]!=0.0f || want[1]!=0.0f || want[2]!=0.0f || want[3]!=0.0f)) {
+        logged=now;
+        Log("FP sticks seat %d: left %.2f %.2f, right %.2f %.2f",ride.seat,want[0],want[1],want[2],want[3]);
     }
 }
 
