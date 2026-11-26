@@ -9,7 +9,7 @@
 #include <random>
 #include <vector>
 
-namespace crew { unsigned char* image=nullptr; }
+namespace crew { unsigned char* image=nullptr; void Log(const char*,...) noexcept {} }
 namespace crew::perfprobe {
 bool traceCommands=false;
 unsigned tracedCommands[256]{};
@@ -370,7 +370,35 @@ bool RayResetTemplates() {
     return true;
 }
 
-bool MotionLibraryCases() {
+bool MotionPresetWeakCache() {
+    // Run the exact native weak-lookup fragment with a fake entry and report which continuation it takes.
+    constexpr unsigned start=0x11AD03B,emptyResult=0x11AD074;
+    constexpr unsigned char enter[]{
+        0x56,0x48,0x81,0xEC,0xA0,0,0,0,0x89,0x94,0x24,0x98,0,0,0, // save row ID in the original frame slot
+    };
+    constexpr unsigned char absent[]{0x33,0xC0,0xEB,0x0D};
+    constexpr unsigned char renew[]{0xB8,1,0,0,0,0x48,0x81,0xC4,0xA0,0,0,0,0x5E,0xC3};
+    unsigned char fragment[sizeof(enter)+kMotionWeakCreate-start+sizeof(renew)]{};
+    std::memcpy(fragment,enter,sizeof(enter));
+    std::memcpy(fragment+sizeof(enter),image+start,kMotionWeakCreate-start);
+    std::memcpy(fragment+sizeof(enter)+emptyResult-start,absent,sizeof(absent));
+    std::memcpy(fragment+sizeof(enter)+kMotionWeakCreate-start,renew,sizeof(renew));
+    auto* const executable=edf::AllocateNearCode(image+start,fragment,sizeof(fragment));
+    if(!executable)return false;
+    const auto run=reinterpret_cast<bool(__fastcall*)(void*,unsigned)>(executable);
+    alignas(8) unsigned char entry[0x28]{},control[0x10]{};
+    bool valid=run(entry,0) && run(entry,4) && !run(entry,5) && !run(entry,0x105);
+    edf::Put(entry,0x20,control+0);
+    valid=valid && run(entry,1) && !run(entry,0x105);
+    edf::Put(control,8,1u);
+    valid=valid && !run(entry,2) && edf::At<unsigned>(control,8)==2u;
+    VirtualFree(executable,0,MEM_RELEASE);
+    return valid;
+}
+
+
+
+bool MotionLibraryCases(bool bounded) {
     using Row=std::array<std::uint32_t,28>;
     using Add=std::uint16_t*(__fastcall*)(void*,std::uint16_t*,const void*);
     constexpr int large=70656;
@@ -408,7 +436,7 @@ bool MotionLibraryCases() {
         rows[40][field]^=1;
     }
     rows[65566]=key;
-    if(!finds(large,key,30) || !finds(65566,key,0xFFFFu))return false;
+    if(!finds(large,key,bounded ? 0xFFFFu : 30) || !finds(65566,key,0xFFFFu))return false;
     rows[65566][27]^=1;
     if(!finds(large,key,0xFFFFu))return false;
 
@@ -430,8 +458,55 @@ bool MotionLibraryCases() {
     auto exclusive=key;
     exclusive[0]=1u;
     rows[8]=exclusive;
-    const bool valid=insert(9,key) && insert(10,exclusive) && finds(41,key,9) &&
-                     finds(41,exclusive,0xFFFFu) && edf::At<std::uint32_t>(library,0x60)==2;
+    const auto verify=[&] {
+        if(!insert(9,key) || !insert(10,exclusive) || !finds(41,key,9) ||
+           !finds(41,exclusive,0xFFFFu) || edf::At<std::uint32_t>(library,0x60)!=2)return false;
+        if(!bounded)return true;
+
+        const Row slot0=rows[0],slot1=rows[1];
+        for(unsigned invalid:{65535u,65536u,65537u}) {
+            rows[invalid].fill(0xFFFFFFu);
+            const Row before=rows[invalid];
+            edf::Put(library,0x5C,invalid);
+            if(!finds(large,exclusive,0xFFFFu) || rows[invalid]!=before || rows[0]!=slot0 || rows[1]!=slot1 ||
+               edf::At<std::uint32_t>(library,0x5C)!=invalid)return false;
+        }
+        rows[65534][0]=0xFFFFFFu;
+        edf::Put(library,0x5C,65534u);
+        if(!finds(kMotionSlots,exclusive,65534u) || rows[65534]!=exclusive)return false;
+
+        const auto reserve=Redirected<ReserveMotionFn>(kMotionGrowthCall);
+        int status=0;
+        if(reserve(library,&status,65536)!=&status || status>=0 || edf::At<int>(library,0x48)!=kMotionSlots)return false;
+
+        const auto objectAdd=Redirected<AddMotionFn>(kMotionObjectCall);
+        const auto fallback=[&](const Row& request,std::uint16_t expected) {
+            std::uint16_t out=0xFFFF;
+            return objectAdd(library,&out,reinterpret_cast<const unsigned char*>(request.data()))==&out && out==expected &&
+                   edf::At<std::uint32_t>(library,0x60)==3;
+        };
+        rows[4]=exclusive;
+        if(!fallback(exclusive,4))return false;
+        Row request=exclusive;
+        request[8]^=1;
+        request[2]=0x3F800000u;
+        request[4]=0x43480000u;
+        if(!fallback(request,1))return false;
+        request[2]=0;
+        if(!fallback(request,2))return false;
+        request[4]=request[5]=0;
+        if(!fallback(request,0))return false;
+        const auto release=Redirected<ReleaseMotionFn>(kMotionReleaseCall);
+        release(library,4);
+        release(library,0xFFFF);
+        if(rows[4]!=exclusive || edf::At<std::uint32_t>(library,0x60)!=3)return false;
+        release(library,65534);
+        return edf::At<std::uint32_t>(library,0x60)==2 &&
+               (edf::At<std::uint32_t>(library,0x5C)&0xFFFFFFu)==65534u &&
+               finds(kMotionSlots,exclusive,65534u);
+
+    };
+    const bool valid=verify();
     edf::Put(image,memcpySlot,copy);
     edf::Put(image,memsetSlot,fill);
     DWORD old=0;
@@ -784,7 +859,7 @@ int main(int argc,char** argv) {
     if(!image)return 1;
     const auto* nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
     if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || !edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return 1;
-    if(!MotionLibraryCases()) {
+    if(!MotionLibraryCases(false)) {
         std::puts("FAIL: stock motion library behavior does not match the fixture");
         return 1;
     }
@@ -877,7 +952,11 @@ int main(int argc,char** argv) {
         std::puts("FAIL: avoidance sweep changed the first overlap or the X cutoff");
         return 1;
     }
-    if(!MotionLibraryCases()) {
+    if(!MotionPresetWeakCache()) {
+        std::puts("FAIL: exhausted motion preset wrapper lifetime mismatch");
+        return 1;
+    }
+    if(!MotionLibraryCases(true)) {
         std::puts("FAIL: motion library ID order, miss or insertion mismatch");
         return 1;
     }
