@@ -20,7 +20,7 @@
   - 域表在 `tools/test_domains.py`（`DOMAINS`，按目录 / 文件归属）；每个用例属于哪些域由它的代码实际 import、读取的文件静态算出，生成 `tests/test_labels.json` 和 `cmake/test_labels.cmake`（ctest `LABELS`）。`tools/selftest.py` 本身的改动按改到的顶层函数选用到它的 selftest 用例。列目录（`os.listdir` / `walk` / `glob` 等）的用例算依赖该模块目录下全部 `.py`；读整个仓库、静态看不出读了什么的用例（`git ls-files` 扫全部源码之类）登记在 `EVERYTHING` 全域表，任何改动都选中。列目录的路径是运行时从仓库拼出来、一路没写目录名的（`os.walk(ROOT)`、`os.listdir(eo.FILES)`、只有通配符的 `glob(ROOT + '/**/*.cpp')`、`from os import walk` 后的 `walk(ROOT)`、`os.popen('dir /s ' + ROOT)`、`git ls-files` / `git grep`），`--check` 会找出来：这类用例要么进 `EVERYTHING`，要么在 `SCANNED` 里声明它读哪些文件（读的是临时目录 / 游戏目录就声明为 `()`），否则报错。
   - 改了共享底座（`CMakeLists.txt`、`common/`、`build.cmd`、CI、`check.py`、`test_domains.py`、标签表、pylib 公共基础模块等，见 `FULL`）或找不到 merge-base 时，自动全跑并打印原因。
   - `--full`：强制全跑（合并前想在本地复现 CI、或怀疑选择漏了时用）。`--dry-run`：只打印会跑什么，不跑。`--base REV`：改为相对 REV 计算改动（`--base HEAD` = 只算未提交的改动）。
-  - 放行看「编译通过 + 与改动相关的用例绿」，也就是 check.py 默认选择跑绿；审查通过就合，不等 CI、不挂着轮询 CI。CI 只在最后合并发版时看一次，红了那时再修。
+  - 提交、推送、开 PR 前不跑 check.py；合并前跑一次。放行看「编译通过 + 与改动相关的用例绿」，也就是 check.py 默认选择跑绿；审查通过就合，不等 CI、不挂着轮询 CI。CI 只在最后合并发版时看一次，红了那时再修。
   - 新增 / 改名测试、或改了测试的 import、读的文件、新增目录后，跑 `test_domains.py --write`：新文件先 `git add`（只算 git 跟踪的文件，未跟踪的不进标签），再 configure（`cmake -S . -B build`，让 `build/CTestTestfile.cmake` 有新用例），再跑 `python tools/test_domains.py --write`，然后再 configure 一次让 LABELS 生效，把两个生成文件一起提交；`--check` 在 check.py 的生成文件阶段和 CI 里校验，任何用例没有域都会报错。`--explain <测试名>` 看某个用例为什么属于这些域。
 - 快速看单个用例：`ctest --test-dir build -R <名字>`；`cmake --build build --target <x>_check && build\<x>_check.exe`。`python tools/selftest.py` 单独跑也会排同一个队，默认 8 个工作进程、按上次耗时从长到短排，`-j 1` 是串行。
 - ctest 用例互不共享输出，可以并行；新用例别写固定的共享路径，也别按墙钟判断时效。ctest 已给每个用例设 `OPENBLAS_NUM_THREADS=1`（`-j` 并行时，numpy 每个进程都开满核会超订）。
