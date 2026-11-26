@@ -866,11 +866,13 @@ void LoadConfig() noexcept {
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
     n.enemyControl=ReadBool(L"EnemyControl",n.enemyControl);
     n.gpuFx=ReadBool(L"GpuFx",n.gpuFx);
-    n.gpuFxTest=static_cast<int>(FixInt("GpuFxTest",ReadInt(L"GpuFxTest",static_cast<DWORD>(n.gpuFxTest)),0,2));
+    n.gpuFxTest=static_cast<int>(FixInt("GpuFxTest",ReadInt(L"GpuFxTest",static_cast<DWORD>(n.gpuFxTest)),0,4));
     n.gpuFxNative=static_cast<int>(FixInt("GpuFxNative",ReadInt(L"GpuFxNative",static_cast<DWORD>(n.gpuFxNative)),0,2));
     n.gpuFxProbe=ReadBool(L"GpuFxProbe",n.gpuFxProbe);
     n.gpuFxLayers=ReadBool(L"GpuFxLayers",n.gpuFxLayers);
     n.gpuFxEfs=ReadBool(L"GpuFxEfs",n.gpuFxEfs);
+    n.gpuFxLitA=ReadBool(L"GpuFxLitA",n.gpuFxLitA);
+    n.devFrameCap=static_cast<int>(FixInt("DevFrameCap",ReadInt(L"DevFrameCap",static_cast<DWORD>(n.devFrameCap)),0,240));
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
     n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
     n.thermalButton=ReadInt(L"VehicleThermalButton",static_cast<DWORD>(n.thermalButton));

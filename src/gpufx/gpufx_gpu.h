@@ -107,6 +107,7 @@ struct Stats {
     static constexpr int kBuckets=5;
     float bucketMs[kBuckets]{-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
     int bucketDrawn[kBuckets]{};
+    double bucketPixels[kBuckets]{-1.0,-1.0,-1.0,-1.0,-1.0};   // the same frame's PS invocations per bucket
     // The scene's luminance before our draw (the median of five 16x16 blocks of the colour target, read back a few
     // frames late without a stall; -1: none yet) and the brightest block's.
     float sceneLuma=-1.0f,sceneLumaMax=-1.0f;

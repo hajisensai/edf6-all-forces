@@ -80,6 +80,7 @@ std::atomic<bool> optEnabled{false},optProbe{false},optLayers{false},optEfs{fals
 std::atomic<int> optTest{0};   // GpuFxTest: 1 the test cards, 2 the cards and the stress (the ultimate strike, three times)
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
 std::atomic<int> optNative{0};   // 0 stock, 1 ours, 2 the screen split (stock left, ours right)
+std::atomic<bool> optLitA{false};   // GpuFxLitA: the lit set 0xA40 taken over too (off: it stays stock, docs/gpufx-re.md)
 std::atomic<bool> anchorReady{false};
 float anchorShared[3]{};   // under publishLock
 
@@ -491,6 +492,73 @@ bool Split(const unsigned char* core,const NativeView& n,std::size_t start,int g
     return false;
 }
 
+// The probe's stock side (docs/gpufx-re.md "集 A 的开销"): once a probe log, one world view's stock particle and efs
+// draws each wrapped in a timestamp pair and a pipeline statistics query, summed per bucket like Stats (1 unlit,
+// 2 lit 0xC08, 3 lit 0xA40, 4 efs) and logged next to ours: the same cards' GPU time and pixels, stock against ours.
+struct StockProfile {
+    static constexpr int kMost=1024,kBuckets=5;
+    ComPtr<ID3D11Query> disjoint;
+    std::vector<ComPtr<ID3D11Query>> begin,end,pipe;
+    std::vector<unsigned char> bucket;
+    std::vector<int> cards;
+    int used=0,state=0;   // 0 idle, 1 wanted (the next world view records), 2 recording, 3 waiting for the GPU
+    bool failed=false;
+    // The last resolved view: per bucket the draws, the cards, the GPU ms and the PS invocations.
+    int draws[kBuckets]{},cardsDone[kBuckets]{};double ms[kBuckets]{},pixels[kBuckets]{};bool have=false;
+    bool Make(ID3D11DeviceContext* context) noexcept {
+        if(disjoint)return true;
+        if(failed)return false;
+        ComPtr<ID3D11Device> device;context->GetDevice(&device);
+        try { begin.resize(kMost);end.resize(kMost);pipe.resize(kMost);bucket.resize(kMost);cards.resize(kMost); } catch(...) {failed=true;return false;}
+        D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_TIMESTAMP_DISJOINT;
+        bool ok=device && SUCCEEDED(device->CreateQuery(&q,&disjoint));
+        for(int i=0;ok && i<kMost;++i) {
+            const auto k=static_cast<std::size_t>(i);
+            q.Query=D3D11_QUERY_TIMESTAMP;ok=SUCCEEDED(device->CreateQuery(&q,&begin[k])) && SUCCEEDED(device->CreateQuery(&q,&end[k]));
+            q.Query=D3D11_QUERY_PIPELINE_STATISTICS;ok=ok && SUCCEEDED(device->CreateQuery(&q,&pipe[k]));
+        }
+        if(!ok){disjoint.Reset();failed=true;}
+        return ok;
+    }
+    // Around one stock draw (render thread, inside the recorded world view): Before, the draw, After.
+    int Before(ID3D11DeviceContext* context,int which,int count) noexcept {
+        if(state!=2 || used>=kMost || !context)return -1;
+        const auto k=static_cast<std::size_t>(used);
+        bucket[k]=static_cast<unsigned char>(which);cards[k]=count;
+        context->End(begin[k].Get());context->Begin(pipe[k].Get());
+        return used++;
+    }
+    void After(ID3D11DeviceContext* context,int at) noexcept {
+        if(at<0 || !context)return;
+        const auto k=static_cast<std::size_t>(at);
+        context->End(pipe[k].Get());context->End(end[k].Get());
+    }
+    void ViewBegins(ID3D11DeviceContext* context) noexcept {
+        if(state==1 && context && Make(context)){used=0;context->Begin(disjoint.Get());state=2;}
+    }
+    void ViewEnds(ID3D11DeviceContext* context) noexcept {
+        if(state==2 && context){context->End(disjoint.Get());state=3;}
+        if(state!=3 || !context)return;
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{};
+        if(context->GetData(disjoint.Get(),&dj,sizeof(dj),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK)return;
+        int d[kBuckets]{},c[kBuckets]{};double m[kBuckets]{},p[kBuckets]{};
+        for(int i=0;i<used;++i) {
+            const auto k=static_cast<std::size_t>(i);
+            UINT64 a=0,b=0;D3D11_QUERY_DATA_PIPELINE_STATISTICS s{};
+            if(context->GetData(begin[k].Get(),&a,sizeof(a),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK ||
+               context->GetData(end[k].Get(),&b,sizeof(b),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK ||
+               context->GetData(pipe[k].Get(),&s,sizeof(s),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK)return;
+            const int w=bucket[k];
+            ++d[w];c[w]+=cards[k];p[w]+=static_cast<double>(s.PSInvocations);
+            if(b>=a && dj.Frequency)m[w]+=static_cast<double>(b-a)*1000.0/static_cast<double>(dj.Frequency);
+        }
+        state=0;
+        if(dj.Disjoint)return;
+        std::memcpy(draws,d,sizeof(d));std::memcpy(cardsDone,c,sizeof(c));std::memcpy(ms,m,sizeof(m));std::memcpy(pixels,p,sizeof(p));have=true;
+    }
+};
+StockProfile stockProfile;
+
 enum class Source { render, core };
 // One stock particle draw: taken over (its snapshot copied into a batch, the stock draw skipped; true) or left to the
 // stock draw (false). Both the ParticleRender slot and the embedded core's own draw come here.
@@ -506,7 +574,7 @@ bool TakeOver(const unsigned char* core,const float* world,void* native,Source s
     // 1 / 2, a stock atlas grid, its texture's chain known.
     const int chain=textureChain.load(std::memory_order_relaxed);
     const int grid=read ? StockGrid(n.frames) : 0;
-    if(wantNative && read && inWorld && chain && n.live && (n.lit==0 || litCapture.complete) && (n.blend==1 || n.blend==2) && n.count>0 && grid) {
+    if(wantNative && read && inWorld && chain && n.live && (n.lit==0 || (litCapture.complete && (n.litSet==2 || optLitA.load(std::memory_order_relaxed)))) && (n.blend==1 || n.blend==2) && n.count>0 && grid) {
         auto* srv=static_cast<ID3D11ShaderResourceView*>(Resolve(n,chain));
         const int room=Renderer::kMaxInstances-kBudget-static_cast<int>(nativeInstances.size());
         if(srv && room>0 && DrawRoom()) {
@@ -565,6 +633,18 @@ void AfterStock(const unsigned char* core,const float* world,void* native,bool l
     if(logState)LogBoundState(context);
 }
 
+// The stock draw about to run, for the probe's stock side (StockProfile): its bucket and cards; -1 when not recording.
+int ProfileStockDraw(const unsigned char* core,const float* world,void* native) noexcept {
+    if(stockProfile.state!=2 || !inWorld)return -1;
+    ID3D11DeviceContext* context=native && Readable(native,0x10) ? At<ID3D11DeviceContext*>(native,8) : nullptr;
+    NativeView n{};
+    if(!context || !ReadNative(core,world,n) || n.live==0 || n.count==0)return -1;
+    return stockProfile.Before(context,n.lit ? (n.litSet==2 ? 2 : 3) : 1,static_cast<int>(n.count));
+}
+void ProfileStockDone(void* native,int at) noexcept {
+    if(at>=0)stockProfile.After(At<ID3D11DeviceContext*>(native,8),at);
+}
+
 void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* view) {
     const auto stock=reinterpret_cast<DrawFn>(image+kParticleDraw);
     if(pass!=2 && pass!=5){stock(obj,native,pass,view);return;}
@@ -573,7 +653,9 @@ void __fastcall ParticleDrawHook(void* obj,void* native,int pass,const void* vie
     const unsigned char* core=o+kCoreInRender;
     const float* world=reinterpret_cast<const float*>(o+kRenderWorld);
     if(view==currentView && TakeOver(core,world,native,Source::render,obj))return;
+    const int profiled=view==currentView ? ProfileStockDraw(core,world,native) : -1;
     stock(obj,native,pass,view);
+    ProfileStockDone(native,profiled);
     RestoreSplit();
     const bool logState=optProbe.load(std::memory_order_relaxed) && probe.stateLogged<24;
     if(logState)++probe.stateLogged;
@@ -584,7 +666,9 @@ void __fastcall CoreDrawHook(void* core,void* native,const float* world) {
     ++probe.coreCalls;
     const auto* c=static_cast<const unsigned char*>(core);
     if(TakeOver(c,world,native,Source::core,core))return;
+    const int profiled=ProfileStockDraw(c,world,native);
     coreDrawNext(core,native,world);
+    ProfileStockDone(native,profiled);
     RestoreSplit();
     AfterStock(c,world,native,false);
 }
@@ -926,7 +1010,10 @@ void __fastcall EfsQuadHook(void* self,void* ctx,const float* world,const unsign
     const bool taken=want && EfsTakeOver(c,world,desc);
     if(taken)return;
     ID3D11DeviceContext* dc=Readable(c,kCtxDevice+8) ? At<ID3D11DeviceContext*>(c,kCtxDevice) : nullptr;
+    const int count=Readable(desc+kEfsCount,8) ? static_cast<int>(At<std::uint64_t>(desc,kEfsCount)) : 0;
+    const int profiled=inWorld && dc && count>0 ? stockProfile.Before(dc,4,count) : -1;
     efsDrawNext(self,ctx,world,desc);
+    if(profiled>=0)stockProfile.After(dc,profiled);
     if(inWorld && dc && want)EfsAfterStock(dc,desc);
 }
 
@@ -944,6 +1031,7 @@ void PublishOptions() noexcept {
     optEnabled.store(c.enabled && c.gpuFx,std::memory_order_relaxed);
     optLayers.store(c.enabled && c.gpuFx && c.gpuFxLayers && layersInstalled,std::memory_order_relaxed);
     optNative.store(c.gpuFxNative,std::memory_order_relaxed);
+    optLitA.store(c.gpuFxLitA,std::memory_order_relaxed);
     optEfs.store(c.enabled && c.gpuFx && c.gpuFxEfs && efsDrawNext,std::memory_order_relaxed);
     optProbe.store(c.gpuFxProbe,std::memory_order_relaxed);
     optTest.store(c.gpuFxTest,std::memory_order_relaxed);
@@ -1045,19 +1133,32 @@ bool InstallLayers() noexcept {
     void* const code=HeadHook(kExplosion,reinterpret_cast<const void*>(&ExplosionHook));
     if(!code)return false;
     explosionNext=reinterpret_cast<ExplosionFn>(code);
-    const bool loop=edf::PatchCode(image+kExplosionLoop,kLoopJe,kLoopJmp,sizeof(kLoopJe));
-    const bool extra=edf::PatchCode(image+kExplosionExtra,kExtraJe,kExtraJmp,sizeof(kExtraJe));
-    Log("GPUFX layers: Explosion hook EDF+%X, its particles off: loop %d, extra %d",kExplosion,loop,extra);
+    Log("GPUFX layers: Explosion hook EDF+%X",kExplosion);
     if(Matches(kBigSmoke,kBigSmokeCall,sizeof(kBigSmokeCall)) && Matches(kBigPuffs,kBigPuffsCall,sizeof(kBigPuffsCall))) {
         if(void* const big=HeadHook(kExplosionBig,reinterpret_cast<const void*>(&ExplosionBigHook))) {
             explosionBigNext=reinterpret_cast<ExplosionBigFn>(big);
-            const bool smoke=edf::PatchCode(image+kBigSmoke,kBigSmokeCall,kNop5,sizeof(kNop5));
-            const bool puffs=edf::PatchCode(image+kBigPuffs,kBigPuffsCall,kNop5,sizeof(kNop5));
-            Log("GPUFX layers: Explosion_Big hook EDF+%X, its particles off: smoke %d, puffs %d",kExplosionBig,smoke,puffs);
+            Log("GPUFX layers: Explosion_Big hook EDF+%X",kExplosionBig);
         }
     }
     if(!explosionBigNext)Log("GPUFX layers: Explosion_Big EDF+%X not as expected; it stays stock",kExplosionBig);
     return true;
+}
+
+// The stock blasts' own particles off while the layers are on, back on with them off (GpuFxLayers is read again on
+// an ini reload, and the bench switches it): the Explosion loop and extra jumps, Explosion_Big's two calls. Game
+// thread (Tick), the only one that runs those functions.
+bool layersPatched=false;
+void ApplyLayerPatches(bool on) noexcept {
+    if(!explosionNext || on==layersPatched)return;
+    const bool loop=on ? edf::PatchCode(image+kExplosionLoop,kLoopJe,kLoopJmp,sizeof(kLoopJe)) : edf::PatchCode(image+kExplosionLoop,kLoopJmp,kLoopJe,sizeof(kLoopJe));
+    const bool extra=on ? edf::PatchCode(image+kExplosionExtra,kExtraJe,kExtraJmp,sizeof(kExtraJe)) : edf::PatchCode(image+kExplosionExtra,kExtraJmp,kExtraJe,sizeof(kExtraJe));
+    bool smoke=true,puffs=true;
+    if(explosionBigNext) {
+        smoke=on ? edf::PatchCode(image+kBigSmoke,kBigSmokeCall,kNop5,sizeof(kNop5)) : edf::PatchCode(image+kBigSmoke,kNop5,kBigSmokeCall,sizeof(kNop5));
+        puffs=on ? edf::PatchCode(image+kBigPuffs,kBigPuffsCall,kNop5,sizeof(kNop5)) : edf::PatchCode(image+kBigPuffs,kNop5,kBigPuffsCall,sizeof(kNop5));
+    }
+    layersPatched=on;
+    Log("GPUFX layers %s: the stock blast particles %s (loop %d, extra %d, big smoke %d, big puffs %d)",on ? "on" : "off",on ? "off" : "back",loop,extra,smoke,puffs);
 }
 
 // The camera's stand-in for the lod (the game thread has no camera): the player.
@@ -1158,6 +1259,183 @@ void StressStrike(ULONGLONG now) noexcept {
     Log("GPUFX stress: ultimate strike %d of 3 (catalog strike %d) at %.1f %.1f %.1f: %s",stressFired,strike,at[0],at[1],at[2],ok ? "started" : "refused");
 }
 
+// ---- the bench (GpuFxTest 3 the look, 4 the load; docs/gpufx-re.md "定点对照台") ----
+// One launch compares the stock draw and ours on the same effects from the same place: the effects are made at fixed
+// points ahead of the player on a fixed beat, and the renderer's switches (GpuFxNative / GpuFxLitA / GpuFxEfs /
+// GpuFxLayers) go round a cycle of phases, each logged ("GPUFX bench phase"), so pictures taken through the run pair
+// up by phase. The blasts are EffectGenUtil::Explosion (its stock smoke and fire cards, the set 0xA40 among them at a
+// middle distance, and its point light); the flashes a weapon effect file's flash played at a point (the pickup
+// effect's way, 0x590F10: no weapon, no owner); ours are the layers the same blasts queue.
+constexpr unsigned kEffectGenUtil=0x20B2980;   // EffectGenUtil*: made with the mission's scene (0x7004F0), null outside
+constexpr unsigned kEfsLoad=0x2ECEC0,kEfsSpawn=0x2EC5C0;
+using EfsLoadFn=void(__fastcall*)(void*,const void*);
+using EfsSpawnFn=void*(__fastcall*)(void*,void*,void*);
+struct BenchPhase { const char* name;int native;bool litA,efs,layers; };
+constexpr BenchPhase kLookPhases[]={{"stock",0,false,false,false},{"takeover",1,true,true,false},{"takeover+layers",1,true,true,true}};
+constexpr BenchPhase kLoadPhases[]={{"stock",0,false,false,false},{"takeover",1,true,true,false},{"takeover, 0xA40 stock",1,false,true,false}};
+constexpr ULONGLONG kLookPhaseMs=10000,kLoadPhaseMs=12000;
+// An MSVC std::wstring as the efs loader reads it (const, never grown): the text out of line (capacity past the 7 of
+// the small buffer).
+struct GameWString { const wchar_t* text;unsigned char pad[8];std::uint64_t size,capacity; };
+static_assert(sizeof(GameWString)==0x20);
+struct EfsSource { const wchar_t* file;const wchar_t* esb; };
+constexpr EfsSource kBenchEfs[]={{L"app:/weapon/effect/v601_tank_cannon.efarc",L"fire01.esb"},
+                                 {L"app:/weapon/effect/pale_laser_rifle01.efarc",L"muzzle_flash01.esb"}};
+struct Bench {
+    bool started=false;ULONGLONG startMs=0;int phase=-1;
+    ULONGLONG nextBlast=0,nextEfs=0;
+    // The efs controllers (0x40 bytes each, zeroed: loaded flag, the resource, the instances' weak list, no owner),
+    // one per source and mission; never freed (their instances may outlive the mission's Reset and their destructor
+    // 0x2EC240 would end them under the efs renderer: a few hundred bytes a mission, bench only).
+    unsigned char* efs[2]{};bool efsReady[2]{};bool efsTried=false;
+    unsigned blasts=0,flashes=0;
+};
+Bench bench;
+
+bool CallEfsLoad(void* ctrl,const GameWString* name) noexcept {
+    __try { reinterpret_cast<EfsLoadFn>(image+kEfsLoad)(ctrl,name);return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool CallEfsSpawn(void* ctrl,void* out,void* params) noexcept {
+    __try { reinterpret_cast<EfsSpawnFn>(image+kEfsSpawn)(ctrl,out,params);return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool CallExplosion(void* egu,const float* pos,const float* dir,float size,const float* color) noexcept {
+    __try { reinterpret_cast<ExplosionFn>(image+kExplosion)(egu,pos,dir,size,0.0f,color,1.0f);return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void ReleaseWeak(void* cb) noexcept {
+    __try {
+        auto* c=static_cast<unsigned char*>(cb);
+        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(c+0xC))==0) {
+            using DeleteFn=void(__fastcall*)(void*);
+            (*reinterpret_cast<DeleteFn* const*>(c))[1](c);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+void BenchLoadEfs() noexcept {
+    bench.efsTried=true;
+    for(int i=0;i<2;++i) {
+        auto* ctrl=static_cast<unsigned char*>(_aligned_malloc(0x40,16));
+        bench.efs[i]=ctrl;bench.efsReady[i]=false;
+        if(!ctrl)continue;
+        std::memset(ctrl,0,0x40);
+        GameWString name{};name.text=kBenchEfs[i].file;name.size=std::wcslen(kBenchEfs[i].file);name.capacity=name.size+8;
+        const bool called=CallEfsLoad(ctrl,&name);
+        bench.efsReady[i]=called && At<void*>(ctrl,0x10)!=nullptr;
+        Log("GPUFX bench efs %ls (%ls): %s",kBenchEfs[i].file,kBenchEfs[i].esb,
+            bench.efsReady[i] ? "loaded" : called ? "missing; this flash stays off" : "load faulted; this flash stays off");
+    }
+}
+
+// One flash of source `i` at `at`, its +z along `fwd` (level), the weak reference given back at once (0x590F10).
+void BenchFlash(int i,const float* at,const float* fwd) noexcept {
+    if(!bench.efsReady[i])return;
+    alignas(16) unsigned char p[0x100]{};
+    float* m=reinterpret_cast<float*>(p);
+    // Rows: right (up x forward), up, forward, position (w 1).
+    m[0]=fwd[2];m[1]=0.0f;m[2]=-fwd[0];m[5]=1.0f;m[8]=fwd[0];m[9]=fwd[1];m[10]=fwd[2];m[12]=at[0];m[13]=at[1];m[14]=at[2];m[15]=1.0f;
+    *reinterpret_cast<const wchar_t**>(p+0x80)=kBenchEfs[i].esb;
+    *reinterpret_cast<float*>(p+0x88)=1.0f;
+    for(int k=0;k<4;++k)reinterpret_cast<float*>(p+0x90)[k]=1.0f;
+    *reinterpret_cast<int*>(p+0xA4)=1;*reinterpret_cast<std::uint16_t*>(p+0xA8)=1;*reinterpret_cast<int*>(p+0xAC)=-1;
+    *reinterpret_cast<int*>(p+0xB0)=-1;*reinterpret_cast<int*>(p+0xBC)=-1;*reinterpret_cast<int*>(p+0xC0)=-1;
+    alignas(16) void* out[2]{};
+    if(!CallEfsSpawn(bench.efs[i],out,p)){bench.efsReady[i]=false;Log("GPUFX bench efs %d: spawn faulted; this flash stays off",i);return;}
+    ++bench.flashes;
+    if(out[1])ReleaseWeak(out[1]);
+}
+
+const BenchPhase* BenchPhaseNow(int& index) noexcept {
+    const int test=optTest.load(std::memory_order_relaxed);
+    if(test<3 || !bench.started)return nullptr;
+    const ULONGLONG now=GameMs();
+    if(now<bench.startMs)return nullptr;
+    const bool look=test==3;
+    const ULONGLONG span=look ? kLookPhaseMs : kLoadPhaseMs;
+    const ULONGLONG count=look ? std::size(kLookPhases) : std::size(kLoadPhases);
+    index=static_cast<int>(((now-bench.startMs)/span)%count);
+    return look ? &kLookPhases[index] : &kLoadPhases[index];
+}
+
+// Game thread, after PublishOptions: the phase's switches over the ini's.
+void BenchOverride() noexcept {
+    int index=0;
+    const BenchPhase* ph=BenchPhaseNow(index);
+    if(!ph)return;
+    const bool on=optEnabled.load(std::memory_order_relaxed);
+    optNative.store(ph->native,std::memory_order_relaxed);
+    optLitA.store(ph->litA,std::memory_order_relaxed);
+    optEfs.store(on && ph->efs && efsDrawNext,std::memory_order_relaxed);
+    optLayers.store(on && ph->layers && layersInstalled,std::memory_order_relaxed);
+}
+
+void BenchTick(ULONGLONG now) noexcept {
+    if(!bench.started){bench.started=true;bench.startMs=now+3000;bench.phase=-1;return;}
+    if(now<bench.startMs)return;
+    if(!bench.efsTried)BenchLoadEfs();
+    int index=0;
+    const BenchPhase* ph=BenchPhaseNow(index);
+    if(!ph)return;
+    const bool look=optTest.load(std::memory_order_relaxed)==3;
+    if(index!=bench.phase) {
+        bench.phase=index;
+        // Each phase starts on the same beat: its blasts and flashes at the same offsets from its start.
+        bench.nextBlast=bench.nextEfs=now+500;
+        Log("GPUFX bench phase %d (%s): native=%d litA=%d efs=%d layers=%d; so far blasts %u, flashes %u",index,ph->name,ph->native,
+            ph->litA,ph->efs,ph->layers,bench.blasts,bench.flashes);
+    }
+    const float fx=anchor[0]-anchorFrom[0],fz=anchor[2]-anchorFrom[2];
+    const float len=std::sqrt(fx*fx+fz*fz);
+    if(!(len>1e-3f))return;
+    const float f[3]{fx/len,0.0f,fz/len};
+    if(now>=bench.nextBlast) {
+        bench.nextBlast=now+(look ? 3000 : 2000);
+        void* const egu=Readable(image+kEffectGenUtil,8) ? At<void*>(image+kEffectGenUtil,0) : nullptr;
+        if(egu) {
+            // The look: three middle-distance blasts (45 m and 60 m ahead: the set 0xA40's range) and one near (the
+            // set 0xC08). The load: a 6 x 4 grid 50..110 m ahead, 16 m and 20 m apart (past each other's radius: the
+            // stock makes no point light where seven blasts are already alive near).
+            const float dir[4]{0.0f,1.0f,0.0f,0.0f};
+            const float color[4]{1.0f,1.0f,1.0f,1.0f};
+            auto blast=[&](float ahead,float side,float size){
+                const float at[4]{anchorFrom[0]+f[0]*ahead+right[0]*side,ground,anchorFrom[2]+f[2]*ahead+right[2]*side,1.0f};
+                if(CallExplosion(egu,at,dir,size,color))++bench.blasts;
+            };
+            if(look){blast(45.0f,-12.0f,0.6f);blast(45.0f,12.0f,0.6f);blast(60.0f,0.0f,0.8f);blast(20.0f,-8.0f,1.5f);}
+            else for(int row=0;row<4;++row)for(int col=0;col<6;++col)blast(50.0f+20.0f*static_cast<float>(row),-40.0f+16.0f*static_cast<float>(col),0.6f);
+        }
+    }
+    if(now>=bench.nextEfs) {
+        bench.nextEfs=now+(look ? 700 : 250);
+        // The flashes: 1.5 m up, 6 m either side of the anchor, the tank gun's facing right, the laser's left.
+        const float a[3]{anchor[0]-right[0]*6.0f,ground+1.5f,anchor[2]-right[2]*6.0f};
+        const float b[3]{anchor[0]+right[0]*6.0f,ground+1.5f,anchor[2]+right[2]*6.0f};
+        const float toRight[3]{right[0],0.0f,right[2]},toLeft[3]{-right[0],0.0f,-right[2]};
+        BenchFlash(0,a,toRight);BenchFlash(1,b,toLeft);
+    }
+}
+
+// DevFrameCap: the game thread held to at most this many frames a second (a high resolution waitable timer), so a
+// run that is not about the frame rate does not drive the GPU flat out.
+void CapFrameRate(int cap) noexcept {
+    static HANDLE timer=nullptr;
+    static LARGE_INTEGER last{},freq{};
+    if(cap<=0){last.QuadPart=0;return;}
+    if(!freq.QuadPart)QueryPerformanceFrequency(&freq);
+    if(!timer)timer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+    LARGE_INTEGER now;QueryPerformanceCounter(&now);
+    const LONGLONG period=freq.QuadPart/cap;
+    if(last.QuadPart && now.QuadPart-last.QuadPart<period) {
+        const LONGLONG wait=period-(now.QuadPart-last.QuadPart);
+        LARGE_INTEGER due;due.QuadPart=-(wait*10000000LL/freq.QuadPart);   // 100 ns units, relative
+        if(timer && due.QuadPart<0 && SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE))WaitForSingleObject(timer,100);
+        QueryPerformanceCounter(&now);
+    }
+    last=now;
+}
+
 void TickNative() noexcept {
     const ULONGLONG now=GameMs();
     const float dt=lastMs && now>lastMs ? (std::min)(0.1f,static_cast<float>(now-lastMs)*0.001f) : 0.0f;
@@ -1167,6 +1445,7 @@ void TickNative() noexcept {
     if(optTest.load(std::memory_order_relaxed)) {
         RegisterDescs();
         if(anchored && optTest.load(std::memory_order_relaxed)==2 && stressFired<3 && now>=stressAt)StressStrike(now);
+        if(anchored && optTest.load(std::memory_order_relaxed)>=3)BenchTick(now);
         if(!anchored && PlaceAnchor()) {
             anchored=true;stressAt=now+4000;
             AcquireSRWLockExclusive(&publishLock);
@@ -1248,11 +1527,11 @@ bool Install() noexcept {
         const bool core=InstallCoreDraw();
         Log("GPUFX installed: stock particle draw slot=%d (%u other references), core draw EDF+%X=%d",ok,others,kCoreDraw,core);
         const Config& c=Cfg();
-        if(c.enabled && c.gpuFx && c.gpuFxLayers) {
+        if(c.enabled && c.gpuFx) {
             layersInstalled=InstallLayers();
             if(!layersInstalled)Log("GPUFX layers: Explosion EDF+%X not as expected; the layered emitters stay off",kExplosion);
         }
-        if(c.enabled && c.gpuFx && c.gpuFxEfs) {
+        if(c.enabled && c.gpuFx) {
             const bool efs=InstallEfs();
             Log("GPUFX efs quad draw EDF+%X (slot EDF+%X): %s",kEfsQuadDraw,kEfsQuadSlot,efs ? "hooked" : "not as expected; stays stock");
         }
@@ -1266,7 +1545,10 @@ void Tick() noexcept {
     const ULONGLONG frame=GameFrame();
     if(ticked==frame)return;
     ticked=frame;
+    CapFrameRate(Cfg().devFrameCap);
     PublishOptions();
+    BenchOverride();
+    ApplyLayerPatches(optLayers.load(std::memory_order_relaxed));
     if(!optEnabled.load(std::memory_order_relaxed))return;
     try { TickNative(); } catch(...) {}
 }
@@ -1330,6 +1612,7 @@ void Reset() noexcept {
     if(pool)pool->Clear();
     poolDropped.store(0,std::memory_order_relaxed);
     anchored=false;spawnDebt=0.0f;lastMs=0;ticked=~ULONGLONG(0);
+    bench.started=false;bench.efsTried=false;bench.efsReady[0]=bench.efsReady[1]=false;stressFired=0;
     anchorReady.store(false,std::memory_order_release);
     AcquireSRWLockExclusive(&publishLock);
     published.clear();publishedIds.clear();
@@ -1337,13 +1620,14 @@ void Reset() noexcept {
     probeReset.store(true,std::memory_order_release);
 }
 
-void WorldBegin(ID3D11DeviceContext*,const void* view) noexcept {
+void WorldBegin(ID3D11DeviceContext* context,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire))return;
     currentView=view;inWorld=MainView(view);observed=false;
     if(inWorld)std::memcpy(splitView,static_cast<const unsigned char*>(view)+0x20,sizeof(splitView));
     observedDepth.Reset();observedFormat=0;fade.copiedThisWorld=false;
     litCapture.Reset();
     ClearCollected();
+    if(inWorld && optProbe.load(std::memory_order_relaxed))stockProfile.ViewBegins(context);
 }
 
 void ObserveSurface(ID3D11DeviceContext* context,int pass) noexcept {
@@ -1362,6 +1646,7 @@ void ObserveSurface(ID3D11DeviceContext* context,int pass) noexcept {
 void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
     if(!installed.load(std::memory_order_acquire) || view!=currentView || !inWorld) {inWorld=false;return;}
     inWorld=false;
+    stockProfile.ViewEnds(context);
     if(probeReset.exchange(false,std::memory_order_acq_rel)){probe=Probe{};efsProbe=EfsProbe{};}
     const bool enabled=optEnabled.load(std::memory_order_relaxed);
     const bool wantProbe=optProbe.load(std::memory_order_relaxed);
@@ -1441,6 +1726,17 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         Log("GPUFX   gpu by bucket (ms, instances): ours %.3f %d, stock %.3f %d, lit 0xC08 %.3f %d, lit 0xA40 %.3f %d, efs %.3f %d",
             st.bucketMs[0],st.bucketDrawn[0],st.bucketMs[1],st.bucketDrawn[1],st.bucketMs[2],st.bucketDrawn[2],st.bucketMs[3],st.bucketDrawn[3],
             st.bucketMs[4],st.bucketDrawn[4]);
+        {
+            const double screen=st.viewport[2]>0.0f ? static_cast<double>(st.viewport[2])*st.viewport[3] : 3840.0*2160.0;
+            Log("GPUFX   ours px by bucket (screens): ours %.2f, stock %.2f, lit 0xC08 %.2f, lit 0xA40 %.2f, efs %.2f",st.bucketPixels[0]/screen,
+                st.bucketPixels[1]/screen,st.bucketPixels[2]/screen,st.bucketPixels[3]/screen,st.bucketPixels[4]/screen);
+            const StockProfile& sp=stockProfile;
+            if(sp.have)Log("GPUFX   stock draws by bucket (ms, draws, cards, px screens): unlit %.3f %d %d %.2f, lit 0xC08 %.3f %d %d %.2f, "
+                "lit 0xA40 %.3f %d %d %.2f, efs %.3f %d %d %.2f",sp.ms[1],sp.draws[1],sp.cardsDone[1],sp.pixels[1]/screen,sp.ms[2],sp.draws[2],
+                sp.cardsDone[2],sp.pixels[2]/screen,sp.ms[3],sp.draws[3],sp.cardsDone[3],sp.pixels[3]/screen,sp.ms[4],sp.draws[4],sp.cardsDone[4],
+                sp.pixels[4]/screen);
+            if(stockProfile.state==0)stockProfile.state=1;
+        }
         const float* P=vp.proj;const float* V=vp.view;
         Log("GPUFX   P=[%.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.6f %.4f | %.4f %.4f %.6f %.4f] jitter x %.6f..%.6f y %.6f..%.6f",
             P[0],P[1],P[2],P[3],P[4],P[5],P[6],P[7],P[8],P[9],P[10],P[11],P[12],P[13],P[14],P[15],

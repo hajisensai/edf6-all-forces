@@ -443,6 +443,7 @@ struct Renderer::Impl final {
         ComPtr<ID3D11Query> disjoint,begin,end,pipeline;
         // ViewParams::profile: a timestamp before each batch and one after the last; marks[k]..marks[k+1] is bucket[k]'s.
         std::vector<ComPtr<ID3D11Query>> marks;
+        std::vector<ComPtr<ID3D11Query>> pipes;   // and a pipeline statistics query around each batch
         std::vector<unsigned char> bucket;
         int used=0;
         bool pending=false;
@@ -452,6 +453,7 @@ struct Renderer::Impl final {
     float gpuMs=-1.0f;
     double pixelsShaded=-1.0;   // the PS invocations of the same timed Draw
     std::array<float,Stats::kBuckets> bucketMs{-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
+    std::array<double,Stats::kBuckets> bucketPixels{-1.0,-1.0,-1.0,-1.0,-1.0};
     // The scene's luminance: five 16x16 blocks of the colour target copied before our draw into a ring of staging
     // textures, mapped without waiting a few frames later.
     static constexpr int kLumaRing=3,kLumaBlock=16,kLumaBlocks=5;
@@ -592,7 +594,7 @@ struct Renderer::Impl final {
                ctx->GetData(t.end.Get(),&b,sizeof(b),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK)continue;
             D3D11_QUERY_DATA_PIPELINE_STATISTICS pipe{};
             if(ctx->GetData(t.pipeline.Get(),&pipe,sizeof(pipe),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK)continue;
-            std::array<double,Stats::kBuckets> sum{};
+            std::array<double,Stats::kBuckets> sum{},px{};
             bool marksReady=true;
             UINT64 prev=0;
             for(int k=0;k<t.used && marksReady;++k) {
@@ -600,10 +602,16 @@ struct Renderer::Impl final {
                 if(ctx->GetData(t.marks[static_cast<std::size_t>(k)].Get(),&m,sizeof(m),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK){marksReady=false;break;}
                 if(k>0 && m>=prev && dj.Frequency)sum[t.bucket[static_cast<std::size_t>(k-1)]]+=static_cast<double>(m-prev)*1000.0/static_cast<double>(dj.Frequency);
                 prev=m;
+                if(k+1<t.used) {
+                    D3D11_QUERY_DATA_PIPELINE_STATISTICS one{};
+                    if(ctx->GetData(t.pipes[static_cast<std::size_t>(k)].Get(),&one,sizeof(one),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK){marksReady=false;break;}
+                    px[t.bucket[static_cast<std::size_t>(k)]]+=static_cast<double>(one.PSInvocations);
+                }
             }
             if(!marksReady)continue;
             t.pending=false;
             if(t.used>1 && !dj.Disjoint)for(int k=0;k<Stats::kBuckets;++k)bucketMs[static_cast<std::size_t>(k)]=static_cast<float>(sum[static_cast<std::size_t>(k)]);
+            if(t.used>1)bucketPixels=px;
             if(!dj.Disjoint && dj.Frequency && b>=a)gpuMs=static_cast<float>(static_cast<double>(b-a)*1000.0/static_cast<double>(dj.Frequency));
             pixelsShaded=static_cast<double>(pipe.PSInvocations);
         }
@@ -748,7 +756,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     st.viewport[0]=vp.TopLeftX;st.viewport[1]=vp.TopLeftY;st.viewport[2]=vp.Width;st.viewport[3]=vp.Height;
     s.ResolveTiming(context);
     st.gpuMs=s.gpuMs;st.pixelsShaded=s.pixelsShaded;
-    for(int k=0;k<Stats::kBuckets;++k)st.bucketMs[k]=s.bucketMs[static_cast<std::size_t>(k)];
+    for(int k=0;k<Stats::kBuckets;++k){st.bucketMs[k]=s.bucketMs[static_cast<std::size_t>(k)];st.bucketPixels[k]=s.bucketPixels[static_cast<std::size_t>(k)];}
     if(cd.Width>=Impl::kLumaBlock && cd.Height>=Impl::kLumaBlock)s.SampleLuma(context,color.Get(),cd,vp);
     st.sceneLuma=s.sceneLuma;st.sceneLumaMax=s.sceneLumaMax;
 
@@ -806,9 +814,11 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     if(timed)timing.used=0;
     const bool profiled=timed && view.profile && [&]() noexcept {
         if(timing.marks.size()==static_cast<std::size_t>(kMaxBatches+1))return true;
-        try { timing.marks.resize(kMaxBatches+1);timing.bucket.resize(kMaxBatches+1); } catch(...) { timing.marks.clear();return false; }
+        try { timing.marks.resize(kMaxBatches+1);timing.pipes.resize(kMaxBatches+1);timing.bucket.resize(kMaxBatches+1); } catch(...) { timing.marks.clear();return false; }
         D3D11_QUERY_DESC md{};md.Query=D3D11_QUERY_TIMESTAMP;
         for(auto& m:timing.marks)if(FAILED(s.device->CreateQuery(&md,&m))){timing.marks.clear();return false;}
+        md.Query=D3D11_QUERY_PIPELINE_STATISTICS;
+        for(auto& p:timing.pipes)if(FAILED(s.device->CreateQuery(&md,&p))){timing.marks.clear();return false;}
         return true;
     }();
     if(timed) {
@@ -898,11 +908,14 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             const int drawn=efs ? ranges[b].count/2 : ranges[b].count;
             const int bucket=group==3 ? 4 : group==2 ? (batch.litSet==2 ? 2 : 3) : group;
             st.bucketDrawn[bucket]+=drawn;
+            ID3D11Query* const pipe=profiled ? timing.pipes[static_cast<std::size_t>(timing.used)].Get() : nullptr;
             if(profiled) {
                 timing.bucket[static_cast<std::size_t>(timing.used)]=static_cast<unsigned char>(bucket);
                 context->End(timing.marks[static_cast<std::size_t>(timing.used++)].Get());
+                context->Begin(pipe);
             }
             context->DrawInstanced(4,static_cast<UINT>(drawn),0,0);
+            if(pipe)context->End(pipe);
             st.drawn+=drawn;++st.batches;
         }
         // Nothing of the native frame stays referenced by the private state.
