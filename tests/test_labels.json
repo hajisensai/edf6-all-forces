@@ -4168,9 +4168,14 @@
   },
   "pack_switch_native": {
    "labels": [
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
     "test-data"
    ],
-   "scripts": []
+   "scripts": [
+    "tests/pack_switch_native_audit.py"
+   ]
   },
   "pause_clock_check": {
    "labels": [
