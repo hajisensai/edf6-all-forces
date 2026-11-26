@@ -20,6 +20,7 @@
 #include "vhud.h"
 #include <cmath>
 #include <cstring>
+#include <iterator>
 
 namespace crew {
 namespace {
@@ -156,5 +157,36 @@ int DriveGearOf(const void* vehicle) noexcept {
         if(!Cfg().enabled || !Cfg().vehicleGears || !drive.vehicle.Is(vehicle) || GameMs()-drive.ms>kStaleMs)return kNoDriveGear;
         return drive.gear.gear;
     } __except(EXCEPTION_EXECUTE_HANDLER){return kNoDriveGear;}
+}
+
+namespace {
+// TestDriveCycle's phases: until (s into the 44 s cycle), the stick (seat+0x2C4: W is negative), the name logged.
+struct TestPhase { float until,stick; const char* name; };
+constexpr TestPhase kTestPhases[]={{4.0f,0.0f,"idle"},{22.0f,-1.0f,"full"},{32.0f,-0.4f,"cruise 40%"},
+                                   {38.0f,1.0f,"brake / reverse"},{44.0f,0.0f,"idle"}};
+constexpr float kTestCycle=44.0f;
+struct TestDrive { ObjRef vehicle; ULONGLONG start=0,ms=0; int phase=-1; } testDrive{};
+}  // namespace
+
+void TestDriveInput(unsigned char* v) noexcept {
+    __try {
+        if(v[kDead] || SeatCount(v)==0 || !Geared(v))return;
+        unsigned char* const seat=SeatAt(v,0);
+        const auto human=PlayerHuman();
+        if(!human || SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=human)return;
+        const ULONGLONG ms=GameMs();
+        if(!testDrive.vehicle.Is(v) || ms-testDrive.ms>kStaleMs)testDrive=TestDrive{ObjRef::Of(v),ms,ms,-1};
+        testDrive.ms=ms;
+        const float t=std::fmod(static_cast<float>(ms-testDrive.start)*0.001f,kTestCycle);
+        int phase=0;
+        while(phase<static_cast<int>(std::size(kTestPhases))-1 && t>=kTestPhases[phase].until)++phase;
+        if(phase!=testDrive.phase) {
+            testDrive.phase=phase;
+            Log("TESTDRIVE v=%p %s: %s (stick %.2f, %.0f s into the cycle; the keys' stick %.2f, drive mode %u)",v,
+                VehicleClassName(v),kTestPhases[phase].name,kTestPhases[phase].stick,t,At<float>(seat,kSeatLY),
+                At<std::uint32_t>(v,0x1AD0)&1u);
+        }
+        Put<float>(seat,kSeatLY,kTestPhases[phase].stick);
+    } __except(EXCEPTION_EXECUTE_HANDLER){testDrive=TestDrive{};}
 }
 }  // namespace crew

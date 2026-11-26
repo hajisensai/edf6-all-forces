@@ -71,6 +71,7 @@ DOMAINS: list[tuple[str, str, tuple[str, ...]]] = [
      ('tools/installer.py', 'tools/build_release.py', 'tools/call_weapons.py', 'tools/calls.py', 'tools/gen_calls.py',
       'tools/gen_stores.py', 'tools/testhub.py', 'tools/save_backup.py', 'tools/support_config.py',
       'tools/support_loadout.py', 'tools/loadout_generator.py', 'tools/strs.py', 'tools/sound_pack.py',
+      'tools/wt_sound.py', 'assets/sound/',   # the shipped War Thunder recordings (their SOURCE.md is data, not docs)
       'pylib/ledger.py', 'pylib/buildcache.py', 'pylib/modelpack.py', 'pylib/vcobjects.py')),
     ('edf5', 'EDF5 ports: weapons, campaign, DLC', ('edf5port/', 'edf5campaign/', 'pylib/edf5*', 'tools/*edf5*')),
     ('edf41', 'EDF4.1 ports: objects, maps, sounds, outfits', ('edf41port/', 'pylib/edf41*', 'tools/*edf41*')),

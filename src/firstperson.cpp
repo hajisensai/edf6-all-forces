@@ -81,6 +81,7 @@
 #include "fp_skin_gpu.h"
 #include "infantryscope.h"
 #include "thermal.h"
+#include "gpufx/gpufx.h"
 #include "enemy_control.h"
 #include "map.h"
 #include "memory.h"
@@ -2367,6 +2368,7 @@ void __fastcall MeshHook(void* mesh,void* ctx,int pass,std::uint8_t flag,void* c
     if(!skin && !thermal::WantsCapture()){
         reinterpret_cast<MeshFn>(image+kMeshDraw)(mesh,ctx,pass,flag,cache);
         thermal::ObserveSurface(At<ID3D11DeviceContext*>(ctx,8),pass);
+        gpufx::ObserveSurface(At<ID3D11DeviceContext*>(ctx,8),pass);
         return;
     }
     // Repeat the supported native helper's prepare/bind/flush sequence, replacing only its DrawIndexed submission.

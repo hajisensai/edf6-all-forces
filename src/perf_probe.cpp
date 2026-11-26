@@ -299,7 +299,29 @@ void CloseFrame(LONGLONG now) noexcept {
 
 void TryPresentHook() noexcept;
 
+// DevFrameCap (with Debug): the main loop held to at most this many frames a second at its input sample (once a
+// frame, before the frame's steps: the game's fixed step then runs two steps a frame at 30, the game's speed kept; a
+// per-step wait would slow the steps and the loop would make up with more of them), a high resolution waitable timer,
+// so a run that is not about the frame rate does not drive the GPU flat out.
+void CapFrameRate(int cap) noexcept {
+    static HANDLE timer=nullptr;
+    static LARGE_INTEGER last{},freq{};
+    if(cap<=0){last.QuadPart=0;return;}
+    if(!freq.QuadPart)QueryPerformanceFrequency(&freq);
+    if(!timer)timer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+    LARGE_INTEGER now;QueryPerformanceCounter(&now);
+    const LONGLONG period=freq.QuadPart/cap;
+    if(last.QuadPart && now.QuadPart-last.QuadPart<period) {
+        const LONGLONG wait=period-(now.QuadPart-last.QuadPart);
+        LARGE_INTEGER due;due.QuadPart=-(wait*10000000LL/freq.QuadPart);   // 100 ns units, relative
+        if(timer && due.QuadPart<0 && SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE))WaitForSingleObject(timer,100);
+        QueryPerformanceCounter(&now);
+    }
+    last=now;
+}
+
 void __fastcall InputHook(void* input) {
+    CapFrameRate(Cfg().devFrameCap);
     const LONGLONG now=Qpc();
     gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
     if(cur.open)CloseFrame(now);

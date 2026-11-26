@@ -39,6 +39,11 @@ bool InSession() noexcept {return false;}
 void Log(const char*,...) noexcept {}
 // The soldier's scope lens at the world's end (infantryscope.cpp): its own test is scope_crosshair_test.
 void InfantryScopeWorldEnd(ID3D11DeviceContext*,const void*) noexcept {}
+// GPU particles at the world's begin / end (src/gpufx): their own tests are gpufx_sim_test / gpufx_gpu_test.
+namespace gpufx {
+void WorldBegin(ID3D11DeviceContext*,const void*) noexcept {}
+void WorldEnd(ID3D11DeviceContext*,const void*) noexcept {}
+}
 }
 namespace crew::thermal {
 struct Renderer::Impl {};

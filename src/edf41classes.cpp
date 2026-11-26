@@ -3,6 +3,7 @@
 // runs 2026-10-13 .. 10-15); the bullet from the dragon (edf41dragon.cpp, real runs 2026-10-14).
 // EDF.dll TimeDateStamp 0x678CCB46.
 #include "edf41classes.h"
+#include "gpufx/gpufx.h"
 
 #include "crew.h"
 #include "memory.h"
@@ -494,7 +495,7 @@ bool Prims() noexcept {
     int s=primState.load();
     if(s)return s==1;
     for(const Print& p:kPrimPrints)
-        if(!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0) {
+        if(!(p.rva==kExplosion && gpufx::ExplosionHooked()) && !(p.rva==kExplosionBig && gpufx::ExplosionBigHooked()) && (!Readable(image+p.rva,8) || std::memcmp(image+p.rva,p.bytes,8)!=0)) {
             Log("EDF41CLASS the code at EDF.dll+0x%zX is not what this was written for: effects, sounds, teams and targets are off",p.rva);
             primState=2;
             return false;

@@ -194,6 +194,7 @@ class IncrementalTests(unittest.TestCase):
                                       'find_edf41': lambda g: None,   # a stand-in game: no EDF4.1 next to it
                                       'material_compat_wanted': lambda g: False,  # no native shader archive in this fixture
                                       'plugin_files': lambda: plugins,
+                                      'wt_sound_files': lambda: {},
                                       'stack_weapons': lambda g: {},
                                       'build_autoturret': lambda g: ({}, False),
                                       'install_autoturret': lambda g, files, force: None}.items():

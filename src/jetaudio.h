@@ -1,20 +1,12 @@
-// jetaudio.cpp: the jets' engine sound and the cockpit's tones and warnings out of the plugin's own XAudio2 voices (the
+// jetaudio.cpp: the engines' layered loops and the cockpit's tones and warnings out of the plugin's own XAudio2 voices (the
 // game's sound system has no sound of a jet engine, no Doppler and no cockpit warnings, docs/sound-re.md). jetsound.cpp
-// decides what each jet sounds like from the game, warn.cpp what the cockpit warns of; this file only plays it. Called
+// and vehsound.cpp decide what each engine sounds like from the game (sound_engine.h), warn.cpp what the cockpit warns of; this file only plays it. Called
 // on the game thread; the watchdog and the Windows voice's rendering are threads of their own.
 #pragma once
+#include <cmath>
 namespace crew::audio {
-// What one jet sounds like this frame: the roar's and the whine's gain in the left and right ear, each one's playback
-// rate (1 = as made: the engine's pitch and the Doppler ratio together) and how far off it is heard (0 near .. 1 far:
-// the air takes its highs).
-struct Mix { float roarL,roarR,whineL,whineR; float roarRatio,whineRatio; float distance; };
-// The engine, its mastering voice and the sounds (the file next to the DLL, <dll name>_jet.wav, as the roar when it is
-// there; else both made here). False: no sound (logged once).
+// The engine and its mastering voice. False: no sound (logged once).
 bool Start() noexcept;
-// A jet's voices: a slot, or -1 (all in use, or no engine).
-int Open() noexcept;
-void Set(int slot,const Mix& mix) noexcept;
-void Close(int slot) noexcept;
 // The cockpit's lock tone this frame (the player's picked store, playerjet.cpp), at Cfg().warnVolume: 2 locked, a steady high tone; 1
 // locking, beeps quickening with `progress` (0..1); 0 none. Not called for kToneStaleMs, it goes quiet.
 void LockTone(int state,float progress,const void* weapon,const void* target) noexcept;
@@ -34,8 +26,8 @@ bool Running() noexcept;   // Start succeeded (Beat keeps it going)
 // --- The ground vehicles' sounds (vehsound.cpp decides them, vsynth.h makes them; docs/sound-re.md §9) ---
 // Each clip is the player's <dll name>_veh_<kClipName>.wav next to the DLL (16-bit PCM, mono or stereo, any rate; a loop
 // made at its idle / its made speed / rate) when there is one, else made here (vsynth.h) once, on a thread of its own:
-// until they are ready (ClipsReady) no voice opens and nothing plays. Engine and tracks loops, the turret's loop and
-// stop, the main gun's report near and far, the loader's three sounds; the bikes' engine; a machine gun's and a
+// until they are ready (ClipsReady) no voice opens and nothing plays. The turret's loop and
+// stop, the main gun's report near and far, the loader's three sounds; a machine gun's and a
 // gatling's burst loops and a burst's tail, an autocannon's round, the cases raining and one landing; a launch. The
 // Sazabi's (sazabi_sound.cpp): its beams' shots and hits, its blade lit, put out, swung and biting, its chest cannon's
 // shot, its funnels leaving, firing and docking, its footfalls, landing and dash; its thrusters', blade's and cannon's
@@ -45,8 +37,8 @@ bool Running() noexcept;   // Start succeeded (Beat keeps it going)
 // rocket off its rail and the next one latched on; the cases landing (a medium gun's brass, a tank gun's stub base, a
 // grenade's aluminium); the separate loading's breech opening, shell rammed, charge module and primer. Last the Q mark's
 // cues (qmark.cpp): this machine's player marked, a teammate marked, a mark let go (not heard where they are: UI cues).
-enum Clip : int { kClipHeavyIdle, kClipHeavyLoad, kClipLightIdle, kClipLightLoad, kClipTracks, kClipTurret, kClipTurretStop,
-                  kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipBikeIdle, kClipBikeLoad, kClipMg, kClipGatling,
+enum Clip : int { kClipTurret, kClipTurretStop,
+                  kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipMg, kClipGatling,
                   kClipBurstTail, kClipAutocannon, kClipBrass, kClipCaseSmall, kClipMissile, kClipSzBeamShot, kClipSzBeamHit,
                   kClipSzSaberOn, kClipSzSaberOff, kClipSzWhoosh, kClipSzSaberHit, kClipSzCannonShot, kClipSzFunnelLaunch,
                   kClipSzFunnelShot, kClipSzFunnelDock, kClipSzFootstep, kClipSzLand, kClipSzDash, kClipSzThrusters,
@@ -60,9 +52,16 @@ constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kC
                                 kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,
                                 kClipSzLand,kClipSzDash,kClipSzShieldBlock};
 constexpr int kSazabiLoopClip[]={kClipSzThrusters,kClipSzSaberHum,kClipSzCharge};
-// How a sound is heard this frame: its gain in each ear (the caller's volume in it), its playback rate (pitch and the
-// Doppler ratio together) and how far off it is (0 near .. 1 far: the air takes its highs).
-struct Heard { float left,right,ratio,distance; };
+// How a sound is heard this frame: its gain (the caller's volume in it), where (surround.h Placing: `side` +1 right,
+// `front` +1 ahead of the camera, `spread` 0 a point .. 1 all around; `sub`: a low layer, the LFE channel's alone), its
+// playback rate (pitch and the Doppler ratio together) and the low-pass it is heard through (Hz: AirCutoff for the
+// air's dulling over a distance).
+struct Heard { float gain,side,front,spread; float ratio,cutoff; bool sub; };
+// The air's dulling `away` (0 near .. 1 at vmix::kFarAt) off: the cutoff falling geometrically from 16 kHz to 1.2 kHz.
+inline float AirCutoff(float away) noexcept {
+    const float d=away<0.0f || !(away==away) ? 0.0f : away>1.0f ? 1.0f : away;
+    return 16000.0f*std::pow(1200.0f/16000.0f,d);
+}
 bool ClipsReady() noexcept;               // Start succeeded and the clips are made (the first call has them made)
 int OpenLoop(int clip) noexcept;          // a looping voice of `clip`, silent until set; -1: none free, or not ready
 void SetLoop(int loop,const Heard& h) noexcept;
@@ -74,8 +73,23 @@ void PlayOnce(int clip,const Heard& h) noexcept;   // a one-shot (dropped with e
 enum UltClip : int { kUltCharge, kUltCircle, kUltThunder, kUltGather, kUltBeam, kUltBlast, kUltShock, kUltClipCount };
 bool UltClipThere(int clip) noexcept;     // ClipsReady and its recording read
 void PlayUlt(int clip,const Heard& h) noexcept;
+// The War Thunder recordings (wt_clips.h): read with the vehicles' clips from <dll name>_wt\<name>_<i>.wav, kept in
+// stereo when they are; a group with a variant missing is not there (logged once) and plays nothing.
+bool WtThere(int clip) noexcept;          // ClipsReady and every variant of it read
+void PlayWt(int clip,int variant,const Heard& h) noexcept;
+// A looping voice of War Thunder's `group` (its first variant, the engines' layers: sound_engine.h), silent until
+// SetLoop, closed by CloseLoop; -1: not there (WtThere), or every loop voice in use.
+int OpenWtLoop(int group) noexcept;
+int LoopsOpen() noexcept;                 // the loop voices in use (the log's voice count)
 // Once a game frame: the game runs. With no beat for kQuietMs (paused, loading, a menu) the watchdog silences
 // everything until the next beat, at `volume` (the game's master and effect volume; each sound's own share is its
-// caller's: the engines' JetSoundVolume in their Mix, the cockpit's Cfg().warnVolume here).
+// caller's: the engines' JetSoundVolume / VehicleEngineVolume in their Heard, the cockpit's Cfg().warnVolume here).
 void Beat(float volume) noexcept;
+// The Debug tallies (Cfg().debug; docs/feature-wt-sound.md §验证): an event started (its name, the layers queued, the
+// distance and how its first layer is heard: logged with its output matrix at most once per kNoteMs per name, counted
+// always), a count of anything else (`what` a string literal: the stock SE starts, the stock hit sounds taken), and once
+// every kStatsMs with anything counted a line of them with the one-shot and loop voices' use and the limiter.
+void Note(const char* event,int layers,float distance,const Heard& first) noexcept;
+void Count(const char* what,int n=1) noexcept;
+void StatsTick() noexcept;
 }  // namespace crew::audio

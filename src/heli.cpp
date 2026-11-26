@@ -58,6 +58,7 @@
 #include "log_once.h"
 #include "profile_sigs.h"
 #include "firstperson.h"
+#include "gpufx/gpufx.h"
 #include "scope_spread.h"
 #include "edf/enemy_points.h"
 #include "edf/world_tables.h"
@@ -834,7 +835,9 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
     // only, put back after the stock shot read them).
     ScopeShot scope{};
     ScopeSpreadShot(weapon,replay,&scope);
+    void* const muzzleEffect=gpufx::ShotBegin(weapon);
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+    gpufx::ShotEnd(weapon,muzzle,muzzleEffect);
     ScopeSpreadRestore(scope);
     FirstPersonAimRestore(aim);
     // The one shot entry of every weapon class: the first person's kick and recoil take each round here (the muzzle

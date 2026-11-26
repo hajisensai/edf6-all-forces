@@ -7,6 +7,7 @@ namespace crew {
 VehicleLookInput::VehicleLookInput(unsigned char*) noexcept {}
 VehicleLookInput::~VehicleLookInput() noexcept {}
 DriveGearInput::DriveGearInput(unsigned char*) noexcept {}
+void TestDriveInput(unsigned char*) noexcept {}
 DriveGearInput::~DriveGearInput() noexcept {}
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
 bool BoardingRequest(unsigned char*) noexcept { return false; }   // TestBoardVehicle (off here)
@@ -119,9 +120,11 @@ void PvpFrame(void) noexcept{unexpectedHook();++pvpFrameTicks;return;}
 void EnemyControlFrame() noexcept{unexpectedHook();++enemyFrameTicks;}
 void EnemyControlNetworkFrame() noexcept{unexpectedHook();++enemyNetworkTicks;}
 namespace thermal { void Tick(bool,unsigned) noexcept{unexpectedHook();++thermalFrameTicks;return;} }
+namespace gpufx { void Tick() noexcept {} }
 void BigWorldProbe(void) noexcept{unexpectedHook();return;}
 void JetSound(unsigned char *) noexcept{unexpectedHook();return;}
 void JetSoundTick(void) noexcept{unexpectedHook();return;}
+void JetLeverFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LockSound(unsigned char *) noexcept{unexpectedHook();return;}
 void VehicleSound(unsigned char *) noexcept{unexpectedHook();return;}
 void ReloadConfigIfChanged(void) noexcept{unexpectedHook();return;}
@@ -135,6 +138,7 @@ void EmcInput(unsigned char *) noexcept{unexpectedHook();return;}
 void EmcFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void EmcTick(void) noexcept{unexpectedHook();return;}
 void SazabiSoundTick(void) noexcept{unexpectedHook();return;}
+void BlastSoundTick(void) noexcept{unexpectedHook();return;}
 void SidecarFrame(unsigned char *) noexcept{unexpectedHook();return;}
 bool SidecarBoard(unsigned char *,unsigned char *) noexcept{unexpectedHook();return {};}
 void HighCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
