@@ -311,6 +311,8 @@ float4 PsGroup(V i, const uint group) {
     if (group == 0u) {
         fade *= saturate((i.misc.y - 0.3) / max(Ambient.w, 0.001));   // ours only: no card cuts the near plane
         float a = t.a * i.color.a * fade;
+        // Nothing to add (a = 0: this blend keeps the target as it is, alpha not written): skip the lighting.
+        if (!(a > 0.0)) discard;
         float thick = t.b;
         float2 n2 = t.rg * 2.0 - 1.0;
         float2 nr = float2(n2.x * i.basis.x - n2.y * i.basis.y, n2.x * i.basis.y + n2.y * i.basis.x);
@@ -350,7 +352,11 @@ float4 PsGroup(V i, const uint group) {
         [branch] if (LitSet == 2u) {
             if (t.a * i.color.a < 0.001) discard;   // the set 0xC08's clip
         } else {
-            light = StockLight(i.vpos.xyz, normalize(i.nrm), i.pos.xy);
+            // Lit only where the pixel adds anything (alpha: a > 0; additive: a non-zero texel colour, not faded out):
+            // elsewhere the output is zero whatever the light, so skipping the shadow and point lights changes nothing.
+            const bool adds = Kind == 3u ? a > 0.0 : fade > 0.0 && any(t.rgb * i.color.rgb != 0.0);
+            light = 0.0;
+            [branch] if (adds) light = StockLight(i.vpos.xyz, normalize(i.nrm), i.pos.xy);
         }
         float3 rgb = t.rgb * i.color.rgb * light;
         return Kind == 3u ? float4(rgb * a, a) : float4(rgb * fade, a);
