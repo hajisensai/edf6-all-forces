@@ -14,7 +14,7 @@ namespace {
 // static initializer 0x2F7A0 from xinput9_1_0.dll); test eax,eax; jne. esi: the player's XInput user (P1: 0, or 1 when
 // the pads are swapped, 0x2136504 == 1: 0x118839E). The one call to that slot (0x2F7FB stores it, 0x11883D1 reads it).
 constexpr unsigned kReadPad=0x11883D1;
-constexpr std::size_t kPadSwap=0x2136504;
+constexpr std::size_t kPadSwap=0x2136504,kPadSlot=0x2136510;   // the call's [rip+0xFAE139]: 0x11883D7+0xFAE139
 const unsigned char kBefore[]={0x48,0x8D,0x54,0x24,0x60,0x8B,0xCE};
 const unsigned char kReadPadCode[]={0xFF,0x15,0x39,0xE1,0xFA,0x00};
 const unsigned char kAfter[]={0x85,0xC0,0x75,0x75};
@@ -41,7 +41,10 @@ DWORD FirstUser() noexcept {
     __try { return At<unsigned>(image,kPadSwap)==1 ? 1u : 0u; } __except(EXCEPTION_EXECUTE_HANDLER){ return 0u; }
 }
 DWORD WINAPI ReadHook(DWORD user,XINPUT_STATE* state) noexcept {
-    const DWORD result=reinterpret_cast<GetStateFn>(gameGet)(user,state);
+    // Through the slot every read, not the pointer it held at the install: whoever fills or rewrites it later (the
+    // game's own init, an overlay, the autopilot's input source) is called as the shipped code would.
+    void* const slotNow=At<void*>(image,kPadSlot);
+    const DWORD result=reinterpret_cast<GetStateFn>(slotNow ? slotNow : gameGet)(user,state);
     if(result!=ERROR_SUCCESS || !state || user!=FirstUser())return result;
     const std::uint16_t raw=state->Gamepad.wButtons,before=swallow.kept;
     state->Gamepad.wButtons=swallow.Filter(raw,ChordNow());
