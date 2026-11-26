@@ -61,7 +61,6 @@
 
 - `tools/testhub.py`：`pull` 拉反馈、`reply` / `status` 回复与改状态、`case` 管测试用例、`publish ZIP --channel` 发包；认证用环境变量 `EDF6_TESTHUB_AUTH=user:password`。它只用标准库，会被打进安装器。
 - 合 PR、写更新说明前，对照 `docs/feedback-*` 里的用户原话核对意图，不要照抄 PR 标题。
-- 往 `main` 合并 PR 后（一批合并的，在最后一个合并之后），**不用再问**，直接按 `D:\APP\edf6-share\CLAUDE.md` 打分享包，分主包和模型包两个 zip 发（步骤见细则）。安装到本机游戏仍守实机测试铁律。
 
 ## 版本与相关仓库
 
