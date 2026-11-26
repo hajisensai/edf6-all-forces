@@ -231,6 +231,74 @@ void PaletteOwnership() {
     frame.Retire();
 }
 
+void ArenaGrowth() {
+    struct Model {
+        Instance inst;
+        alignas(16) unsigned char records[2*kBoneStride]{};
+    };
+    constexpr std::size_t staged=350,count=600;
+    std::vector<Model> models(count);
+    TestBuffer buffer;
+    ID3D11Buffer* holder=&buffer;
+    Frame frame;
+    Check(frame.Begin(),"start an empty arena");
+    const float delta[]={1,0,0,0,0,1,0,0,0,0,1,0,4,0,0,1};
+    bool stagedOk=true;
+    for(std::size_t i=0;i<count;++i) {
+        auto& model=models[i];
+        model.inst.Set(static_cast<float>(i));
+        edf::Put<void*>(model.inst.bytes,kBones,model.records);
+        edf::Put<void*>(model.inst.bytes,kPaletteHolder,&holder);
+        Matrix bind{};
+        for(int row=0;row<4;++row)bind.elements[row*5]=1;
+        bind.elements[12]=static_cast<float>(i+1);
+        for(int bone=0;bone<2;++bone)std::memcpy(model.records+bone*kBoneStride+kInverseBind,&bind,sizeof(bind));
+        const auto key=Identify(model.inst.bytes);
+        frame.Observe(key);
+        if(i<staged)stagedOk=frame.Stage(key,delta,&Copy) && stagedOk;
+    }
+    Check(stagedOk && frame.Seal(&Copy,&CapturePalette) && frame.Open(),"stage and capture across multiple arena growths");
+    Check(buffer.references==count+1,"the frame holds a reference for every captured binding");
+    bool posesOk=true,palettesOk=true;
+    for(std::size_t i=0;i<count;++i) {
+        auto& model=models[i];
+        model.inst.Set(-1);
+        std::memset(model.records,0,sizeof(model.records));
+        const auto key=Identify(model.inst.bytes);
+        const auto* pose=frame.Lookup(key);
+        const float expected=static_cast<float>(i)+(i<staged ? 4.0f : 0.0f);
+        posesOk=posesOk && pose && pose[1].elements[12]==expected;
+        const auto* packed=frame.Palette(key,pose,&buffer);
+        palettesOk=palettesOk && packed && packed[1].columns[3]==expected+static_cast<float>(i+1);
+    }
+    Check(posesOk && palettesOk,"growth retains captured prefixes and packs each staged transform exactly once");
+    frame.Retire();
+    Check(buffer.references==1 && frame.Begin(),"retiring all entries frees the frame without moving native ownership");
+    const auto last=Identify(models.back().inst.bytes);
+    frame.Observe(last);
+    Check(frame.Seal(&Copy) && frame.Open() && frame.Lookup(last) && frame.Lookup(last)[1].elements[12]==-1 &&
+          !frame.Lookup(Identify(models.front().inst.bytes)),"a smaller later recording never sees the previous arena contents");
+    frame.Retire();
+}
+
+void RestagedIdentity() {
+    Frame frame;
+    Instance before,after;
+    before.Set(8);after.Set(90);
+    const float delta[]={1,0,0,0,0,1,0,0,0,0,1,0,4,0,0,1};
+    Check(frame.Begin(),"claim a slot for a reused instance");
+    const auto old=Identify(before.bytes);
+    frame.Observe(old);
+    Check(frame.Stage(old,delta,&Copy),"stage the original arrays");
+    edf::Put<Matrix*>(before.bytes,kPose,after.pose);
+    const auto replacement=Identify(before.bytes);
+    frame.Observe(replacement);
+    Check(frame.Seal(&Copy) && frame.Open() && !frame.Lookup(old),"a changed identity can only publish its new arrays");
+    const auto* pose=frame.Lookup(replacement);
+    Check(pose && pose[1].elements[12]==90,"the old staged transform never reaches reused storage");
+    frame.Retire();
+}
+
 void WarpPaletteUpload() {
     ID3D11Device* device=nullptr;
     ID3D11DeviceContext* context=nullptr;
@@ -336,6 +404,8 @@ int main() {
     Pipeline();
     BoundedBacklog();
     PaletteOwnership();
+    ArenaGrowth();
+    RestagedIdentity();
     MatrixPacking();
     WarpPaletteUpload();
     Lifetime();

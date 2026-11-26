@@ -3,12 +3,15 @@
 #pragma once
 #include "edf/hash_index.h"
 #include "frame_rate_logic.h"
+#include <algorithm>
 #include <cstring>
 #include <atomic>
 #include <d3d11.h>
 #include <xmmintrin.h>
 #include <cstdint>
+#include <memory>
 #include <new>
+#include <type_traits>
 #include <vector>
 
 namespace crew::renderpose {
@@ -51,14 +54,15 @@ public:
         entries_.clear();
         index_.Clear();
         used_=0;
-        paletteUsed_=0;
+        paletteUsed_=transformsUsed_=0;
         return true;
     }
     void Observe(const Skeleton& key) noexcept {
         if(!key.instance || !key.bones || !key.live || !key.count || key.count>kMaxBones)return;
         const int match=index_.Find(key.instance);
         if(match>=0) {
-            entries_[static_cast<std::size_t>(match)].key=key;
+            auto& entry=entries_[static_cast<std::size_t>(match)];
+            if(!(entry.key==key))entry=Entry{key};
             return;
         }
         if(entries_.size()>=kMaxInstances)return;
@@ -79,9 +83,11 @@ public:
         auto& entry=entries_[static_cast<std::size_t>(at)];
         if(!(entry.key==key))return false;
         if(entry.offset!=kUncopied)return true;  // the first owner (player or carrier) wins
-        if(key.count>kMaxMatrices-used_ || !Grow(matrices_,used_+key.count) || !CopyEntry(entry,copy))return false;
-        std::memcpy(entry.transform,transform,sizeof(entry.transform));
-        entry.pendingTransform=true;
+        if(key.count>kMaxMatrices-used_ || transformsUsed_==kMaxInstances ||
+           !transforms_.Grow(transformsUsed_+1,transformsUsed_,kMaxInstances) ||
+           !matrices_.Grow(used_+key.count,used_,kMaxMatrices) || !CopyEntry(entry,copy))return false;
+        std::memcpy(transforms_.data()[transformsUsed_].elements,transform,sizeof(Matrix));
+        entry.transform=transformsUsed_++;
         return true;
     }
 
@@ -91,17 +97,21 @@ public:
         std::size_t wanted=used_;
         for(const auto& entry:entries_)
             if(entry.offset==kUncopied && entry.key.count<=kMaxMatrices-wanted)wanted+=entry.key.count;
-        if(Grow(matrices_,wanted))
-            for(auto& entry:entries_)
-                if(entry.offset==kUncopied && entry.key.count<=wanted-used_)CopyEntry(entry,copy);
-        if(!used_) {
+        const bool canCopy=matrices_.Grow(wanted,used_,kMaxMatrices);
+        bool captured=false;
+        for(auto& entry:entries_) {
+            if(canCopy && entry.offset==kUncopied && entry.key.count<=wanted-used_)CopyEntry(entry,copy);
+            captured|=entry.offset!=kUncopied;
+        }
+        if(!captured) {
             Cancel();
             return false;
         }
         if(palette)for(auto& entry:entries_) {
             if(entry.offset==kUncopied || entry.key.count>kMaxPaletteBones-paletteUsed_)continue;
             const auto wantedPalette=paletteUsed_+entry.key.count;
-            if(!Grow(inverse_,wantedPalette,kMaxPaletteBones) || !Grow(packed_,wantedPalette,kMaxPaletteBones))break;
+            if(!inverse_.Grow(wantedPalette,paletteUsed_,kMaxPaletteBones) ||
+               !packed_.Grow(wantedPalette,0,kMaxPaletteBones))break;
             entry.buffer=palette(entry.key,inverse_.data()+paletteUsed_);
             if(!entry.buffer)continue;
             entry.paletteOffset=paletteUsed_;
@@ -132,10 +142,10 @@ public:
         auto& entry=entries_[static_cast<std::size_t>(at)];
         if(entry.offset==kUncopied || !(entry.key==key))return nullptr;
         auto* pose=matrices_.data()+entry.offset;
-        if(entry.pendingTransform) {
+        if(entry.transform!=kNoTransform) {
             // Only the queue consumer can touch this slot after Open().
-            framerate::MulBones(pose->elements,key.count,entry.transform);
-            entry.pendingTransform=false;
+            framerate::MulBones(pose->elements,key.count,transforms_.data()[entry.transform].elements);
+            entry.transform=kNoTransform;
         }
         return pose;
     }
@@ -146,10 +156,10 @@ public:
         if(at<0)return nullptr;
         auto& entry=entries_[static_cast<std::size_t>(at)];
         if(entry.offset==kUncopied || entry.buffer!=buffer || !(entry.key==key) ||
-           pose!=matrices_.data()+entry.offset || entry.pendingTransform)return nullptr;
+           pose!=matrices_.data()+entry.offset || entry.transform!=kNoTransform)return nullptr;
         const auto offset=entry.paletteOffset;
         if(!entry.paletteReady) {
-            for(std::size_t i=0;i<key.count;++i)PackBone(inverse_[offset+i],pose[i],packed_[offset+i]);
+            for(std::size_t i=0;i<key.count;++i)PackBone(inverse_.data()[offset+i],pose[i],packed_.data()[offset+i]);
             entry.paletteReady=true;
         }
         return packed_.data()+offset;
@@ -159,23 +169,34 @@ private:
     static constexpr std::size_t kMaxPaletteBones=1u<<17;
     enum class State { free,building,queued,reading };
     static constexpr std::size_t kUncopied=kMaxMatrices;
+    static constexpr std::size_t kNoTransform=kMaxInstances;
     struct Entry {
         Skeleton key;
-        std::size_t offset=kUncopied,paletteOffset=0;
+        std::size_t offset=kUncopied,paletteOffset=0,transform=kNoTransform;
         ID3D11Buffer* buffer=nullptr;
-        bool pendingTransform=false,paletteReady=false;
-        float transform[16]{};
+        bool paletteReady=false;
     };
-    template<class T>
-    bool Grow(std::vector<T>& storage,std::size_t wanted,std::size_t limit=kMaxMatrices) noexcept {
-        if(storage.size()>=wanted)return true;
-        const auto enlarged=storage.size()+storage.size()/2+256;
-        const auto next=enlarged<limit ? enlarged : limit;
-        try {
-            storage.resize(wanted>next ? wanted : next);
+    // Raw matrix slots are initialized by successful capture or packing. Growing a free slot never clears spare capacity
+    // or copies data from its previous recording. Packed output has no initialized prefix until the consumer opens it.
+    template<class T> class Arena {
+        static_assert(std::is_trivial_v<T>);
+    public:
+        T* data() noexcept {return storage_.get();}
+        bool Grow(std::size_t wanted,std::size_t preserve,std::size_t limit) noexcept {
+            if(capacity_>=wanted)return true;
+            const auto enlarged=capacity_+capacity_/2+256;
+            const auto next=(std::max)(wanted,(std::min)(enlarged,limit));
+            std::unique_ptr<T[]> storage(new(std::nothrow) T[next]);
+            if(!storage)return false;
+            if(preserve)std::memcpy(storage.get(),storage_.get(),preserve*sizeof(T));
+            storage_.swap(storage);
+            capacity_=next;
             return true;
-        } catch(const std::bad_alloc&) {return false;}
-    }
+        }
+    private:
+        std::unique_ptr<T[]> storage_;
+        std::size_t capacity_=0;
+    };
     template<class Copy>
     bool CopyEntry(Entry& entry,Copy copy) noexcept {
         if(!copy(entry.key,matrices_.data()+used_))return false;
@@ -185,10 +206,10 @@ private:
     }
 
     std::atomic<State> state_{State::free};
-    std::size_t used_=0,paletteUsed_=0;
+    std::size_t used_=0,paletteUsed_=0,transformsUsed_=0;
     edf::PtrIndex index_;
     std::vector<Entry> entries_;
-    std::vector<Matrix> matrices_,inverse_;
-    std::vector<PackedBone> packed_;
+    Arena<Matrix> matrices_,inverse_,transforms_;
+    Arena<PackedBone> packed_;
 };
 }
