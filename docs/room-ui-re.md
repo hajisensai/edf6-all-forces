@@ -83,6 +83,10 @@ AI 武器自带 `WeaponIcon`（`app:/weapon/icon/<名>`）【证实】：
   通道：0x50 / 0x58 / 0x60 / 0x68 上下左右，**0x70 A**（位 0x1000，0x1188A4D）、**0x78 B**（0x2000），0x80 X、0x88 Y、0x90 Back、
   0x98 Start、0xA0 LB、0xA8 RB、0xB0 L3、0xB8 R3，0x40 / 0x48 扳机；A 是下方键（XInput 布局，无 A/B 互换）。【证实】
   +0x4C 是「按住」（每帧按当前位重写），+0x4D 非 0 = 被抑制（`0x1183D60` 为假时全部置 1），读取方当作没按。【证实】
+- **手柄读取**：EDF.dll 只在 `0x11883D1` 一处调 XInputGetState（`call [0x2136510]`，槽由静态初始化 `0x2F7A0` 从 xinput9_1_0.dll
+  取地址，0x2136518 / 0x2136520 是另两个导出，`0x11883BC` 用 0x2136520 查能力）；user 为玩家序号（`0x2136504`==1 时 0/1 互换）。
+  按键和摇杆都从这次读到的 XINPUT_STATE 来。插件的组合键（步行夜视 L3+R3）在这里从游戏读到的位里扣掉（`src/native_pad.cpp`），
+  否则原版把同一 L3 / R3 当自己的按键（2026-11-26 实机：切夜视时游骑兵同时冲刺）。【证实（调用点与槽）】
 - **按名取组件**：`0x839600(layout, const wstring*)` → 第一个下标或 −1；`0x839560(layout, shared_ptr<Component>* out, idx)` 不转型；
   `0x8859C0(layout, shared_ptr<HUiTextField>* out, idx)` 动态转型，不是 TextField 时 out 为空；`0x839FD0(layout, out, const wstring*)`
   = 0x839600 + 0x839560。游戏的标准写法 0x886800：0x839600 → 0x8859C0 → `0x863690 SetText(tf, 字面文字)`（[tf+0x228]==0 时直接返回）。【证实】

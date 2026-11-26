@@ -29,6 +29,7 @@
 #include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
+#include "native_pad.h"
 #include "gpufx/gpufx.h"
 #include "pvp.h"
 #include "havok_props.h"
@@ -1403,6 +1404,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     thermal::Install();    // mesh heat/depth passes, inert in optical mode
+    nativepad::Install();  // the game's pad read: a plugin chord (on foot: the night vision's L3 + R3) kept from the game
     gpufx::Install();      // GPU particles at the world's end (thermal.cpp's redirect), the stock particle draw slot
     InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     Log("VIEWDIAG umbra watch %s",InstallUmbraWatch() ? "on" : "NOT installed (EDF.dll's Umbra import is not as read)");

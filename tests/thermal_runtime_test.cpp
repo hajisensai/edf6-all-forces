@@ -1,6 +1,7 @@
 // Execute the production control/publication path on real local-seat memory.
 // GPU rendering and native ABI have separate WARP/read-only-binary tests.
 #include "../src/thermal.cpp"
+#include "../src/native_pad.cpp"   // the game's pad read the night vision's chord is kept from (its ReadHook, real code)
 #include <cstdio>
 
 namespace {
@@ -14,6 +15,12 @@ bool testPadPresent=false;std::uint16_t testPadButtons=0;   // the first XInput 
 HWND testWindow=nullptr;
 SHORT WINAPI Key(int key) {return key==0x4E && testKey ? static_cast<SHORT>(0x8000) : 0;}
 HWND WINAPI Window() {return testWindow;}
+std::uint16_t gamePadButtons=0;   // what the game's own XInputGetState (0x11883D1's slot) reads from the pad
+DWORD WINAPI GameGetState(DWORD,XINPUT_STATE* s) {*s={};s->Gamepad.wButtons=gamePadButtons;return ERROR_SUCCESS;}
+// The buttons the game is handed for `user` when the pad holds `buttons` (native_pad.cpp ReadHook).
+std::uint16_t GameSees(DWORD user,std::uint16_t buttons) {
+    gamePadButtons=buttons;XINPUT_STATE s{};crew::nativepad::ReadHook(user,&s);return s.Gamepad.wButtons;
+}
 }
 namespace crew {
 unsigned char* image=nullptr;
@@ -217,6 +224,56 @@ int main() {
     check(!GetStatus().nightVision && !GetStatus().nightEligible && !ReadSnapshot(*Find(human)).night,"InfantryNightVision=0: off");
     step(true);check(!GetStatus().nightVision,"InfantryNightVision=0: the key does nothing on foot");
     config.nightVision=true;step(false);step(true);check(GetStatus().nightVision,"enabled again");
+    // The chord kept from the game's own pad read (2026-11-26 实机: L3 + R3 switched night vision and the Ranger dashed:
+    // the stock soldier took the same L3 / R3 as its own presses).
+    {
+        padchord::Swallow s;
+        check(s.Filter(0x40,0xC0)==0x40,"a chord button alone reaches the game");
+        check(s.Filter(0xC0,0xC0)==0,"the whole chord in one read: neither button reaches the game");
+        check(s.Filter(0x40,0xC0)==0 && s.Filter(0x40,0)==0,"one let go: the other kept until released, owned or not");
+        check(s.Filter(0x1040,0)==0x1000,"the other buttons pass meanwhile");
+        check(s.Filter(0,0)==0 && s.Filter(0x40,0xC0)==0x40,"released: L3 is the game's again");
+        check(s.Filter(0xC0,0)==0xC0,"a chord not owned is the game's");
+    }
+    nativepad::gameGet=reinterpret_cast<void*>(&GameGetState);
+    testPadPresent=true;
+    const auto padStep=[&](std::uint16_t buttons){testPadButtons=buttons;testKey=false;++testFrame;Tick(true,0x4E);};
+    padStep(0);
+    check(GameSees(0,0x40)==0x40 && GameSees(0,0x80)==0x80 && GameSees(0,0)==0,"on foot: L3 / R3 alone are the game's (dash, zoom)");
+    {
+        const bool was=GetStatus().nightVision;
+        check(GameSees(0,0xC0)==0,"on foot, the night vision's chord: kept from the game's read");
+        padStep(0xC0);check(GetStatus().nightVision!=was,"...and it still switches night vision (the plugin's own pad read)");
+        check(GameSees(0,0xC0)==0 && GameSees(0,0x40)==0,"held, then R3 let go: L3 still kept (no stock press of it)");
+        check(GameSees(0,0x1040)==0x1000,"other buttons pass while it is kept");
+        padStep(0);check(GameSees(0,0)==0 && GameSees(0,0x40)==0x40,"both released: a new L3 is the game's");
+        GameSees(0,0);
+    }
+    check(GameSees(1,0xC0)==0xC0,"another XInput user's pad (split screen's second player) is untouched");
+    Put<unsigned>(image,nativepad::kPadSwap,1);
+    check(GameSees(1,0xC0)==0 && GameSees(1,0)==0 && GameSees(0,0xC0)==0xC0,"pads swapped (0x2136504 == 1): user 1 is the first player's");
+    GameSees(0,0);Put<unsigned>(image,nativepad::kPadSwap,0);
+    testPaused=true;check(GameSees(0,0xC0)==0xC0,"paused: the chord is the menu's (not owned)");
+    GameSees(0,0);testPaused=false;
+    testMap=true;padStep(0);check(GameSees(0,0xC0)==0xC0,"the map holds the keys: the chord not owned");
+    GameSees(0,0);testMap=false;padStep(0);
+    config.nightVision=false;padStep(0);check(GameSees(0,0xC0)==0xC0,"InfantryNightVision=0: L3 + R3 are the game's");
+    GameSees(0,0);config.nightVision=true;padStep(0);
+    config.nightVisionButton=0;padStep(0);check(GameSees(0,0xC0)==0xC0,"InfantryNightVisionButton=0: nothing owned");
+    GameSees(0,0);config.nightVisionButton=0xC0;padStep(0);
+    Put<int>(human,enemy_control::kHumanLocalPad,1);padStep(0);
+    check(GameSees(0,0xC0)==0,"a split screen's second player's frame leaves the first player's claim as it was");
+    GameSees(0,0);Put<int>(human,enemy_control::kHumanLocalPad,0);
+    testOnFoot=false;padStep(0);check(GameSees(0,0xC0)==0xC0,"not on foot: L3 + R3 are the game's");
+    GameSees(0,0);testOnFoot=true;padStep(0);
+    stepfresh::See(stepfresh::Now()+stepfresh::kEveryStep+1);
+    check(GameSees(0,0xC0)==0xC0,"a claim no longer renewed (the soldier's frame not run) owns nothing");
+    GameSees(0,0);padStep(0);check(GameSees(0,0xC0)==0,"renewed: owned again");
+    GameSees(0,0);
+    Reset();check(GameSees(0,0xC0)==0xC0,"mission reset: nothing owned");
+    GameSees(0,0);padStep(0);testPadPresent=false;nativepad::gameGet=nullptr;
+    step(false);
+    if(!GetStatus().nightVision){step(true);step(false);}
     // The render: a fresh night snapshot marks the view; its end draws night vision (stub) and reports it shown.
     alignas(16) unsigned char nightView[0x100]{};
     testViewOwner=human;
