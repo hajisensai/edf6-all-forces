@@ -667,8 +667,8 @@ class Plume:
     """How a missile store's round looks in flight (the user, 2026-11-26: 「所有导弹、炮弹之类都换得了。抄抄战雷、皇牌空战之类的
     游戏」; docs/feature-projectile-look.md): Ace Combat's rail drop, white-hot motor and long white trail, on the stock
     class's own fields (docs/missile-re.md, MissileBullet01):
-      - `ignite`: frames off the rail before the motor lights (CP[7][0]; CP[7][1] 1: the launcher's velocity kept while
-        it drops). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
+      - `ignite`: frames an ejected round falls clear before its motor lights (CP[7][0]; CP[7][1] 1: the launcher's
+        velocity kept while it drops); 0 for a rail or tube launch, lit at once (PLUMES). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
         whole flight); the motor's flame and trail emitters open at ignition (0x26AA02).
       - `trail`: frames a trail node lives (CP[2], a single int: each node 0.9..1.1 of it, 0x268D31; the trail stays
         where it was laid, it does not drift).
@@ -685,21 +685,23 @@ class Plume:
 
 
 PLUME_IGNITE_MOST = 20.0   # frames: src/missile.cpp neither guides nor fuses-by-proximity it before ignition
-# A jet's (or a helicopter's) rail missile drops 0.2 s clear before it lights, its trail 5-8 s; a ground or ship launcher's
-# tube or cell kicks it out lit almost at once; a gun- or tube-launched anti-tank missile and a rocket light in the tube
-# and trail short and grey. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
+# When the motor lights is the real launcher's (the user, 2026-11-26: 「导弹不一定全是下坠的吧……至少应该和现实一样吧，有些可能
+#直接射出去」): a rail launcher (LAU-7 / LAU-127 / LAU-117 / M299, a rocket pod, a tube) lights the motor on the rail and
+# the round flies straight off it; a hot-launch cell or canister (Mk 41 for the ESSM, the PAC-3's, the 9M311's tube)
+# lights in it; only an ejector launcher (the AIM-54's LAU-93 under an F-14) kicks the round clear to fall before it
+# lights: AAM_L alone drops. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
 _HOT = (1.5, 1.4, 1.3, 0.85)       # flame (6.0, 2.8, 1.3): white-hot; trail a bright white
 _SAM = (1.6, 1.5, 1.4, 0.9)
 _ATGM = (1.2, 1.1, 1.0, 0.6)       # flame (4.8, 2.2, 1.0), a thinner grey trail
 _ROCKET = (1.25, 1.15, 1.0, 0.7)
 PLUMES: dict[str, Plume] = {
-    'AAM_S': Plume(12.0, 420.0, _HOT), 'AAM_M': Plume(12.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
-    'AGM': Plume(12.0, 300.0, _HOT), 'AGM_L': Plume(10.0, 240.0, _HOT),
-    'ESSM': Plume(4.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(3.0, 360.0, _SAM), 'APOC_SAM': Plume(4.0, 420.0, _SAM),
-    'PATRIOT_SAM': Plume(4.0, 480.0, _SAM),
+    'AAM_S': Plume(0.0, 420.0, _HOT), 'AAM_M': Plume(0.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
+    'AGM': Plume(0.0, 300.0, _HOT), 'AGM_L': Plume(0.0, 240.0, _HOT),
+    'ESSM': Plume(0.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(0.0, 360.0, _SAM), 'APOC_SAM': Plume(0.0, 420.0, _SAM),
+    'PATRIOT_SAM': Plume(0.0, 480.0, _SAM),
     'GLM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGMF': Plume(0.0, 180.0, _ATGM),
     'RKT': Plume(0.0, 150.0, _ROCKET),
-    'SAZABI_MISSILE': Plume(6.0, 240.0, _HOT),   # SAZABI_MISSILE below: the shield's missiles pop out, then light
+    'SAZABI_MISSILE': Plume(0.0, 240.0, _HOT),   # SAZABI_MISSILE below: from the shield's launcher, lit
 }
 
 
