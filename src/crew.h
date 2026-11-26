@@ -312,8 +312,8 @@ struct Config {
                                  //    strike every 16 s, the set 0xA40 stock and ours by turns each second)
     int gpuFxNative=1;           // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw (2: the
                                  //    screen split, stock left and ours right: the A/B picture)
-    bool gpuFxLitA=false;        // ...and the lit set 0xA40 (the middle-distance lit smoke) too: off, it stays stock until
-                                 //    ours is no slower (docs/gpufx-re.md)
+    bool gpuFxLitA=true;         // ...and the lit set 0xA40 (the middle-distance lit smoke, per pixel point lights) too
+                                 //    (docs/gpufx-re.md: under the ultimate strike ours about half the stock's GPU time)
     bool gpuFxLayers=true;       // ...War Thunder style layered smoke for big guns' shots and blasts (gpufx_layers.h); the stock
                                  //    blast particles and vehicle guns' muzzle effects off
     bool gpuFxEfs=true;          // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
