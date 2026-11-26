@@ -169,6 +169,12 @@ Debug 日志的两种行：`SOUND event <名>: N layer(s) at D m; first gain …
   - hit_aphe_mid 0 的根因：`Strike`（装甲命中）自己的弹类清单漏了 GrenadeBullet01_MapNoDamage，Flak 88 的 7 m 近炸高爆弹打在狂战士上只出 explosion_ground。已改成和 `KindOf` 共用 `ShellClass`，并加 Debug 计数 `armour_shell_no_hit_se`（高爆弹打在装甲上但原版这一下不放命中声，所以爆炸不带装甲层）。
 - 电磁炮的 `report_rail` 计数改由离线用例 `vehsound_gun`（`tests/vehsound_gun_test.cpp`）验证，不再等实机：把生产代码 `src/vehsound.cpp` 整份编进去，只替换读游戏的函数和发声函数，用假的 403（电磁炮 FireInterval 180、伤害 600、`SolidBullet01Rail`）逐帧走 `VehicleSound`。断言：口径判成 `Bore::rail`、没有战雷事件；每发一次 `report_rail`、近 / 远片段按 340 m/s 的传播延迟播放；同一帧看两次、装填、没开火都不计；联机收到的射击计数（+0x1544）算一发；两门电磁炮同一帧开火只出一声；2 km 外仍有远片段；20 m 内有充电和就绪声；`VehicleGunVolume=0` / `VehicleSound=0` 时原版 FireSe 原样写回。变异核对：删掉 `Report` 里的 Note 后 22 项中 9 项变红。它覆盖不到的只有两点：游戏里 403 的武器字段是否真是这些值（`vsound_check` 已按原版数值查过口径），以及 NPC 会不会真的开主炮（AI 行为，与音效无关）。
 
+- 第五轮（wtfx3 = wtfx2 + 一辆 403 电磁炮坦克；29 个窗口；DLL build 867701c7eb，loading 行相符）：
+  - report_rail 25（插件电磁炮声，如 31 m 1 层、矩阵 [0.73 0.35]）；主炮 128mm_pak44_ai 10、150mm_sfh_18_ai 55，12mm_m2_ai 950；hit_pierce 15、hit_mgun 425、rico_mgun 84，hit_aphe_big 27；`stock_silent_armour` 1003，`stock_hit_taken` / `stock_hit_kept` 0：不双响。
+  - 声部：dropped 0，busy 峰值 109/160，loops 41/96、none free 0，限幅器 on。
+  - 来袭候选 43 发，仍全部 < 10°。
+  - hit_aphe_mid 仍 0，`armour_shell_no_hit_se` 也是 0：Flak 88 的高爆弹是近炸弹（在目标附近引爆），这一轮没有一发撞上装甲留下命中记录（否则这两个计数必有其一），打在近旁按普通爆炸出 explosion_ground（64），这和 WT 一致（近旁的高爆爆炸不放命中装甲声）。这组武器里没有 3–8 m 半径又撞击引爆的弹，hit_aphe_mid 和 hit_aphe_big 走同一条路径（只是半径档不同，`ArmourEvent` 离线检查覆盖），实机没触发到。
+
 ## 没验证的
 
 - 没在游戏里试听（只有上面的日志数据）：各口径的音量平衡、近距层淡出距离、500 m 外 1/d 衰减的手感、机枪 grain 的连贯性。

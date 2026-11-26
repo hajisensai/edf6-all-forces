@@ -381,10 +381,15 @@ def place_file(game: str, dest: str, payload: bytes, *, new: bool = False) -> No
         kept = dest.replace('/', '__').replace('\\', '__')
         if os.path.lexists(os.path.join(placed_dir(game), kept)):
             raise FileExistsError(os.path.join(placed_dir(game), kept))
+    # The folders this placement makes (none there yet), outermost first, under Mods: taken back with it (_unmake).
+    made, up = [], os.path.dirname(dest.replace('\\', '/'))
+    while up and not os.path.isdir(os.path.join(game, 'Mods', up)):
+        made.insert(0, up)
+        up = os.path.dirname(up)
     # The entry (with its kept name) is on disk before the copy: no file in placed_dir is ever unrecorded. An entry
     # whose copy or payload never came is harmless to restore_placed (the file still holds its original).
     entries.append({'dest': dest, 'kept': kept, 'original_sha256': original,
-                    'payload_sha256': hashlib.sha256(payload).hexdigest()})
+                    'payload_sha256': hashlib.sha256(payload).hexdigest(), 'made_dirs': made})
     _write_manifest(game, entries)
     try:
         if kept:
@@ -395,7 +400,7 @@ def place_file(game: str, dest: str, payload: bytes, *, new: bool = False) -> No
         # nothing of the payload written: this placement never happened (its copy and its entry taken back)
         if kept and os.path.lexists(os.path.join(placed_dir(game), kept)):
             os.remove(os.path.join(placed_dir(game), kept))
-        entries.pop()
+        _unmake(game, entries.pop())
         _write_manifest(game, entries)
         if not entries and not os.listdir(placed_dir(game)):
             os.rmdir(placed_dir(game))
@@ -403,6 +408,17 @@ def place_file(game: str, dest: str, payload: bytes, *, new: bool = False) -> No
     with f:   # a write failing from here on leaves the entry: restore_placed puts the original back
         f.write(payload)
     print('placed', dest, 'over the original' if original is not None else '(new)')
+
+
+def _unmake(game: str, entry: dict) -> None:
+    """The folders `entry`'s placement made (place_file's made_dirs) removed, innermost first, each only while empty
+    (something else put in it since: it and those over it stay)."""
+    for rel in reversed(entry.get('made_dirs', [])):
+        path = os.path.join(game, 'Mods', rel)
+        if not os.path.isdir(path) or os.listdir(path):
+            return
+        os.rmdir(path)
+        print('removed the folder', path)
 
 
 def place_loadout(game: str, source: str) -> None:
@@ -443,6 +459,7 @@ def restore_placed(game: str) -> bool:
             continue
         if kept and os.path.exists(kept):
             os.remove(kept)
+        _unmake(game, e)
     left.reverse()
     _write_manifest(game, left)
     if os.path.exists(os.path.join(placed_dir(game), 'manifest.json.tmp')):   # a manifest write that never finished
