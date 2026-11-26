@@ -328,7 +328,7 @@ NpcCommandResult GiveUnit(const Entry& e,const Command& order,const ObjRef& requ
     const auto done=[](bool ok){return ok ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};};
     switch(e.owner) {
     case Owner::heli: return done(HeliCommand(e.u.v,c,focus));
-    case Owner::jet: return done(JetCommand(e.u.v,c,focus));
+    case Owner::jet: return done(JetCommand(e.u.v,c,focus,requester));
     case Owner::ground: return done(GroundCommand(e.u.v,c));
     case Owner::squad: return NpcSquadCommandForRequester(ObjRef::Of(e.u.v),c,requester,focus);
     case Owner::tank: return NpcMapCommandForRequester(ObjRef::Of(e.u.v),c,requester,focus);

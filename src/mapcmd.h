@@ -53,7 +53,7 @@ int GroundCommandUnits(CommandUnit* out,int most) noexcept;
 // what it did before any command). Game thread.
 // `focus`: a focus order's target (the enemy the player marked, as a squad's); the aircraft take it (mapcmd::AirOrder).
 bool HeliCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
-bool JetCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
+bool JetCommand(const void* v,const Command& c,const ObjRef& focus={},const ObjRef& requester={}) noexcept;
 bool GroundCommand(const void* v,const Command& c) noexcept;
 // npcai.cpp: the NPC soldiers' squads (one unit a squad, its leader's address; docs/npc-ai-design.md §5, §6), every one
 // the frame saw (a script's too, locked), and an order to one.

@@ -460,7 +460,7 @@ bool HeliCommand(const void*,const Command& c,const ObjRef&) noexcept {
     ++heliCommands;if(!commandTakes)return false;
     heliReleases+=c.order==mapcmd::Order::none;return true;
 }
-bool JetCommand(const void*,const Command& c,const ObjRef&) noexcept {
+bool JetCommand(const void*,const Command& c,const ObjRef&,const ObjRef&) noexcept {
     if(!commandTakes)return false;
     jetReleases+=c.order==mapcmd::Order::none;return true;
 }

@@ -7,7 +7,9 @@
 //  - the heading follows the anchor's walk, not its standing turns;
 //  - bounding overwatch swaps its halves when the movers are all there, or after kBoundMost, never with no movers;
 //  - a soldier with no headway gives its slot up for kRestMs, then tries again;
-//  - the key's cycles go round both lists and back to stock.
+//  - the key's cycles go round both lists and back to stock;
+//  - the march keeps up: the anchor's speed measured and led, the slot eased, the goal re-sent sparingly, the walk's
+//    least ease, the rest's scatter (the front open), the view cone, the straggler's stretch and its places behind.
 //   cmake --build build --target formation_check && build\formation_check.exe      (exit code 1 on a failure)
 #include "../src/formation.h"
 #include <cstdio>
@@ -130,6 +132,104 @@ void Cycles() {
     Check(n==static_cast<int>(sizeof(kGuard)/sizeof(kGuard[0])),"the guard cycle goes round",n);
     Check(FromInt(-1)==Shape::stock && FromInt(kShapes)==Shape::stock && FromInt(3)==Shape::wedge,"ini values");
 }
+// The keeping up (formation.h Observe / Lead / Ease / Resend / EaseLeast / Resting / Scatter / InView / Stranded /
+// RegroupAt): the anchor walked at a steady speed, turned about, stood still, warped; a straggler out of view.
+void Keeps() {
+    // Observe: a steady 5 m/s along +x settles near 5 m/s; a warp of 200 m in a frame starts it over at rest.
+    Motion m{};
+    float p[3]={0.0f,0.0f,0.0f};
+    for(std::uint64_t t=0;t<=3000;t+=16){p[0]=5.0f*static_cast<float>(t)*0.001f;Observe(m,p,t);}
+    Check(Near(m.vel[0],5.0f,0.2f) && Near(m.vel[1],0.0f,0.05f),"steady walk measured",m.vel[0],m.vel[1]);
+    float led[3];
+    Lead(m,p,led);
+    Check(Near(led[0]-p[0],3.0f,0.2f) && Near(led[2],p[2],0.01f),"5 m/s led 0.6 s",led[0]-p[0]);
+    p[0]+=200.0f;Observe(m,p,3100);
+    Check(SpeedOf(m)==0.0f,"a warp is no speed",SpeedOf(m));
+    // Lead: at a walk a quarter of the lead; a sprint capped at kLeadMost.
+    Motion w{{0.0f,0.0f,0.0f},{3.0f,0.0f},0,true};
+    const float o[3]={0.0f,0.0f,0.0f};
+    Lead(w,o,led);
+    Check(Near(led[0],3.0f*kLeadSec*kWalkLead,1e-3f),"a walk led a quarter",led[0]);
+    Motion r{{0.0f,0.0f,0.0f},{0.0f,40.0f},0,true};
+    Lead(r,o,led);
+    Check(Near(led[2],kLeadMost,1e-3f) && Near(led[0],0.0f,1e-3f),"a sprint led at most kLeadMost",led[2]);
+    Motion still{};
+    Lead(still,o,led);
+    Check(led[0]==0.0f && led[2]==0.0f,"unknown motion: no lead");
+    // Ease: the slot jumps to its first place; a turn about (20 m across) is swung over, not jumped; far it snaps.
+    Goal g{};
+    const float a[3]={0.0f,0.0f,0.0f},b[3]={20.0f,0.0f,0.0f},c[3]={100.0f,0.0f,0.0f};
+    Ease(g,a,0.0f,1000);
+    Check(g.set && g.at[0]==0.0f,"the first goal taken as it is");
+    Ease(g,b,0.0f,1100);
+    Check(Near(g.at[0],kGoalRate*0.1f,1e-3f),"a turn about eased",g.at[0]);
+    Ease(g,b,4.0f,1200);
+    Check(Near(g.at[0],kGoalRate*0.1f+(kGoalRate+kGoalCatch*4.0f)*0.1f,1e-3f),"eased faster with the anchor's speed",g.at[0]);
+    std::uint64_t t=1200;
+    while(g.at[0]<20.0f && t<10000){t+=16;Ease(g,b,0.0f,t);}
+    Check(g.at[0]==20.0f && t<5000,"the eased goal gets there",g.at[0],static_cast<double>(t));
+    Ease(g,c,0.0f,t+16);
+    Check(g.at[0]==100.0f,"past kGoalSnap it jumps",g.at[0]);
+    Ease(g,a,0.0f,t+16+5000);
+    Check(g.at[0]==0.0f,"after a gap it starts over",g.at[0]);
+    // Resend: a small move kept, one past kRegoal re-sent after kRegoalMs, one past kRegoalFar at once.
+    Sent s{};
+    const float s0[3]={0.0f,0.0f,0.0f},s1[3]={1.0f,0.0f,0.0f},s2[3]={2.0f,0.0f,0.0f},s3[3]={10.0f,0.0f,0.0f};
+    Check(Resend(s,s0,0),"the first goal sent");
+    Check(!Resend(s,s1,100) && s.at[0]==0.0f,"1 m: not re-sent");
+    Check(!Resend(s,s2,200),"2 m within kRegoalMs: not yet");
+    Check(Resend(s,s2,600) && s.at[0]==2.0f,"2 m after kRegoalMs: re-sent");
+    Check(Resend(s,s3,650) && s.at[0]==10.0f,"8 m: at once");
+    // EaseLeast: the floor standing near, more walking, all of a walk far behind; never past 1.
+    Check(Near(EaseLeast(0.0f,0.0f),kEaseFloor,1e-4f),"standing near: the floor",EaseLeast(0.0f,0.0f));
+    Check(EaseLeast(3.0f,1.0f)>EaseLeast(0.0f,1.0f),"walking: a higher floor");
+    Check(EaseLeast(0.0f,8.0f)>EaseLeast(0.0f,4.0f) && EaseLeast(0.0f,20.0f)==1.0f,"farther: faster, at most 1");
+    // Resting: still kStillMs within kStillRadius; a step out starts it over.
+    Rest rest{};
+    const float r0[3]={0.0f,0.0f,0.0f},r1[3]={1.0f,0.0f,1.0f},r2[3]={5.0f,0.0f,0.0f};
+    Check(!Resting(rest,r0,0) && !Resting(rest,r1,4000),"not yet resting");
+    Check(Resting(rest,r1,5000),"resting after kStillMs");
+    Check(!Resting(rest,r2,5100) && !Resting(rest,r2,9000) && Resting(rest,r2,10200),"a move starts the rest over");
+    // Scatter: nobody in the open front, nobody nearer the anchor than spacing or to another than spacing x 0.7.
+    const float sp=5.0f;
+    float xs[24],zs[24];
+    for(int k=0;k<24;++k) {
+        Check(Scatter(k,sp,&xs[k],&zs[k]),"a scatter place");
+        const float rr=std::sqrt(xs[k]*xs[k]+zs[k]*zs[k]);
+        const float ang=std::atan2(xs[k],zs[k]);
+        Check(rr>=sp-1e-3f,"scattered off the anchor",k,rr);
+        Check(std::fabs(ang)>=kOpenFront-1e-3f,"the front left open",k,ang);
+        for(int j=0;j<k;++j) {
+            const float d=std::sqrt((xs[k]-xs[j])*(xs[k]-xs[j])+(zs[k]-zs[j])*(zs[k]-zs[j]));
+            Check(d>=sp*0.7f,"scattered apart",k,d);
+        }
+    }
+    Check(!Scatter(-1,sp,&xs[0],&zs[0]) && !Scatter(0,0.0f,&xs[0],&zs[0]),"no place for no soldier or no spacing");
+    // InView: ahead in view, behind and well to the side not.
+    const float eye[3]={0.0f,1.6f,0.0f},look[3]={0.0f,0.0f,1.0f};
+    const float ahead[3]={5.0f,1.0f,50.0f},behind[3]={0.0f,1.0f,-50.0f},side[3]={50.0f,1.0f,5.0f};
+    Check(InView(eye,look,ahead) && !InView(eye,look,behind) && !InView(eye,look,side),"the view cone");
+    // Stranded: kStrandMs out in a row; back in starts over; a gap (not asked about) starts over.
+    Strand st{};
+    Check(!Stranded(st,true,1000) && !Stranded(st,true,1800) && !Stranded(st,true,2600) && !Stranded(st,true,3400),"not yet stranded");
+    Check(Stranded(st,true,4000),"stranded after kStrandMs");
+    Check(!Stranded(st,false,4100),"back in view");
+    Check(!Stranded(st,true,4200) && !Stranded(st,true,5000) && !Stranded(st,true,5800) && !Stranded(st,true,6600) &&
+          !Stranded(st,true,7100),"back in view: the stretch over");
+    Strand gap{};
+    Check(!Stranded(gap,true,1000) && !Stranded(gap,true,1500),"gap: started");
+    Check(!Stranded(gap,true,5000),"a gap past kSampleGap starts it over");
+    Check(!Stranded(gap,true,5500),"still counting after the gap");
+    // RegroupAt: behind the anchor against its look, then behind left and right, kRegroupBack away at least.
+    const float an[3]={100.0f,10.0f,100.0f},lk[2]={0.0f,1.0f};
+    float d0[3],d1[3],d2[3];
+    RegroupAt(an,lk,0,sp,0,d0);RegroupAt(an,lk,0,sp,1,d1);RegroupAt(an,lk,0,sp,2,d2);
+    Check(Near(d0[0],100.0f,1e-3f) && Near(d0[2],100.0f-kRegroupBack,1e-3f) && d0[1]==10.0f,"straight behind",d0[0],d0[2]);
+    Check(d1[2]<100.0f && d2[2]<100.0f && d1[0]>100.0f && d2[0]<100.0f,"behind its left (+x is left of +z here) and right",d1[0],d2[0]);
+    float d3[3];
+    RegroupAt(an,lk,3,sp,0,d3);
+    Check(Near(d3[2],100.0f-kRegroupBack-3.0f*sp,1e-3f),"each place spacing farther back",d3[2]);
+}
 }  // namespace
 
 int main() {
@@ -139,6 +239,7 @@ int main() {
     Bounds();
     Stuck();
     Cycles();
+    Keeps();
     std::printf(failures ? "formation_check: %d of %d FAILED\n" : "formation_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

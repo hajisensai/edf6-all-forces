@@ -215,6 +215,8 @@ struct Soldier {
     // look for vehicles along a dash's way (VehicleNear: not cast every frame).
     npc::mobility::Carry mobCarry;
     npc::mobility::VehicleLook mobLook;
+    // Its keeping up in the march (formation.h Keep: its eased slot, the goal its route was given, stranded since).
+    npc::formation::Keep keep;
 };
 // Every soldier the plugin has driven this mission (a deque: Soldier* stays valid as it grows) and their index by object.
 std::deque<Soldier> soldiers;
@@ -241,7 +243,7 @@ struct World {
     npc::grid::Grid enemyGrid,friendGrid;
     float frRadius=0.0f;
     bool player=false,lane=false,lookOk=false;
-    float playerAt[3]{},look[3]{};
+    float playerAt[3]{},look[3]{},eye[3]{};   // eye: the camera's (lookOk), where the player's view is from
     npc::Lane laneOf{};
 };
 World world{};
@@ -310,7 +312,7 @@ void PlayerLane(World& w) noexcept {
     w.lane=false;
     float eye[3],dir[3];
     w.lookOk=w.player && CameraRay(eye,dir);   // the look (the fall-back's "behind the player") whether or not the lane is on
-    if(w.lookOk)std::memcpy(w.look,dir,12);
+    if(w.lookOk){std::memcpy(w.look,dir,12);std::memcpy(w.eye,eye,12);}
     if(!w.lookOk || !Cfg().npcFireLane)return;
     npc::Lane& l=w.laneOf;
     l.from[0]=w.playerAt[0];l.from[1]=w.playerAt[1]+kEye;l.from[2]=w.playerAt[2];
@@ -468,6 +470,8 @@ struct March {
     int n;
     const void* member[32];
     int movers,pending,moversLast,pendingLast;   // bounding: this frame's and the last frame's
+    npc::formation::Motion motion;   // the anchor's velocity (the slots led by it)
+    npc::formation::Rest rest;       // ...and its standing still (the soldiers spread round it)
 };
 March march{};
 SRWLOCK marchLock=SRWLOCK_INIT;
@@ -852,7 +856,9 @@ Hull RouteHull(Hull hull) noexcept;
 // of its speed, slowing at every corner (testhub #41 / #47: "很难让他们跟着玩家"; docs/feedback-2026-10-12-npc-fire.md had
 // measured 2.0-2.3 m/s, a Ranger's full walk being 0.1 m a frame, 6 m/s).
 constexpr float kEaseMetres=6.0f,kEaseLeast=0.3f;
-void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={}) noexcept {
+// `least`: the ease's floor (the march's: formation.h EaseLeast, the pace of the player it keeps up with).
+void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLONG ms,float pace=1.0f,Hull hull={},
+            float least=kEaseLeast) noexcept {
     Soldier* const soldier=Entry(h,ms);
     if(!soldier){Stand(h);return;}
     hull=RouteHull(hull);
@@ -872,7 +878,8 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     if(route!=npc::navigation::Result::moving || !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     if(!(pace>0.0f)){Stand(h);return;}
     const float left=npc::navigation::FinalLeft(soldier->navigation,{pos[0],pos[1],pos[2]});
-    const float ease=left<0.0f ? 1.0f : (std::min)(1.0f,(std::max)(kEaseLeast,(left-stop)/kEaseMetres+kEaseLeast));
+    const float floorEase=least>kEaseLeast ? (least<1.0f ? least : 1.0f) : kEaseLeast;
+    const float ease=left<0.0f ? 1.0f : (std::min)(1.0f,(std::max)(floorEase,(left-stop)/kEaseMetres+kEaseLeast));
     Move(h,dir,ease*(pace<1.0f ? pace : 1.0f));
     // The walk this frame, for its own dashes (Mobility): along the route, never straight at the goal. The route's next
     // waypoint is the next 2 m cell; the run (the path from it on, as far as it goes straight) is what a dash may follow.
@@ -1890,6 +1897,64 @@ void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos
     else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms);
 }
 
+// A straggler put back (formation.h Stranded / RegroupAt; the player 2026-11-26 「可以抄一下这个跟随的好的地方」): a
+// recruited soldier on foot, fighting nothing, under no order, NpcRegroupRange m and more from the player it follows
+// and out of its view for kStrandMs, is warped kRegroupBack m behind that player, onto the ground, out of its view, in
+// its sight line's clear (not through a wall onto the far side); none of the three places fits, it tries again
+// kStrandMs on. Online the soldier's authority does it (Drive runs there alone): the player is then the one who
+// recruited it, of whichever machine, its body's facing standing for a remote player's camera.
+constexpr float kRegroupEye=1.6f;   // m: the eye over a remote player's feet, the waist over a soldier's
+bool Regroup(Soldier& s,unsigned char* h,const float* pos,const Squad* q,const unsigned char* root,ULONGLONG ms,
+             const char** move) noexcept {
+    using namespace npc::formation;
+    const float range=Cfg().npcRegroupRange;
+    if(!(range>0.0f) || s.control!=npc::Control::recruited || !root || !IsAnyPlayer(root) || (q && q->cmd.order!=Order::none) ||
+       s.boardV || !HumanOnFoot(h) || !IsOnlineAuthority(h)) {
+        s.keep.strand=Strand{};
+        return false;
+    }
+    const auto* avatar=CommanderAvatar(root);
+    const unsigned char* const who=avatar && avatar!=h ? avatar : root;
+    if(who[kDead] || !HumanOnFoot(who)){s.keep.strand=Strand{};return false;}   // riding: ride_along.h's
+    const bool local=who==PlayerHuman() && world.player;
+    const float* const at=local ? world.playerAt : Pos(who);
+    float eye[3],look[3];
+    if(local && world.lookOk){std::memcpy(eye,world.eye,12);std::memcpy(look,world.look,12);}
+    else {
+        const float* m=reinterpret_cast<const float*>(who+kMatrix);
+        eye[0]=at[0];eye[1]=at[1]+kRegroupEye;eye[2]=at[2];
+        look[0]=m[8];look[1]=0.0f;look[2]=m[10];
+    }
+    const float waist[3]={pos[0],pos[1]+1.0f,pos[2]};
+    const bool out=npc::Horiz(pos,at)>range && !InView(eye,look,waist);
+    if(!Stranded(s.keep.strand,out,ms))return false;
+    float level[2]={look[0],look[2]};
+    const float l=std::sqrt(level[0]*level[0]+level[1]*level[1]);
+    if(l>1e-3f){level[0]/=l;level[1]/=l;}else{level[0]=0.0f;level[1]=1.0f;}
+    const int k=static_cast<int>((reinterpret_cast<std::uintptr_t>(h)>>4)&3);
+    for(int i=0;i<3;++i) {
+        float to[3];
+        RegroupAt(at,level,k,Cfg().npcFormationSpacing,i,to);
+        const float top[3]={to[0],to[1]+3.0f,to[2]},bottom[3]={to[0],to[1]-6.0f,to[2]};
+        float floor[3];
+        if(!(MapFloorRay(top,bottom,floor)>=0.0f) || !std::isfinite(floor[1]))continue;
+        to[1]=floor[1];
+        const float seen[3]={to[0],to[1]+1.0f,to[2]};
+        if(InView(eye,look,seen))continue;
+        const float from[3]={at[0],at[1]+1.0f,at[2]};
+        float hit[3];
+        if(MapRay(from,seen,hit)>=0.0f)continue;
+        if(!WarpHuman(h,to))break;
+        Log("NPCAI soldier %p regroups: %.0f m off, warped behind its player (place %d)",h,npc::Horiz(pos,at),i);
+        s.keep=Keep{};
+        s.navigation.initialized=false;
+        *move="regroup";
+        return true;
+    }
+    s.keep.strand.since=ms ? ms : 1;s.keep.strand.last=ms;   // no place fit: again kStrandMs on
+    return false;
+}
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -1964,6 +2029,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         else p.move="support follow";
         return p;
     }
+    if(!t.e && Regroup(s,h,pos,q,root,ms,&p.move))return p;
     if(!t.e && FormationMove(s,h,pos,q,root,ms,&p.move))return p;
     if(t.e) {
         Spot(s,pos,t.e->aim,anchor,served.at,engage,o.leash,ms);
@@ -2911,6 +2977,7 @@ void ResetNpcAi() noexcept {
     sixRuns.clear();
     world=World{};   // world.enemy emptied, its index (enemyIndex) with it
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
+    march.motion=npc::formation::Motion{};march.rest=npc::formation::Rest{};
     march.movers=march.pending=march.moversLast=march.pendingLast=0;
     for(auto& p:peerMarches)p=PeerMarch{};
     ResetSweep();
@@ -3153,11 +3220,22 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     }
     float x,z;
     if(!anchor || k<0 || !Offset(shape,k,n,spacing,&x,&z))return false;
+    // The march keeps up (formation.h Keep): its slots round where the player will be a moment on, eased round when
+    // the heading turns, spread round the player who stands; the route's goal re-sent only when it moved enough.
+    float at[3]={anchor[0],anchor[1],anchor[2]},speed=0.0f;
+    bool resting=false;
+    if(marching) {
+        Observe(mr->motion,anchor,ms);
+        speed=SpeedOf(mr->motion);
+        resting=Resting(mr->rest,anchor,ms) && Scatter(k,spacing,&x,&z);
+        if(!resting)Lead(mr->motion,anchor,at);
+    }
     float slot[3];
-    npc::formation::World(anchor,fwd,x,z,slot);
+    npc::formation::World(at,fwd,x,z,slot);
+    if(marching){Ease(s.keep.goal,slot,speed,ms);slot[0]=s.keep.goal.at[0];slot[2]=s.keep.goal.at[2];}
     const float d=npc::Horiz(pos,slot);
     if(left)*left=d;
-    if(marching && shape==Shape::bounding) {
+    if(marching && !resting && shape==Shape::bounding) {
         if(TeamOf(k)!=mr->bound.moving && npc::Horiz(pos,anchor)<Cfg().npcLeash) {
             Stand(h);*move="overwatch";   // the other half covers: it holds where it is
             return true;
@@ -3170,9 +3248,13 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     const float top[3]={slot[0],slot[1]+0.55f,slot[2]},bottom[3]={slot[0],slot[1]-2.0f,slot[2]};
     float floor[3];
     if(MapFloorRay(top,bottom,floor)>=0.0f && std::isfinite(floor[1])) {
-        slot[1]=floor[1];MoveTo(h,pos,slot,kArrive,ms,q && !marching ? MapPaceScale(q->top.obj) : 1.0f);
+        slot[1]=floor[1];
+        if(marching) {
+            Resend(s.keep.sent,slot,ms);
+            MoveTo(h,pos,s.keep.sent.at,kArrive,ms,1.0f,Hull{},EaseLeast(speed,npc::Horiz(pos,s.keep.sent.at)));
+        } else MoveTo(h,pos,slot,kArrive,ms,q ? MapPaceScale(q->top.obj) : 1.0f);
     } else Stand(h);
-    *move=marching ? "formation" : "guard formation";
+    *move=marching ? (resting ? "formation rest" : "formation") : "guard formation";
     return true;
 }
 
@@ -4188,6 +4270,9 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             // A squad seated in a vehicle is that vehicle's crew: not recruited out of it (command the vehicle).
             if(!HumanOnFoot(top))return CommandResult(Reason::riding);
             if(!recruited)Follow(top,const_cast<unsigned char*>(caller));
+            // FOLLOW ME: what each kept of its own keeping up goes (its eased slot, its route's goal, a stranded
+            // stretch), so it takes its slot in the march afresh.
+            for(int i=0;i<count;++i)if(Soldier* m=FindSoldier(members[i]))m->keep=npc::formation::Keep{};
             q->cmd={};break;
         case Order::dismiss:
             if(!recruited)return CommandResult(Reason::notOwner);

@@ -79,6 +79,7 @@ void Release(Jet& j) noexcept {
         if(d.ref && d.primer.joining==j.ref.ctrl)d.primer.joining=nullptr;
     }
     if(IsPrimer(j))PrimerDied(j);   // a shot-down centipede's body is posed on as it falls (its own reference)
+    DropRef(j.followBy);
     DropRef(j.ref);
     j=Jet{};
 }
@@ -154,6 +155,18 @@ void Circle(Jet& j,const float* pos,const float* anchor,float height,ULONGLONG m
     *speed=Patrol(j,pos,anchor,height,want);
 }
 
+// With no target of its own, escorting the player it follows (Jet::escorting): their slot, or the racetrack round them
+// (jet_escort.h), never Patrol's ring round where they stood.
+void Escort(Jet& j,const Kind& k,const float* pos,const float* anchor,float height,ULONGLONG ms,float* want,float* speed) noexcept {
+    if(j.mode!=Mode::patrol)SetMode(j,Mode::patrol,ms);
+    j.t.lockSeen=0;
+    jetescort::Params p{k.minSpeed,k.cruise,k.attack>k.cruise ? k.attack : k.cruise,0.0f,k.patrolStep};
+    p.turn=TurnRadiusOf(k,1.0f,jetescort::LoiterSpeed(p));
+    const jetescort::Steer s=jetescort::Fly(j.escortTrack,p,pos,anchor,j.wing);
+    Level(pos,s.dir,height,want);
+    *speed=s.speed;
+}
+
 // The guidance (`want`, `speed`) its mode and its kind's weapon ask for this frame.
 void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos,const float* nose,const float* anchor,
            const float* viewer,const float* lead,float height,float clear,bool walled,ULONGLONG ms,float* want,float* speed,
@@ -189,6 +202,7 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     }
     case Weapon::guns:
         if(j.t.target){Attack(j,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk);return;}
+        if(j.escorting){Escort(j,kind,pos,anchor,height,ms,want,speed);return;}
         Circle(j,pos,anchor,height,ms,want,speed);
         return;
     case Weapon::shells:
@@ -287,6 +301,27 @@ bool Alive(const ObjRef& r) noexcept {
     if(!r.obj || !r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return false;
     const auto o=static_cast<const unsigned char*>(r.obj);
     return Readable(o,kSeats+8) && At<const void*>(o,kSelfCtrl)==r.ctrl && !(o[kObjFlags]&kObjDeleted);
+}
+
+// Where the player `r` a follow order came from is (JetCommand's requester), while they are: their object not deleted,
+// not dead; else nullptr.
+static const float* FollowedAt(const ObjRef& r) noexcept {
+    if(!r.obj || !r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return nullptr;
+    const auto o=static_cast<const unsigned char*>(r.obj);
+    if(!Readable(o,kPosition+12) || !Readable(o,kDead+1) || At<const void*>(o,kSelfCtrl)!=r.ctrl || (o[kObjFlags]&kObjDeleted) || o[kDead])
+        return nullptr;
+    return reinterpret_cast<const float*>(o+kPosition);
+}
+
+// Entry `j` follows `who` (another machine's player; empty: none, or this machine's player): the old one let go.
+static void SetFollow(Jet& j,const ObjRef& who) noexcept {
+    DropRef(j.followBy);
+    j.followBy=who;
+    j.followSeen=false;
+    j.escortTrack=jetescort::Track{};
+    if(!who.ctrl)return;
+    HoldRef(who);
+    if(const float* at=FollowedAt(who)){std::memcpy(j.followAt,at,12);j.followSeen=true;}
 }
 
 Jet* FindJet(const unsigned char* v) noexcept {
@@ -559,10 +594,13 @@ bool JetLeaving(const void* vehicle) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexcept {
+bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus,const ObjRef& requester) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
         if(!j || !Commandable(*j,GameMs()))return false;
+        // Follow whom: another machine's player (online, the order run here) held; this machine's player none (player.pos).
+        const bool remote=c.order==Order::follow && requester.obj && requester.obj!=PlayerHuman();
+        if(remote && !FollowedAt(requester))return false;
         if(c.order==Order::focus) {
             FocusSeen seen{focus,false};
             if(!focus || !VisitEnemies(j->Vehicle(),&SeeFocus,&seen) || !seen.seen)return false;
@@ -571,8 +609,9 @@ bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexce
             return true;
         }
         ApplyMapCommand(*j,c,GameMs());
-        Log("JET v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
-            c.at[0],c.at[1],c.at[2]);
+        SetFollow(*j,remote ? requester : ObjRef{});
+        Log("JET v=%p map command: %s%s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
+            remote ? " (another machine's player)" : "",c.at[0],c.at[1],c.at[2]);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -647,6 +686,11 @@ void JetFrame(unsigned char* v) noexcept {
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
     Jet* const mother=MotherOf(*j);
     if(j->escort && follow && !gunner)std::memcpy(j->anchor,player.pos,12);   // the player aboard: player.pos is its own
+    if(j->followBy.ctrl) {   // another machine's player it was told to follow: where they are, while they are
+        const float* at=FollowedAt(j->followBy);
+        j->followSeen=at!=nullptr;
+        if(at)std::memcpy(j->followAt,at,12);
+    }
     // The player's carrier sends its drones to a point (PlayerLaunchDrone): they work round that.
     const bool ordered=mother && mother->carrier.ordered;
     const float* anchor=gunner ? GunnerAnchor(*j,crewOrder) : ordered ? mother->carrier.order : mother ? j->anchor :
@@ -656,6 +700,12 @@ void JetFrame(unsigned char* v) noexcept {
     // is taken in by its patrol circle, so the circle and the fight round it stay in.
     float anchorIn[3];
     anchor=SoftAnchor(*j,anchor,anchorIn);
+    // Escorting the player it follows (jet_escort.h): a follow order's player while seen, or its call's follow variant's
+    // once handed back (support_dispatch.cpp AirArrival: Order::none); a winged jet's guns alone (a gunship's shells and a
+    // carrier's drones keep their circle round the point they work).
+    j->escorting=!gunner && !mother && kind.weapon==Weapon::guns && kind.flight==FlightModel::wing &&
+                 (j->cmd.order==Order::follow ? (j->followBy.ctrl ? j->followSeen : follow) : j->cmd.order==Order::none && j->escort && follow);
+    if(j->escorting)jetescort::Observe(j->escortTrack,anchor,ms);
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     if(!gunner)Leave(*j,kind,arms,mother,hp,hpMax,ms);   // held for the player at the gun: no withdrawal
     const float was[3]={j->m.vel[0],j->m.vel[1],j->m.vel[2]};
@@ -824,7 +874,7 @@ jet::Jet* jet::Adopt(unsigned char* v) noexcept {
 // still there to drop it from, and keeping it would leak the block every mission.
 void ResetJets() noexcept {
     ResetSupportDrones();
-    for(auto& j:jets){PvpForgetSupportObject(j.ref);DropRef(j.ref);j=Jet{};}
+    for(auto& j:jets){PvpForgetSupportObject(j.ref);DropRef(j.followBy);DropRef(j.ref);j=Jet{};}
     ResetCorpses();
     ResetDolls();
     ResetWalls();
