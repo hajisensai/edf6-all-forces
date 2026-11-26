@@ -29,6 +29,7 @@
 #include "support_soldier.h"
 #include "npc_arms.h"
 #include "thermal.h"
+#include "gpufx/gpufx.h"
 #include "pvp.h"
 #include "enemy_control.h"
 #include "enemy_control_net.h"
@@ -140,6 +141,7 @@ void MissionStart() noexcept {
     ResetPlayer();
     ResetFirstPerson();
     thermal::Reset();
+    gpufx::Reset();
     ResetCrew();
     ResetHelis();
     ResetGround();

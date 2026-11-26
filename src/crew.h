@@ -308,6 +308,24 @@ struct Config {
     float scopeSniperHipMinSpread=0.015f; // ...and at least this half angle (rad; FireAccuracy 0 sniper rifles too)
     float scopeHipSpread=1.25f;           // ...another scoped weapon unzoomed: x this
     float scopeAimSpread=0.8f;            // ...and zoomed: x this
+    bool gpuFx=true;             // GPU particle effects (src/gpufx): the module (world-end draw)
+    int gpuFxTest=0;             // ...test cards and a puff column 25 m ahead of the player at mission start (2: and the
+                                 //    stress: the ultimate strike 60 m ahead, three of them 6 s apart, with no pt asked;
+                                 //    3 / 4: the bench, fixed blasts and flashes with the switches cycled: the look / the load; 5: the ultimate
+                                 //    strike every 16 s, the set 0xA40 stock and ours by turns each second)
+    int gpuFxNative=1;           // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw (2: the
+                                 //    screen split, stock left and ours right: the A/B picture)
+    bool gpuFxLitA=true;         // ...and the lit set 0xA40 (the middle-distance lit smoke, per pixel point lights) too
+                                 //    (docs/gpufx-re.md: under the ultimate strike ours about half the stock's GPU time)
+    bool gpuFxLayers=true;       // ...War Thunder style layered smoke for big guns' shots and blasts (gpufx_layers.h); the stock
+                                 //    blast particles and vehicle guns' muzzle effects off
+    bool gpuFxEfs=true;          // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
+                                 //    (with GpuFxNative 1 / 3)
+    bool gpuFxTrails=true;       // ...the efs renderer's trails (ExtLine / LocusExtendLine / EmittingExtendLine: smoke trails,
+                                 //    tracers) drawn by the GPU renderer with the stock trail shaders, batched (with GpuFxNative 1 / 2)
+    bool gpuFxProbe=false;       // ...render state, matrices, light block and stock particle state to the log
+    int devFrameCap=0;           // with debug: the main loop held to at most this many frames a second (0 off; perf_probe.cpp):
+                                 //    test runs not about the frame rate
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
