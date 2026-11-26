@@ -57,6 +57,7 @@
 #include "thermal.h"
 #include "map_enemy_ui.h"
 #include "enemy_control_bindings.h"
+#include "aura.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -5780,6 +5781,37 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
                   p.given==kPingCleared ? Tx::npcPingCleared : Tx::npcPingNoUnit));
 }
 
+// The aura trucks (aura.cpp): each standing aura's edge on the ground near the player, dashed in its kind's colour, and
+// under the banners what reaches the player now (one line: the kinds and their strengths).
+void AuraHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    static AuraView v;   // the draw thread's own (a view is too big to copy onto its stack each frame)
+    if(!AuraViewNow(&v))return;
+    static const float* const kTint[aura::kKinds]={kAmber,kGreen,kCyan};
+    for(int i=0;i<v.rings && i<aura::kMaxSources;++i) {
+        const AuraRingView& r=v.ring[i];
+        const float* const tint=kTint[static_cast<int>(r.kind)%aura::kKinds];
+        for(int j=0;j<r.points && j<kAuraRing;j+=2) {   // dashed
+            float x0,y0,x1,y1;
+            const int k=(j+1)%r.points;
+            if(sight::ToScreen(vp,r.pt[j],1.0f,width,height,&x0,&y0) && sight::ToScreen(vp,r.pt[k],1.0f,width,height,&x1,&y1))
+                Seg(drawer,ctx,x0,y0,x1,y1,2.0f*s,tint);
+        }
+    }
+    if(!v.here.kinds)return;
+    wchar_t line[160];
+    int n=std::swprintf(line,_countof(line),L"%ls",Tr(Tx::auraTitle));
+    const auto room=[&]() noexcept { return n>=0 && n<static_cast<int>(_countof(line))-2; };
+    const auto gap=[&]() noexcept { line[n++]=L' ';line[n++]=L' '; };
+    const auto rest=[&]() noexcept { return _countof(line)-static_cast<std::size_t>(n); };
+    const auto step=[&](int m) noexcept { n=m<0 ? -1 : n+m; };
+    if(v.here.attack>0.0f && room()){gap();step(std::swprintf(line+n,rest(),Tr(Tx::auraAttack),static_cast<int>(std::lround(v.here.attack*100.0f))));}
+    if(v.here.repair>0.0f && room()){gap();step(std::swprintf(line+n,rest(),Tr(Tx::auraRepair),static_cast<double>(v.here.repair*100.0f)));}
+    if(v.here.ammo>0.0f && room()){gap();step(std::swprintf(line+n,rest(),Tr(Tx::auraAmmo),static_cast<double>(v.here.ammo*100.0f)));}
+    if(n<0)return;
+    const float* const tint=v.here.attack>0.0f ? kAmber : v.here.repair>0.0f ? kGreen : kCyan;
+    Label(text,lines,at,width*0.5f,height*0.5f+318.0f*s,1,kLineScale*0.75f,tint,L"%ls",line);
+}
+
 // The catalog's categories in the HUD's words (debug_spawn.h Category, in its order): the debug spawn tool's menu and the
 // test range's 「摆放」 panel.
 const Tx* DebugSpawnCategoryWords() noexcept {
@@ -6230,6 +6262,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         RescueCueBanner(t,width,height,s,lines,&at);
         StrikeBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        AuraHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(fresh)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);

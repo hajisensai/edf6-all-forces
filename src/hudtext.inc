@@ -1229,3 +1229,7 @@ HUDTEXT(mapLaunchNone,L"As equipped (no presets: make them in the armory)",L"当
 HUDTEXT(mapLaunchWaiting,L"Making the files (%ls): starts when done; move the cursor to cancel",L"正在生成文件（%ls）：完成后自动出击，移动光标取消",L"正在產生檔案（%ls）：完成後自動出擊，移動游標取消",L"ファイル生成中（%ls）：完了後に出撃、カーソル移動で取消")
 HUDTEXT(mapLaunchFailed,L"Not started, the files were not made: %ls. Confirm again to start with the files as they are",L"未出击，文件生成失败：%ls。再次确认则按现有文件出击",L"未出擊，檔案產生失敗：%ls。再次確認則按現有檔案出擊",L"未出撃、ファイル生成失敗：%ls。もう一度決定で現在のファイルのまま出撃")
 HUDTEXT(mapProgress,L"Campaign %d / %d cleared",L"战役进度 %d / %d 已通关",L"戰役進度 %d / %d 已通關",L"キャンペーン %d / %d クリア")
+HUDTEXT(auraTitle,L"AURA",L"光环",L"光環",L"オーラ")
+HUDTEXT(auraAttack,L"ATTACK +%d%%",L"攻击 +%d%%",L"攻擊 +%d%%",L"攻撃 +%d%%")
+HUDTEXT(auraRepair,L"REPAIR %.1f%%/s",L"维修 %.1f%%/秒",L"維修 %.1f%%/秒",L"修理 %.1f%%/秒")
+HUDTEXT(auraAmmo,L"AMMO %.1f%%/s",L"补弹 %.1f%%/秒",L"補彈 %.1f%%/秒",L"補給 %.1f%%/秒")

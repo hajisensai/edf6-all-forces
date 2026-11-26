@@ -574,6 +574,12 @@ struct Config {
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round
+    bool auraVehicles=true;         // aura.cpp: the command / repair / ammo trucks' auras (docs/feature-aura-vehicles.md)
+    float auraRadius=60.0f;         // ...an aura's radius (m)
+    float auraCommandAttack=0.3f;   // ...the command truck: the attack bonus (0.3 = +30%)
+    float auraRepairShare=0.02f;    // ...the repair truck: the share of max HP healed a second
+    float auraAmmoShare=0.1f;       // ...the ammo truck: the share of a magazine (or a reload) given a second
+    float auraParkSpeed=1.0f;       // ...an empty truck's aura stands at most this fast (m/s): parked
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.

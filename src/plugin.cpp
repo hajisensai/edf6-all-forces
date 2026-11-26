@@ -75,6 +75,7 @@
 #include "profile_sigs.h"
 #include "keyconfig.h"
 #include "pad_hold.h"
+#include "aura.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -512,6 +513,11 @@ void Validate(Config& n) noexcept {
     Fix("ScriptNpcSettleSec",n.scriptNpcSettleSec,0.0f,600.0f);
     Fix("TankPostHold",n.tankPostHold,1.0f,100.0f);
     Fix("TankReverseMax",n.tankReverseMax,0.0f,200.0f);
+    Fix("AuraRadius",n.auraRadius,0.0f,500.0f);
+    Fix("AuraCommandAttack",n.auraCommandAttack,0.0f,5.0f);
+    Fix("AuraRepairShare",n.auraRepairShare,0.0f,1.0f);
+    Fix("AuraAmmoShare",n.auraAmmoShare,0.0f,5.0f);
+    Fix("AuraParkSpeed",n.auraParkSpeed,0.0f,20.0f);
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -1050,6 +1056,12 @@ void LoadConfig() noexcept {
     n.vehicleGears=ReadBool(L"VehicleGears",n.vehicleGears);
     n.tankPostHold=ReadFloat(L"TankPostHold",n.tankPostHold);
     n.tankReverseMax=ReadFloat(L"TankReverseMax",n.tankReverseMax);
+    n.auraVehicles=ReadBool(L"AuraVehicles",n.auraVehicles);
+    n.auraRadius=ReadFloat(L"AuraRadius",n.auraRadius);
+    n.auraCommandAttack=ReadFloat(L"AuraCommandAttack",n.auraCommandAttack);
+    n.auraRepairShare=ReadFloat(L"AuraRepairShare",n.auraRepairShare);
+    n.auraAmmoShare=ReadFloat(L"AuraAmmoShare",n.auraAmmoShare);
+    n.auraParkSpeed=ReadFloat(L"AuraParkSpeed",n.auraParkSpeed);
     Validate(n);
     IgnoreRetired();
     {
@@ -1403,6 +1415,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallStoreRecoil();   // the 403's store holders past its seats: the hull push, not a seat's jitter (storerecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
+    InstallAura();          // the aura trucks (aura.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();

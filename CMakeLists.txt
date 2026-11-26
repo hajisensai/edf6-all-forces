@@ -100,6 +100,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/andryusha.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/jet_sortie.cpp)
 # A registered jet's engine lever online (src/jet_lever_net.cpp; the wire src/jet_lever_protocol.h, tests/jet_lever_net_test.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/jet_lever_net.cpp)
+# The aura trucks (src/aura.cpp; the rules src/aura_logic.h, tests/aura_logic_test.cpp; docs/feature-aura-vehicles.md).
+target_sources(EDF6VehicleCrew PRIVATE src/aura.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus_net.cpp)
