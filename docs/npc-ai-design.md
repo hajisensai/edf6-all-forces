@@ -102,7 +102,7 @@ friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5
 - `Gather` 的 `FriendVisit` 拿到的是游戏 TeamManager 队伍遍历（0x5E11D0，遍历自己的成员红黑树）交来的成员，上一行已直接读 `+0x2E8`：类判断用 `IsSoldierClassLive`（直接读 vtable）。乘骑提示 `PromptHook` 的 `object` 同样来自这个遍历、原版访问者刚对它做过 dynamic_cast：vtable 直接读，`ClassOfVtable` 判载具类，`IsJet`（要问 Readable 读 506 的标记）只对 506 vtable 问。
 - `ArmsOf`：原来一名士兵 4 次工作集调用（列表、武器批、WeaponSet、set 的 entry 各一次），改为 `edf::PrefetchReadableSpans` 两次（列表 + 两组 set；武器 + entry）。实测单次调用固定开销约 0.23 µs、每页约 0.2 µs。之后各处 Readable 的答案不变，只是都在缓存里找到。
 - `MoveTo`：路线预算把本帧排在「上一帧第一个被拒者」之前的调用者直接返回 pending（`GroundNavigate` 的轮转），而它两端的落地射线（`RouteStart`，1.6 ms/帧）此时根本不会被用到。先问 `GroundNavigateDeferred`（与调用共用同一个帧轮转函数、同样推进轮转状态），轮不到就直接 Stand，不再射线。
-
+- 地面 A* 按格坐标对已发现节点做固定容量哈希索引。每条可走边只检查同桶节点，同格多层仍按高度差严格小于 0.25 米、按插入顺序命中。搜下一段时重置索引，已铺好的路线继续走。桶链利用节点末尾已有的对齐空间，士兵和支援的每个搜索状态分别增加 1 KiB 和 2 KiB 桶头。节点优先级、开放边查询和每帧预算保持原有规则。
 
 ### 3.4 枪线（B1）
 

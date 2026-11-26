@@ -53,11 +53,41 @@ constexpr int kNodes=1536,kRouteNodes=4096,kPath=512;
 // A support route's greed (Profile::greed): it must find a way in, not the shortest; with it a route of RouteState gets
 // round a wall 400 m long across its middle, where the shortest-route search runs out of nodes (ground_navigation_test).
 constexpr float kRouteGreed=2.0f;
-struct Node { Point at;float g{},f{};int x{},z{},parent=-1;bool closed{}; };
+// A bucket stores one-based node indices; the link fits in Node's trailing padding.
+struct Node { Point at;float g{},f{};int x{},z{},parent=-1;bool closed{};std::uint16_t nextInBucket{}; };
+static_assert(sizeof(Node)==36);
 template<int N>
 struct BasicState {
     static constexpr int kCapacity=N;
     Node nodes[N]{};Point path[kPath]{};
+    static_assert(N<=65535);
+    static constexpr unsigned kBuckets=N<=kNodes ? 512 : 1024;
+    std::uint16_t cells[kBuckets]{};
+
+    static unsigned Bucket(int x,int z) noexcept {
+        const std::uint32_t hash=std::uint32_t(x)*0x8da6b343u ^ std::uint32_t(z)*0xd8163841u;
+        return (hash^(hash>>16))&(kBuckets-1);
+    }
+    int FindCell(int x,int z,float y) const noexcept {
+        int found=-1;
+        // Traverse newest first, retaining the earliest compatible floor as the original search did.
+        for(auto link=cells[Bucket(x,z)];link;link=nodes[link-1].nextInBucket) {
+            const auto& n=nodes[link-1];
+            if(n.x==x && n.z==z && std::fabs(n.at.y-y)<0.25f)found=link-1;
+        }
+        return found;
+    }
+    void AddNode(Node node) noexcept {
+        auto& head=cells[Bucket(node.x,node.z)];
+        node.nextInBucket=head;
+        nodes[count++]=node;
+        head=static_cast<std::uint16_t>(count);
+    }
+    void ResetNodes(Node start) noexcept {
+        std::fill_n(cells,kBuckets,std::uint16_t{0});
+        count=0;
+        AddNode(start);
+    }
     Point origin{},goal{},aim{},progress{};Profile profile{};   // aim: the grid cell nearest the goal (GridEstimate)
     int count{},active=-1,direction{},length{},cursor{};
     std::uint64_t retryAt{},progressAt{},checkedAt{},lastAt{};
@@ -81,24 +111,24 @@ using State=BasicState<kNodes>;
 using RouteState=BasicState<kRouteNodes>;
 template<class State>
 inline void Begin(State& s,Point from,Point goal,Profile p,std::uint64_t ms) noexcept {
-    s.count=1;s.active=-1;s.direction=0;s.length=s.cursor=0;s.partial=false;
+    s.active=-1;s.direction=0;s.length=s.cursor=0;s.partial=false;
     s.origin=from;s.goal=goal;s.profile=p;s.failed=false;s.initialized=true;
     s.progress=from;s.progressAt=ms;s.lastAt=ms;s.checked=false;
     s.searchingAhead=s.aheadFailed=false;
     // The cells are placed as the search places them (origin + index * cell), so a cell's estimate is whole steps.
     s.aim={from.x+std::round((goal.x-from.x)/p.cell)*p.cell,goal.y,from.z+std::round((goal.z-from.z)/p.cell)*p.cell};
-    s.nodes[0]={from,0.0f,p.greed*GridEstimate(from,s.aim),0,0,-1,false};
+    s.ResetNodes({from,0.0f,p.greed*GridEstimate(from,s.aim),0,0,-1,false});
 }
 // Profile::ahead: a search to `goal` from the end of the path being walked, the path kept (its end now a corner). The
 // actor's progress clock is the walk's, untouched; the leg it walks meanwhile is one walked (Partial's legStale).
 template<class State>
 inline void BeginAhead(State& s,Point goal,Profile p) noexcept {
     const Point from=s.path[s.length-1];
-    s.count=1;s.active=-1;s.direction=0;s.partial=true;
+    s.active=-1;s.direction=0;s.partial=true;
     s.origin=from;s.goal=goal;s.profile=p;s.failed=false;
     s.searchingAhead=true;s.aheadFailed=false;s.legWalked=true;
     s.aim={from.x+std::round((goal.x-from.x)/p.cell)*p.cell,goal.y,from.z+std::round((goal.z-from.z)/p.cell)*p.cell};
-    s.nodes[0]={from,0.0f,p.greed*GridEstimate(from,s.aim),0,0,-1,false};
+    s.ResetNodes({from,0.0f,p.greed*GridEstimate(from,s.aim),0,0,-1,false});
 }
 // The search ahead found nothing (or no room): the path being walked stays, and at its end the search begins again from
 // there as without Profile::ahead.
@@ -241,12 +271,11 @@ Result Search(State& s,Point from,std::uint64_t ms,Query& edge,const Profile& p,
         if(e==Edge::pending)return Result::pending;
         --budget;++s.direction;
         if(e==Edge::open) {
-            int found=-1;
-            for(int i=0;i<s.count;++i)if(s.nodes[i].x==x && s.nodes[i].z==z && std::fabs(s.nodes[i].at.y-at.y)<0.25f){found=i;break;}
+            const int found=s.FindCell(x,z,at.y);
             const float g=current.g+Horizontal(current.at,at)+std::fabs(current.at.y-at.y);
             if(found<0) {
                 if(s.count==State::kCapacity)return PartialOrFail(s,from,ms) ? Result::pending : Result::blocked;
-                found=s.count++;s.nodes[found]={at,g,g+p.greed*GridEstimate(at,s.aim),x,z,s.active,false};
+                s.AddNode({at,g,g+p.greed*GridEstimate(at,s.aim),x,z,s.active,false});
             } else if(g<s.nodes[found].g) {
                 auto& n=s.nodes[found];n.g=g;n.f=g+p.greed*GridEstimate(at,s.aim);n.parent=s.active;n.closed=false;
             }
