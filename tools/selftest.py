@@ -4144,7 +4144,10 @@ def vehicle_sound_wired() -> None:
         named = re.search(rf'(\w+)={rva}\b', code)
         assert rva in sigs or (named and (named.group(1) in sigs or f'Matches({named.group(1)},' in code)), f'{rva} is not checked'
     hook = crew.split('void __fastcall InputHook(', 1)[1]
-    assert 0 <= hook.find('&VehicleSound,v') < disabled_return_offset(hook), 'VehicleSound before the Enabled test'
+    assert 0 <= hook.find('&SoundStep,v') < disabled_return_offset(hook), 'VehicleSound before the Enabled test'
+    # One "now" for the step and its recording (docs/trace-replay.md): read once at the call, handed to both.
+    assert 'void SoundStep(unsigned char* v) noexcept { VehicleSoundAt(v,soundMs); }' in crew
+    assert 0 <= hook.find('soundMs=GameMs();') < hook.find('&SoundStep,v'), "the step's time read before it"
     assert 'ResetVehicleSound();' in mission and 'InstallVehicleSound();' in plugin
     # The listener is the camera's for the vehicles too: placed whenever VehicleSound is on (not only once a jet sounded),
     # and a stock sound is held only while ours can be heard (the clips made and the listener placed).
