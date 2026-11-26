@@ -562,6 +562,32 @@ class Gate:
         return _Held()
 
 
+def replace_open(src: str, dst: str) -> None:
+    """`src` renamed over `dst` atomically while the autopilot may hold `dst` open: its keys poll reads it with
+    FILE_SHARE_DELETE, which os.replace (MoveFileEx) still refuses (WinError 5, 2026-11-26), but a POSIX-semantics
+    rename (FileRenameInfoEx) takes: the reader keeps the old file until it closes it."""
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.restype = wt.HANDLE
+    kernel.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID, wt.DWORD, wt.DWORD, wt.HANDLE]
+    kernel.SetFileInformationByHandle.argtypes = [wt.HANDLE, ctypes.c_int, wt.LPVOID, wt.DWORD]
+    kernel.CloseHandle.argtypes = [wt.HANDLE]
+    target = os.path.normpath(os.path.abspath(dst))
+    # DELETE access, every share mode, OPEN_EXISTING
+    handle = kernel.CreateFileW(os.path.abspath(src), 0x00010000, 7, None, 3, 0, None)
+    if handle in (None, wt.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        # FILE_RENAME_INFO with the name as WCHARs (a c_char array would stop at the UTF-16's first zero byte)
+        class RenameInfo(ctypes.Structure):
+            _fields_ = [('flags', wt.DWORD), ('root', wt.HANDLE), ('length', wt.DWORD),
+                        ('name', ctypes.c_wchar * (len(target) + 1))]
+        info = RenameInfo(0x1 | 0x2, None, 2 * len(target), target)   # REPLACE_IF_EXISTS | POSIX_SEMANTICS
+        if not kernel.SetFileInformationByHandle(handle, 22, ctypes.byref(info), ctypes.sizeof(info)):   # FileRenameInfoEx
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def key(game: str, spec: str, ms: int, gate: Gate | None = None) -> None:
     """Holds `spec` `ms` ms (the autopilot's keys file). With `gate` (a run's `during`): pressed only before the run's
     end began, released unless everything is already being put back (then uninstall removes the keys file)."""
@@ -573,7 +599,7 @@ def key(game: str, spec: str, ms: int, gate: Gate | None = None) -> None:
     def write(text: str) -> None:
         with open(path + '.tmp', 'w') as f:
             f.write(text)
-        os.replace(path + '.tmp', path)
+        replace_open(path + '.tmp', path)
     def release() -> None:
         if gate is None:
             write('')
@@ -906,11 +932,11 @@ def pack_content(game: str, key: str) -> int:
 
 def mission_target(game: str, mission: str) -> tuple[int, int]:
     """The row and the mode's content id a `mission` / `next` name enters (autopilot.cpp AskMission / AskNext):
-    range row 0 of TestRangeContent's mode, edf41:ROW / edf41mp01:ROW / edf41mp02:ROW of EDF41Content (+1, +2),
+    range row 0 (range:ROW row ROW: the PvP presets) of TestRangeContent's mode, edf41:ROW / edf41mp01:ROW / edf41mp02:ROW of EDF41Content (+1, +2),
     edf5:ROW of EDF5CampaignContent, a stock row (RM015 13, M001 1, a number) of the stock list (content id 0)."""
     low = mission.lower()
-    if low == 'range':
-        return 0, pack_content(game, 'TestRangeContent')
+    if low == 'range' or low.startswith('range:'):
+        return (int(mission[6:]) if low.startswith('range:') else 0), pack_content(game, 'TestRangeContent')
     for prefix, extra in (('edf41:', 0), ('edf41mp01:', 1), ('edf41mp02:', 2)):
         if low.startswith(prefix):
             first = pack_content(game, 'EDF41Content')
@@ -955,7 +981,8 @@ def cycle_report(log: list[str], count: int, outcome: str | None) -> str:
 
 
 def hold_keys(game: str, spec: str, ms: int, shots: str | None, name: str) -> None:
-    """A scheduled key hold of `run`, with the window's picture just before and just after when pictures are kept."""
+    """A scheduled key hold of `run`, with the window's picture just before, halfway through the hold (what the held
+    input moves, while it is still held) and just after when pictures are kept."""
     def picture(when: str) -> None:
         if not shots:
             return
@@ -966,7 +993,14 @@ def hold_keys(game: str, spec: str, ms: int, shots: str | None, name: str) -> No
             print('no picture:', e)
     picture('before')
     print('holding', spec, 'for', ms, 'ms')
-    key(game, spec, ms)
+    during = threading.Timer(ms / 2000, picture, ('during',)) if shots else None
+    if during:
+        during.start()
+    try:
+        key(game, spec, ms)
+    finally:
+        if during:
+            during.join()
     picture('after')
 
 
