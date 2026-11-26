@@ -157,15 +157,17 @@ void Scripted() {
         fx=r.Tap(kToggle);
         Check(fx.close && !fx.backToTasks && !r.s.open && r.a.commits==1,"toggle closes after commit");
     }
-    // tabs: Q/E wrap and commit; a failed commit keeps the tab and notes why
+    // tabs: Q/E step and commit, stopping at both ends (no wrap); a failed commit keeps the tab and notes why
     {
         Rig r;
         r.Tap(kTabNext);
         Check(r.s.tab==1 && r.a.commits==1,"tab next commits the page");
         r.Tap(kTabPrev);r.Tap(kTabPrev);
-        Check(r.s.tab==2,"tabs wrap");
+        Check(r.s.tab==0 && r.a.commits==1 && r.b.commits==1,"tabs stop at the first (no commit for a step that goes nowhere)");
+        r.Tap(kTabNext);r.Tap(kTabNext);r.Tap(kTabNext);
+        Check(r.s.tab==2 && r.a.commits==2 && r.b.commits==2 && r.c.commits==0,"tabs stop at the last");
         r.c.failCommit=true;
-        r.Tap(kTabNext);
+        r.Tap(kTabPrev);
         Check(r.s.tab==2 && r.s.note[0]==L'b',"failed commit keeps the tab, says why");
         Effects fx=r.Tap(kDigit1+1);
         Check(fx.op==Op::none,"failed commit blocks a preset switch");

@@ -161,8 +161,10 @@ def check_model_offline() -> None:
     has_main = lambda _p: b'CAS'  # noqa: E731
     check(mm.menu_problems(after, has_main) == [], 'a unified file')
     heli = mm.menu_problems(after, lambda _p: b'HELI')
-    check(heli == [f"菜单 CAS {stock['animation_model'][1]} 没有名为 'main' 的动画组（['Roter', 'Main']）：渲染器会拿 -1 当下标"],
+    check(heli[:1] == [f"菜单 CAS {stock['animation_model'][1]} 没有名为 'main' 的动画组（['Roter', 'Main']）：渲染器会拿 -1 当下标"],
           f'a menu CAS without `main`: refused (the -1 index) {heli}')
+    check(len(heli) == 2 and "soldier_weapon_slot 的动画组 ['weapon']" in heli[1],
+          f'nor the soldier\'s `weapon` slot: refused too {heli}')
     missing = mm.menu_problems(before, has_main)
     check(missing == [f'缺 {k}' for k in (mm.MENU_MODEL, 'change_color', 'random_animation')], f'battle-only: {missing}')
     moved = dict(mm.add_sgo(battle, keys))
@@ -177,7 +179,42 @@ def check_model_offline() -> None:
     bad[mm.MENU_MODEL] = ['x.cas']
     check(mm.menu_problems(sgo.write_depth_first(version, bad), has_main) == [f'{mm.MENU_MODEL} 不是 [[archive, model], CAS, MAB]'],
           'a malformed menu model refused')
+    check_weapon_slot_offline(version, stock)
     mm.cas_groups = groups
+
+
+def check_weapon_slot_offline(version: int, stock: dict) -> None:
+    """soldier_weapon_slot against the menu CAS (the 整备 -> 载具 crash: the Ranger's `weapon` slot on a vehicle CAS of
+    `Roter` / `main` pushed no group number, the renderer read one at 0x93ED2E). Stand-ins as check_model_offline's,
+    b'VEH' a plugin jet's menu CAS (`Roter`, `main`, no `weapon`)."""
+    mm.cas_groups = lambda cas: {b'CAS': ['weapon', 'main'], b'VEH': ['Roter', 'main'],
+                                 b'FEN': ['weapon_r', 'weapon_l', 'main']}[cas]
+    jet = {'animation_model': [['app:/object/v.mrab', 'v.mdb'], mm.JET_CAS, 'app:/object/v.mab'],
+           'durability': mm._f(100.0)}
+    keys = mm.vehicle_menu_keys(stock, jet['animation_model'], mm.menu_cas_path(mm.JET_CAS))
+    check(keys['soldier_weapon_slot'] == [[[0.0], mm.MENU_ANMGROUP, 0, 0]],
+          f"a vehicle's slot: the Ranger's with the group `main` {keys['soldier_weapon_slot']}")
+    made = sgo.write_depth_first(version, mm.add_sgo(jet, keys))
+    check(mm.menu_problems(made, lambda _p: b'VEH') == [], 'a vehicle on a menu CAS of Roter / main: unified')
+    ranger = dict(mm.add_sgo(jet, keys), soldier_weapon_slot=stock['soldier_weapon_slot'])
+    lost = mm.menu_problems(sgo.write_depth_first(version, ranger), lambda _p: b'VEH')
+    check(lost == [f"菜单 CAS {mm.menu_cas_path(mm.JET_CAS)} 没有 soldier_weapon_slot 的动画组 ['weapon']"
+                   "（['Roter', 'main']）：渲染器少存下标、照读（0x93ED2E 读野指针）"],
+          f"the Ranger's `weapon` slot on a vehicle CAS (the crash): refused {lost}")
+    empty = dict(mm.add_sgo(jet, keys), soldier_weapon_slot=[])
+    short = mm.menu_problems(sgo.write_depth_first(version, empty), lambda _p: b'VEH')
+    check(short == ['soldier_weapon_slot 只有 0 项，渲染器要读 1 个动画组下标（0x93ED2E 越界）'], f'no slot: refused {short}')
+    check(mm.weapon_slots('N607_COMMON_FENCER_HC') == 2 and mm.weapon_slots('N601_COMMON_RANGER_AF') == 1 and
+          mm.weapon_slots('OBJECT/V504_BEGARUTA.SGO') == 1, 'the Fencer reads two groups (0x93FF07), the rest one')
+    fencer = dict(mm.add_sgo(jet, keys), soldier_weapon_slot=[[[0.0], 'weapon_r', 0, 0], [[1.0], 'weapon_l', 0, 0]])
+    fen = sgo.write_depth_first(version, fencer)
+    check(mm.menu_problems(fen, lambda _p: b'FEN', 2) == [], "a Fencer's two groups, both in its menu CAS")
+    one = sgo.write_depth_first(version, dict(fencer, soldier_weapon_slot=fencer['soldier_weapon_slot'][:1]))
+    check(mm.menu_problems(one, lambda _p: b'FEN', 2) == ['soldier_weapon_slot 只有 1 项，渲染器要读 2 个动画组下标（0x93ED2E 越界）'],
+          'a Fencer with one slot: refused')
+    check(mm.menu_problems(fen, lambda _p: b'CAS', 2) == [
+        f"菜单 CAS {mm.menu_cas_path(mm.JET_CAS)} 没有 soldier_weapon_slot 的动画组 ['weapon_r', 'weapon_l']"
+        "（['weapon', 'main']）：渲染器少存下标、照读（0x93ED2E 读野指针）"], "a Fencer's groups not in the CAS: refused")
 
 
 def check_real(game: object, game_dir: str) -> None:
@@ -220,9 +257,16 @@ def check_real(game: object, game_dir: str) -> None:
             return game.read(*mp.cas_ref(path))
         except KeyError:
             return None
-    check(mm.menu_problems(sgo.write_depth_first(*synthetic_jet(game)), read_cas)[-1:] ==
-          [f"菜单 CAS {mm.JET_CAS} 没有名为 'main' 的动画组（['Roter', 'Main']）：渲染器会拿 -1 当下标"],
-          'a jet naming its battle CAS in the menu: refused (the -1 index)')
+    jet_problems = mm.menu_problems(sgo.write_depth_first(*synthetic_jet(game)), read_cas)
+    check(jet_problems[-2:] ==
+          [f"菜单 CAS {mm.JET_CAS} 没有名为 'main' 的动画组（['Roter', 'Main']）：渲染器会拿 -1 当下标",
+           f"菜单 CAS {mm.JET_CAS} 没有 soldier_weapon_slot 的动画组 ['main']（['Roter', 'Main']）："
+           '渲染器少存下标、照读（0x93ED2E 读野指针）'],
+          f'a jet naming its battle CAS in the menu: refused (the -1 index, its slot group not there either) {jet_problems}')
+    # The 整备 -> 载具 crash: the stock Ranger menu's slot names `weapon`, which no vehicle menu CAS has.
+    ranger_slot = mm.members_of(game.read(mm.MENU_FOLDER, mm.VEHICLE_STOCK))['soldier_weapon_slot']
+    check([e[1] for e in ranger_slot] == ['weapon'] and 'weapon' not in mm.cas_groups(read_cas(mm.menu_cas_path(mm.JET_CAS))),
+          f"the Ranger menu's slot `weapon`, not in the jet menu CAS {ranger_slot}")
     head = {f'N601_COMMON_RANGER_{k}_LEADER' for k in ('FL', 'RL', 'SG', 'SN')}
     for rel, data in files.items():
         if not rel.startswith('OBJECT/') or rel == mp.MECH_BASE:
@@ -230,7 +274,8 @@ def check_real(game: object, game_dir: str) -> None:
         name = rel[len('OBJECT/'):-len('.SGO')]
         battle = game.read('OBJECT', name + '.SGO')
         check(data[:4] == b'DSGO' and dsgo.write(dsgo.parse(data)) == data, f'{name}: a DSGO, parses back exactly')
-        check(mm.menu_problems(data, read_cas) == [], f'{name}: everything the menu needs ({mm.menu_problems(data, read_cas)})')
+        problems = mm.menu_problems(data, read_cas, mm.weapon_slots(name))
+        check(problems == [], f'{name}: everything the menu needs, its weapon slots in the menu CAS ({problems})')
         check(mm.battle_equal(battle, data) == [], f'{name}: every battle key equal ({mm.battle_equal(battle, data)})')
         m, b = mm.members_of(data), mm.members_of(battle)
         stock = mm.members_of(game.read(mm.MENU_FOLDER, mm.STOCK_MENU[name[:4]]))
@@ -290,8 +335,11 @@ def check_vehicle_bases(game: object, game_dir: str, files: dict[str, bytes], re
         battle = support_loadout._source(game_dir, game, folder, name)
         made = mp.unify_vehicle(game, rel, battle, game_dir)
         m = mm.members_of(made)
-        check(mm.menu_problems(made, read_cas) == [] and mm.battle_equal(battle, made) == [],
-              f'{rel}: unified, every battle key equal')
+        # The Mods copy may be an earlier install's unified file: its menu keys are derived again, so only the
+        # battle keys (everything but VEHICLE_ADDED) must stay.
+        was = {k: v for k, v in mm.members_of(battle).items() if k not in mm.VEHICLE_ADDED}
+        moved = [k for k in was if m.get(k) != was[k]] + [k for k in m if k not in was and k not in mm.VEHICLE_ADDED]
+        check(mm.menu_problems(made, read_cas) == [] and moved == [], f'{rel}: unified, every battle key equal {moved}')
         check(m[mm.MENU_MODEL] == m['animation_model'], f'{rel}: its own model, CAS (has `main`) and MAB')
         check(mp.unify_vehicle(game, rel, made, game_dir) == made, f'{rel}: unified again, the same bytes')
         # A file built on the unified base whose model changed: the menu keys follow the battle model.

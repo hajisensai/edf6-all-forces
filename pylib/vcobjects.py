@@ -875,16 +875,16 @@ PRIMER_GUN_FILES: dict[str, tuple[float, float, float, float, float, float, tupl
 }
 _PRIMER_NEEDLE, _PRIMER_SPIT, _PRIMER_BARB, _PRIMER_STING = ('app:/weapon/' + f.lower() for f in PRIMER_GUN_FILES)
 # What a creature sounds like (a Jet's `creature`): the sound bank its cues are in (added to game_sound), the 506's
-# heli_se_table rows (index -> SEPRESET cue: 3 hit, 4 crash, 5 rotor crash, 6-8 the explosions: which of those its
-# death plays is not known, so all three), and ragdoll_contact's cue. A cue the banks do not hold is silence.
+# heli_se_table rows (index -> SEPRESET cue: 3 hit, 4 crash, 6-8 the explosions: which of those its death plays is not
+# known, so all three; 5, the rotor crash, is JET_HELI_SE_ROWS' silence as for every jet), and ragdoll_contact's cue.
 CREATURE_SOUNDS: dict[str, tuple[str, dict[int, str], str]] = {
     # the giant ant's (GIANTANT01.SGO ant_DamageEffectSe / ant_BloodSe / ant_DeadSe)
     'centipede': ('app:/sound/adx/tikyuu4_en_GiantAnt.acb',
-                  {3: '巨大蟻ヒットエフェクト', 4: '巨大蟻衝突', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき大', 7: '敵共通血しぶき小',
+                  {3: '巨大蟻ヒットエフェクト', 4: '巨大蟻衝突', 6: '敵共通血しぶき大', 7: '敵共通血しぶき小',
                    8: '巨大蟻死亡'}, '巨大蟻衝突'),
     # the giant bee's (GIANTBEE01.SGO bee_DamageEffectSe / bee_DamageSe / bee_DeadBloodSe / bee_DeadSe)
     'dragonfly': ('app:/sound/adx/tikyuu4_en_GiantBee.acb',
-                  {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
+                  {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
                    8: '蜂死亡'}, '蜂ダメージ'),
 }
 STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_SALVO, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP,
@@ -897,9 +897,6 @@ _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
                            *((f, stock) for f, (stock, _k) in XM_GUN_FILES.items()),
                            *((f, JET_BOMB_STOCK if STORES[store_of(_weapon(f))[0]].role == 'bomb' else JET_MISSILE_STOCK)
                              for f in STORE_FILES))}
-# The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
-# does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
-# (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
 # jet_sgo: the seat of an aircraft the player boards. vehicle_riding_position[i][3] is not a pose: it is the seat's
 # name key in the text table (0x7A3500; 505_TANK_DRIVER and 506_HELI_DRIVER both read "Pilot Seat"); the rider's pose
 # is the seat locator's own MAB parameters (Animation / DispCharacter, 0x62B62D), the 506's: rider hidden
@@ -1237,8 +1234,18 @@ TRACKED: dict[str, str] = {
 # what the drill touches (an enemy's lock point within ~6 m) and bursts there; meeting nothing it is gone without a burst.
 DRILL_CHARGE_FILE = 'EDF6VC_DRILL_CHARGE.SGO'
 DRILL_CHARGE_RADIUS, DRILL_CHARGE_SPEED, DRILL_CHARGE_LIFE = 4.0, 2.5, 4
+# The 506's heli_se_table rows a jet must not play (the user, 2026-11-26: 「喷气机的音效怎么用的螺旋桨的…把原版的砍掉吧」),
+# each with the SEPRESET name V506_HELI.SGO holds there (jet_sgo checks them). Its 16 rows (docs/sound-re.md §3):
+# 0 ヘリ起動アイドリング, 1 ヘリローター, 2 ヘリ着陸, 3 ヘリダメージ, 4 ヘリ衝突, 5 ヘリローター衝突, 6-8 ヘリ爆発小/極小/大,
+# 9 ヘリ搭乗, 10 ヘリ降車, 11-13 ビークル水中移動/水中移動停止/水中落ちる, 14-15 ビークル燃料切れ警告/燃料切れ.
+# Silenced: the rotor's (0 start-up and idle, 1 its loop, 5 the rotor striking something) and what only a helicopter
+# does (2 landing, 9 boarding, 10 leaving). Kept: what any vehicle makes (3 hit, 4 crash, 6-8 explosions; 11-15 are
+# the shared ビークル cues: water and fuel). A name SEPRESET.SGO does not hold makes the game's preset empty (0x7B16F0
+# returns false, its cue none) and playing it does nothing (0x7B4510); the plugin plays the engine (src/jetsound.cpp).
 JET_SILENT_SE = 'EDF6VC_SILENT'
-JET_ROTOR_SE_ROWS = (0, 1)
+JET_HELI_SE: dict[int, str] = {0: 'ヘリ起動アイドリング', 1: 'ヘリローター', 2: 'ヘリ着陸', 5: 'ヘリローター衝突', 9: 'ヘリ搭乗',
+                               10: 'ヘリ降車'}
+JET_HELI_SE_ROWS = tuple(JET_HELI_SE)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
     'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _STRIKE),
@@ -2017,9 +2024,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.file_of(airframe).lower(),
                     _jet_ragdoll(rag[1], body, box[0] if door or airframe is not False else None)]
     se = m.get('heli_se_table')
-    if not isinstance(se, list) or len(se) <= max(JET_ROTOR_SE_ROWS):
+    if not isinstance(se, list) or len(se) <= max(JET_HELI_SE_ROWS) or any(
+            sgo.plain(se[i]) != cue for i, cue in JET_HELI_SE.items()):
         raise ValueError('V506_HELI 的 heli_se_table 不是预期的样子')
-    for i in JET_ROTOR_SE_ROWS:
+    for i in JET_HELI_SE_ROWS:
         se[i] = JET_SILENT_SE
     if jet.creature:
         bank, cues, contact = CREATURE_SOUNDS[jet.creature]

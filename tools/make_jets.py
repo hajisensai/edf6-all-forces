@@ -6,8 +6,8 @@ stock BOMBER501.MRAB with its model split into elevon bones the plugin moves (py
 docs/mdb-format.md), which only these two SGOs use (the stock bombers keep theirs), and their guns into
 <game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO, the stores EDF6VC_<KIND>_<rounds>.SGO (pylib/vcobjects.py STORES: missiles
 with a jet's launch and motor sounds, bombs)
-and the blast drones' charges EDF6VC_BLAST_CHARGE / EDF6VC_DOLL_CHARGE.SGO (vcobjects.jet_guns). The jets' rotor
-sound is silenced (vcobjects.JET_ROTOR_SE_ROWS): the plugin plays their engine (src/jetsound.cpp). Without the SGOs the plugin leaves the stock
+and the blast drones' charges EDF6VC_BLAST_CHARGE / EDF6VC_DOLL_CHARGE.SGO (vcobjects.jet_guns). The jets' helicopter
+sounds (rotor, landing, boarding) are silenced (vcobjects.JET_HELI_SE_ROWS): the plugin plays their engine (src/jetsound.cpp). Without the SGOs the plugin leaves the stock
 bombers alone.
 Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, which the Air Raider's call
 weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring, and EDF6VC_FLY_<KIND>.SGO: the plugin's other aircraft

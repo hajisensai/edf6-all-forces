@@ -1241,7 +1241,8 @@ void PublishOptions() noexcept {
 
 // ---- the layered emitters (gpufx_layers.h) ----
 // The events come from the game's own hooks (the shot entry 0x696FD0 through heli.cpp, EffectGenUtil::Explosion
-// 0x2E5ED0 here), queued under eventLock and spawned by TickNative. Both are this machine's: a remote player's round
+// 0x2E5ED0 and Explosion_Big 0x2E7A30 here; each turns its own size unit back into the radius), queued under
+// eventLock and spawned by TickNative. Both are this machine's: a remote player's round
 // is replayed through 0x696FD0 (replay 1), a remote blast is this machine's own bullet's.
 SRWLOCK eventLock=SRWLOCK_INIT;
 constexpr std::size_t kQueueMost=256;
@@ -1281,14 +1282,14 @@ using ExplosionBigFn=void(__fastcall*)(void*,const float*,const float*,float,flo
 ExplosionFn explosionNext=nullptr;
 ExplosionBigFn explosionBigNext=nullptr;
 
-void QueueBlast(const float* pos,float size) noexcept {
+void QueueBlast(const float* pos,float radius) noexcept {
     if(!optLayers.load(std::memory_order_relaxed))return;
     __try {
-        if(Readable(pos,12) && std::isfinite(pos[0]) && std::isfinite(pos[1]) && std::isfinite(pos[2]) && std::isfinite(size) && size>0.0f) {
+        if(Readable(pos,12) && std::isfinite(pos[0]) && std::isfinite(pos[1]) && std::isfinite(pos[2]) && std::isfinite(radius) && radius>0.0f) {
             AcquireSRWLockExclusive(&eventLock);
             if(blastQueued<kQueueMost) {
                 BlastEvent& e=blastQueue[blastQueued++];
-                std::memcpy(e.pos,pos,sizeof(e.pos));e.size=size;
+                std::memcpy(e.pos,pos,sizeof(e.pos));e.radius=radius;
             } else layerQueueFull.fetch_add(1,std::memory_order_relaxed);
             ReleaseSRWLockExclusive(&eventLock);
         }
@@ -1296,12 +1297,12 @@ void QueueBlast(const float* pos,float size) noexcept {
 }
 
 void __fastcall ExplosionHook(void* egu,const float* pos,const float* dir,float size,float shake,const float* color,float light) {
-    QueueBlast(pos,size);
+    QueueBlast(pos,ExplosionRadius(size));      // size = radius / 5 (gpufx_layers.h)
     explosionNext(egu,pos,dir,size,shake,color,light);
 }
 
 void __fastcall ExplosionBigHook(void* egu,const float* pos,const float* dir,float size,float shake,unsigned char flag) {
-    QueueBlast(pos,size);
+    QueueBlast(pos,ExplosionBigRadius(size));   // size = radius / 70 (gpufx_layers.h)
     explosionBigNext(egu,pos,dir,size,shake,flag);
 }
 

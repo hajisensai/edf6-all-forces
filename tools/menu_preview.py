@@ -202,7 +202,7 @@ def unify_soldier(game: rootcpk.Game, name: str, data: bytes,
 
 def check(game: rootcpk.Game, name: str, battle: bytes, unified: bytes, root: str | None = None) -> None:
     """ValueError when `unified` lacks what either loader needs or a battle key differs from `battle`."""
-    problems = menu_model.menu_problems(unified, read_cas_for(game, root))
+    problems = menu_model.menu_problems(unified, read_cas_for(game, root), menu_model.weapon_slots(name))
     moved = menu_model.battle_equal(battle, unified)
     if problems or moved:
         raise ValueError(f'{name} 不是统一模型文件：{problems + [f"战斗键 {k} 变了" for k in moved]}')

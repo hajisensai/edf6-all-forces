@@ -240,14 +240,19 @@ inline Pedal PedalOf(float speed,float stick) noexcept {
 }
 
 // A jet's engine (ours): its rpm (800 idle .. 2600 full military power .. 2750 with the afterburner) spooling up and
-// down, the afterburner's share (wep) lighting and going out, the load its throttle.
+// down, the afterburner's share (wep) lighting and going out, the load its throttle. The afterburner lights only once
+// the core is at military power (kJetLight): it was lit on the throttle alone, at 2 a second, so slamming it from idle
+// had it full in 0.5 s at ~1550 rpm, the jet_ab layer (+8 dB, low) over the spooling turbine at its loudest where the
+// core is quiet: a propeller's low thrum (the user, 2026-11-26: 「喷气机的音效怎么用的螺旋桨的」). Its ignition
+// (k_jet_ab_start, set off by wep crossing 0.01) comes with it, at the top of the spool.
 constexpr float kJetIdle=800.0f,kJetMil=2600.0f,kJetWep=2750.0f,kJetAiTop=2400.0f;
+constexpr float kJetLight=kJetMil-50.0f;
 constexpr float kJetSpoolUp=500.0f,kJetSpoolDown=650.0f;   // rpm / s: idle to full in about 4 s
 struct Spool { float rpm=kJetIdle,wep=0.0f,load=0.0f; };
 inline void Step(Spool& s,float power,bool burner,float dt) noexcept {
     const float p=std::isfinite(power) ? (power<0.0f ? 0.0f : power>1.0f ? 1.0f : power) : 0.0f;
     s.rpm=Toward(s.rpm,burner ? kJetWep : kJetIdle+(kJetMil-kJetIdle)*p,kJetSpoolUp,kJetSpoolDown,dt);
-    s.wep=Toward(s.wep,burner ? 1.0f : 0.0f,2.0f,1.5f,dt);
+    s.wep=Toward(s.wep,burner && s.rpm>=kJetLight ? 1.0f : 0.0f,2.0f,1.5f,dt);
     s.load=Toward(s.load,p,1.5f,1.5f,dt);
 }
 // The AI's sheets end at 2400: the player's range mapped onto theirs.

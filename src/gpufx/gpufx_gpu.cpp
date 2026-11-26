@@ -202,9 +202,10 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     V o;
     o.pos = mul(vp, Proj);
     o.color = p.color;
-    // Ours: a puff whose centre is about as near as its own size fades (the camera inside a dust cloud sees through
-    // it, not a wall); the stock kinds keep their own distance fade.
-    if (Kind == 0u) o.color.a *= saturate((centre - 0.25 * p.size) / max(0.75 * p.size, 0.5));
+    // Ours: a puff fades only once the camera is inside it (its centre nearer than half its size, to nothing at the
+    // centre): the camera inside a dust cloud sees through it, not a wall, while a puff a size away stays whole (a
+    // fade from one size out thinned every near blast). The stock kinds keep their own distance fade.
+    if (Kind == 0u) o.color.a *= saturate(centre / max(0.5 * p.size, 0.5));
     float2 uv = c * float2(0.5, -0.5) + 0.5;
     float last = (float)(max(Frames, 1u) - 1u);
     float fr = clamp(p.frame, 0.0, last);
