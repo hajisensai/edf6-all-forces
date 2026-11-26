@@ -315,7 +315,7 @@ def probe_parsing() -> None:
         log = os.path.join(d, 'vehiclecrew.log')
         perf = c_format('src/crew.cpp', 'PERF %u frames, %u steps')
         frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
-        havok = c_format('src/perf_probe.cpp', 'PERF HAVOK')
+        havok = c_format('src/perf_probe.cpp', 'PERF HAVOK %sbuild')
         render = c_format('src/perf_probe.cpp', 'PERF RENDER %u presents')
         net = c_format('src/perf_probe.cpp', 'PERF NET CHANNELS')
         gpu = c_format('src/perf_probe.cpp', 'PERF GPU a frame')
@@ -326,8 +326,10 @@ def probe_parsing() -> None:
             f.write('[13:00:20.000] ' + perf % (100, 300, 50.0, 20, 80.0, 100, 20, 40, 33, 16.6, 60, 30.0) + '\n')
             f.write('[13:00:15.000] ' + frame % (300, 10, 0.1, 1.0, 4.0, 0.5, 8.0, 4.0, 0.5, 0.01, 3.0, 5.6) + '\n')
             f.write('[13:00:20.000] ' + frame % (100, 0, 0.1, 1.0, 6.0, 0.7, 40.0, 13.3, 1.5, 0.01, 1.0, 8.6) + '\n')
-            f.write('[13:00:15.000] ' + havok % (100, 200.0, 5.0, 100, 100.0, 3.0) + '\n')
-            f.write('[13:00:20.000] ' + havok % (200, 600.0, 6.0, 200, 200.0, 4.0) + '\n')
+            f.write('[13:00:15.000] ' + havok % ('', 100, 200.0, 5.0, 100, 100.0, 3.0) + '\n')
+            f.write('[13:00:20.000] ' + havok % ('', 200, 600.0, 6.0, 200, 200.0, 4.0) + '\n')
+            f.write('[13:00:20.000] ' + havok % ('before ', 100, 100.0, 2.0, 100, 50.0, 1.0) + '\n')
+            f.write('[13:00:20.000] ' + havok % ('after ', 100, 500.0, 6.0, 100, 150.0, 4.0) + '\n')
             f.write('[13:00:20.000] ' + render % (400, 0.2, 3.0, 12.5, 40.0, 20.0, 45.0, 90.0, 2,
                                                   1200, 300, 0, 0, 0, 7, 2500) + '\n')
             f.write('[13:00:15.000] ' + gpu % (40.0, 12.0, 0.0, 0.25, 0.0, 1.5, 300.0, 0.8) + '\n')
@@ -351,6 +353,9 @@ def probe_parsing() -> None:
         h = perf_report.read_havok(log, w)
         check(h['build'] == (300, 800.0 / 300, 6.0) and h['finish'] == (300, 1.0, 4.0),
               'Havok timings weight each graph by its call count')
+        check(h['before objects build'] == (100, 1.0, 2.0) and h['after objects build'] == (100, 5.0, 6.0)
+              and h['before objects finish'] == (100, 0.5, 1.0) and h['after objects finish'] == (100, 1.5, 4.0),
+              'Havok reports the two steps separately without double counting the legacy totals')
         r = perf_report.read_render(log, w)
         check(r['presents'] == 400 and r['stepped_worst'] == 90.0 and r['unpaired'] == 2 and r['submits'][0] == 1200
               and r['meshes'] == 2500, 'PERF RENDER: presents, input to present, submits by pass (gpu-2, latency-2)')

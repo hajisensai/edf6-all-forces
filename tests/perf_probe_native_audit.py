@@ -40,6 +40,7 @@ checked = 0
 for site, target in (('kInputCall', 'kInput'), ('kFenceCall', 'kFence'), ('kPresentCall', 'kPresentCmd'),
                      ('kUpdateCall', 'kUpdate'), ('kDrawCall', 'kDraw'), ('kResolveCall', 'kResolve'),
                      ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette'),
+                     ('kHavokBeforeCall', 'kHavokStep'), ('kHavokAfterCall', 'kHavokStep'),
                      ('kHavokBuildCall', 'kHavokBuild'), ('kHavokFinishCall', 'kHavokFinish')):
     call(value(site), value(target))
     checked += 1

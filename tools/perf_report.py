@@ -413,18 +413,23 @@ def read_frame_split(log: str, window: tuple[float, float]) -> dict[str, float]:
     return out
 
 
-HAVOK_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF HAVOK build (\d+) calls ([\d.]+) ms total max '
-                        r'([\d.]+) ms, finish (\d+) calls ([\d.]+) ms total max ([\d.]+) ms')
+HAVOK_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF HAVOK (?:(before|after) )?'
+                        r'build (\d+) calls ([\d.]+) ms total max ([\d.]+) ms, '
+                        r'finish (\d+) calls ([\d.]+) ms total max ([\d.]+) ms')
 
 
 def read_havok(log: str, window: tuple[float, float]) -> dict[str, tuple[int, float, float]]:
     """Direct task graph timings: per phase (calls, mean ms, max ms), including the caller's waits."""
     rows = _rows(log, HAVOK_TIME, window)
     out = {}
-    for name, i in (('build', 4), ('finish', 7)):
-        calls = sum(int(m[i]) for m in rows)
-        if calls:
-            out[name] = (calls, sum(float(m[i + 1]) for m in rows) / calls, max(float(m[i + 2]) for m in rows))
+    for phase in (None, 'before', 'after'):
+        samples = [m for m in rows if m[4] == phase]
+        for graph, i in (('build', 5), ('finish', 8)):
+            calls = sum(int(m[i]) for m in samples)
+            if calls:
+                name = f'{phase} objects {graph}' if phase else graph
+                out[name] = (calls, sum(float(m[i + 1]) for m in samples) / calls,
+                             max(float(m[i + 2]) for m in samples))
     return out
 
 
