@@ -33,10 +33,22 @@ void Paint(uigpu::Painter& paint,uitext::Labels& labels,const View& view,hudtext
             from=layer.holeQuads;
         }
         PaintQuads(paint,layer,from,layer.quads.n);
-        for(int i=0;i<layer.nt;++i) {
-            const Text& t=layer.texts[i];
-            if(t.s[0])labels.Draw(paint,t.s,t.x,t.y,t.size,t.argb,ToText(t.align),t.bold,lang,frame,t.maxW);
-        }
+        // the texts that yield last: what the others drew first (their drawn edges, Text::yieldTo)
+        static Edge drawn[Layer::kTextMost];   // render thread only
+        for(int pass=0;pass<2;++pass)
+            for(int i=0;i<layer.nt;++i) {
+                const Text& t=layer.texts[i];
+                const bool yields=t.yieldTo>=0 && t.yieldTo<layer.nt && t.yieldTo!=i;
+                if(yields!=(pass==1))continue;
+                drawn[i]=Edge{};
+                if(!t.s[0])continue;
+                uitext::Fit fit;
+                fit.maxW=yields ? RoomBeside(t,drawn[t.yieldTo]) : t.maxW;
+                if(yields && drawn[t.yieldTo].on && !(fit.maxW>0.f))continue;   // no room left beside it
+                fit.size2=t.size2;fit.rowY[0]=t.rowY[0];fit.rowY[1]=t.rowY[1];
+                const uitext::Label l=labels.DrawFit(paint,t.s,t.x,t.y,t.size,t.argb,ToText(t.align),t.bold,lang,frame,fit);
+                drawn[i]=EdgeOf(t,l.w);
+            }
     }
 }
 }  // namespace crew::armory

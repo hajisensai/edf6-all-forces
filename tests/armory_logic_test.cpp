@@ -18,7 +18,7 @@ void Check(bool ok,const char* why) {
 using namespace crew::armory;
 
 // A page whose counts depend on the cursor (rows -> items -> fields), counting edits and commits.
-class FakePage final : public Page {
+class FakePage : public Page {
 public:
     const wchar_t* name=L"P";
     int subs=0;
@@ -520,12 +520,134 @@ void RandomWalk() {
         Check(closes>0,"the walk closes the screen sometimes");
     }
 }
+
+// Fitted texts: a row's label yields to its value (the value's width first, the label what it leaves), the swatch
+// between them, and the hint bar's keys yield to the note on up to two rows.
+void Fitting() {
+    const skin::Rect r{100,200,700,250};
+    const RowWidths plain=RowWidthsOf(r,false,false);
+    Check(plain.label==r.W()-2*kRowInset && plain.value==0,"a label alone: the whole row");
+    const RowWidths pair=RowWidthsOf(r,true,false);
+    Check(pair.label==r.W()-2*kRowInset && pair.value<pair.label && pair.value>r.W()*0.5f,
+          "a value: at most all but kRowLabelLeast of the row, the label yields to it");
+    const RowWidths chip=RowWidthsOf(r,true,true);
+    Check(r.x0+kRowInset+chip.label+kRowGap<=ChipX(r) && r.x1-kRowInset-chip.value>=ChipX(r)+kChipW+kRowGap,
+          "a swatch: the label before it, the value after it");
+    // the room beside a drawn text
+    Text label;
+    label.x=r.x0+kRowInset;label.maxW=pair.label;label.gap=kRowGap;label.align=Align::left;
+    Text value;
+    value.x=r.x1-kRowInset;value.align=Align::right;
+    const Edge drawn=EdgeOf(value,120);
+    Check(drawn.on && drawn.x1==value.x && drawn.x0==value.x-120,"a right text's edge");
+    Check(!EdgeOf(value,0).on,"nothing drawn: no edge");
+    Check(RoomBeside(label,drawn)==drawn.x0-kRowGap-label.x,"the label up to the value, a gap before it");
+    Check(RoomBeside(label,Edge{})==pair.label,"no value drawn: the label's own width");
+    Check(RoomBeside(label,EdgeOf(value,10))>RoomBeside(label,drawn),"a shorter value: more room for the label");
+    Text keys;
+    keys.x=160;keys.align=Align::left;keys.maxW=0;keys.gap=kHintGap;
+    Check(RoomBeside(keys,Edge{true,900,1000})==900-kHintGap-160,"no width of its own: up to the other");
+    // Build: the item rows' labels yield to their values; the hint bar's keys to the note, on two rows
+    Rig rig;
+    rig.Tap(kRight);
+    CopyText(rig.s.note,kTextMost,L"a note");
+    static View v;
+    Build(rig.s,rig.pages,3,rig.ps,rig.w,&v);
+    const Layer& base=v.layer[0];
+    int yielding=0,hints=0;
+    for(int i=0;i<base.nt;++i){
+        const Text& t=base.texts[i];
+        if(t.yieldTo<0)continue;
+        Check(t.yieldTo<base.nt && t.yieldTo!=i,"yields to a text of its layer");
+        const Text& to=base.texts[t.yieldTo];
+        if(t.y>=skin::layout::kHint.y0 && t.y<skin::layout::kHint.y1){
+            ++hints;
+            Check(t.align==Align::left && to.align==Align::right && std::wcscmp(to.s,L"a note")==0 && t.gap==kHintGap,
+                  "the keys yield to the note");
+            Check(t.size2==kHintRowSize && t.rowY[0]<t.rowY[1] && t.rowY[1]+kHintRowSize<=skin::layout::kHint.y1+1,
+                  "the keys may take two rows inside the bar");
+            Check(to.maxW>0 && to.maxW<t.maxW,"the note bounded below the keys' span");
+        } else {
+            ++yielding;
+            Check(t.align==Align::left && to.align==Align::right && to.y==t.y && t.gap==kRowGap && to.maxW>0,
+                  "a row's label yields to its value");
+        }
+    }
+    Check(yielding>0 && hints==1,"labels and the hint keys yield");
+}
+
+// Page::Look: what the page takes (the wheel, the stick) the state does not use; the stick's keys only, not the
+// keyboard's.
+struct LookPage final : FakePage {
+    int took=0,looks=0,keys=0;
+    int Look(const Pos&,int,const Input&) noexcept override { ++looks;return took; }
+    bool Key(Pos&,int,int key,const Input&) noexcept override { if(key==kAltNext)++keys;return false; }
+};
+void Looking() {
+    LookPage a;FakePage b,c;
+    Page* pages[3]{&a,&b,&c};
+    State s;
+    Presets ps=MakePresets(3,0);
+    Words w=MakeWords();
+    Input in;
+    a.name=L"A";b.name=L"B";c.name=L"C";
+    Open(s,in);
+    s.column=1;
+    in.wheel=-1;
+    Step(s,pages,3,ps,w,in);
+    Check(a.looks==1 && s.pos.item==1,"nothing taken: the wheel moves the cursor");
+    a.took=kLookWheel;
+    Step(s,pages,3,ps,w,in);
+    Check(s.pos.item==1,"the wheel taken: the cursor stays");
+    in.wheel=0;
+    a.took=kLookStick;
+    in.held[kAltNext]=true;in.stickKeys=1u<<kAltNext;
+    Step(s,pages,3,ps,w,in);
+    Check(a.keys==0,"the stick taken: its key not given");
+    in.held[kAltNext]=false;in.stickKeys=0;
+    Step(s,pages,3,ps,w,in);
+    in.held[kAltNext]=true;   // the keyboard's D
+    Step(s,pages,3,ps,w,in);
+    Check(a.keys==1,"the stick taken: the keyboard's key still given");
+    s.popup=Popup::actions;
+    const int looks=a.looks;
+    Step(s,pages,3,ps,w,in);
+    Check(a.looks==looks,"a popup: no look");
+}
+
+// 整备 held drawn for the world map: through the key release and the press, the select coming over the screen; ended
+// when nothing came (not pressed, nothing drawn by the second frame) or the screen has its input back.
+void Handing() {
+    HandoffState h;
+    Check(!HandoffFrame(h,true,false),"none: nothing held");
+    HandoffAsk(h);
+    Check(HandoffFrame(h,true,false) && HandoffFrame(h,true,false),"asked: held while the key is released");
+    HandoffPressed(h,true);
+    Check(h.phase==Handoff::pressed,"pressed");
+    Check(HandoffFrame(h,false,false) && h.phase==Handoff::away,"the screen lost its input: the select over it");
+    Check(HandoffFrame(h,false,true) && HandoffFrame(h,false,false),"held while the select comes");
+    Check(!HandoffFrame(h,true,false),"the screen has its input again: ended");
+    HandoffAsk(h);HandoffPressed(h,true);
+    Check(HandoffFrame(h,true,true) && h.phase==Handoff::away,"the select drew first: away too");
+    HandoffAsk(h);HandoffPressed(h,true);
+    Check(HandoffFrame(h,true,false),"one frame with input after the press: still waiting");
+    Check(!HandoffFrame(h,true,false),"the second: nothing opened, ended");
+    HandoffAsk(h);HandoffPressed(h,false);
+    Check(h.phase==Handoff::none,"not pressed: ended");
+    HandoffAsk(h);
+    Check(!HandoffFrame(h,false,false),"input lost before the press: ended");
+    HandoffPressed(h,true);
+    Check(h.phase==Handoff::none,"a press with nothing held: nothing");
+}
 }  // namespace
 
 int main() {
     Scripted();
     Hooks();
     RandomWalk();
+    Fitting();
+    Looking();
+    Handing();
     std::printf("armory_logic: %d checks passed\n",checks);
     return 0;
 }
