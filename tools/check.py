@@ -5,10 +5,15 @@
 
   build.cmd + offline_checks, then side by side: ctest, tools/selftest.py, py_compile and the generated files' checks.
   -j N: the processes the tests take in all (default: one a logical core), shared between ctest and selftest.
-  ctest and selftest run only the tests this branch's changes select (tools/test_domains.py): the files changed since
-  the merge-base with origin/main, uncommitted and untracked ones included. A change to the build, common/, pylib's
-  shared base, CI, check.py or the domain table, or no merge-base, runs every test. The build and the gen stage
-  always run whole. --full: every test (CI always runs every test). --dry-run: say what would run, run nothing.
+  ctest and selftest run only the tests this branch's changes reach (tools/test_domains.py select_files), chosen once
+  the slot is held and the build is done: the files changed since the merge-base with origin/main, uncommitted and
+  untracked ones included, against each test's own dependencies (the Python it imports or runs, the files it reads,
+  and for a C++ test the sources its exe compiled, from ninja's records). A CMakeLists.txt change selects the tests and
+  targets the changed commands name; one it cannot place (flags, if(), a foreach body), a change to cmake/, build.cmd,
+  CI, check.py, test_domains.py or the check's own modules (FULL), or no merge-base runs every test. The build,
+  py_compile, the docs' links and the labels' check always run; a generator only when the change reaches its code,
+  inputs or output. --full: every test and generator (CI always runs everything). --dry-run: say what would run (needs
+  a configured build/), run nothing.
   --base REV: compare with REV instead of the merge-base (--base HEAD: only the uncommitted changes).
   One check per worktree: a second one while the first is queued or running exits 3 at once.
 
@@ -20,8 +25,9 @@ Why (the maintainer, 2026-11-10: 「太慢了 ... 特别吃性能，电脑很卡
 - ctest and selftest side by side instead of one after the other: selftest's wall time is its longest test, most of
   its workers idle at its end, while ctest still had work queued; together they keep the cores busy till both end.
 - Only the tests a change can affect (2026-11-24: 「类似的测试优化都要做。太慢了，性能浪费很严重」): a src/-only branch
-  built every model for 10+ minutes in ctest and selftest. Each test's domains (tests/test_labels.json, its ctest
-  LABELS) come from what its code imports and reads; a changed file selects the tests labelled with its domain.
+  built every model for 10+ minutes in ctest and selftest. 2026-11-26 (「check.py 太长了 ... 十分钟太浪费时间了」):
+  by domain, any pylib/ or tools/ change still selected ~all of both and CMakeLists.txt / common/ ran everything in
+  two of three merges; by file, a test runs when a file it depends on changed.
 Each part's output goes to build/check-<part>.log; the failures' tails are printed at the end. Exit 1 on a failure,
 3 when this worktree's check is already queued or running.
 """
@@ -59,9 +65,7 @@ GENERATED = [
     (['tools/gen_mech_parts.py', '--check'], None),
     (['tools/gen_weapon_series.py', '--check'], None),
     (['tools/gen_worldmap.py', '--check'], None),
-    (['tools/doc_links_check.py'], None),   # docs <-> code paths (eng-12)
-    (['tools/test_domains.py', '--check'], None),   # every test in a domain, the labels current
-]
+]   # gen_checks also runs tools/doc_links_check.py and test_domains' --check, on every run
 
 
 def game_defines() -> tuple[list[str], str | None]:
@@ -129,70 +133,97 @@ def base_of() -> str:
     return '' if code else base.strip()
 
 
-def changed_files() -> tuple[list[str], str | None]:
+def changed_files() -> tuple[list[str], set[str], str | None]:
     """This branch's changes: the files changed since the merge-base with origin/main (committed or not, both sides
-    of a rename) and the untracked ones; (files, None), or ([], why) when there is no base to compare with."""
+    of a rename) and the untracked ones, and those of them that are gone; (files, deleted, None), or ([], set(), why)
+    when there is no base to compare with."""
     base = base_of()
     if not base:
-        return [], f'no commit {BASE}' if BASE else 'no merge-base with origin/main (git fetch origin?)'
+        return [], set(), f'no commit {BASE}' if BASE else 'no merge-base with origin/main (git fetch origin?)'
     code, diff = _git('diff', '--name-only', '--no-renames', base)
     code2, new = _git('ls-files', '--others', '--exclude-standard')
     if code or code2:
-        return [], f'git diff against the merge-base {base[:10]} failed'
-    return sorted({f for f in (diff + new).splitlines() if f}), None
+        return [], set(), f'git diff against the merge-base {base[:10]} failed'
+    files = sorted({f for f in (diff + new).splitlines() if f})
+    return files, {f for f in files if not os.path.exists(os.path.join(ROOT, f))}, None
+
+
+def cmake_change(files: list[str], names: set[str]) -> tuple[set[str], str | None]:
+    """What this branch's change to the CMakeLists.txt files selects (test_domains.cmake_effects): (the tests and
+    targets it names, None), or (set(), why): run everything."""
+    out: set[str] = set()
+    base = base_of()
+    for f in test_domains.CMAKE_FILES:
+        if f not in files:
+            continue
+        code, old = _git('show', f'{base}:{f}')
+        code2, diff = _git('diff', '-U0', base, '--', f)
+        if code2:
+            return set(), f'git diff {f} failed'
+        try:
+            with open(os.path.join(ROOT, f), encoding='utf-8') as h:
+                new = h.read()
+        except OSError:
+            new = ''
+        got, why = test_domains.cmake_effects('' if code else old, new, *test_domains.diff_sides(diff), names)
+        if why:
+            return set(), f'{f}: {why}'
+        out |= got
+    return out, None
 
 
 def plan(argv: list[str]) -> dict:
-    """The tests to run: test_domains.select's answer for this branch's changes, and what it rests on."""
-    files, why = changed_files()
-    try:
-        labels = test_domains.load()
-    except (OSError, ValueError) as e:
-        labels, why = {}, why or f'{test_domains.LABELS_JSON} unreadable ({e})'
+    """The tests to run: test_domains.select_files's answer for this branch's changes, from the code as it is now
+    (every test's dependencies, the build's records of what each C++ target compiled) and the build configured."""
+    started = time.perf_counter()
+    files, deleted, why = changed_files()
     if '--full' in argv:
         why = '--full'
+    repo = test_domains.Repo()
+    deps = test_domains.test_deps(BUILD, repo)
+    cpp = test_domains.cpp_files(BUILD)
     names = None
     if test_domains.SELFTEST in files and not why:   # which of its tests and helpers the change is in
         code, diff = _git('diff', '-U0', base_of(), '--', test_domains.SELFTEST)
         with open(os.path.join(ROOT, test_domains.SELFTEST), encoding='utf-8') as f:
             names = test_domains.changed_names(f.read(), test_domains.diff_lines(diff)) if not code else None
-    sel = test_domains.select(files, labels, names) if labels else {'full': None, 'domains': {}, 'scripts': []}
+    cmake = cmake_change(files, {n.lower() for n in deps['ctest']} | repo.target_names) if not why else (set(), None)
+    sel = test_domains.select_files(files, deps, cpp, deleted, names, cmake)
     sel['full'] = why or sel['full']
-    sel['files'] = files
-    sel['labels'] = labels
+    sel.update(files=files, deleted=deleted, deps=deps, repo=repo, cpp=cpp, cmake=cmake[0],
+               seconds=time.perf_counter() - started)
     return sel
 
 
 def say_plan(sel: dict) -> None:
-    labels = sel['labels']
+    every = {part: len(sel['deps'][part]) for part in ('ctest', 'selftest')}
     if sel['full']:
         print(f'check.py: every test ({sel["full"]})', flush=True)
         return
     n = len(sel['files'])
-    print(f'check.py: the tests {n} changed file{"s" * (n != 1)} select (tools/test_domains.py; --full for all):')
+    print(f'check.py: the tests {n} changed file{"s" * (n != 1)} reach (tools/test_domains.py select_files, '
+          f'{sel["seconds"]:.0f} s; --full for all):')
     for d, files in sorted(sel['domains'].items()):
-        print(f'  run   {d:16} {", ".join(files[:3])}{f" (+{len(files) - 3})" if len(files) > 3 else ""}')
-    if sel['scripts']:
-        print(f'  run   the tests in   {", ".join(sel["scripts"][:4])}{" ..." if len(sel["scripts"]) > 4 else ""}')
+        print(f'  changed {d:16} {", ".join(files[:3])}{f" (+{len(files) - 3})" if len(files) > 3 else ""}')
+    if sel['cmake']:
+        names = sorted(sel['cmake'])
+        print(f'  CMake   names {", ".join(names[:6])}{" ..." if len(names) > 6 else ""}')
     if 'selftest_names' in sel:
         names = sel['selftest_names']
-        print(f'  run   the selftests using {", ".join(names[:6])}{" ..." if len(names) > 6 else ""} (changed in '
-              f'{test_domains.SELFTEST})')
-    skipped = [d for d in labels.get('domains', {}) if d not in sel['domains'] and d != test_domains.SCRIPTS]
-    print(f'  skip  {", ".join(skipped)} (no change)')
+        print(f'  selftest.py changed in {", ".join(names[:6])}{" ..." if len(names) > 6 else ""}')
     for part in ('ctest', 'selftest'):
-        print(f'  {part}: {len(sel[part])} of {len(labels.get(part, {}))} tests')
+        print(f'  {part}: {len(sel[part])} of {every[part]} tests')
     sys.stdout.flush()
 
 
 def skip_file(sel: dict, part: str) -> str | None:
-    """The file naming the tests of `part` no change selects (a test the labels do not know runs); None: all run."""
+    """The file naming the tests of `part` no change selects; None: all run."""
     if sel['full']:
         return None
     path = os.path.join(BUILD, f'check-{part}-skip.txt')
     chosen = set(sel[part])
     with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(''.join(f'{n}\n' for n in sel['labels'].get(part, {}) if n not in chosen))
+        f.write(''.join(f'{n}\n' for n in sel['deps'][part] if n not in chosen))
     return path
 
 
@@ -211,7 +242,17 @@ def tail(log: str, lines: int = 60) -> str:
         return ''
 
 
-def gen_checks(log: str) -> tuple[int, float]:
+def generators(sel: dict) -> list[tuple[list[str], list[str] | None]]:
+    """The GENERATED steps this change reaches (each generator's code, inputs and output: test_domains
+    generator_deps); all of them on a full run."""
+    if sel['full']:
+        return list(GENERATED)
+    return [g for g in GENERATED if sel['hits'](test_domains.generator_deps(sel['repo'], g[0][0]))]
+
+
+def gen_checks(log: str, sel: dict) -> tuple[int, float]:
+    """py_compile of every tracked Python file, the generators the change reaches, the docs' links, and the test labels
+    (test_domains --check, from the dependencies the selection already computed)."""
     started = time.perf_counter()
     failed = 0
     with open(log, 'w', encoding='utf-8', errors='replace') as out:
@@ -219,9 +260,13 @@ def gen_checks(log: str) -> tuple[int, float]:
                                          'autoturret/tools', 'autoturret/third_party/edf6-cpk'],
                                         cwd=ROOT, capture_output=True, text=True, encoding='utf-8').stdout.splitlines()
               if p.endswith('.py')]
-        steps = [[sys.executable, '-m', 'py_compile', *py]]
-        steps += [[sys.executable, *args] for args, _ in GENERATED]
-        for cmd, (_, files) in zip(steps, [(None, None)] + GENERATED):
+        chosen = generators(sel)
+        out.write(f'generators: {len(chosen)} of {len(GENERATED)} ({", ".join(a[0] for a, _ in chosen) or "none"}); '
+                  f'skipped: {", ".join(a[0] for a, _ in GENERATED if (a, _) not in chosen) or "none"}\n')
+        steps = [([sys.executable, '-m', 'py_compile', *py], None)]
+        steps += [([sys.executable, *args], files) for args, files in chosen]
+        steps += [([sys.executable, 'tools/doc_links_check.py'], None)]   # docs <-> code paths (eng-12)
+        for cmd, files in steps:
             out.write(f'$ {" ".join(cmd[:4])}\n')
             out.flush()
             code = subprocess.call(cmd, cwd=ROOT, stdout=out, stderr=subprocess.STDOUT)
@@ -231,6 +276,13 @@ def gen_checks(log: str) -> tuple[int, float]:
             if code:
                 out.write(f'FAIL ({code}): {" ".join(cmd[1:])}\n')
                 failed += 1
+        # every test in a domain, the labels current
+        out.write('$ tools/test_domains.py --check (in check.py, on the selection\'s dependencies)\n')
+        code, text = test_domains.check_report(BUILD, sel['deps'], sel['repo'])
+        out.write(text + '\n')
+        if code:
+            out.write('FAIL (1): tools/test_domains.py --check\n')
+            failed += 1
     return (1 if failed else 0), time.perf_counter() - started
 
 
@@ -245,12 +297,16 @@ def main(argv: list[str]) -> int:
     if '--base' in argv:
         global BASE
         BASE = argv[argv.index('--base') + 1]
-    if '--dry-run' in argv:
+    if '--dry-run' in argv:   # on the build as it is (not rebuilt): what a check would run
+        if not os.path.isfile(os.path.join(BUILD, 'CTestTestfile.cmake')):
+            print('check.py --dry-run: no configured build (build.cmd first)')
+            return 2
         sel = plan(argv)
         say_plan(sel)
         for part in ('ctest', 'selftest'):
             if not sel['full']:
                 print(f'{part}: ' + ' '.join(sel[part]))
+        print('generators: ' + ' '.join(a[0] for a, _ in generators(sel)))
         return 0
     checklock.children_die_with_me()   # killed alone, it would leave ctest / selftest running in the same build folder
     try:
@@ -273,14 +329,13 @@ def busy_text(who: dict) -> str:
 
 
 @contextlib.contextmanager
-def slot(argv: list[str]):
-    """The machine's check slot, then the tests to run: (the plan, the seconds queued). The tests are chosen once the
-    slot is held, from the changes on disk then: the queue can take tens of minutes, and the build that follows builds
-    what is on disk then, so a choice made before it could miss what changed while it waited."""
+def slot():
+    """The machine's check slot: the seconds queued. The tests are chosen once it is held and the build is done
+    (_main: plan), from the changes on disk then: the queue can take tens of minutes, and the choice reads the code
+    and the build as they are when the tests run."""
     started = time.perf_counter()
     with checklock.held(f'tools/check.py ({os.path.basename(ROOT)})'):
-        waited = time.perf_counter() - started
-        yield plan(argv), waited
+        yield time.perf_counter() - started
 
 
 def _main(argv: list[str], jobs: int) -> int:
@@ -291,7 +346,7 @@ def _main(argv: list[str], jobs: int) -> int:
     logs = {k: os.path.join(BUILD, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
     # the parts' output goes to their logs: a line every few minutes for whoever watches this run (pylib/heartbeat.py),
     # from when the slot is ours (checklock says its own while waiting)
-    with slot(argv) as (sel, waited), heartbeat.beating('check.py', lambda: heartbeat.parts_progress(results, logs)):
+    with slot() as waited, heartbeat.beating('check.py', lambda: heartbeat.parts_progress(results, logs)):
         for log in logs.values():   # a part's log is this run's from its start on: parts_progress() never reads a stale one
             with contextlib.suppress(OSError):
                 os.remove(log)
@@ -302,7 +357,6 @@ def _main(argv: list[str], jobs: int) -> int:
               f'check slot); logs build/check-*.log', flush=True)
         defines, game = game_defines()
         print(f'check.py: native audits {"read " + game if game else "skip (no game found)"}', flush=True)
-        say_plan(sel)
         if '--no-build' not in argv:
             cmd = f'call "{os.path.join(ROOT, "build.cmd")}" {" ".join(defines)} && call "{os.path.join(ROOT, "tools", "msvc-x64-env.cmd")}" ' \
                   f'&& cmake --build "{BUILD}" --target offline_checks'
@@ -311,22 +365,25 @@ def _main(argv: list[str], jobs: int) -> int:
             if results['build'][0]:
                 print(tail(logs['build']))
                 return 1
+        # chosen now: the code on disk and the build the tests will run
+        sel = plan(argv)
+        say_plan(sel)
         # selftest's wall time is its longest test: half the processes keep it there, ctest takes the rest and the
         # cores selftest's workers leave when they run out of tests.
         st_jobs = max(1, min(8, jobs // 2))
         parts = []
-        if '--no-ctest' not in argv:
+        if '--no-ctest' not in argv and (sel['full'] or sel['ctest']):
             ct_skip = skip_file(sel, 'ctest')
             parts.append(('ctest', lambda: run(['ctest', '--test-dir', BUILD, '--output-on-failure',
                                                 '-j', str(max(1, jobs - st_jobs)),
                                                 *(['--exclude-from-file', ct_skip] if ct_skip else [])],
                                                logs['ctest'], env)))
-        if '--no-selftest' not in argv:
+        if '--no-selftest' not in argv and (sel['full'] or sel['selftest']):
             st_skip = skip_file(sel, 'selftest')
             parts.append(('selftest', lambda: run([sys.executable, 'tools/selftest.py', '-j', str(st_jobs),
                                                    *(['--skip', st_skip] if st_skip else [])], logs['selftest'], env)))
         if '--no-gen' not in argv:
-            parts.append(('gen', lambda: gen_checks(logs['gen'])))
+            parts.append(('gen', lambda: gen_checks(logs['gen'], sel)))
 
         def go(name, fn):
             results[name] = fn()
