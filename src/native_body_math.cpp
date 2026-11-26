@@ -54,7 +54,7 @@ constexpr unsigned kAvoidanceOverflowCall=kAvoidanceOverflow+3;
 constexpr unsigned char kAvoidanceFirstHeapSkip[]{0xEB,0x0A};
 constexpr unsigned char kAvoidanceDoneSig[]{0x4C,0x8B,0x55,0xF7,0x4C,0x8B,0x5D,0xEF};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
-              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+5==kNativeBodyMathSites);
+              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+6==kNativeBodyMathSites);
 
 struct AvoidanceNeighbor { std::uint64_t handle; float distanceSquared; std::uint32_t padding; };
 struct AvoidanceHeap { AvoidanceNeighbor* entries; int count; };
@@ -419,6 +419,63 @@ bool InstallBoxMerge() noexcept {
     return false;
 }
 
+constexpr unsigned kBoundsCheck=0x109CF4,kBoundsInvalid=0x109D14,kBoundsValid=0x109D2A,kScalarBoundsCheck=0x650E0;
+constexpr unsigned kBoundsCheckCall=kBoundsCheck+4;
+constexpr unsigned char kBoundsCheckStock[]{
+    0x48,0x8D,0x4D,0x00,0xE8,0xE3,0xB3,0xF5,0xFF,0x84,0xC0,0x75,0x13,0x48,0x8D,0x4D,
+    0x10,0xE8,0xD6,0xB3,0xF5,0xFF,0x84,0xC0,0x75,0x06,0x0F,0x28,0x55,0x10,0xEB,0x16,
+};
+constexpr unsigned char kBoundsInvalidSig[]{0x0F,0x28,0x05,0x15,0xBF,0x65,0x01};
+constexpr unsigned char kBoundsValidSig[]{0x0F,0x28,0x45,0x00,0x48,0x8D,0x55,0x20};
+constexpr unsigned char kScalarBoundsSig[]{
+    0x33,0xC0,0xF3,0x0F,0x10,0x04,0x81,0x0F,0x2E,0xC0,0x7A,0x0C,0x48,0xFF,0xC0,
+    0x48,0x83,0xF8,0x04,0x75,0xED,0x32,0xC0,0xC3,0xB0,0x01,0xC3,
+};
+bool __fastcall BoundsHaveNaN(const float* bounds) noexcept {
+    const auto signless=_mm_set1_epi32(0x7FFFFFFF);
+    const auto infinity=_mm_set1_epi32(0x7F800000);
+    const auto low=_mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(bounds)),signless);
+    const auto high=_mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(bounds+4)),signless);
+    const auto minimumNormal=_mm_set1_epi32(0x00800000);
+    const auto zero=_mm_setzero_si128();
+    const auto exceptional=[&](__m128i bits) noexcept {
+        const auto subnormal=_mm_andnot_si128(_mm_cmpeq_epi32(bits,zero),_mm_cmpgt_epi32(minimumNormal,bits));
+        return _mm_or_si128(subnormal,_mm_cmpgt_epi32(bits,infinity));
+    };
+    if(!_mm_movemask_epi8(_mm_or_si128(exceptional(low),exceptional(high))))return false;
+    // Retain the scalar order for signaling NaNs and denormal-operand flags.
+    const auto stock=reinterpret_cast<bool(__fastcall*)(const float*)>(image+kScalarBoundsCheck);
+    return stock(bounds) || stock(bounds+4);
+}
+
+bool InstallBoundsCheck() noexcept {
+    if(!edf::Matches(image,kBoundsCheck,kBoundsCheckStock,sizeof(kBoundsCheckStock)) ||
+       !edf::Matches(image,kBoundsInvalid,kBoundsInvalidSig,sizeof(kBoundsInvalidSig)) ||
+       !edf::Matches(image,kBoundsValid,kBoundsValidSig,sizeof(kBoundsValidSig)) ||
+       !edf::Matches(image,kScalarBoundsCheck,kScalarBoundsSig,sizeof(kScalarBoundsSig)))return false;
+    auto* const site=image+kBoundsCheck;
+    auto* const thunk=edf::AllocateNearThunk(site,reinterpret_cast<void*>(&BoundsHaveNaN));
+    if(!thunk)return false;
+    constexpr unsigned call=kBoundsCheckCall-kBoundsCheck;
+    unsigned char code[]{
+        0x48,0x8D,0x4D,0x00,                             // lea rcx,[rbp]
+        0xE8,0,0,0,0,                                    // call packed check
+        0x84,0xC0,                                       // test al,al
+        0x75,static_cast<unsigned char>(kBoundsInvalid-kBoundsCheck-13),
+        0x0F,0x28,0x55,0x10,                             // movaps xmm2,[rbp+10h]
+        0xEB,static_cast<unsigned char>(kBoundsValid-kBoundsCheck-19),
+    };
+    static_assert(sizeof(code)==19 && sizeof(code)<sizeof(kBoundsCheckStock));
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+call+5);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        const auto relative=static_cast<std::int32_t>(delta);
+        std::memcpy(code+call+1,&relative,sizeof(relative));
+        if(edf::PatchCode(site,kBoundsCheckStock,code,sizeof(code)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
 inline bool Normalize3(__m128& v) noexcept {
     v=KeepW(v,_mm_set1_ps(1.0f));
     const auto squared=_mm_mul_ps(v,v);
@@ -473,6 +530,7 @@ unsigned InstallNativeBodyMath() noexcept {
             installed+=changed;
         }
     }
+    installed+=InstallBoundsCheck();
     installed+=InstallAvoidanceHeap();
     installed+=InstallAvoidanceScan();
     installed+=InstallClingBodyReuse();

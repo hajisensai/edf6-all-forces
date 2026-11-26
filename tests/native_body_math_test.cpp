@@ -103,6 +103,38 @@ template<class Before,class After> void Bench(const char* name,Before before,Aft
     std::sort(newTimes.begin(),newTimes.end());
     std::printf("500,000 %s: %.2f -> %.2f ms (median of five runs)\n",name,oldTimes[2],newTimes[2]);
 }
+bool BoundsValidation() noexcept {
+    using Check=bool(__fastcall*)(const float*);
+    const auto* const code=image+kBoundsCheck;
+    if(code[4]!=0xE8 || code[11]!=0x75 || kBoundsCheck+13+code[12]!=kBoundsInvalid ||
+       code[17]!=0xEB || kBoundsCheck+19+code[18]!=kBoundsValid)return false;
+    const auto old=reinterpret_cast<Check>(image+kScalarBoundsCheck);
+    const auto check=Redirected<Check>(kBoundsCheckCall);
+    std::mt19937 rng(130027);
+    const unsigned mxcsr=_mm_getcsr(),clean=mxcsr&~0x3Fu;
+    for(unsigned i=0;i<100000;++i) {
+        Box bounds{};
+        for(float& f:bounds.data) {
+            const std::uint32_t bits=rng();
+            std::memcpy(&f,&bits,4);
+        }
+        if(i%7==0)bounds.data[i%8]=std::numeric_limits<float>::quiet_NaN();
+        if(i%11==0)bounds.data[i%8]=std::numeric_limits<float>::infinity();
+        _mm_setcsr(clean);
+        const bool expected=old(bounds.data)||old(bounds.data+4);
+        const auto expectedFlags=_mm_getcsr()&0x3Fu;
+        _mm_setcsr(clean);
+        if(check(bounds.data)!=expected || (_mm_getcsr()&0x3Fu)!=expectedFlags) {
+            _mm_setcsr(mxcsr);
+            std::printf("FAIL: packed bounds validation, case %u\n",i);
+            return false;
+        }
+    }
+    _mm_setcsr(mxcsr);
+    std::puts("native bounds validation: 100,000 matching results and floating-point flags");
+    return true;
+}
+
 bool AvoidanceNeighbors() noexcept {
     using Sift=int(__fastcall*)(AvoidanceHeap*,int) noexcept;
     using Raise=void(__fastcall*)(AvoidanceHeap*,int) noexcept;
@@ -503,7 +535,7 @@ int main(int argc,char** argv) {
         std::puts("FAIL: ray collector reset template does not reproduce the native state");
         return 1;
     }
-    if(!AvoidanceNeighbors())return 1;
+    if(!BoundsValidation() || !AvoidanceNeighbors())return 1;
     if(!AvoidanceBoxes()) {
         std::puts("FAIL: avoidance sweep changed the first overlap or the X cutoff");
         return 1;
