@@ -170,9 +170,9 @@ inline float Toward(float x,float to,float up,float down,float dt) noexcept {
 enum class Kind : std::uint8_t { turbine, diesel, petrol };
 enum class Gear : std::uint8_t { tracks, wheels };
 struct Drive { Kind kind; Gear gear; int gears; float top,pitch; };
-// The plugin's engined classes (vehsound.cpp: CarBase's engine sound in the vtable) and theirs (ours: by what the
-// vehicles are: the E651 Titan, the Gigantus and the Balam-class tanks a gas turbine as an M1's, the Proteus-era E551 and
-// the Maser and the Naegling a diesel, the Grape and the trucks a petrol six, the bikes a petrol twin pitched up).
+// The plugin's engined classes (vehsound.cpp BodyOfVehicle: CarBase's engine sound in the vtable) and theirs (ours): the light
+// modern tanks 505 (the Blacker), 601 and the 603 flak a gas turbine as an M1's; the 403, the 404 Titan and the 510
+// Maser a diesel on tracks, the 402 rocket carrier one on wheels; Car a petrol six; the bikes a petrol twin pitched up.
 struct ClassDrive { const char* name; Drive d; };
 constexpr ClassDrive kDrives[]={
     {"505_Tank",{Kind::turbine,Gear::tracks,0,70.0f,1.0f}},{"601_Tank",{Kind::turbine,Gear::tracks,0,60.0f,1.0f}},
