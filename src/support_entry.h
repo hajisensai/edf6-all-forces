@@ -57,8 +57,14 @@ Refusal AirRoute(const PlayArea& area,const Reach& reach,const float* target,con
     const float plo[2]={-reach.half,-reach.half},phi[2]={reach.half,reach.half};
     bool found=false;float best=-3.0f;
     const float entryLo[2]={glo[0]-kOffMap,glo[1]-kOffMap},entryHi[2]={ghi[0]+kOffMap,ghi[1]+kOffMap};
-    for(int b=0;b<kAirBearings;++b) {
-        const float a=6.28318531f*static_cast<float>(b)/kAirBearings,ux=std::cos(a),uz=std::sin(a);   // target -> entry
+    // First the bearing straight back along `preferred` itself (the user, 2026-11-26: 「应该直接进入航线才对」): in on the
+    // heading asked for exactly, on a gun run's line produced, its nose already along it; the kAirBearings round only
+    // where that corridor is not clear. A bearing 22.5 deg off put the entry beside the line by hundreds of metres at its
+    // start, and the jet flew a lap to line up (jet_sortie.cpp).
+    const float preferredLength=std::sqrt(preferred[0]*preferred[0]+preferred[2]*preferred[2]);
+    for(int b=preferredLength>1e-4f ? -1 : 0;b<kAirBearings;++b) {
+        const float a=6.28318531f*static_cast<float>(b)/kAirBearings;
+        const float ux=b<0 ? -preferred[0]/preferredLength : std::cos(a),uz=b<0 ? -preferred[2]/preferredLength : std::sin(a);   // target -> entry
         const float closest=ExitAlong(entryLo,entryHi,target[0],target[2],ux,uz),farthest=ExitAlong(plo,phi,target[0],target[2],ux,uz);
         if(farthest<closest || farthest<kMinJourney)continue;
         // Visibility is not an admission condition. Use the nearest physically valid off-map entry.
@@ -89,6 +95,7 @@ Refusal AirRoute(const PlayArea& area,const Reach& reach,const float* target,con
         const float align=candidate.heading[0]*preferred[0]+candidate.heading[2]*preferred[2];
         const float score=align;
         if(!found || score>best){found=true;best=score;route=candidate;}
+        if(b<0 && found)break;   // the heading asked for: none better
     }
     return found ? Refusal::none : Refusal::noEntry;
 }

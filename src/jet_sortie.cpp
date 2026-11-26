@@ -59,7 +59,7 @@ void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const
     s=Sortie{};
     s.pass=pass;s.begun=ms;s.phaseAt=ms;
     const float explicitHeading[3]={run.x,0.0f,run.z};
-    s.line=sortie::LineThrough(mark,pos,run.half>0.0f ? explicitHeading : heading);
+    s.line=sortie::LineThrough(mark,pos,sortie::HasHeading(run) ? explicitHeading : heading);
     s.runHalf=run.half;
     s.missileSeen=j.t.missileAt;
     Log("JET v=%p sortie: %s at (%.0f,%.0f,%.0f)",j.Vehicle(),kPassNames[static_cast<int>(pass)],mark[0],mark[1],mark[2]);

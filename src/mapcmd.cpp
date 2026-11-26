@@ -83,7 +83,8 @@ struct DispatchFlags { bool queue=false,paced=false; };      // Dispatch: Shift 
 struct Keys { bool tab,shift,ctrl,follow,release,left,right,middle,padNext,padGuard,padFollow,padRelease,
              engage,hold,board,dismount,dismiss,recruit,attackMove,mark,formation,sweep,health,pace,all,digit[9],supportPrev,supportNext,supportCall,
              // The test range's 「摆放」 panel (range_place.h): , . / Enter Backspace; the pad's D-pad, A, B.
-             placePrev,placeNext,placeCategory,placeEnter,placeClose,padUp,padDown,padLeft,padRight,padA,padB,padPvp,padEnemy; };
+             placePrev,placeNext,placeCategory,placeEnter,placeClose,padUp,padDown,padLeft,padRight,padA,padB,padPvp,padEnemy,
+             entryTurn; };   // G: the armed flown call's way in turned (Shift: back)
 
 // --- The game thread's own ---
 struct Game {
@@ -106,6 +107,9 @@ struct Game {
     int armedSupport=-1;
     bool runStarted=false;
     float runStart[3]{};
+    // The armed flown call's way in (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」): from the player toward its
+    // point turned by G this many eighths (0: not turned); a gun run's or a carpet's line is its own way in.
+    int entryTurn=0;
     // The armed support's composed load (map_buttons.h ComposePanel), while it has seats; -1 none.
     int composeEntry=-1;SupportLoadout compose{};
     bool armedClick=false;
@@ -360,7 +364,7 @@ Keys ReadKeys(const MapCmdInput& in,bool placeKeys) noexcept {
         k.attackMove=Down('Z');k.all=k.ctrl && Down('A');
         k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
-        k.supportPrev=Down(VK_OEM_4);k.supportNext=Down(VK_OEM_6);k.supportCall=Down('C');
+        k.supportPrev=Down(VK_OEM_4);k.supportNext=Down(VK_OEM_6);k.supportCall=Down('C');k.entryTurn=Down('G');
         if(placeKeys) {
             k.placePrev=Down(VK_OEM_COMMA);k.placeNext=Down(VK_OEM_PERIOD);k.placeCategory=Down(VK_OEM_2);
             k.placeEnter=Down(VK_RETURN);k.placeClose=Down(VK_BACK);
@@ -558,7 +562,7 @@ bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
 }
 // One thing armed at a time: a point order or a support call (`order` false: the support `support`, -1 nothing).
 void Arm(Game& g,bool order,Order o,int support) noexcept {
-    if(order || support!=g.armedSupport)g.runStarted=false;
+    if(order || support!=g.armedSupport){g.runStarted=false;g.entryTurn=0;}
     g.armedOrder=order;g.armed=order ? o : Order::none;g.armedSupport=order ? -1 : support;
     if(order || support>=0){g.formationMenu=false;g.dismountMenu=false;g.place.armed=-1;}   // one thing armed at a time (the 「摆放」 row too)
     // A support with seats opens its composition from the load it brings uncomposed (SupportCallPreset); armed again it
@@ -663,7 +667,8 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         Arm(g,false,Order::none,again ? -1 : hit.entry);
         if(!again) {
             g.supportPick=hit.entry;
-            Note(g,hudtext::Tr(SupportGroundRun(hit.entry) ? hudtext::Tx::cmdRunStart : hudtext::Tx::cmdSupportArmed),
+            Note(g,hudtext::Tr(SupportGroundRun(hit.entry) ? hudtext::Tx::cmdRunStart :
+                               SupportCatalogFlown(hit.entry) ? hudtext::Tx::cmdSupportArmedFlown : hudtext::Tx::cmdSupportArmed),
                  SupportCallName(hit.entry));
         }
         return;
@@ -1581,6 +1586,13 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                           false,(k.hold && !g.was.hold) || padY==mapcmd::TapHold::hold};
     // Shift with a move (the right button) or an attack-move (Z): after the points before it (mapcmd_logic.h Waypoints).
     const bool queue=k.shift;
+    // G turns the armed flown call's way in by 45 deg (Shift+G back), kept for its click (which disarms it).
+    if(k.entryTurn && !g.was.entryTurn && g.armedSupport>=0 && SupportCatalogFlown(g.armedSupport) && !SupportGroundRun(g.armedSupport)) {
+        g.entryTurn=(g.entryTurn+(k.shift ? 7 : 1))%8;
+        Note(g,hudtext::Tr(hudtext::Tx::cmdEntryTurn),g.entryTurn*45);
+        Log("MAPCMD the armed call's way in turned %d deg from the player's toward its point",g.entryTurn*45);
+    }
+    const int turnedEntry=g.armedSupport,entryTurn=g.entryTurn;
     // The armed point order's click on the ground: that order there (disarmed).
     int supportAt=-1,runClick=-1;
     SupportLoadout load{};   // the armed support's composed load, taken before disarming closes it
@@ -1688,11 +1700,23 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         const int kind=SupportStrikeBarrage(SupportCatalogStrike(catalog));
         return headingLength>1e-4f && barrage::HasOrientedFootprint(kind) ? heading : nullptr;
     };
+    // A flown call's way in (not a line's): from this player toward the point, turned by G (the armed one's); sent with
+    // the request (sortie_plan.h RunSpec), so the host plans it the requester's way, not from its own player.
+    const auto entryHeading=[&](int catalog,float* out) noexcept {
+        if(catalog<0 || !pointOk || !SupportCatalogFlown(catalog) || SupportGroundRun(catalog))return false;
+        float from[3];SupportStrikeHeading(point,from);
+        const float a=static_cast<float>(catalog==turnedEntry ? entryTurn : 0)*0.785398163f,c=std::cos(a),s=std::sin(a);
+        out[0]=from[0]*c-from[2]*s;out[1]=0.0f;out[2]=from[0]*s+from[2]*c;
+        return true;
+    };
+    float previewEntry[3];
+    const float* const previewHeading=entryHeading(g.armedSupport,previewEntry) ? previewEntry : aimedHeading(g.armedSupport);
     // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route.
-    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point,aimedHeading(g.armedSupport),
+    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point,previewHeading,
                 g.runStarted ? g.runStart : nullptr);
     if(supportAt>=0) {
         if(pointOk) {
+            if(float way[3];run.half<=0.0f && entryHeading(supportAt,way))run=sortie::HeadingRun(way[0],way[2]);
             SupportCallComposedAt(supportAt,run.half>0.0f ? runCentre : point,load.count>0 ? &load : nullptr,
                                   g.note,_countof(g.note),aimedHeading(supportAt),run);
             g.noteAt=GetTickCount64();

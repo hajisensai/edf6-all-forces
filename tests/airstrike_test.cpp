@@ -45,7 +45,7 @@ bool UltimateStart(const unsigned char* caller,const float*,float damage,std::ui
 unsigned char* playerHuman=nullptr;
 unsigned char* PlayerHuman() noexcept { return playerHuman; }
 int unpaidCalls=0;
-bool SupportCallUnpaidAt(int,const float*,wchar_t*,std::size_t) noexcept {++unpaidCalls;return true;}
+bool SupportCallUnpaidAt(int,const float*,wchar_t*,std::size_t,const sortie::RunSpec&) noexcept {++unpaidCalls;return true;}
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }   // the second waves (airstrike.cpp SupportFollowUpTick)
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }

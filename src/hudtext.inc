@@ -1229,3 +1229,5 @@ HUDTEXT(mapLaunchNone,L"As equipped (no presets: make them in the armory)",L"当
 HUDTEXT(mapLaunchWaiting,L"Making the files (%ls): starts when done; move the cursor to cancel",L"正在生成文件（%ls）：完成后自动出击，移动光标取消",L"正在產生檔案（%ls）：完成後自動出擊，移動游標取消",L"ファイル生成中（%ls）：完了後に出撃、カーソル移動で取消")
 HUDTEXT(mapLaunchFailed,L"Not started, the files were not made: %ls. Confirm again to start with the files as they are",L"未出击，文件生成失败：%ls。再次确认则按现有文件出击",L"未出擊，檔案產生失敗：%ls。再次確認則按現有檔案出擊",L"未出撃、ファイル生成失敗：%ls。もう一度決定で現在のファイルのまま出撃")
 HUDTEXT(mapProgress,L"Campaign %d / %d cleared",L"战役进度 %d / %d 已通关",L"戰役進度 %d / %d 已通關",L"キャンペーン %d / %d クリア")
+HUDTEXT(cmdSupportArmedFlown,L"%ls: LEFT-CLICK THE MAP FOR ITS DESTINATION (G: TURN ITS WAY IN; RIGHT-CLICK: CANCEL)",L"%ls：左键点击地图指定目的地（G 旋转入场方向，右键取消）",L"%ls：左鍵點擊地圖指定目的地（G 旋轉入場方向，右鍵取消）",L"%ls：マップを左クリックで目的地（G で進入方向を回転、右クリックで取消）")
+HUDTEXT(cmdEntryTurn,L"Way in turned %d deg from yours (G; Shift+G back)",L"入场方向：从你这边转 %d°（G；Shift+G 反转）",L"入場方向：從你這邊轉 %d°（G；Shift+G 反轉）",L"進入方向：自分側から %d° 回転（G／Shift+G で逆）")

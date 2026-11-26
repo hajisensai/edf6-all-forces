@@ -171,7 +171,7 @@ unsigned char* PlayerHuman() noexcept {return objects[31];}
 int SupportAirCallCount() noexcept {return 21;}
 // A sortie's second wave (airstrike.cpp, not linked here): what the dispatcher queued and settled.
 int followUpsQueued=0,followUpsSettled=0;std::uint32_t followUpRequest=~0u,followUpSettledRequest=0;bool followUpOut=false;
-void SupportFollowUpQueue(int,const float*,std::uint32_t request) noexcept {++followUpsQueued;followUpRequest=request;}
+void SupportFollowUpQueue(int,const float*,std::uint32_t request,const sortie::RunSpec&) noexcept {++followUpsQueued;followUpRequest=request;}
 void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept {++followUpsSettled;followUpSettledRequest=request;followUpOut=out;}
 const wchar_t* SupportAirCallName(int) noexcept {return L"Heli";}
 const wchar_t* airKeys[21]={L"INTERCEPTOR",L"INTERCEPTOR_F",L"STRIKE",L"STRIKE_F",L"MULTIROLE",L"MULTIROLE_F",L"FIGHTER",L"FIGHTER_F",
@@ -191,7 +191,7 @@ int strikesStarted=0;bool strikeStarts=true;
 bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity,const float*) noexcept {
     ++strikesStarted;if(note && capacity)note[0]=0;return strikeStarts;
 }
-support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route) noexcept {
+support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route,const float*) noexcept {
     *route={{-1400,150,0},{1,0,0}};return support::Refusal::none;
 }
 int warnedDeployments=0;
@@ -236,7 +236,7 @@ int plannedAircraft=0,plannedHeli=-2;
 support::Refusal planRefusal=support::Refusal::none;
 int plannedTransports=0;
 // The one air planner (support_aircraft.h PlanAirSupport): every entry's spec, a transport's too (its plane no jet or heli row).
-support::Refusal PlanAirSupport(const SupportAircraft& spec,const float*,const float*,support::Route* route) noexcept {
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float*,const float*,support::Route* route,const float*) noexcept {
     plannedAircraft=spec.count;plannedHeli=spec.heli;
     if(spec.transportPlane || spec.heli==static_cast<int>(HeliBody::transport410))++plannedTransports;
     *route={{-1400,150,0},{1,0,0}};return !terrain ? support::Refusal::noEntry : planRefusal;

@@ -27,7 +27,7 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {if(ref.obj)++routePvpFo
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
-void SupportFollowUpQueue(int,const float*,std::uint32_t) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
+void SupportFollowUpQueue(int,const float*,std::uint32_t,const sortie::RunSpec&) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
 void SupportFollowUpSettle(std::uint32_t,bool) noexcept{}
 const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
 const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
@@ -41,7 +41,7 @@ std::uint32_t SupportStrikePt(int) noexcept{return 0;}
 bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int) noexcept{return -1;}
 bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t,const float*) noexcept{return false;}
-support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
+support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*,const float*) noexcept{return support::Refusal::unsupported;}
 void WarnDeployment(const support_net::Plan&) noexcept{}
 std::int32_t SupportPoints() noexcept{return 1000000;}
 std::int32_t SupportPointsPrice(std::uint32_t) noexcept{return 0;}
@@ -88,7 +88,7 @@ bool ResolveSupportSource(std::uint64_t,ObjRef*) noexcept{return false;}
 bool ResolveMarkIdentities(const unsigned char*,const unsigned char*,MarkIdentities*) noexcept{return false;}
 bool SupportCommandRequesterMatches(void*,const char*) noexcept{return false;}
 bool SubmitCarrierDroneNetworkRequest(const unsigned char*,unsigned,unsigned,const float*) noexcept{return false;}
-support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
+support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*,const float*) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
