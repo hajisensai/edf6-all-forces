@@ -28,6 +28,7 @@
 #include "wasted_fire.h"
 #include "edf/hash_index.h"
 #include "edf/host.h"
+#include <new>
 #include <vector>
 
 #include <atomic>
@@ -238,12 +239,95 @@ SRWLOCK lock=SRWLOCK_INIT;
 // Apart from the book because it is reset by assignment (an atomic cannot be).
 std::atomic<std::uint64_t> latestHoldMirror{0};
 
-// The target's lock points (its own registry entries), at most `max`; its root when it has none.
-struct Points { const void* target; float p[4][3]; int n; };
-void SeePoint(void* ctx,const void* object,const float* aim) {
-    auto& s=*static_cast<Points*>(ctx);
-    if(object==s.target && s.n<4){std::memcpy(s.p[s.n],aim,12);++s.n;}
+// Snapshot the first four valid points in registry order, with no native pointers to the point storage retained.
+struct Points {
+    float p[4][3]{};
+    int n=0;
+    void Add(const float* aim) noexcept {
+        if(n<4)std::memcpy(p[n++],aim,sizeof(p[0]));
+    }
+};
+
+Points ScanPoints(const void* target) noexcept {
+    struct Request { const void* target; Points points; } request{target,{}};
+    VisitLockPoints([](void* ctx,const void* object,const float* aim) {
+        auto& request=*static_cast<Request*>(ctx);
+        if(object==request.target)request.points.Add(aim);
+    },&request);
+    return request.points;
 }
+
+// One boss is common: use its first scan for every shooter without building a table for unrelated objects. On a second
+// distinct target, index the whole registry once. Each target keeps its sample until the native scene step changes.
+class TargetPointCache {
+public:
+    Points Read(const void* target) noexcept {
+        const SceneStep step=SceneStepNow();
+        if(!step.scene) {
+            if(step_.scene)Clear();
+            return ScanPoints(target);
+        }
+        if(step_.scene!=step.scene || step_.count!=step.count || step_.mission!=step.mission) {
+            Clear();
+            step_=step;
+        }
+        if(!first_) {
+            const Points sample=ScanPoints(target);
+            if(sample.n){first_=target;firstPoints_=sample;}
+            return sample;
+        }
+        if(first_==target)return firstPoints_;
+        const bool builtNow=state_==State::single;
+        if(builtNow)Build();
+        if(state_==State::indexed) {
+            const int i=rows_.Find(target);
+            if(i>=0)return points_[static_cast<std::size_t>(i)];
+            if(builtNow)return {};
+        }
+        // An absent object may register a lock point later in the same step.
+        return ScanPoints(target);
+    }
+
+    void Clear() noexcept {
+        step_={};
+        first_=nullptr;
+        state_=State::single;
+        rows_.Clear();
+        points_.clear();
+    }
+
+private:
+    enum class State { single,indexed,failed };
+    void Add(const void* object,const float* aim) {
+        const int i=rows_.Find(object);
+        if(i>=0) {
+            points_[static_cast<std::size_t>(i)].Add(aim);
+            return;
+        }
+        const auto next=static_cast<int>(points_.size());
+        points_.emplace_back().Add(aim);
+        rows_.Set(object,next);
+    }
+    void Build() noexcept {
+        state_=State::failed;
+        struct BuildState { TargetPointCache& owner; bool complete; } build{*this,true};
+        if(VisitLockPoints([](void* ctx,const void* object,const float* aim) {
+            auto& build=*static_cast<BuildState*>(ctx);
+            if(!build.complete || object==build.owner.first_)return;
+            try { build.owner.Add(object,aim); }
+            catch(const std::bad_alloc&) { build.complete=false; }
+        },&build) && build.complete)state_=State::indexed;
+    }
+
+    SceneStep step_{};
+    const void* first_=nullptr;
+    Points firstPoints_;
+    State state_=State::single;
+    edf::PtrIndex rows_;
+    std::vector<Points> points_;
+};
+
+TargetPointCache targetPoints;
 
 // Observed this frame (`frame`: the memo epoch) unless it was already: its velocity over the time since it was last
 // seen, its position, its window (hitpredict::Observe). The one writer of a Watched. Null when unreadable.
@@ -273,8 +357,7 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
     const std::uint64_t ms=GameMs();
     const float* root=reinterpret_cast<const float*>(o+kPosition);
     const WindowNow now=WindowOf(o,k);
-    Points pts{target,{},0};
-    VisitLockPoints(&SeePoint,&pts);
+    Points pts=o[edf::kDead] ? Points{} : targetPoints.Read(target);
     if(!pts.n){std::memcpy(pts.p[0],root,12);pts.n=1;}
     // The first lock point whose predicted hit the game takes: its aim point; none: the first one's, not accepted.
     bool accepted=false;float flightMs=0.0f;
@@ -444,6 +527,7 @@ void ResetWastedFire() noexcept {
     ReleaseSRWLockExclusive(&lock);
     watched.Clear();
     plans.Clear();
+    targetPoints.Clear();
     for(auto& m:targetMemo)m=TargetMemo{};
     shooterMemo=ShooterMemo{};
     memoClock.Reset();   // epochs only grow: no cleared memo's key comes back
