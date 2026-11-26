@@ -1668,7 +1668,13 @@ std::uint64_t __fastcall DrawHook(unsigned char* self,unsigned char* ctx) {
         if(mapped)DrawMap(self,ctx);
     }
     const std::uint64_t result=nextDraw(self,ctx);
-    if(mapped && Still(self))DrawOver(ctx);
+    if(ctx) {   // 整备 held drawn on its screen since it asked for the map: given up once the select is in place
+        armoryui::MapDrawn();
+        if(Still(self)) {
+            armoryui::MapShown();
+            if(mapped)DrawOver(ctx);
+        }
+    }
     return result;
 }
 

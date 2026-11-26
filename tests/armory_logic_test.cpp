@@ -614,6 +614,31 @@ void Looking() {
     Step(s,pages,3,ps,w,in);
     Check(a.looks==looks,"a popup: no look");
 }
+
+// 整备 held drawn for the world map: through the key release and the press, the select coming over the screen; ended
+// when nothing came (not pressed, nothing drawn by the second frame) or the screen has its input back.
+void Handing() {
+    HandoffState h;
+    Check(!HandoffFrame(h,true,false),"none: nothing held");
+    HandoffAsk(h);
+    Check(HandoffFrame(h,true,false) && HandoffFrame(h,true,false),"asked: held while the key is released");
+    HandoffPressed(h,true);
+    Check(h.phase==Handoff::pressed,"pressed");
+    Check(HandoffFrame(h,false,false) && h.phase==Handoff::away,"the screen lost its input: the select over it");
+    Check(HandoffFrame(h,false,true) && HandoffFrame(h,false,false),"held while the select comes");
+    Check(!HandoffFrame(h,true,false),"the screen has its input again: ended");
+    HandoffAsk(h);HandoffPressed(h,true);
+    Check(HandoffFrame(h,true,true) && h.phase==Handoff::away,"the select drew first: away too");
+    HandoffAsk(h);HandoffPressed(h,true);
+    Check(HandoffFrame(h,true,false),"one frame with input after the press: still waiting");
+    Check(!HandoffFrame(h,true,false),"the second: nothing opened, ended");
+    HandoffAsk(h);HandoffPressed(h,false);
+    Check(h.phase==Handoff::none,"not pressed: ended");
+    HandoffAsk(h);
+    Check(!HandoffFrame(h,false,false),"input lost before the press: ended");
+    HandoffPressed(h,true);
+    Check(h.phase==Handoff::none,"a press with nothing held: nothing");
+}
 }  // namespace
 
 int main() {
@@ -622,6 +647,7 @@ int main() {
     RandomWalk();
     Fitting();
     Looking();
+    Handing();
     std::printf("armory_logic: %d checks passed\n",checks);
     return 0;
 }

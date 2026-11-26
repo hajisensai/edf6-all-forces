@@ -849,4 +849,32 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
     }
 }
 
+// 整备 closed for the world map: what it drew stays drawn over its screen until the select is in place (no frame of the
+// HQ / room menu between them; armory.cpp). The select in place (the render thread's word) ends it at once; one UI
+// frame of the held screen at a time here: asked (until the closing key is released and the select button pressed;
+// the screen losing its input first: something else came over it, ended), pressed (the press made the select: the
+// screen loses its input or the select draws; neither by the second frame with input after the press: nothing opened,
+// ended), away (the select over it; the screen has its input again and the select no longer draws: it closed, ended).
+enum class Handoff : std::uint8_t { none, asked, pressed, away };
+struct HandoffState { Handoff phase=Handoff::none; int idle=0; };
+inline void HandoffAsk(HandoffState& h) noexcept { h=HandoffState{};h.phase=Handoff::asked; }
+inline void HandoffPressed(HandoffState& h,bool pressed) noexcept {
+    if(h.phase!=Handoff::asked)return;
+    h.phase=pressed ? Handoff::pressed : Handoff::none;
+    h.idle=0;
+}
+// `selectDrawn`: the select drew since the last frame. False: the hold ended (phase none).
+inline bool HandoffFrame(HandoffState& h,bool hasInput,bool selectDrawn) noexcept {
+    switch(h.phase) {
+        case Handoff::none: return false;
+        case Handoff::asked: if(!hasInput)h.phase=Handoff::none;break;
+        case Handoff::pressed:
+            if(!hasInput || selectDrawn)h.phase=Handoff::away;
+            else if(++h.idle>=2)h.phase=Handoff::none;
+            break;
+        case Handoff::away: if(hasInput && !selectDrawn)h.phase=Handoff::none;break;
+    }
+    return h.phase!=Handoff::none;
+}
+
 }  // namespace crew::armory

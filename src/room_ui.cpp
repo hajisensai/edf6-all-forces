@@ -687,8 +687,8 @@ void AutoOpenMission(unsigned char* self,void* ctx,bool menuBusy) noexcept {
 }
 // 整备 asked for the world map (armory.h TakeMapRequest): the screen's own mission select button pressed the stock way,
 // after the screen's own update (as when the player confirms it). Disabled (a room guest before the host's pick): not.
-void OpenMissionSelect(unsigned char* self) noexcept {
-    if(!pressOk){Log("ROOMUI 整备 asked for the world map: the button press did not check out at load: not opened");return;}
+bool OpenMissionSelect(unsigned char* self) noexcept {
+    if(!pressOk){Log("ROOMUI 整备 asked for the world map: the button press did not check out at load: not opened");return false;}
     const wchar_t* const name=st.room ? L"Button_Mission" : L"ButtonGotoSelectMission";
     Shared button=Find(self,name);
     bool enabled=false;
@@ -698,6 +698,7 @@ void OpenMissionSelect(unsigned char* self) noexcept {
     Release(button);
     if(why)Log("ROOMUI 整备 asked for the world map: %ls not pressed (%s)",name,why);
     else Log("ROOMUI 整备 asked for the world map: %ls pressed (the stock ButtonApply way)",name);
+    return !why;
 }
 void AutoGone(unsigned char* self) noexcept {
     unsigned char* tried=self;
@@ -776,7 +777,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         std::memset(copy+kCtxInput,0,sizeof(void*));
         result=screen.next(self,copy);
     } else result=screen.next(self,ctx);
-    if(mapAsked)OpenMissionSelect(self);
+    if(mapAsked)armoryui::MapPressed(OpenMissionSelect(self));
     if(TakeNativeEntry(st.nativeEntry,self==st.self && !followedGone.load() && !st.menu.open && !armoryui::IsOpen())) {
         OpenArmory(self);
         st.gate.latched=true;
