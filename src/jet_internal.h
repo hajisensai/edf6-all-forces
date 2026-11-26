@@ -382,6 +382,7 @@ struct Aim {
     float out[3];            // extend / run-out / crank direction
     float outRun;            // m from the target its extend flies out to (Strike: PlanExtend, the room it has)
     float outAt[3];          // a teardrop extend's turn point (outTear): beside the line out, outRun along it
+    float outLeg[3];         // a teardrop extend's leg: level, from where it was planned to outAt (its end: abreast of outAt)
     bool outTear;            // its extend is a teardrop to outAt (a box too small to fly straight out and round)
     ULONGLONG missileAt;     // its last missile salvo
     ULONGLONG lockAt;        // game ms the nose came onto the target within kMissileCone (0: not on it)

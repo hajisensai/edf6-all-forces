@@ -1393,6 +1393,9 @@ set_tests_properties(support_exit_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=
 # Ground attack runs on a stock-size map, whose soft box is narrower than the strike's own run (jet_obstacle_sim
 # --strike-room-suite; the 2026-10-09 log's multirole jets that never fired).
 add_test(NAME jet_strike_room COMMAND jet_obstacle_sim --strike-room-suite --out "${CMAKE_BINARY_DIR}")
+# An extend Strike begins is flown, not ended the next frame and planned again (jet_obstacle_sim --extend-flip-suite;
+# the 2026-11-26 perfrun log's fighter: 245 approach / extend flips and teardrop lines in a minute).
+add_test(NAME jet_extend_flip COMMAND jet_obstacle_sim --extend-flip-suite --out "${CMAKE_BINARY_DIR}")
 # The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
 # offline (tools/play_area_check.cpp). Not part of the plugin build:
 # cmake --build build --target play_area_check && build\play_area_check.exe
