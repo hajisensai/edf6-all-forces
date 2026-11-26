@@ -645,12 +645,18 @@ STORES: dict[str, Store] = {
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 SALVO_ROUNDS = 256
 SALVO_CHILDREN = 4
+# The salvo's rhythm (src/salvo_volley.h kVolley / kVolleyGap, src/lockon.cpp ShotHook): the plugin fires SALVO_VOLLEY
+# rounds a shot, round n off rail n % 4 (all four rails, twice), and the burst waits FireBurstInterval =
+# SALVO_VOLLEY_GAP frames between volleys: 32 volleys, the last 93 frames (1.55 s) after the first. One lock starts it;
+# the rounds go over every enemy locked, one each first, the rest evenly.
+SALVO_VOLLEY = 8
+SALVO_VOLLEY_GAP = 3
 SALVO_MARK = 7070.0
 SALVO_JET = 'edf6tr_jet_salvo_interceptor_mission'
 SALVO_MODEL = 'EDF6VC_SALVO_INTERCEPTOR.MRAB'
 SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
 # The salvo's launch, after Ace Combat's multi-missile volleys (the user, 2026-11-26: 「参照别的游戏做导弹发射效果…类似王牌空战」):
-# the rounds ripple off the four rails a frame apart, drop clear of the launcher for a beat, light, fan out, then
+# the rounds leave the four rails in volleys (SALVO_VOLLEY every SALVO_VOLLEY_GAP frames), drop clear of the launcher for a beat, light, fan out, then
 # turn onto their locks off the nose; each splits into four bright children. The carrier is MissileBullet02
 # (docs/missile-re.md §MissileBullet02): its CP[7] [frames, factor] the drop before ignition (the launcher's velocity
 # times factor each frame plus AmmoGravityFactor's gravity; own speed AmmoSpeed and no trail), then the motor (own
@@ -684,7 +690,7 @@ STORES['SALVO'] = Store(
     replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
             damage=180.0, blast=4.0, lock_range=4200.0, lock_cone=SALVO_LOCK_CONE, lock_time=1.0,
             accel=SALVO_ACCEL * 3600.0, top=SALVO_TOP * 60.0, eject=SALVO_EJECT, spread=SALVO_FAN,
-            burst=float(SALVO_ROUNDS), burst_gap=1.0, interval=float(SALVO_ROUNDS)),
+            burst=float(SALVO_ROUNDS), burst_gap=float(SALVO_VOLLEY_GAP), interval=float(SALVO_ROUNDS)),
     _local('Salvo missile', '斉射ミサイル', '齊射飛彈', '齐射导弹', '일제 사격 미사일'),
     per_pylon=SALVO_ROUNDS // 4, pylon_mass=110.0, pylon_drag=0.015)
 

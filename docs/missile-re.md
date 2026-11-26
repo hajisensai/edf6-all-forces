@@ -144,7 +144,7 @@ AI（`src/jet_combat.cpp`）：天顶导弹雨的开火门用 `sortie::kRainFire
 
 做不到的：
 
-- 发射节奏：一次扳机一帧最多出 FireCount 发，分配方式 0 时每发一个锁定（`docs/lockon-re.md` §3），256 发至少 256 帧 ≈ 4.3 s。要 2 s 内打完得 FireCount 2 + 128 个锁定（改 SALVO_ROUNDS、`kSalvoLockLimit`、`lockon.cpp` 分配、HUD、`SalvoLocked`），未做。
+- 发射节奏（已由插件改）：原版连发每次武器更新只打一发、一发一个炮口，分配方式 0 时每发一个锁定（`docs/lockon-re.md` §3），256 发至少 256 帧 ≈ 4.3 s，还得先锁满 256 个。现在插件钩住两处打一发的调用，齐射挂载一次打 8 发（四根导轨各两发），每 3 帧一轮（`SALVO_VOLLEY` / `SALVO_VOLLEY_GAP`，`src/salvo_volley.h`），256 发 1.55 s 打完；1 个锁定就能开火，弹按敌人轮流分（`docs/lockon-re.md` §7）。待实机确认：同帧 8 发的观感与帧时间、联机远端是否逐发同步。
 - 弹体自发光（已由插件补上）：AmmoColor 只染尾焰和光焰，弹体模型的材质不受它影响。现在母弹 CP[16]、子弹 CP[13] 各带一条发光声明，插件在弹头处画加色光晕，模型不改（`docs/round-glow.md`）。
 - 母弹尾迹粗、子弹细：尾迹宽绑在 AmmoSize（也是模型尺寸）上，只能改模型大小，未改。
 

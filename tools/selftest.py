@@ -1501,7 +1501,8 @@ def store_looks() -> None:
         if kind(name) == 'SALVO':
             cp = got['Ammo_CustomParameter']
             assert got['AmmoClass'] == 'MissileBullet02' and len(cp) == 17 and cp[12][0] == 1
-            assert got['AmmoCount'] == got['FireBurstCount'] == vc.SALVO_ROUNDS and got['FireBurstInterval'] == 1
+            assert got['AmmoCount'] == got['FireBurstCount'] == vc.SALVO_ROUNDS and got['FireCount'] == 1
+            assert got['FireBurstInterval'] == vc.SALVO_VOLLEY_GAP
             assert cp[15][2] == vc.SALVO_CHILDREN and cp[15][4] == 'MissileBullet01'
             near = lambda a, b: all(abs(x - y) < 1e-5 for x, y in zip(a, b, strict=True))  # noqa: E731
             child = cp[15][13]
@@ -2112,6 +2113,17 @@ def sortie_copies_agree() -> None:
             continue
         raise AssertionError(f'declare_glow took {bad}')
     assert 'salvo ? sortie::kRainRoundSpeed : ' in combat and 'salvo ? 0.0f : ' in combat
+    # The salvo's volleys (src/salvo_volley.h, src/lockon.cpp ShotHook; the user, 2026-11-26: 「每帧只能出一发 什么垃圾设定，
+    # 改」): its constants the store's, both shot calls patched, one lock enough, the old repeat-lock queue gone.
+    volley = src('src/salvo_volley.h')
+    assert f'constexpr int kRounds={vc.SALVO_ROUNDS};' in volley and f'constexpr int kVolley={vc.SALVO_VOLLEY};' in volley
+    assert f'constexpr int kVolleyGap={vc.SALVO_VOLLEY_GAP};' in volley and vc.SALVO_VOLLEY % 4 == 0
+    frames = (-(-vc.SALVO_ROUNDS // vc.SALVO_VOLLEY) - 1) * vc.SALVO_VOLLEY_GAP
+    assert 1.5 <= frames / 60.0 <= 2.0, frames
+    assert vc.STORES['SALVO'].weapon.burst_gap == vc.SALVO_VOLLEY_GAP
+    lockon = src('src/lockon.cpp')
+    assert 'const bool volleyOk=HookVolleys();' in lockon and 'kStartShot=0x690C7B' in lockon and 'kBurstShot=0x6940DF' in lockon
+    assert 'kRepeatLock' not in lockon and 'locked>0; }' in plan and 'kRainBurstMs=2000;' in plan
     cmake = src('CMakeLists.txt')
     assert 'src/jet_sortie.cpp' in cmake and 'add_executable(sortie_check EXCLUDE_FROM_ALL tools/sortie_check.cpp)' in cmake
     assert ' sortie_check ' in cmake

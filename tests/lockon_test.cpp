@@ -33,6 +33,17 @@ const unsigned char cancelHead[]={0x40,0x53,0x48,0x81,0xEC,0x40,0x06,0x00,0x00,0
 alignas(16) unsigned char weapon[0xD00]{},remote[0xD00]{},listHead[0x28]{},lockNode[0x28]{},target[0x60]{},locked[0x60]{},ctrl[0x10]{};
 int checks=0,cancelCalls=0,dropCalls=0,clearCalls=0;
 
+struct ShotSeen { unsigned index; std::int32_t cursor,burstLeft; };
+ShotSeen shots[300];
+int shotCount=0;
+bool refuseShots=false;
+// Weapon_VehicleShoot's slot 16 standing in: records the round, takes it off the magazine (0x69820E's decrement).
+void __fastcall RecordShot(unsigned char* w,unsigned index) {
+    if(refuseShots)return;
+    if(shotCount<300)shots[shotCount++]={index,At<std::int32_t>(w,kLockCursor),At<std::int32_t>(w,kBurstLeft)};
+    Put<std::int32_t>(w,kRoundsLeft,At<std::int32_t>(w,kRoundsLeft)-1);
+}
+
 void Check(bool condition,const char* what) {
     ++checks;
     if(!condition){std::fprintf(stderr,"FAIL: %s\n",what);std::exit(1);}
@@ -148,7 +159,6 @@ int main() {
         alignas(16) static unsigned char launcher[0xD00]{}, head[0x28]{}, entries[4][0x30]{}, nodes[kSalvoLockLimit][0x28]{};
         static unsigned char enemies[3]{};
         salvoAnswer=true;
-        repeatOk=true;
         Put<const void*>(launcher,kLockList,head);
         Put<const void*>(head,0,head);
         // Enemy zero has two lock points. They share its allocation.
@@ -177,8 +187,71 @@ int main() {
             Put<std::uint64_t>(launcher,kLockCount,static_cast<unsigned>(n+1));
             tail=nodes[n];
         }
-        Check(launcher[kRepeatLock]==1 && perEnemy[0]==86 && perEnemy[1]==85 && perEnemy[2]==85,
-              "the full magazine is balanced 11, 11, 10 across three enemies");
+        Check(launcher[0x78E]==0 && perEnemy[0]==86 && perEnemy[1]==85 && perEnemy[2]==85,
+              "a full list is balanced 86, 85, 85 across three enemies, the weapon's repeat byte untouched");
+    }
+    {
+        // The volleys (ShotHook): kVolley rounds a call from the fire start and the burst step alike, round n's cursor
+        // at its enemy's node, the burst run on to the magazine's end; every other weapon one shot as before.
+        alignas(16) static unsigned char gun[0x1000]{},gunHead[0x28]{},gunNodes[3][0x28]{},gunEntries[3][0x30]{},dead[0x10]{};
+        static unsigned char foes[2]{};
+        static void* gunVt[kShotSlot+1]{};
+        gunVt[kShotSlot]=reinterpret_cast<void*>(&RecordShot);
+        Put<void* const*>(gun,0,gunVt);
+        Put<std::int32_t>(gun,kAmmoCount,salvo::kRounds);Put<std::int32_t>(gun,kRoundsLeft,salvo::kRounds);
+        Put<std::int32_t>(gun,kLockShare,0);gun[kLockKept]=1;
+        // Nodes: foe 0, foe 1, foe 0's second lock point.
+        Put<const void*>(gun,kLockList,gunHead);
+        const unsigned char* tail=gunHead;
+        for(int i=0;i<3;++i) {
+            Put<const void*>(gunEntries[i],kEntryObject,&foes[i==2 ? 0 : i]);
+            Put<const void*>(const_cast<unsigned char*>(tail),0,gunNodes[i]);
+            Put<const void*>(gunNodes[i],0,gunHead);
+            Put<const void*>(gunNodes[i],kNodeEntry,gunEntries[i]);
+            Put<const void*>(gunNodes[i],kNodeCtrl,ctrl);
+            tail=gunNodes[i];
+        }
+        Put<std::uint64_t>(gun,kLockCount,3);
+        salvoAnswer=true;shotCount=0;
+        Put<std::int32_t>(gun,kBurstLeft,2);   // the stock's start: k - 1 for its 3 locks
+        ShotHook(gun,0);
+        Check(shotCount==salvo::kVolley && At<std::int32_t>(gun,kRoundsLeft)==salvo::kRounds-salvo::kVolley &&
+              At<std::int32_t>(gun,kBurstLeft)==salvo::kRounds-salvo::kVolley,
+              "the fire start fires a volley and the burst runs on past its 3 locks");
+        const int nodeOf[]={0,1,2,1,0,1,2,1};   // foe r % 2; foe 0's two points in turn
+        bool order=true;
+        for(int r=0;r<salvo::kVolley;++r)
+            order=order && shots[r].index==static_cast<unsigned>(r) && shots[r].cursor==nodeOf[r] &&
+                  shots[r].burstLeft==salvo::kRounds-r-1;
+        Check(order,"each round its own index (its rail), its enemy's node, the burst left after it");
+        int calls=1;
+        while(At<std::int32_t>(gun,kRoundsLeft)>0 && calls<100) {
+            Put<std::int32_t>(gun,kBurstLeft,At<std::int32_t>(gun,kBurstLeft)-1);   // the burst step's own decrement
+            ShotHook(gun,static_cast<unsigned>(salvo::kRounds-At<std::int32_t>(gun,kRoundsLeft)));
+            ++calls;
+        }
+        Check(calls==salvo::kRounds/salvo::kVolley && shotCount==salvo::kRounds && shots[salvo::kRounds-1].burstLeft==0 &&
+              At<std::int32_t>(gun,kBurstLeft)==0,"256 rounds in 32 calls, the last timed by FireInterval");
+        int per[2]={};
+        for(int r=0;r<salvo::kRounds;++r)++per[shots[r].cursor==1 ? 1 : 0];
+        Check(per[0]==128 && per[1]==128,"two enemies share the salvo evenly");
+        // No live lock: the cursor past the last node (unguided).
+        for(int i=0;i<3;++i)Put<const void*>(gunNodes[i],kNodeCtrl,dead);
+        Put<std::int32_t>(gun,kRoundsLeft,salvo::kRounds);shotCount=0;
+        ShotHook(gun,0);
+        Check(shotCount==salvo::kVolley && shots[0].cursor==3 && shots[7].cursor==3,"no live lock: unguided rounds");
+        // A shot that takes no round ends the volley.
+        refuseShots=true;shotCount=0;
+        const std::int32_t before=At<std::int32_t>(gun,kRoundsLeft);
+        ShotHook(gun,0);
+        Check(At<std::int32_t>(gun,kRoundsLeft)==before && At<std::int32_t>(gun,kBurstLeft)==before,"a refused shot stops the volley");
+        refuseShots=false;
+        // Not the salvo: one shot, nothing of the weapon's touched.
+        salvoAnswer=false;shotCount=0;
+        Put<std::int32_t>(gun,kBurstLeft,5);Put<std::int32_t>(gun,kLockCursor,7);
+        ShotHook(gun,9);
+        Check(shotCount==1 && shots[0].index==9 && shots[0].cursor==7 && At<std::int32_t>(gun,kBurstLeft)==5,
+              "every other weapon: the stock's one shot");
     }
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("lockon: %d production cancellation checks passed\n",checks);

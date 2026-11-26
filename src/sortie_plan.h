@@ -5,6 +5,7 @@
 //   Lap    a circle round the mark counted as it is flown (the heli's death circle, the gunship's marking lap)
 // and the few numbers each pass is made of.
 #pragma once
+#include "salvo_volley.h"
 #include <cmath>
 
 namespace crew {
@@ -25,12 +26,16 @@ constexpr float kPopClimb=1.6f;           // its climb away: up this much for ea
 constexpr unsigned long long kPopClimbMs=4500;
 constexpr float kRainAlt=320.0f;
 constexpr float kRainFrom=4000.0f,kRainTo=450.0f,kRainSpeed=155.0f;
-// The 256 rounds go one per simulation frame. Keep flying the pass while the native trigger is draining.
-constexpr unsigned long long kRainBurstMs=5500;
+// The 256 rounds go in volleys (salvo_volley.h: 8 every 3 frames, the last 1.55 s after the first). Keep flying the
+// pass while the burst is draining, and as long before the next trigger.
+constexpr unsigned long long kRainBurstMs=2000;
+static_assert(salvo::VolleyFrames(salvo::kRounds)*1000/60<kRainBurstMs,"the pass outlasts the burst");
 constexpr bool SalvoDraining(unsigned long long now,unsigned long long firedAt) noexcept {
     return firedAt!=0 && now>=firedAt && now-firedAt<=kRainBurstMs;
 }
-constexpr bool SalvoLocked(int loaded,int locked) noexcept { return loaded>0 && locked>=loaded; }
+// One lock is enough (after the lock dwell, kLockMs): the burst fires the whole magazine whatever it was started with,
+// over every enemy locked by then and since (src/lockon.cpp SalvoVolley).
+constexpr bool SalvoLocked(int loaded,int locked) noexcept { return loaded>0 && locked>0; }
 // The salvo's AI trigger: the lock cone is 1.40 rad off the nose (pylib/vcobjects.py SALVO_LOCK_CONE) and its rounds
 // fan out and turn onto their locks themselves, so the jet fires with its aim this far off the nose.
 constexpr float kRainFireCone=0.8f;
