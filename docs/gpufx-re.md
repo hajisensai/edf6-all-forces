@@ -186,7 +186,7 @@
   - Distortion 和 Model 不在本段范围。
 - 对照台：`GpuFxTest=3 / 4` 另加两个拖尾源，ExtLine 用 `app:/object/ev601_plant.efarc` 的 `smoke.esb`，Locus 用 `app:/weapon/effect/v601_tank_cannon.efarc` 的 `bullet01.esb`。没找到单独放 EmittingExtendLine 的 esb，它和 Locus 共用绘制函数与我方代码路径。阶段表加了 `trails` 开关，负载台多一个阶段「接管但拖尾留原版」。探针把拖尾记在桶 5（我方的四边形数 / 原版的绘制数、四边形数、毫秒、像素）和 `GPUFX   trails` 一行。
 - 离线核对：
-  - `gpufx_sim` 把四边形逐三角形对照原版条带：ExtLine 1000 点分批、Locus 512 点重开、奇数点、0 / 1 点都覆盖到。
+  - `gpufx_sim` 把四边形逐三角形对照原版条带：ExtLine 0 / 1 / 奇数点和 1000 点分批（0、1、2、3、7、12、1000、1001 点），Locus 不足两点不画、512 点重开（2、3、9、511、512、513、1024、1100 点）。
   - `gpufx_gpu` 在 WARP 上用等价 HLSL 编出的字节码验证：坏字节码被拒，三种混合、淡出、LESS / LESS_EQUAL、条带覆盖、与卡片交错的绘制顺序。
 - 未实机验证：画面一致和 GPU 时间要跑 `GpuFxTest=3 / 4` 对照（命令见 PR 说明）。
 
