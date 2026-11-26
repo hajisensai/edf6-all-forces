@@ -36,6 +36,12 @@ constexpr unsigned kCollideDispatchCalls[]={0xDAF9BB,0xDAF9E0};
 constexpr unsigned kCollideSleepCall=0xA0FC48,kCollideSleep=0x9EAE60;
 constexpr unsigned kDefaultQueueInterface=0x182EC80,kDefaultQueueMode=0x36C;
 constexpr unsigned kModeZeroExecute=0xA0FE74;
+constexpr unsigned kPostCollideVtable=0x18C1D28;
+constexpr unsigned kContactDispatchCall=0xDAC932,kContactDispatch=0xE781D0;
+constexpr unsigned kPostCollideSignalCall=0xDACA04,kPostCollideSignal=0xDA9F60;
+constexpr unsigned kEventCommandCall=0xE77770,kEventCommand=0x12FE960;
+constexpr unsigned kEventListenerCall=0xE75FBB;
+constexpr unsigned char kEventListenerSig[]={0x4C,0x8B,0xC5,0x49,0x8B,0xD7,0x41,0xFF,0x51,0x18};
 constexpr unsigned kGraphNodes=0x18,kGraphNodeCount=0x20,kGraphEdges=0x328,kGraphEdgeCount=0x330;
 constexpr unsigned kGraphNodeStride=0x18,kGraphNodeJob=0x10;
 constexpr unsigned char kTaskExecuteSig[]={0x48,0x8D,0x43,0x10,0x48,0x89,0x45,0x88,0x48,0x8D,0x55,
@@ -95,7 +101,8 @@ bool split=false;          // PerfProbe: the frame split hooks are in
 bool presentTried=false;
 std::atomic<DWORD> gameThread{0};   // the main loop's thread (the frame anchor's), 0 before the first frame
 bool anchored=false;                // the frame anchor chained
-bool havokTiming=false,havokSplit=false,collideTiming=false,taskTrace=false;
+bool havokTiming=false,havokSplit=false,collideTiming=false,taskTrace=false,contactTrace=false;
+unsigned contactImageSize=0;
 thread_local bool profileCollide=false,profileCollideSleep=false,profileTaskWaits=false;
 unsigned havokPhase=2;    // game thread only: 0 before objects, 1 after, 2 outside either tagged step
 
@@ -134,6 +141,19 @@ struct GraphEdge { std::uint16_t from,to; };
 static_assert(sizeof(GraphEdge)==4);
 struct TaskSpan { LONGLONG begin,end;unsigned node;bool worker; };
 struct WaitSpan { LONGLONG begin,end; };
+constexpr unsigned kContactBuckets=64;
+struct ContactBucket {
+    unsigned type=0,callback=0,calls=0;
+    LONGLONG elapsed=0;
+};
+struct ContactTrace {
+    ContactBucket listeners[kContactBuckets]{};
+    unsigned commands[256]{};
+    unsigned count=0,dropped=0,dispatches=0;
+    LONGLONG dispatch=0,signal=0;
+};
+thread_local ContactTrace* activeContact=nullptr;
+thread_local bool inContactDispatch=false;
 struct TaskNodeReport {
     const char* name=nullptr;
     LONGLONG begin=0,end=0,work=0,duringWait=0;
@@ -142,12 +162,14 @@ struct TaskNodeReport {
 };
 struct GraphReport {
     TaskNodeReport nodes[kGraphNodesMax]{};
+    ContactTrace contacts;
     unsigned id=0,count=0,concrete=0,observed=0,dropped=0;
     int tail=-1;
     LONGLONG origin=0,wait=0;
 };
 struct ActiveTaskGraph {
     const unsigned char* nativeNodes=nullptr;
+    ContactTrace contacts;
     const void* tasks[kGraphNodesMax]{};
     const char* names[kGraphNodesMax]{};
     GraphEdge edges[kGraphEdgesMax]{};
@@ -202,6 +224,7 @@ bool CaptureTaskGraph(const void* graph) noexcept {
         AcquireSRWLockExclusive(&graphLock);
         auto& taskGraph=taskTraceStorage->graph;
         taskGraph.id=++traceId;
+        taskGraph.contacts={};
         taskGraph.count=static_cast<unsigned>(count);
         taskGraph.edgeCount=validEdges;
         taskGraph.nativeNodes=nodes;
@@ -233,6 +256,7 @@ void FinishTaskGraph(bool completed) noexcept {
     report.id=taskGraph.id;
     report.count=taskGraph.count;
     report.origin=taskGraph.origin;
+    report.contacts=taskGraph.contacts;
     report.dropped=taskGraph.dropped;
     for(unsigned i=0;i<taskGraph.count;++i) {
         report.nodes[i].name=taskGraph.names[i];
@@ -272,6 +296,24 @@ void FinishTaskGraph(bool completed) noexcept {
 
 using TaskExecuteFn=std::uintptr_t(__fastcall*)(void*,void*,void*,void*);
 
+__declspec(noinline) std::uintptr_t CapturePostCollide(TaskExecuteFn original,unsigned id,
+                                                      void* task,void* context,void* a3,void* a4) {
+    ContactTrace sample{};
+    auto* const previous=activeContact;
+    activeContact=&sample;
+    std::uintptr_t result=0;
+    __try {
+        result=original(task,context,a3,a4);
+    } __finally {
+        activeContact=previous;
+    }
+    AcquireSRWLockExclusive(&graphLock);
+    auto& graph=taskTraceStorage->graph;
+    if(graphActive.load(std::memory_order_relaxed) && id==graph.id)graph.contacts=sample;
+    ReleaseSRWLockExclusive(&graphLock);
+    return result;
+}
+
 std::uintptr_t __fastcall TaskExecuteProbe(void* task,void* context,void* a3,void* a4) {
     const auto original=At<TaskExecuteFn>(At<const void*>(task,0),0x10);
     unsigned id=0,node=0;
@@ -295,7 +337,9 @@ std::uintptr_t __fastcall TaskExecuteProbe(void* task,void* context,void* a3,voi
     }
     if(!id)return original(task,context,a3,a4);
     const auto begin=Qpc();
-    const auto result=original(task,context,a3,a4);
+    const auto result=contactTrace && At<const void*>(task,0)==image+kPostCollideVtable
+        ? CapturePostCollide(original,id,task,context,a3,a4)
+        : original(task,context,a3,a4);
     const auto end=Qpc();
     const bool worker=owner!=GetCurrentThreadId();
     AcquireSRWLockExclusive(&graphLock);
@@ -313,6 +357,19 @@ void ReportTaskGraphs() noexcept {
         const auto& graph=taskTraceStorage->reports[i];
         Log("PERF COLLIDE GRAPH %u nodes %u/%u dropped %u tail %d wait %.3f ms",
             graph.id,graph.observed,graph.concrete,graph.dropped,graph.tail,static_cast<double>(graph.wait)*tickMs);
+        const auto& contact=graph.contacts;
+        if(contact.dispatches) {
+            Log("PERF COLLIDE CONTACT %u dispatches %u work %.3f ms signal %.3f ms dropped %u",
+                graph.id,contact.dispatches,static_cast<double>(contact.dispatch)*tickMs,
+                static_cast<double>(contact.signal)*tickMs,contact.dropped);
+            for(unsigned j=0;j<std::size(contact.commands);++j)if(contact.commands[j])
+                Log("PERF COLLIDE COMMAND %u kind %u calls %u",graph.id,j,contact.commands[j]);
+            for(unsigned j=0;j<contact.count;++j) {
+                const auto& listener=contact.listeners[j];
+                Log("PERF COLLIDE LISTENER %u event %u callback 0x%X calls %u work %.3f ms",graph.id,
+                    listener.type,listener.callback,listener.calls,static_cast<double>(listener.elapsed)*tickMs);
+            }
+        }
         for(unsigned j=0;j<graph.count;++j) {
             const auto& node=graph.nodes[j];
             if(!node.calls)continue;
@@ -452,6 +509,102 @@ bool InstallIndirectProbe(unsigned call,const unsigned char (&signature)[N],void
     return false;
 }
 
+using DispatchContactsFn=std::uintptr_t(__fastcall*)(void*,void*,void*,void*);
+using ContactSignalFn=std::uintptr_t(__fastcall*)(void*,void*);
+DispatchContactsFn nextContactDispatch=nullptr;
+ContactSignalFn nextContactSignal=nullptr,nextEventCommand=nullptr;
+
+std::uintptr_t __fastcall ContactDispatchProbe(void* store,void* stream,void* dispatcher,void* extra) {
+    auto* const trace=activeContact;
+    if(!trace)return nextContactDispatch(store,stream,dispatcher,extra);
+    const auto begin=Qpc();
+    const bool previous=inContactDispatch;
+    inContactDispatch=true;
+    std::uintptr_t result=0;
+    __try {
+        result=nextContactDispatch(store,stream,dispatcher,extra);
+    } __finally {
+        inContactDispatch=previous;
+    }
+    ++trace->dispatches;
+    trace->dispatch+=Qpc()-begin;
+    return result;
+}
+
+std::uintptr_t __fastcall PostCollideSignalProbe(void* signal,void* world) {
+    auto* const trace=activeContact;
+    if(!trace)return nextContactSignal(signal,world);
+    const auto begin=Qpc();
+    const auto result=nextContactSignal(signal,world);
+    trace->signal+=Qpc()-begin;
+    return result;
+}
+
+std::uintptr_t __fastcall EventCommandProbe(void* dispatcher,void* command) {
+    if(activeContact && inContactDispatch)++activeContact->commands[At<unsigned char>(command,3)];
+    return nextEventCommand(dispatcher,command);
+}
+
+std::uintptr_t __fastcall EventListenerProbe(void* listener,void* input,void* event,const void* table) {
+    const auto original=At<DispatchContactsFn>(table,0x18);
+    auto* const trace=activeContact;
+    if(!trace || !inContactDispatch)return original(listener,input,event,const_cast<void*>(table));
+    const unsigned type=At<std::uint16_t>(event,4);
+    const auto address=reinterpret_cast<std::uintptr_t>(original)-reinterpret_cast<std::uintptr_t>(image);
+    const auto callback=address<contactImageSize ? static_cast<unsigned>(address) : 0u;
+    unsigned slot=0;
+    for(;slot<trace->count;++slot) {
+        const auto& item=trace->listeners[slot];
+        if(item.type==type && item.callback==callback)break;
+    }
+    if(slot==kContactBuckets) {
+        ++trace->dropped;
+        return original(listener,input,event,const_cast<void*>(table));
+    }
+    auto& item=trace->listeners[slot];
+    if(slot==trace->count){item.type=type;item.callback=callback;++trace->count;}
+    ++item.calls;
+    const auto begin=Qpc();
+    const auto result=original(listener,input,event,const_cast<void*>(table));
+    item.elapsed+=Qpc()-begin;
+    return result;
+}
+
+bool InstallEventListenerProbe() noexcept {
+    if(!edf::Matches(image,kEventListenerCall,kEventListenerSig,sizeof(kEventListenerSig)))return false;
+    auto* const site=image+kEventListenerCall;
+    // Recreate mov r8,rbp and mov rdx,r15, then tail-jump to the diagnostic wrapper.
+    unsigned char bridge[]={0x4C,0x8B,0xC5,0x49,0x8B,0xD7,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    const auto destination=reinterpret_cast<std::uintptr_t>(&EventListenerProbe);
+    std::memcpy(bridge+8,&destination,sizeof(destination));
+    auto* const relay=static_cast<unsigned char*>(edf::AllocateNearCode(site,bridge,sizeof(bridge)));
+    if(!relay)return false;
+    const auto delta=reinterpret_cast<std::intptr_t>(relay)-reinterpret_cast<std::intptr_t>(site+5);
+    unsigned char code[]={0xE8,0,0,0,0,0x90,0x90,0x90,0x90,0x90};
+    static_assert(sizeof(code)==sizeof(kEventListenerSig));
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        const auto rel=static_cast<std::int32_t>(delta);
+        std::memcpy(code+1,&rel,sizeof(rel));
+        if(edf::PatchCode(site,kEventListenerSig,code,sizeof(code)))return true;
+    }
+    VirtualFree(relay,0,MEM_RELEASE);
+    return false;
+}
+
+void InstallContactTrace() noexcept {
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+At<LONG>(image,0x3C));
+    contactImageSize=pe->OptionalHeader.SizeOfImage;
+    const bool dispatch=Chain(kContactDispatchCall,kContactDispatch,reinterpret_cast<void*>(&ContactDispatchProbe),
+                              reinterpret_cast<void**>(&nextContactDispatch));
+    const bool signal=Chain(kPostCollideSignalCall,kPostCollideSignal,reinterpret_cast<void*>(&PostCollideSignalProbe),
+                            reinterpret_cast<void**>(&nextContactSignal));
+    const bool command=Chain(kEventCommandCall,kEventCommand,reinterpret_cast<void*>(&EventCommandProbe),
+                             reinterpret_cast<void**>(&nextEventCommand));
+    const bool listener=InstallEventListenerProbe();
+    contactTrace=dispatch && signal && command && listener;
+    Log("HOOK perf PostCollide dispatch=%d signal=%d command=%d listener=%d",dispatch,signal,command,listener);
+}
+
 void InstallCollideProbe() noexcept {
     const bool construct=Chain(kCollideConstructCall,kCollideConstruct,reinterpret_cast<void*>(&CollideConstructHook),
                               reinterpret_cast<void**>(&nextCollideConstruct));
@@ -468,6 +621,7 @@ void InstallCollideProbe() noexcept {
             InstallIndirectProbe(kModeZeroExecute,kTaskExecuteSig,reinterpret_cast<void*>(&TaskExecuteProbe));
         if(!taskTrace){delete taskTraceStorage;taskTraceStorage=nullptr;}
         Log("HOOK perf Havok collision tasks=%d (one graph sampled every 16 builds)",taskTrace);
+        if(taskTrace)InstallContactTrace();
     }
 }
 

@@ -84,6 +84,16 @@ for raw, name in re.findall(r'{(0x[0-9A-Fa-f]+),"([A-Za-z]+)"}', source):
     assert native_name == f'.?AVhknp{name}Task@@'.encode(), native_name
     assert struct.unpack_from('<Q', binary, vtable + 0x10)[0] == struct.unpack_from('<Q', binary, vtable - 0x20 + 0x30)[0]
 checked += 1
+# PostCollide is split at the stock calls. The listener bridge recreates both volatile arguments.
+for probe, callee in [('kContactDispatchCall','kContactDispatch'),('kPostCollideSignalCall','kPostCollideSignal'),
+                      ('kEventCommandCall','kEventCommand')]:
+    call(value(probe),value(callee))
+at = value('kEventListenerCall')
+assert binary[at:at+10] == bytes.fromhex('4c8bc5498bd741ff5118')
+assert binary[0xE75F98:0xE75F9B] == bytes.fromhex('4c8b09')   # r9 is the listener vtable
+assert binary[0xE76970:0xE76974] == bytes.fromhex('66394704') # event kind at event+4
+assert binary[0x12FE960:0x12FE964] == bytes.fromhex('0fb64203') # command kind at record+3
+checked += 4
 # The Present command's rcx: lea rcx, [rip+disp] at 0x11A308E, the renderer.
 assert binary[0x11A308E:0x11A3091] == bytes.fromhex('488d0d')
 assert 0x11A3095 + struct.unpack_from('<i', binary, 0x11A3091)[0] == value('kRenderer')

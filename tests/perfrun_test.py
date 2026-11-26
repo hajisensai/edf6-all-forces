@@ -319,6 +319,9 @@ def probe_parsing() -> None:
         collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE construct')
         graph = c_format('src/perf_probe.cpp', 'PERF COLLIDE GRAPH %u')
         node = c_format('src/perf_probe.cpp', 'PERF COLLIDE NODE')
+        contact = c_format('src/perf_probe.cpp', 'PERF COLLIDE CONTACT')
+        command = c_format('src/perf_probe.cpp', 'PERF COLLIDE COMMAND')
+        listener = c_format('src/perf_probe.cpp', 'PERF COLLIDE LISTENER')
         render = c_format('src/perf_probe.cpp', 'PERF RENDER %u presents')
         net = c_format('src/perf_probe.cpp', 'PERF NET CHANNELS')
         gpu = c_format('src/perf_probe.cpp', 'PERF GPU a frame')
@@ -343,6 +346,14 @@ def probe_parsing() -> None:
             f.write('[13:00:20.000] ' + node % (1, 1, 'PostCollide', 1, 0, 0.5, 0.0, 3.0, 3.5, 0) + '\n')
             f.write('[13:00:20.000] ' + node % (2, 0, 'Grid', 1, 1, 2.0, 1.0, 0.0, 2.0, -1) + '\n')
             f.write('[13:00:40.000] ' + node % (3, 0, 'Grid', 1, 1, 9.0, 9.0, 0.0, 9.0, -1) + '\n')
+            f.write('[13:00:15.000] ' + contact % (1, 1, 4.0, 0.2, 0) + '\n')
+            f.write('[13:00:20.000] ' + contact % (2, 1, 5.0, 0.3, 3) + '\n')
+            f.write('[13:00:40.000] ' + contact % (3, 1, 20.0, 1.0, 1) + '\n')
+            f.write('[13:00:20.000] ' + command % (1, 2, 30) + '\n')
+            f.write('[13:00:20.000] ' + command % (2, 2, 35) + '\n')
+            f.write('[13:00:20.000] ' + listener % (1, 4, 0x6DACC8, 10, 2.0) + '\n')
+            f.write('[13:00:20.000] ' + listener % (2, 4, 0x6DACC8, 12, 3.0) + '\n')
+            f.write('[13:00:40.000] ' + listener % (3, 4, 0x6DACC8, 40, 19.0) + '\n')
             f.write('[13:00:20.000] ' + render % (400, 0.2, 3.0, 12.5, 40.0, 20.0, 45.0, 90.0, 2,
                                                   1200, 300, 0, 0, 0, 7, 2500) + '\n')
             f.write('[13:00:15.000] ' + gpu % (40.0, 12.0, 0.0, 0.25, 0.0, 1.5, 300.0, 0.8) + '\n')
@@ -376,6 +387,11 @@ def probe_parsing() -> None:
         check(trace['graphs'] == 2 and trace['complete'] == 1 and trace['wait_ms'] == 4.0
               and trace['chains'] == {('Grid', 'PostCollide'): 1} and trace['tasks']['Grid'] == [3, 3, 6., 3.5],
               'collision task report weights callback spans and excludes partial graphs from tail chains')
+        events = perf_report.read_post_collide(log, w)
+        check(events['graphs'] == 2 and events['dispatch_ms'] == 9.0 and events['signal_ms'] == 0.5
+              and events['dropped'] == 3 and events['commands'] == {2: 65}
+              and events['listeners'] == {(4, 0x6DACC8): [22, 5.0]},
+              'PostCollide joins command and listener rows only to sampled graphs in the window')
         r = perf_report.read_render(log, w)
         check(r['presents'] == 400 and r['stepped_worst'] == 90.0 and r['unpaired'] == 2 and r['submits'][0] == 1200
               and r['meshes'] == 2500, 'PERF RENDER: presents, input to present, submits by pass (gpu-2, latency-2)')

@@ -492,6 +492,33 @@ def read_collide_tasks(log: str, window: tuple[float, float]) -> dict:
             'wait_ms': sum(float(m[9]) for m in graphs.values())}
 
 
+CONTACT_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE CONTACT (\d+) dispatches (\d+) '
+                          r'work ([\d.]+) ms signal ([\d.]+) ms dropped (\d+)')
+CONTACT_COMMAND = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE COMMAND (\d+) kind (\d+) calls (\d+)')
+CONTACT_LISTENER = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE LISTENER (\d+) event (\d+) '
+                              r'callback (0x[0-9A-Fa-f]+) calls (\d+) work ([\d.]+) ms')
+
+
+def read_post_collide(log: str, window: tuple[float, float]) -> dict:
+    rows = {int(m[4]): m for m in _rows(log, CONTACT_TIME, window)}
+    if not rows:
+        return {}
+    commands = collections.Counter()
+    listeners = {}
+    for m in _rows(log, CONTACT_COMMAND, None):
+        if int(m[4]) in rows:
+            commands[int(m[5])] += int(m[6])
+    for m in _rows(log, CONTACT_LISTENER, None):
+        if int(m[4]) in rows:
+            item = listeners.setdefault((int(m[5]), int(m[6], 16)), [0, 0.])
+            item[0] += int(m[7])
+            item[1] += float(m[8])
+    return {'graphs': len(rows), 'dispatches': sum(int(m[5]) for m in rows.values()),
+            'dispatch_ms': sum(float(m[6]) for m in rows.values()),
+            'signal_ms': sum(float(m[7]) for m in rows.values()),
+            'dropped': sum(int(m[8]) for m in rows.values()), 'commands': commands, 'listeners': listeners}
+
+
 def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
     """The PERF RENDER rows in `window`: means weighted by presents, worsts the max. {} without them."""
     rows = _rows(log, RENDER, window)
@@ -1018,6 +1045,23 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
         if tasks['chains']:
             out += ['', 'Last-finishing observed dependency chains:', '']
             out += [f"- {' → '.join(chain)}: {count} graphs" for chain, count in tasks['chains'].most_common(4)]
+    post_collide = read_post_collide(log, cw)
+    if post_collide:
+        out += ['', '## Sampled PostCollide event dispatch (PerfProbe=2)', '',
+                f"{post_collide['graphs']} graphs: {post_collide['dispatches']} dispatches, "
+                f"{post_collide['dispatch_ms']:.2f} ms in command dispatch, "
+                f"{post_collide['signal_ms']:.2f} ms in the PostCollide signal, "
+                f"{post_collide['dropped']} listener calls omitted by the bucket limit."]
+        if post_collide['commands']:
+            out += ['', 'Command kinds: ' + ', '.join(f'{kind} × {count}'
+                    for kind, count in post_collide['commands'].most_common()), '']
+        if post_collide['listeners']:
+            out += ['', '| Event type | Listener RVA | Calls | Inclusive callback time (ms) |',
+                    '|---|---|---:|---:|']
+            for (kind, callback), (calls, elapsed) in sorted(post_collide['listeners'].items(),
+                                                             key=lambda item: -item[1][1]):
+                name = f'0x{callback:x}' if callback else 'Outside EDF.dll'
+                out.append(f'| {kind} | {name} | {calls} | {elapsed:.2f} |')
     render = read_render(log, cw)
     if render:
         sub = ' / '.join(f'{v:.0f}' for v in render['submits'])
