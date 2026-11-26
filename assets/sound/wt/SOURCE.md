@@ -1,4 +1,4 @@
-# War Thunder gun, explosion and passby sounds (assets/sound/wt)
+# War Thunder gun, explosion, passby and engine sounds (assets/sound/wt)
 
 Source: https://github.com/GaijinEntertainment/fmod_studio_warthunder_for_modders , commit `07fd12efffbf20b2053d630ed5cf7ca3ddfa54a6`.
 The upstream Readme says the project "allows you to create sound modifications" and that using the content means
@@ -16,7 +16,7 @@ One gain for the whole set: **0.680167** (set peak before gain 1.440824; scaled 
 
 Installed to `Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav` by the installer.
 
-Files: 234, total size 74929346 bytes (71.46 MiB).
+Files: 299, total size 116333892 bytes (110.94 MiB).
 
 | file | source (under the project root) | channels | seconds | bytes |
 |---|---|---|---|---|
@@ -254,3 +254,83 @@ Files: 234, total size 74929346 bytes (71.46 MiB).
 | bullet_whiz_2.wav | tanks/effects/projectile_whiz_rico/bullet_whiz-002.wav | 1 | 0.787 | 75580 |
 | bullet_whiz_3.wav | tanks/effects/projectile_whiz_rico/bullet_whiz-003.wav | 1 | 0.897 | 86176 |
 | bullet_whiz_4.wav | tanks/effects/projectile_whiz_rico/bullet_whiz-004.wav | 1 | 0.737 | 70750 |
+
+## The engines (src/sound_engine.h)
+
+Source: War Thunder's own sound banks `sound/aircraft_engines.assets.bank` and `sound/tanks_engines.assets.bank`
+(the streams the modder project's events above name as their files: each AudioFile's assetPath and length matched
+to the bank's stream name and length), decoded by vgmstream; under the same terms as the project they belong to.
+The source column: `<bank>/<subsong>_<stream name>`. Every file mixed to mono, resampled to 48000 Hz and 20 Hz high-passed by FFT over the whole file (a loop's end still runs into its start), loops kept
+whole, each made seamless by a 100 ms equal-power cross-fade of its end into its start
+(one-shots: `di_hiss_load`, `di_off`, `di_switch`, `jet_ab_start`, `pe_release`, `pe_revv`, `su_load`, `tr_stop`: their tails cut as above).
+One gain for the engines: **0.668010** (their peak before gain 1.347285, after it 0.9).
+
+Files: 65, 41404546 bytes (39.49 MiB, limit 40 MiB).
+
+| file | source | channels | seconds | bytes |
+|---|---|---|---|---|
+| jet_idle_rear_1.wav | aircraft_engines.assets.bank/1050_typhoon_idle_rear.wav | 1 | 7.900 | 758444 |
+| jet_max_rear_1.wav | aircraft_engines.assets.bank/1202_typhoon_max_rear.wav | 1 | 7.900 | 758444 |
+| jet_idle_front_1.wav | aircraft_engines.assets.bank/0993_typhoon_idle_front.wav | 1 | 7.900 | 758444 |
+| jet_max_front_1.wav | aircraft_engines.assets.bank/1031_typhoon_max_front.wav | 1 | 7.900 | 758444 |
+| jet_ab_1.wav | aircraft_engines.assets.bank/1259_typhoon_afterburner.wav | 1 | 7.900 | 758444 |
+| jet_ab_start_1.wav | aircraft_engines.assets.bank/1299_afterburner_start-001.wav | 1 | 1.834 | 176094 |
+| jet_ab_start_2.wav | aircraft_engines.assets.bank/0800_afterburner_start-002.wav | 1 | 2.061 | 197896 |
+| jet_ab_start_3.wav | aircraft_engines.assets.bank/0166_afterburner_start-003.wav | 1 | 1.872 | 179714 |
+| jet_turb_02_1.wav | aircraft_engines.assets.bank/1207_turbine_04_N1_12800_02.wav | 1 | 9.500 | 912044 |
+| jet_turb_04_1.wav | aircraft_engines.assets.bank/0408_turbine_04_N1_12800_04.wav | 1 | 9.500 | 912044 |
+| jet_turb_06_1.wav | aircraft_engines.assets.bank/0316_turbine_04_N1_12800_06.wav | 1 | 9.500 | 912044 |
+| jet_turb_08_1.wav | aircraft_engines.assets.bank/1117_turbine_04_N1_12800_08.wav | 1 | 9.500 | 912044 |
+| jet_turb_085_1.wav | aircraft_engines.assets.bank/0119_turbine_06_N1_8867_085.wav | 1 | 9.500 | 912044 |
+| jet_far_low_1.wav | aircraft_engines.assets.bank/0354_jet_low_far.wav | 1 | 13.900 | 1334444 |
+| jet_far_1.wav | aircraft_engines.assets.bank/0624_jet_far_loop-001.wav | 1 | 9.400 | 902444 |
+| jet_approach_1.wav | aircraft_engines.assets.bank/0709_jet-001.wav | 1 | 7.900 | 758444 |
+| gt_00_1.wav | tanks_engines.assets.bank/0390_engine_00.wav | 1 | 8.300 | 796842 |
+| gt_33_1.wav | tanks_engines.assets.bank/2577_engine_33.wav | 1 | 9.500 | 912044 |
+| gt_66_1.wav | tanks_engines.assets.bank/0421_engine_66.wav | 1 | 7.100 | 681642 |
+| gt_99_1.wav | tanks_engines.assets.bank/0810_engine_99.wav | 1 | 8.900 | 854442 |
+| gt_00_load_1.wav | tanks_engines.assets.bank/0211_engine_00_load.wav | 1 | 8.293 | 796218 |
+| gt_33_load_1.wav | tanks_engines.assets.bank/2496_engine_33_load.wav | 1 | 9.498 | 911832 |
+| gt_66_load_1.wav | tanks_engines.assets.bank/2795_engine_66_load.wav | 1 | 7.087 | 680414 |
+| gt_99_load_1.wav | tanks_engines.assets.bank/1810_engine_99_load.wav | 1 | 8.889 | 853362 |
+| gt_dist_1.wav | tanks_engines.assets.bank/0033_abrams_dist-001.wav | 1 | 7.900 | 758444 |
+| di_00_1.wav | tanks_engines.assets.bank/1542_strv121_engine_00_exterior.wav | 1 | 7.700 | 739244 |
+| di_33_1.wav | tanks_engines.assets.bank/1937_strv121_engine_33_exterior.wav | 1 | 7.700 | 739244 |
+| di_66_1.wav | tanks_engines.assets.bank/3106_strv121_engine_66_exterior.wav | 1 | 7.700 | 739244 |
+| di_33_load_1.wav | tanks_engines.assets.bank/0892_strv121_engine_33_load_exterior.wav | 1 | 7.700 | 739244 |
+| di_66_load_1.wav | tanks_engines.assets.bank/1818_strv121_engine_66_load_exterior.wav | 1 | 7.700 | 739244 |
+| di_99_load_1.wav | tanks_engines.assets.bank/3113_strv121_engine_99_load_exterior.wav | 1 | 7.700 | 739244 |
+| di_hiss_idle_1.wav | tanks_engines.assets.bank/2641_diesel_hiss_idle.wav | 1 | 9.500 | 912044 |
+| di_hiss_low_1.wav | tanks_engines.assets.bank/2022_diesel_hiss_low.wav | 1 | 9.500 | 912044 |
+| di_hiss_high_1.wav | tanks_engines.assets.bank/0175_diesel_hiss_high.wav | 1 | 9.500 | 912044 |
+| di_switch_1.wav | tanks_engines.assets.bank/3063_strv121_engine_loadswitch_exterior-001.wav | 1 | 3.000 | 288044 |
+| di_switch_2.wav | tanks_engines.assets.bank/3130_strv121_engine_loadswitch_exterior-002.wav | 1 | 2.721 | 261218 |
+| di_switch_3.wav | tanks_engines.assets.bank/2792_strv121_engine_loadswitch_exterior-003.wav | 1 | 3.122 | 299778 |
+| di_hiss_load_1.wav | tanks_engines.assets.bank/0497_diesel_hiss_load-001.wav | 1 | 1.992 | 191260 |
+| di_hiss_load_2.wav | tanks_engines.assets.bank/1970_diesel_hiss_load-002.wav | 1 | 2.046 | 196442 |
+| di_off_1.wav | tanks_engines.assets.bank/0356_engine_turbine_off-001.wav | 1 | 4.200 | 403244 |
+| di_off_2.wav | tanks_engines.assets.bank/1561_engine_turbine_off-002.wav | 1 | 4.200 | 403244 |
+| pe_00_1.wav | tanks_engines.assets.bank/2026_engine_00.wav | 1 | 9.500 | 912044 |
+| pe_33_1.wav | tanks_engines.assets.bank/0416_engine_33.wav | 1 | 6.500 | 624044 |
+| pe_66_1.wav | tanks_engines.assets.bank/1325_engine_66.wav | 1 | 7.700 | 739244 |
+| pe_99_1.wav | tanks_engines.assets.bank/1589_engine_99.wav | 1 | 7.100 | 681644 |
+| pe_33_load_1.wav | tanks_engines.assets.bank/1566_engine_33_load.wav | 1 | 9.500 | 912044 |
+| pe_66_load_1.wav | tanks_engines.assets.bank/1136_engine_66_load.wav | 1 | 9.500 | 912044 |
+| pe_99_load_1.wav | tanks_engines.assets.bank/3088_engine_99_load.wav | 1 | 9.500 | 912044 |
+| pe_revv_1.wav | tanks_engines.assets.bank/1428_engine_revv-001.wav | 1 | 3.917 | 376114 |
+| pe_revv_2.wav | tanks_engines.assets.bank/3038_engine_revv-002.wav | 1 | 4.126 | 396102 |
+| pe_revv_3.wav | tanks_engines.assets.bank/2617_engine_revv-003.wav | 1 | 5.400 | 518442 |
+| pe_release_1.wav | tanks_engines.assets.bank/0042_engine_release-001.wav | 1 | 1.634 | 156910 |
+| pe_release_2.wav | tanks_engines.assets.bank/1628_engine_release-002.wav | 1 | 1.320 | 126760 |
+| pe_release_3.wav | tanks_engines.assets.bank/2635_engine_release-003.wav | 1 | 1.500 | 144040 |
+| tr_33_1.wav | tanks_engines.assets.bank/0266_tracks_33.wav | 1 | 7.900 | 758444 |
+| tr_66_1.wav | tanks_engines.assets.bank/2185_tracks_66.wav | 1 | 7.400 | 710444 |
+| tr_99_1.wav | tanks_engines.assets.bank/2729_tracks_99.wav | 1 | 7.900 | 758444 |
+| tr_stop_1.wav | tanks_engines.assets.bank/2650_tracks_stop-001.wav | 1 | 2.000 | 192044 |
+| tr_stop_2.wav | tanks_engines.assets.bank/0694_tracks_stop-002.wav | 1 | 2.000 | 192044 |
+| tr_stop_3.wav | tanks_engines.assets.bank/0741_tracks_stop-003.wav | 1 | 2.000 | 192044 |
+| su_33_1.wav | tanks_engines.assets.bank/1546_suspension_33.wav | 1 | 7.900 | 758444 |
+| su_66_1.wav | tanks_engines.assets.bank/1152_suspension_66.wav | 1 | 7.900 | 758444 |
+| su_99_1.wav | tanks_engines.assets.bank/1791_suspension_99.wav | 1 | 7.932 | 761554 |
+| su_load_1.wav | tanks_engines.assets.bank/2250_suspension_load-001.wav | 1 | 2.851 | 273766 |
+| su_load_2.wav | tanks_engines.assets.bank/1897_suspension_load-002.wav | 1 | 2.873 | 275856 |

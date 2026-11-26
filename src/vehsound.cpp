@@ -4,9 +4,13 @@
 // the plugin's own voices (jetaudio.cpp, the clips made in vsynth.h, the mix decided in vehmix.h), placed at the camera
 // as the jets' engines are (SoundAt: panned to the ears, the Doppler ratio, the air's dulling far off):
 //  - the engine (the CarBase classes: the tanks, the Kepler and the howitzer, the Titan, the Maser, the Grape and the
-//    trucks, the Naegling, the bikes and the sidecar): a heavy V12, a light six or a V-twin, two layers faded across by
-//    the stock engine's own load (+0x1A80) and pitched up with the revs (the load and the speed); a tank's tracks
-//    clacking with its speed. It runs while someone sits in the driver's seat, winding up and down;
+//    trucks, the Naegling, the bikes and the sidecar): War Thunder's layered engines (sound_engine.h, docs/feature-wt-
+//    sound.md 「引擎」): a gas turbine, a diesel or a petrol engine by its class (engine::kDrives), its layers cross-faded
+//    over the rpm and the load (the rpm from its speed through a gearbox, the load the stock engine's own +0x1A80) and
+//    pitched with the rpm, the diesel's load switch and hiss, the petrol's revving; its running gear's (tracks or
+//    wheels) over its speed and turning, the tracks' stop. The vehicle the local player sits in plays the player's
+//    events, every other one (NPCs, the other players online) the AI's, heard late by the speed of sound. It runs while
+//    someone sits in the driver's seat, winding up and down (a diesel's shut-down when it stops);
 //  - the turret: the traverse drive whining with the fastest of the seats' aim axes against their top rate (their
 //    rates, seat aim +0x1C / +0x5C: the stock axis step's), a stop's clunk when it comes to rest; the mechs' arms the
 //    same drive, quicker (the Begaruta, the Nix: their begaruta_aim_se_table);
@@ -41,6 +45,8 @@
 #include "jetaudio.h"
 #include "vehmix.h"
 #include "vsynth.h"
+#include "sound_engine.h"
+#include "lazy_rows.h"
 #include "layout.h"
 #include "surround.h"
 #include "sound_event.h"
@@ -48,6 +54,7 @@
 #include "vecmath.h"
 #include "edf/weapon.h"
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <initializer_list>
 
@@ -80,17 +87,19 @@ constexpr unsigned kIsPlaying=0x7A8A20,kStopSound=0x7A8CD0;
 using IsPlayingFn=bool(__fastcall*)(void*);
 using StopSoundFn=void(__fastcall*)(void*,int);
 
-using vmix::kEngineRef; using vmix::kTracksRef; using vmix::kTurretRef; using vmix::kReloadRef; using vmix::kTrackHalf;
-using vmix::kEngineShare; using vmix::kTurretShare; using vmix::kReloadShare;
-constexpr float kEngineHear=500.0f,kTurretHear=150.0f,kReloadHear=80.0f,kRapidHear=1200.0f,kBrassHear=40.0f;   // m: no voice farther
+using vmix::kTurretRef; using vmix::kReloadRef; using vmix::kTrackHalf;
+using vmix::kTurretShare; using vmix::kReloadShare;
+constexpr float kTurretHear=150.0f,kReloadHear=80.0f,kRapidHear=1200.0f,kBrassHear=40.0f;   // m: no voice farther
 using vmix::kFarAt;                                 // m: the air's dulling at its fullest (the jets')
 constexpr float kStartSec=1.2f,kStopSec=2.0f;       // the engine winding up / down
+constexpr std::size_t kSeatStickY=0x2C4;            // seat 0's left stick Y: the throttle (forward negative)
+constexpr ULONGLONG kTurnLogMs=250;
 constexpr float kMechServo=1.25f;                   // a mech's arm drives: the turret's, quicker and higher
 constexpr ULONGLONG kStaleMs=300;                   // a vehicle not seen this long (game ms) is gone: its voices too
 constexpr int kVehicles=48,kMostGuns=8,kPending=256;   // a Katyusha's ripple: forty rockets on their way; a cannon's ten layers
 
 enum class Body : std::uint8_t { none, heavy, light, bike, mech };
-enum Loop : int { kLoopIdle, kLoopLoad, kLoopTracks, kLoopTurret, kLoopCount };
+enum Loop : int { kLoopTurret, kLoopCount };
 struct Saved { unsigned char cues[kCueBytes]; bool held; const unsigned char* where=nullptr; };   // where: the preset's cues held
 struct Gun {
     const unsigned char* w;
@@ -109,7 +118,18 @@ struct Vehicle {
     Body body;
     int turrets;                          // its turret presets ([13] [14], and [15] [16] on the 403 and the Titan)
     Saved engine[3],turret[4],aim[kMostAimSounds];
-    int loop[kLoopCount]={-1,-1,-1,-1};   // its voices (jetaudio.h OpenLoop), -1: none
+    int loop[kLoopCount]={-1};            // its voices (jetaudio.h OpenLoop), -1: none
+    const engine::Drive* drive;           // its engine and running gear (engine::kDrives), nullptr: none
+    engine::Gearbox box;
+    engine::Pedal pedal;                  // the driver's last (logged at once when it, or the reverse gear, changes)
+    bool logReverse;
+    const engine::Event* engineEvent;     // the events its voices are of (the player's or the AI's)
+    const engine::Event* gearEvent;
+    int engineVoice[engine::kMostEventLayers],gearVoice[engine::kMostEventLayers];   // each layer's loop + 1, 0: none
+    engine::Inputs heard;                 // the parameters last heard (the one-shots cross from them)
+    bool hasHeard;
+    unsigned turnOf;                      // the one-shots' variants in turn
+    ULONGLONG logAt;
     float last[3],vel[3],nose[3];
     float on,slew,turn;                   // turn: the hull's yaw rate (rad/s), the tracks' as much as its speed
     bool moving;
@@ -117,6 +137,9 @@ struct Vehicle {
     Gun gun[kMostGuns];
 };
 Vehicle vehicles[kVehicles]{};
+// Each vehicle's past (vehicles[i]'s), for the speed of sound, 46 KB each: on the heap from the first engine heard,
+// not in the image (2.2 MB of .data committed for every player otherwise: tests/plugin_image_size_guard.py).
+LazyRows<engine::Trail,kVehicles> trails;
 // A report on its way (the sound's travel time, a case's fall): played when the game clock reaches `due`.
 // `wt`: a War Thunder recording's group (wt_clips.h), `variant` the one of it.
 struct Pending { int clip=-1; bool wt=false; int variant=0; audio::Heard heard{}; ULONGLONG due=0; };
@@ -274,8 +297,12 @@ float GroupVolume(vmix::Group g) noexcept {
 
 // --- Bookkeeping ---
 void CloseLoop(int& l) noexcept { audio::CloseLoop(l);l=-1; }
+void CloseVoices(int* voice) noexcept {
+    for(int k=0;k<engine::kMostEventLayers;++k)if(voice[k]){audio::CloseLoop(voice[k]-1);voice[k]=0;}
+}
 void CloseLoops(Vehicle& s) noexcept {
     for(int& l:s.loop)CloseLoop(l);
+    CloseVoices(s.engineVoice);CloseVoices(s.gearVoice);
     for(int i=0;i<s.guns;++i){CloseLoop(s.gun[i].burst);CloseLoop(s.gun[i].brass);}
 }
 // Everything given back (the vehicle `v`, seen now: its memory is its own) and its voices closed.
@@ -309,6 +336,9 @@ Vehicle* EntryFor(unsigned char* v,ULONGLONG ms,bool make) noexcept {
     free->body=free->ground ? BodyOfVehicle(v) : Body::none;
     // The 403's machine gun turret and the Titan's second guns have their own move / stop pair after the main one's.
     free->turrets=Named(VehicleClassName(v),{"403_Tank","404_Tank"}) ? 4 : 2;
+    if(free->body==Body::heavy || free->body==Body::light || free->body==Body::bike)
+        for(const engine::ClassDrive& c:engine::kDrives)if(!std::strcmp(VehicleClassName(v),c.name))free->drive=&c.d;
+    if(trails.Allocated())trails[static_cast<std::size_t>(free-vehicles)].count=0;
     std::memcpy(free->last,v+kPosition,12);
     std::memcpy(free->nose,v+kMatrix+32,12);
     return free;
@@ -368,33 +398,121 @@ const wtevent::Event* EventOf(vmix::Bore b) noexcept {
     }
 }
 
+// Whether the local player sits in `v` (any seat): its own vehicle, heard as the player's events.
+bool Own(unsigned char* v) noexcept {
+    const unsigned n=SeatCount(v);
+    for(unsigned i=0;i<n && i<8;++i)if(SeatRider(SeatAt(v,i))==Rider::player)return true;
+    return false;
+}
+// An event's layers `h` (n of them) heard from `p` at `gain` (`pitch` more): a voice opened for each loud enough,
+// closed once quiet.
+void Voices(int* voice,const engine::Heard* h,int n,const SoundPlace& p,float gain,float pitch,float doppler) noexcept {
+    const float spread=surround::SpreadAt(p.distance,vmix::kVehicleSize,0.0f),cutoff=audio::AirCutoff(p.distance/kFarAt);
+    for(int k=0;k<n;++k) {
+        int& l=voice[k];
+        const float g=gain*h[k].gain;
+        if(l && g<engine::kCloseGain){audio::CloseLoop(l-1);l=0;continue;}
+        if(!l && g>engine::kOpenGain)l=audio::OpenWtLoop(h[k].clip)+1;   // none free (or not there): again next frame
+        if(l)audio::SetLoop(l-1,audio::Heard{g,p.side,p.front,spread,h[k].ratio*pitch*doppler,cutoff,false});
+    }
+}
+// An event's one-shots crossed from `from` to `to`, heard from `p` at `gain`.
+void Shots(Vehicle& s,const engine::Event& e,const engine::Inputs& from,const engine::Inputs& to,const SoundPlace& p,
+           float gain,float doppler,const unsigned char* v) noexcept {
+    const unsigned bits=engine::Crossed(e,from,to);
+    for(int i=0;i<e.shots;++i) {
+        if(!(bits&(1u<<i)) || !audio::WtThere(e.s[i].clip))continue;
+        const float g=gain*engine::ShotGain(e,i,to,p.distance);
+        if(g<engine::kOpenGain)continue;
+        audio::PlayWt(e.s[i].clip,static_cast<int>(s.turnOf++%static_cast<unsigned>(wt::kVariants[e.s[i].clip])),
+                      audio::Heard{g,p.side,p.front,surround::SpreadAt(p.distance,vmix::kVehicleSize,0.0f),doppler,
+                                   audio::AirCutoff(p.distance/kFarAt),false});
+        if(Cfg().verbose)Log("SOUND vehicle v=%p one-shot %d at %.0f m, gain %.3f",v,e.s[i].clip,p.distance,g);
+    }
+}
+
 void EngineStep(unsigned char* v,Vehicle& s,float dt) noexcept {
     const float vol=Volume(Cfg().vehicleEngineVolume);
-    const bool engine=s.body==Body::heavy || s.body==Body::light || s.body==Body::bike;
-    const bool ours=engine && vol>0.0f;
+    const bool engined=s.body==Body::heavy || s.body==Body::light || s.body==Body::bike;
+    const bool ours=engined && vol>0.0f;
     if(ours){Presets(v,kEnginePresets,s.engine,3,true);for(const std::size_t h:kEngineHandles)StopPlaying(v+h);}
-    else if(engine)Presets(v,kEnginePresets,s.engine,3,false);
+    else if(engined)Presets(v,kEnginePresets,s.engine,3,false);
+    // No heap for the trails: the engines stay silent (logged once by LazyRows).
+    if(!ours || !s.drive || !trails.Allocate("vehicle engine sound")){CloseVoices(s.engineVoice);CloseVoices(s.gearVoice);return;}
+    const engine::Drive& d=*s.drive;
     const bool driven=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none && !v[kDead];
+    const float wasOn=s.on;
     s.on=vec::Approach(s.on,driven ? 1.0f : 0.0f,dt/(driven ? kStartSec : kStopSec));
-    const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    float at[3];
-    for(int i=0;i<3;++i)at[i]=m[12+i]-m[8+i]*2.0f+m[4+i]*1.0f;   // the engine deck: aft and up of the origin
-    SoundPlace p{};
-    const bool heard=ours && s.on>0.001f && SoundAt(at,s.vel,&p) && p.distance<kEngineHear;
-    const bool heavy=s.body==Body::heavy,bike=s.body==Body::bike;
-    const vmix::EngineClass& c=heavy ? vmix::kHeavy : bike ? vmix::kBike : vmix::kLight;
     const float speed=std::sqrt(vec::Dot(s.vel,s.vel)),load=At<float>(v,kEngineLoad);
-    const float l=std::isfinite(load) ? load : 0.0f;
-    const vmix::EngineMix e=vmix::Engine(vmix::Revs(speed,l,c),l,s.on,c);
-    const float g=heard ? vol*kEngineShare*vmix::Falloff(p.distance,kEngineRef,1.0f) : 0.0f;
-    const int idle=heavy ? audio::kClipHeavyIdle : bike ? audio::kClipBikeIdle : audio::kClipLightIdle;
-    const int loaded=heavy ? audio::kClipHeavyLoad : bike ? audio::kClipBikeLoad : audio::kClipLightLoad;
-    Set(s.loop[kLoopIdle],idle,heard,HeardAt(p,g*e.idle,e.ratio));
-    Set(s.loop[kLoopLoad],loaded,heard,HeardAt(p,g*e.load,e.ratio));
+    // Along the nose: backing runs the reverse gear (engine::Step).
+    const float along=vec::Dot(s.vel,reinterpret_cast<const float*>(v+kMatrix+32))*3.6f;
+    engine::Step(s.box,d,along,std::isfinite(load) ? load : 0.0f,s.on,dt);
+    const engine::Pedal pedal=engine::PedalOf(along,SeatCount(v)>0 ? At<float>(SeatAt(v,0),kSeatStickY) : 0.0f);
+    const char* turned=pedal!=s.pedal ? (pedal==engine::Pedal::brake ? "brake" : pedal==engine::Pedal::drive ? "drive" : "coast") :
+                       s.box.reverse!=s.logReverse ? (s.box.reverse ? "into reverse" : "out of reverse") : nullptr;
+    const bool own=Own(v);
+    const engine::Event& e=engine::EngineEvent(d.kind,own);
+    const engine::Event& gear=engine::GearEvent(d.gear,own);
+    if(s.engineEvent!=&e || s.gearEvent!=&gear) {   // got in / out: the other events' voices
+        CloseVoices(s.engineVoice);CloseVoices(s.gearVoice);
+        s.engineEvent=&e;s.gearEvent=&gear;s.hasHeard=false;
+    }
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    engine::Sample x{};
+    for(int i=0;i<3;++i)x.pos[i]=m[12+i]-m[8+i]*2.0f+m[4+i]*1.0f;   // the engine deck: aft and up of the origin
+    std::memcpy(x.vel,s.vel,12);std::memcpy(x.nose,m+8,12);
     // A tank turning on the spot runs its tracks too: each side kTrackHalf m from the middle.
-    const vmix::TrackMix t=vmix::Tracks(speed+kTrackHalf*s.turn,vsynth::kTrackSpeed);
-    const float tg=heard ? vol*kEngineShare*vmix::Falloff(p.distance,kTracksRef,1.0f)*t.gain : 0.0f;
-    Set(s.loop[kLoopTracks],audio::kClipTracks,heard && heavy,HeardAt(p,tg,t.ratio));   // kept open standing: silent, not closed
+    const float run=d.gear==engine::Gear::tracks ? speed+kTrackHalf*s.turn : speed;
+    x.in.v[engine::kRpm]=s.box.rpm;x.in.v[engine::kLoad]=s.box.load;x.in.v[engine::kWep]=0.0f;
+    x.in.v[engine::kSpeed]=run*3.6f;x.in.v[engine::kTurn]=s.turn;
+    x.in.v[engine::kSpeedShare]=100.0f*speed*3.6f/d.top;
+    x.ms=GameMs();
+    engine::Trail& trail=trails[static_cast<std::size_t>(&s-vehicles)];
+    engine::Push(trail,x);
+    float listener[3];
+    const engine::Sample* r=ListenerAt(listener) ? engine::Retarded(trail,listener,x.ms) : nullptr;
+    SoundPlace p{};
+    if(!r || !SoundAt(r->pos,r->vel,&p)){CloseVoices(s.engineVoice);CloseVoices(s.gearVoice);return;}
+    const float cone=engine::ConeAngle(r->nose,p.toCamera);
+    engine::Heard he[engine::kMostEventLayers],hg[engine::kMostEventLayers];
+    const int ne=engine::Hear(e,r->in,p.distance,cone,he),ng=engine::Hear(gear,r->in,p.distance,cone,hg);
+    const float ge=vol*s.on,gg=vol*(s.on>0.0f || speed>0.5f ? 1.0f : 0.0f);   // the running gear rolls engine or none
+    const float de=engine::Doppler(e,p.doppler,cone),dg=engine::Doppler(gear,p.doppler,cone);
+    Voices(s.engineVoice,he,ne,p,ge,d.pitch,de);
+    Voices(s.gearVoice,hg,ng,p,gg,1.0f,dg);
+    if(s.hasHeard) {
+        Shots(s,e,s.heard,r->in,p,ge,de,v);
+        Shots(s,gear,s.heard,r->in,p,gg,dg,v);
+    }
+    s.heard=r->in;s.hasHeard=true;
+    // A diesel shutting down (ours: WT's di_off, its event's level): heard as the driver leaves.
+    if(d.kind==engine::Kind::diesel && wasOn>=0.999f && !driven && audio::WtThere(wt::k_di_off)) {
+        const float g=vol*engine::Rolloff(e,p.distance)*engine::Amp(e.db);
+        audio::PlayWt(wt::k_di_off,static_cast<int>(s.turnOf++%static_cast<unsigned>(wt::kVariants[wt::k_di_off])),
+                      audio::Heard{g,p.side,p.front,surround::SpreadAt(p.distance,vmix::kVehicleSize,0.0f),de,
+                                   audio::AirCutoff(p.distance/kFarAt),false});
+    }
+    const ULONGLONG ms=x.ms;
+    // Every 2 s, and at once as the driver brakes, drives or lets go or it goes into the reverse gear or out of it
+    // (a brake is over in less than 2 s), kTurnLogMs apart at most (a stick wavering at the edge: the last change later).
+    if((Cfg().verbose || (own && Cfg().debug)) && (ms-s.logAt>=2000 || (turned && ms-s.logAt>=kTurnLogMs))) {
+        s.logAt=ms;s.pedal=pedal;s.logReverse=s.box.reverse;
+        char a[200],b[120];int at=0,bt=0,open=0;
+        for(int k=0;k<ne && at<160;++k){open+=s.engineVoice[k] ? 1 : 0;at+=std::snprintf(a+at,sizeof(a)-at,"%s%.3f",k ? "," : "",ge*he[k].gain);}
+        for(int k=0;k<ng && bt<90;++k){open+=s.gearVoice[k] ? 1 : 0;bt+=std::snprintf(b+bt,sizeof(b)-bt,"%s%.3f",k ? "," : "",gg*hg[k].gain);}
+        if(!ne)a[0]=0;
+        if(!ng)b[0]=0;
+        char gearName[8];
+        if(s.box.reverse)std::snprintf(gearName,sizeof(gearName),"R");
+        else std::snprintf(gearName,sizeof(gearName),"%d",s.box.gear+1);
+        Log("SOUND vehicle v=%p %s %s %s gear %s rpm %.0f load %.2f %.0f km/h (%+.0f along) %s%s%s on %.2f, %.0f m cone %.0f "
+            "late %.2f s; engine [%s] running gear [%s] %d voice(s) of its %d, %d loop(s) open",v,VehicleClassName(v),
+            own ? "own" : "ai",d.kind==engine::Kind::turbine ? "turbine" : d.kind==engine::Kind::diesel ? "diesel" : "petrol",
+            gearName,r->in.v[engine::kRpm],r->in.v[engine::kLoad],speed*3.6f,along,
+            pedal==engine::Pedal::brake ? "braking" : pedal==engine::Pedal::drive ? "driving" : "coasting",
+            turned ? ", now: " : "",turned ? turned : "",s.on,p.distance,cone,static_cast<double>(ms-r->ms)/1000.0,a,b,
+            open,ne+ng,audio::LoopsOpen());
+    }
 }
 
 // The fastest of the seats' aim axes against their top rate.

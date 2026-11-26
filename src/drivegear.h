@@ -18,4 +18,7 @@ constexpr int kNoDriveGear=-99;
 // The gear the player drives `vehicle` in (drive_gear.h: -1 R, 0 N, 1..4), kNoDriveGear when none (not driving it on the
 // keyboard, a vehicle without gears, VehicleGears off). Game thread.
 int DriveGearOf(const void* vehicle) noexcept;
+// Tests only (ini TestDriveCycle): the player driver's left stick Y written by a fixed cycle, before the gears and the
+// stock input read it (crew.cpp InputHook). Game thread.
+void TestDriveInput(unsigned char* vehicle) noexcept;
 }  // namespace crew

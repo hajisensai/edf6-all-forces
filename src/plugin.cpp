@@ -29,6 +29,7 @@
 #include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
+#include "gpufx/gpufx.h"
 #include "pvp.h"
 #include "havok_props.h"
 #include "aiworld_capacity.h"
@@ -736,6 +737,8 @@ void LoadConfig() noexcept {
     if(n.airdropTest)Log("CONFIG AirdropTest=%d (tests only): a container airdrop asked once a mission",n.airdropTest);
     n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);
     if(n.npcCrewTest)Log("CONFIG NpcCrewTest=1 (tests only): empty vehicles are crewed without a player having driven them");
+    n.testDriveCycle=ReadBool(L"TestDriveCycle",n.testDriveCycle);
+    if(n.testDriveCycle)Log("CONFIG TestDriveCycle=1 (tests only): the player driver's throttle runs a fixed cycle (idle, full, half, brake)");
     n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
     n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
     n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
@@ -870,6 +873,15 @@ void LoadConfig() noexcept {
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
     n.enemyControl=ReadBool(L"EnemyControl",n.enemyControl);
+    n.gpuFx=ReadBool(L"GpuFx",n.gpuFx);
+    n.gpuFxTest=static_cast<int>(FixInt("GpuFxTest",ReadInt(L"GpuFxTest",static_cast<DWORD>(n.gpuFxTest)),0,5));
+    n.gpuFxNative=static_cast<int>(FixInt("GpuFxNative",ReadInt(L"GpuFxNative",static_cast<DWORD>(n.gpuFxNative)),0,2));
+    n.gpuFxProbe=ReadBool(L"GpuFxProbe",n.gpuFxProbe);
+    n.gpuFxLayers=ReadBool(L"GpuFxLayers",n.gpuFxLayers);
+    n.gpuFxEfs=ReadBool(L"GpuFxEfs",n.gpuFxEfs);
+    n.gpuFxTrails=ReadBool(L"GpuFxTrails",n.gpuFxTrails);
+    n.gpuFxLitA=ReadBool(L"GpuFxLitA",n.gpuFxLitA);
+    n.devFrameCap=static_cast<int>(FixInt("DevFrameCap",ReadInt(L"DevFrameCap",static_cast<DWORD>(n.devFrameCap)),0,240));
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
     n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
     n.thermalButton=ReadInt(L"VehicleThermalButton",static_cast<DWORD>(n.thermalButton));
@@ -1372,6 +1384,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     thermal::Install();    // mesh heat/depth passes, inert in optical mode
+    gpufx::Install();      // GPU particles at the world's end (thermal.cpp's redirect), the stock particle draw slot
     InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     Log("VIEWDIAG umbra watch %s",InstallUmbraWatch() ? "on" : "NOT installed (EDF.dll's Umbra import is not as read)");
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)

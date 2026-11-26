@@ -26,6 +26,7 @@
 #include "enemy_control.h"
 #include "enemy_control_net.h"
 #include "thermal.h"
+#include "gpufx/gpufx.h"
 #include "vehicle_look.h"
 #include "seat_switch_logic.h"
 #include "drivegear.h"
@@ -38,6 +39,7 @@
 #include "edf/game_frame.h"
 #include "gravity.h"
 #include "gravity_net.h"
+#include "jet_lever_net.h"
 #include "floatgun.h"
 #include "edf/host.h"
 #include "heli.h"
@@ -717,10 +719,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepBarrage, kStepFollowUp, kStepMapQueue, kStepDreadnought, kStepEmplacement, kStepBlastSound, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepBarrage, kStepFollowUp, kStepMapQueue, kStepDreadnought, kStepEmplacement, kStepBlastSound, kStepJetLever, kStepGpuFx, kStepCount };
 const char* const kStepNames[]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","barrage","follow-up","map queue","dreadnought","emplacement","blast sound"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","barrage","follow-up","map queue","dreadnought","emplacement","blast sound","jet lever","gpufx"};
 static_assert(sizeof(kStepNames)/sizeof(kStepNames[0])==kStepCount,"a name for every step, in the enum's order");
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
@@ -897,6 +899,7 @@ void PerfTick() noexcept {
     perf.at=t;perf.worst=perf.sum=0.0;perf.steps=0;
 }
 
+void GpuFxTick() noexcept { gpufx::Tick(); }
 void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
 void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
 void GravityTick() noexcept { gravity::Frame(); GravityGunTick(); gravity::net::Frame(); FloatGunTick(); }
@@ -911,6 +914,7 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
     GuardedTick(kStepThermal,&ThermalTick);
+    GuardedTick(kStepGpuFx,&GpuFxTick);
     GuardedTick(kStepPvp,&PvpFrame);
     GuardedTick(kStepEnemyControl,&EnemyControlFrame);
     GuardedTick(kStepEnemyControl,&EnemyControlNetworkFrame);
@@ -953,6 +957,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     if(Cfg().enabled)Guarded(kStepPayload,&SeatTurretsInput,static_cast<unsigned char*>(vehicle));
     // The player driver's War Thunder gears on the keyboard (drivegear.cpp): the stock input reads the gear's stick, the
     // seat gets the keys' own back at the end of this traversal.
+    if(Cfg().enabled && Cfg().testDriveCycle)TestDriveInput(static_cast<unsigned char*>(vehicle));   // tests only, before the gears
     DriveGearInput gears(static_cast<unsigned char*>(vehicle));
     // A fixed emplacement never drives: its drive stick cleared last, over every writer before (emplacement.cpp).
     if(Cfg().enabled)Guarded(kStepEmplacement,&EmplacementInput,static_cast<unsigned char*>(vehicle));
@@ -1002,6 +1007,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
     Guarded(kStepStockHud,&StockHudFrame,v);
     Guarded(kStepJetSound,&JetSound,v);
+    Guarded(kStepJetLever,&JetLeverFrame,v);   // after its engine sound: online, a registered jet's lever sent / burnt here
     Guarded(kStepLockSound,&LockSound,v);
     Guarded(kStepUnderground,&UnderVehicle,v);
     Guarded(kStepShield,&ShieldVehicle,v);

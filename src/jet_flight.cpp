@@ -6,6 +6,7 @@
 #include "gear.h"
 #include "jet_pullout.h"
 #include "hover_lift.h"
+#include "wing_engine.h"
 #include "nacelle_reach.h"
 #include "support_entry.h"
 #include <cwchar>
@@ -209,7 +210,10 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     for(int i=0;i<3;++i)next[i]=dir[i]+(acc[i]-dir[i]*accAlong)*dt/s;
     if(!Normalize(next))std::memcpy(next,dir,12);
     const float bleed=pull>kG ? (pull/kG-1.0f)*kTurnBleed : 0.0f;
-    s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt/mass)-(kG*next[1]+bleed)*dt;
+    // The engine (wing_engine.h): the thrust this speed command takes, the lever following it (the sound, the exhaust).
+    const wing::SpeedStep step=wing::Speed(s,speed,k.cruise,k.thrust/mass,k.brake,next[1],bleed,kG,dt);
+    s=step.speed;
+    j.m.power=wing::Lever(j.m.power,step.demand,dt);
     const float top=j.m.top>0.0f ? j.m.top : k.attack*1.3f;
     s=Clamp(s,k.minSpeed*0.8f,top<kBodyTop ? top : kBodyTop);
     for(int i=0;i<3;++i)j.m.vel[i]=next[i]*s;
@@ -869,10 +873,9 @@ void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,float clear,con
     if(k.pose==Pose::elevons)Elevons(j,k,v,dt);
     else if(k.pose==Pose::flap)Flap(j,k,v,dt);
     NpcGear(v,Len(j.m.vel),dt);   // the landing gear up in flight (gear.cpp; a model without it: nothing)
-    // The exhaust (booster.cpp JetFlames): burning with the speed between its slowest and its attack speed, the
-    // afterburner near the top.
-    const float s=Len(j.m.vel),share=k.attack>k.minSpeed ? (s-k.minSpeed)/(k.attack-k.minSpeed) : 1.0f;
-    JetFlames(v,Clamp(share,0.4f,1.0f),speed>=k.attack-5.0f,ms);
+    // The exhaust (booster.cpp JetFlames): burning with its engine's lever (JetSteer, wing_engine.h), the afterburner
+    // where the thrust it commands is saturated.
+    JetFlames(v,Clamp(j.m.power,0.4f,1.0f),wing::Burner(j.m.power),ms);
     JetSmoke(v,Entering(j,ms),ms);   // arriving: smoke from its exhausts (booster.cpp)
 }
 }  // namespace jet

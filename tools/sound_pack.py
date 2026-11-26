@@ -2,15 +2,16 @@
 「修改的音效重新修改，音效太烂了。可以使用 00_win32_audio.zip 这个」).
 
 The plugin already takes a recording for any of its sounds: <dll name>_veh_<clip>.wav next to the DLL (src/jetaudio.cpp
-MakeClipsNow, kClipName), <dll name>_jet.wav for the jets' roar (Start) and the ultimate strike's <dll name>_ult_<name>.wav
-(kUltClipName: only recordings, no sound of the plugin's own; without one the show plays the game's cue). This tool cuts,
+MakeClipsNow, kClipName) and the ultimate strike's <dll name>_ult_<name>.wav
+(kUltClipName: only recordings, no sound of the plugin's own; without one the show plays the game's cue). The engines
+are not here: they are War Thunder's layered loops (tools/wt_sound.py, src/sound_engine.h). This tool cuts,
 pitches, layers and loops the
 recordings MAPPING names out of a sound archive the player has (read straight from the zip: nothing in it is extracted
 or run), levels each like the clip it replaces and writes those WAVs. The repository is public and the archive is
 another game's sounds, so only this recipe is kept here, never the sounds: the player builds them from their own copy.
 
   python tools/sound_pack.py build ZIP OUT [--reference DIR] [--skip CLIP ...]
-      OUT/EDF6VehicleCrew_veh_<clip>.wav, OUT/EDF6VehicleCrew_jet.wav and OUT/sound_pack.json (each clip's sources,
+      OUT/EDF6VehicleCrew_veh_<clip>.wav and OUT/sound_pack.json (each clip's sources,
       their SHA-256, length, peak and loudness against the plugin's own). --reference: vsound_check's WAVs (default
       %TEMP%/edf6_vsound_check; `cmake --build build --target vsound_check && build/vsound_check.exe` writes them);
       without them each clip is levelled to the plugin's peak for it only.
@@ -44,9 +45,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JETAUDIO = os.path.join(ROOT, 'src', 'jetaudio.cpp')
 PLUGIN = 'EDF6VehicleCrew'
 RATE = 48000          # the plugin's own rate (jetaudio.cpp kRate)
-JET = 'jet'           # the jets' roar: <dll>_jet.wav, not a kClipName clip
-JET_PEAK = 0.85       # SynthRoar's
-JET_LOOP = True
 ULT = 'ult_'          # the ultimate's clips: 'ult_<kUltClipName>', <dll>_ult_<name>.wav, one-shots
 ULT_PEAK = 0.95
 SAMPLES = 'sound/samples/'
@@ -78,19 +76,9 @@ class Recipe:
 
 
 # The recordings picked for each clip (docs/feedback-2026-10-12-sound.md has the table and the measures behind it).
-# Clips not here keep the sound the plugin makes: the archive has no recording of their kind (tracks, turret motors,
+# Clips not here keep the sound the plugin makes: the archive has no recording of their kind (turret motors,
 # breech work, cases, the bikes, the Sazabi's blade and funnels' moves, the Q mark's UI cues).
 MAPPING: tuple[Recipe, ...] = (
-    Recipe(JET, (Layer('engines/fa-18_hornet_steady_ext.wav', 8.0, 16.4),), loop=8.0,
-           why='F/A-18 外部稳态录音，43 s 内电平起伏 ±2 dB（最稳的喷气机素材）；取 8 s 做无缝循环'),
-    Recipe('engine_heavy_idle', (Layer('engines/engine_tank.wav', 0.5, 6.7, pitch=0.7),), loop=6.0,
-           why='坦克引擎录音，8 s 电平几乎恒定（波动 0.20）；降 0.7 倍当怠速，满转时插件再升 2.3 倍≈录音的 1.6 倍'),
-    Recipe('engine_heavy_load', (Layer('engines/apc_engine_loop.wav', 0.3, 6.4, pitch=0.7),), loop=5.5,
-           why='装甲车引擎循环（文件名即 loop），7.4 s 恒定，频谱比坦克怠速更亮（重心 1.4 kHz），当负荷层'),
-    Recipe('engine_light_idle', (Layer('engines/engine_hummer.wav', 0.2, 3.4, pitch=0.85),), loop=3.0,
-           why='悍马引擎录音（轻型车），3.5 s 稳定；降 0.85 倍当怠速'),
-    Recipe('engine_light_load', (Layer('engines/pickup_engine_02.wav', 0.3, 5.9, pitch=0.85),), loop=5.0,
-           why='皮卡引擎录音，6 s 稳定（波动 0.21），当轻型车负荷层'),
     Recipe('mg_burst', (Layer('weapon_fire/4leg_mech_minigun_01_loop.wav', 0.1, 1.5, pitch=12.0 / 12.2),), loop=12 / 12.0,
            why='机枪连射循环素材，实测 12.2 发/秒（插件按 12 发/秒设计）；按 12/12.2 变速后取整 12 发做无缝循环'),
     Recipe('gatling_burst', (Layer('test/minigun_fire.wav'),), loop=0.72,
@@ -185,7 +173,7 @@ def _array(text: str, name: str) -> list[str]:
 
 
 def clip_table(path: str = JETAUDIO) -> dict[str, tuple[bool, float]]:
-    """kClipName -> (kClipLoops, kClipPeak), plus the jets' roar."""
+    """kClipName -> (kClipLoops, kClipPeak), plus the ultimate strike's clips."""
     with open(path, encoding='utf-8') as f:
         text = f.read()
     names = [re.fullmatch(r'L"(\w+)"', s).group(1) for s in _array(text, 'kClipName')]
@@ -194,7 +182,6 @@ def clip_table(path: str = JETAUDIO) -> dict[str, tuple[bool, float]]:
     if not len(names) == len(loops) == len(peaks):
         raise SystemExit(f'{JETAUDIO}: kClipName / kClipLoops / kClipPeak lengths differ')
     table = {n: (lp, pk) for n, lp, pk in zip(names, loops, peaks)}
-    table[JET] = (JET_LOOP, JET_PEAK)
     m = re.search(r'kUltClipName\[kUltClipCount\]=\{(.*?)\};', text, re.S)
     if not m:
         raise SystemExit(f'{JETAUDIO}: no kUltClipName[kUltClipCount] table')
@@ -204,8 +191,6 @@ def clip_table(path: str = JETAUDIO) -> dict[str, tuple[bool, float]]:
 
 
 def file_name(clip: str) -> str:
-    if clip == JET:
-        return f'{PLUGIN}_jet.wav'
     return f'{PLUGIN}_{clip}.wav' if clip.startswith(ULT) else f'{PLUGIN}_veh_{clip}.wav'
 
 

@@ -2682,6 +2682,20 @@
     "tests/test_goldcoat.py"
    ]
   },
+  "gpufx_gpu": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "gpufx_sim": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "grape_turret_check": {
    "labels": [
     "plugin-native"
@@ -3166,6 +3180,12 @@
    "scripts": []
   },
   "jet_ground_settle": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "jet_lever_net": {
    "labels": [
     "plugin-native"
    ],
@@ -5238,6 +5258,12 @@
    ],
    "scripts": []
   },
+  "sound_engine_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "sound_event_check": {
    "labels": [
     "plugin-native"
@@ -6278,6 +6304,12 @@
    "scripts": [
     "tests/weapon_style_data_check.py"
    ]
+  },
+  "wing_engine_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
   },
   "wing_turn": {
    "labels": [
