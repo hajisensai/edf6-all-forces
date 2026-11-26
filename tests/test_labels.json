@@ -2701,6 +2701,13 @@
     "tests/test_goldcoat.py"
    ]
   },
+  "gpufx_glow": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "gpufx_gpu": {
    "labels": [
     "plugin-native",
