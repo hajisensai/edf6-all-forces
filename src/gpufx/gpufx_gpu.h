@@ -100,6 +100,7 @@ struct Stats {
     float viewport[4]{};   // the bound viewport (x, y, width, height): split screen draws into its own rectangle
     int drawn=0,batches=0;
     float gpuMs=-1.0f;     // the last resolved GPU time of a Draw (timestamp queries, a few frames late; -1: none yet)
+    double pixelsShaded=-1.0;   // the same Draw's pixel shader invocations (pipeline statistics; -1: none yet)
     // The scene's luminance before our draw (the median of five 16x16 blocks of the colour target, read back a few
     // frames late without a stall; -1: none yet) and the brightest block's.
     float sceneLuma=-1.0f,sceneLumaMax=-1.0f;

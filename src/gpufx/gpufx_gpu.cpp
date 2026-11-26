@@ -304,7 +304,9 @@ float4 SampleSlot(uint slot, float2 uv, bool clampUv) {
 // 2 the stock lit kinds, 3 the efs kinds.
 float4 PsGroup(V i, const uint group) {
     if (group == 3u) return EfsPs(i);
-    float4 t = lerp(SampleSlot(i.slot, i.uv.xy, group == 0u), SampleSlot(i.slot, i.uv.zw, group == 0u), i.misc.x);
+    // A flipbook blends two frames; a one-frame texture (the stock cards, almost all) samples once (Frames is uniform).
+    float4 t = SampleSlot(i.slot, i.uv.xy, group == 0u);
+    [branch] if (Frames > 1u) t = lerp(t, SampleSlot(i.slot, i.uv.zw, group == 0u), i.misc.x);
     float fade = saturate((SceneDistance(i.pos.xy) - i.misc.y) / max(i.misc.z, 0.001));
     if (group == 0u) {
         fade *= saturate((i.misc.y - 0.3) / max(Ambient.w, 0.001));   // ours only: no card cuts the near plane
@@ -431,10 +433,11 @@ struct Renderer::Impl final {
     DXGI_FORMAT depthViewFormat=DXGI_FORMAT_UNKNOWN;
     // GPU time: a ring of timestamp sets, read back without stalling a few frames later.
     static constexpr int kQueries=4;
-    struct Timing { ComPtr<ID3D11Query> disjoint,begin,end; bool pending=false; };
+    struct Timing { ComPtr<ID3D11Query> disjoint,begin,end,pipeline; bool pending=false; };
     std::array<Timing,kQueries> timing;
     int timingNext=0;
     float gpuMs=-1.0f;
+    double pixelsShaded=-1.0;   // the PS invocations of the same timed Draw
     // The scene's luminance: five 16x16 blocks of the colour target copied before our draw into a ring of staging
     // textures, mapped without waiting a few frames later.
     static constexpr int kLumaRing=3,kLumaBlock=16,kLumaBlocks=5;
@@ -532,6 +535,8 @@ struct Renderer::Impl final {
             if(FAILED(device->CreateQuery(&qd,&t.disjoint)))return false;
             qd.Query=D3D11_QUERY_TIMESTAMP;
             if(FAILED(device->CreateQuery(&qd,&t.begin)) || FAILED(device->CreateQuery(&qd,&t.end)))return false;
+            qd.Query=D3D11_QUERY_PIPELINE_STATISTICS;
+            if(FAILED(device->CreateQuery(&qd,&t.pipeline)))return false;
         }
         order.resize(kMaxInstances);keys.resize(kMaxInstances);
         context=value;
@@ -571,8 +576,11 @@ struct Renderer::Impl final {
             if(ctx->GetData(t.disjoint.Get(),&dj,sizeof(dj),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK ||
                ctx->GetData(t.begin.Get(),&a,sizeof(a),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK ||
                ctx->GetData(t.end.Get(),&b,sizeof(b),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK)continue;
+            D3D11_QUERY_DATA_PIPELINE_STATISTICS pipe{};
+            if(ctx->GetData(t.pipeline.Get(),&pipe,sizeof(pipe),D3D11_ASYNC_GETDATA_DONOTFLUSH)!=S_OK)continue;
             t.pending=false;
             if(!dj.Disjoint && dj.Frequency && b>=a)gpuMs=static_cast<float>(static_cast<double>(b-a)*1000.0/static_cast<double>(dj.Frequency));
+            pixelsShaded=static_cast<double>(pipe.PSInvocations);
         }
     }
 
@@ -714,7 +722,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         vp=D3D11_VIEWPORT{0.0f,0.0f,static_cast<float>(cd.Width),static_cast<float>(cd.Height),0.0f,1.0f};
     st.viewport[0]=vp.TopLeftX;st.viewport[1]=vp.TopLeftY;st.viewport[2]=vp.Width;st.viewport[3]=vp.Height;
     s.ResolveTiming(context);
-    st.gpuMs=s.gpuMs;
+    st.gpuMs=s.gpuMs;st.pixelsShaded=s.pixelsShaded;
     if(cd.Width>=Impl::kLumaBlock && cd.Height>=Impl::kLumaBlock)s.SampleLuma(context,color.Get(),cd,vp);
     st.sceneLuma=s.sceneLuma;st.sceneLumaMax=s.sceneLumaMax;
 
@@ -772,6 +780,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
     if(timed) {
         context->Begin(timing.disjoint.Get());
         context->End(timing.begin.Get());
+        context->Begin(timing.pipeline.Get());
     }
     {
         ScopedContextState restore(s.context1.Get(),s.isolated.Get());
@@ -860,6 +869,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
         context->ClearState();
     }
     if(timed) {
+        context->End(timing.pipeline.Get());
         context->End(timing.end.Get());
         context->End(timing.disjoint.Get());
         timing.pending=true;

@@ -1433,9 +1433,10 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         if(probe.loggedAt && now-probe.loggedAt<5000)return;
         probe.loggedAt=now;
         Log("GPUFX view=%p idx=%d rt %ux%u fmt=%u samples=%u vp=%.0f,%.0f %.0fx%.0f depth=%s fmt=%u reversed=%d negZ=%d drawn=%d batches=%d%s%s "
-            "cpu=%.3f ms gpu=%.3f ms",view,At<int>(view,0),st.width,st.height,st.colorFormat,st.samples,st.viewport[0],st.viewport[1],st.viewport[2],
+            "cpu=%.3f ms gpu=%.3f ms fill=%.1f screens",view,At<int>(view,0),st.width,st.height,st.colorFormat,st.samples,st.viewport[0],st.viewport[1],st.viewport[2],
             st.viewport[3],source,format,st.reversed,st.lookNegZ,st.drawn,st.batches,drew ? "" : " refused: ",drew ? "" : (st.refused ? st.refused : "nothing to draw"),
-            probe.cpuSamples ? probe.cpuMs/probe.cpuSamples : 0.0,st.gpuMs);
+            probe.cpuSamples ? probe.cpuMs/probe.cpuSamples : 0.0,st.gpuMs,
+            st.pixelsShaded>=0.0 && st.viewport[2]>0.0f ? st.pixelsShaded/(static_cast<double>(st.viewport[2])*st.viewport[3]) : -1.0);
         const float* P=vp.proj;const float* V=vp.view;
         Log("GPUFX   P=[%.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.6f %.4f | %.4f %.4f %.6f %.4f] jitter x %.6f..%.6f y %.6f..%.6f",
             P[0],P[1],P[2],P[3],P[4],P[5],P[6],P[7],P[8],P[9],P[10],P[11],P[12],P[13],P[14],P[15],
