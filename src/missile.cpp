@@ -75,6 +75,7 @@ constexpr float kCoastDrag=0.004f;       // of its speed a frame after burnout (
 constexpr float kMinSpeed=1.0f;          // m a frame: no slower (it falls out of the sky as its life ends)
 constexpr float kFuseShare=0.6f,kFuseLeast=4.0f;   // m
 constexpr float kG=9.8f;
+constexpr float kDrop=5.0f*kG;   // m/s^2 off the rail before ignition: about a metre in 0.2 s, plain to see
 constexpr float kJumpM=20.0f;          // a lock point moving more in a frame went to another target
 
 // Each round guided: the target where it was last frame (its velocity, m a frame), and the game frame it was last
@@ -310,9 +311,16 @@ void Guide(unsigned char* b) noexcept {
     // Its warhead's safety every frame it lives, before anything else here can leave it to the stock step.
     const std::int32_t age=At<std::int32_t>(b,kAge);
     const bool armed=Arm(b,RoundOf(b,age,GameFrame()));
-    // Before its motor lights (CP[7][0] frames; 0 for every store) the stock code fades and drops what it inherited:
-    // left to it.
-    if(At<std::int32_t>(b,kFlown)<At<std::int32_t>(b,kIgnition))return;
+    // Before its motor lights (CP[7][0] frames: a jet's rail missile drops clear first, vcobjects.py Plume) the stock
+    // code scales what it inherited by CP[7][1] (1: the launcher's velocity kept) and adds +0x13F0, the gravity of its
+    // AmmoGravityFactor (ctor 0x268F5E from 0x231C10; read nowhere after ignition, 0x26A880 / 0x235D50). Every
+    // consumer of AmmoGravityFactor takes it for a whole flight's (HoldFire, the sights), so ours stays 0 and the drop
+    // off the rail is added here: kDrop down, a frame at a time, into the inherited part (nothing else moves it now).
+    const std::int32_t ignition=At<std::int32_t>(b,kIgnition);
+    if(At<std::int32_t>(b,kFlown)<ignition) {
+        reinterpret_cast<float*>(b+kInherited)[1]-=kDrop*kFrame*kFrame;
+        return;
+    }
     float* own=reinterpret_cast<float*>(b+kOwn);
     float* inherited=reinterpret_cast<float*>(b+kInherited);
     float vel[3];
@@ -341,7 +349,7 @@ void Guide(unsigned char* b) noexcept {
         if(!Normalize(dir))return;
     }
     // The motor: the stock code adds CP[4] along its velocity after this; past its burn that is taken back here.
-    if(static_cast<float>(age)>burn) {
+    if(static_cast<float>(age-ignition)>burn) {   // its burn from ignition
         const float accel=At<float>(b,kAccel);
         speed=speed*(1.0f-kCoastDrag)-(std::isfinite(accel) ? accel : 0.0f);
         if(speed<kMinSpeed)speed=kMinSpeed;

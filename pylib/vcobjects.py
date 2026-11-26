@@ -643,6 +643,55 @@ STORES: dict[str, Store] = {
     **{f'MG{tank}': _coax_store(tank, mount) for tank, mount in COAX_MOUNTS.items()},
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
+
+
+@dataclass(frozen=True)
+class Plume:
+    """How a missile store's round looks in flight (the user, 2026-11-26: 「所有导弹、炮弹之类都换得了。抄抄战雷、皇牌空战之类的
+    游戏」; docs/feature-projectile-look.md): Ace Combat's rail drop, white-hot motor and long white trail, on the stock
+    class's own fields (docs/missile-re.md, MissileBullet01):
+      - `ignite`: frames off the rail before the motor lights (CP[7][0]; CP[7][1] 1: the launcher's velocity kept while
+        it drops). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
+        whole flight); the motor's flame and trail emitters open at ignition (0x26AA02).
+      - `trail`: frames a trail node lives (CP[2], a single int: each node 0.9..1.1 of it, 0x268D31; the trail stays
+        where it was laid, it does not drift).
+      - `colour`: AmmoColor, both the trail's start colour (rgb as given, fading to alpha 0) and the motor's flame
+        ((r*4, g*2, b, a), 0x268AEB): over 1 a brighter, whiter trail and a white-hot flame. The trail's and the flame's
+        widths are AmmoSize's (the round's model at its real length, Look), not ours to set."""
+    ignite: float
+    trail: float
+    colour: tuple[float, float, float, float]
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.ignite <= PLUME_IGNITE_MOST and self.trail > 0.0 and len(self.colour) == 4):
+            raise ValueError(f'bad plume {self}')
+
+
+PLUME_IGNITE_MOST = 20.0   # frames: src/missile.cpp neither guides nor fuses-by-proximity it before ignition
+# A jet's (or a helicopter's) rail missile drops 0.2 s clear before it lights, its trail 5-8 s; a ground or ship launcher's
+# tube or cell kicks it out lit almost at once; a gun- or tube-launched anti-tank missile and a rocket light in the tube
+# and trail short and grey. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
+_HOT = (1.5, 1.4, 1.3, 0.85)       # flame (6.0, 2.8, 1.3): white-hot; trail a bright white
+_SAM = (1.6, 1.5, 1.4, 0.9)
+_ATGM = (1.2, 1.1, 1.0, 0.6)       # flame (4.8, 2.2, 1.0), a thinner grey trail
+_ROCKET = (1.25, 1.15, 1.0, 0.7)
+PLUMES: dict[str, Plume] = {
+    'AAM_S': Plume(12.0, 420.0, _HOT), 'AAM_M': Plume(12.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
+    'AGM': Plume(12.0, 300.0, _HOT), 'AGM_L': Plume(10.0, 240.0, _HOT),
+    'ESSM': Plume(4.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(3.0, 360.0, _SAM), 'APOC_SAM': Plume(4.0, 420.0, _SAM),
+    'PATRIOT_SAM': Plume(4.0, 480.0, _SAM),
+    'GLM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGMF': Plume(0.0, 180.0, _ATGM),
+    'RKT': Plume(0.0, 150.0, _ROCKET),
+    'SAZABI_MISSILE': Plume(6.0, 240.0, _HOT),   # SAZABI_MISSILE below: the shield's missiles pop out, then light
+}
+
+
+def plume_of(store: Store) -> Plume | None:
+    """The store's Plume (PLUMES by its STORES key, or the Sazabi's), None: the template's look (the salvo's own)."""
+    kind = next((k for k, s in STORES.items() if s is store), None)
+    if kind is None and store is globals().get('SAZABI_MISSILE'):
+        kind = 'SAZABI_MISSILE'
+    return PLUMES.get(kind) if kind else None
 SALVO_ROUNDS = 256
 SALVO_CHILDREN = 4
 SALVO_MARK = 7070.0
@@ -2430,6 +2479,16 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         else:
             cp.items[i] = value
     cone.items[0] = cone.items[1] = missile.lock_cone
+    plume = plume_of(store)
+    if plume is not None:
+        if len(cp.items[7].items) != 2 or not isinstance(cp.items[2], float):
+            raise ValueError(f'{JET_MISSILE_STOCK} 的 CP[2] / CP[7] 不是预期的尾烟寿命 / [点火延迟, 衰减]')
+        cp.items[2] = plume.trail
+        cp.items[7].items[:] = [plume.ignite, 1.0]
+        colour = r.get('AmmoColor')
+        if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
+            raise ValueError(f'{JET_MISSILE_STOCK} 的 AmmoColor 不是 4 个数')
+        colour.items[:] = [float(c) for c in plume.colour]
     if missile.muzzle is not None:
         _fire_from(game, r, missile.muzzle)
     if store is STORES['SALVO']:
