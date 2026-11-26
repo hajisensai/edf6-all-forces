@@ -39,7 +39,9 @@ export function normalize(raw) {
       after: Array.isArray(l.after) ? l.after.map(String).slice(0, L.lanes) : [],
       steps: l.steps.map((s) => {
         if (!s || typeof s !== 'object') throw new HttpError(400, '大纲格式不对');
-        return { id: id(s.id), title: clean(s.title, L.stepTitle) || '（未命名）', tag: clean(s.tag, L.tag), body: clean(s.body, L.body) };
+        // A step's own colour (one of TONES) sets it apart inside its line; none = the line's colour.
+        const tone = TONES.includes(s.tone) ? { tone: s.tone } : {};
+        return { id: id(s.id), title: clean(s.title, L.stepTitle) || '（未命名）', tag: clean(s.tag, L.tag), body: clean(s.body, L.body), ...tone };
       }),
     };
   });

@@ -140,9 +140,13 @@ test('outline: validation, clean text, limits and rate', async () => {
   dirty.lanes[0].name = 'a\u202Eb <img src=x>';
   dirty.lanes[0].tone = 'red';
   dirty.lanes[0].steps[0].body = 'x\u0007y\u200Bz';
+  dirty.lanes[0].steps[0].tone = 'red';
+  dirty.lanes[0].steps.push({ id: 's2', title: '梦', tone: 'hazard' });
   dirty.lanes[0].extra = 'dropped';
   assert.equal((await call(e, '/api/outline/save', { outline: dirty, version: 0 })).status, 200);
   const lane = (await get(e)).outline.lanes[0];
+  assert.equal('tone' in lane.steps[0], false);
+  assert.equal(lane.steps[1].tone, 'hazard');
   assert.equal(lane.name, 'ab <img src=x>');
   assert.equal(lane.tone, 'edf');
   assert.equal(lane.steps[0].body, 'xyz');

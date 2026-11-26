@@ -116,6 +116,10 @@ main.wide { max-width: 1200px; }
 .olStep { position: relative; padding: 0 0 14px 32px; min-width: 0; }
 .olStep::before { content: ""; position: absolute; left: 10px; top: 24px; bottom: 0; width: 2px; background: var(--line); }
 .olStep:last-child::before { display: none; }
+.olStep[data-tone="edf"] { --tone: var(--ok); }
+.olStep[data-tone="hazard"] { --tone: var(--warn); }
+.olStep[data-tone="violet"] { --tone: #7c5cc4; }
+.olStep[data-tone] .olCard { border-left: 3px solid var(--tone); padding-left: 8px; }
 .olDot { position: absolute; left: 0; top: 2px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
   font-size: 11px; font-weight: 700; color: var(--panel); background: var(--tone); font-variant-numeric: tabular-nums; }
 .olCard h3 { margin: 0; font-size: 15px; display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; overflow-wrap: anywhere; }
@@ -133,6 +137,6 @@ dialog.outlineDlg { width: min(560px, calc(100vw - 32px)); }
 dialog.outlineDlg h2 { margin: 0; font-size: 17px; }
 .danger { color: var(--bad) !important; }
 #copyBox { min-height: 200px; margin: 8px 0; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olLane[data-tone="violet"] { --tone: #a98ee8; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olLane[data-tone="violet"], :root:not([data-theme="light"]) .olStep[data-tone="violet"] { --tone: #a98ee8; } }
 [hidden] { display: none !important; }
 .bar { margin: 1em 0; }

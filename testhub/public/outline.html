@@ -39,6 +39,7 @@
       <h2 id="stepDlgTitle">编辑这一步</h2>
       <label for="fTitle">标题</label><input type="text" id="fTitle" maxlength="80" required>
       <label for="fTag">标签（可空，比如「轮回 1」「DLC」）</label><input type="text" id="fTag" maxlength="20">
+      <label for="fTone">颜色（用来区分同一条线里不同来源的步骤，比如梦境关卡）</label><select id="fTone"><option value="">跟任务线一样</option><option value="edf">绿</option><option value="hazard">橙</option><option value="violet">紫</option></select>
       <label for="fBody">内容</label><textarea id="fBody" maxlength="4000"></textarea>
       <p class="row"><button class="btn ghost small danger" id="fDelete" type="button">删除这一步</button>
         <span class="row" style="margin-left:auto"><button class="btn ghost" id="fCancel" type="button">取消</button><button class="btn" type="submit">确定</button></span></p>
