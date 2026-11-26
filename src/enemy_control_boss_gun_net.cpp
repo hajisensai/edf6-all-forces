@@ -166,9 +166,9 @@ Stream* Bind(const NativeLease& l,bool authority) noexcept {
     if(!installed || !Ready() || !Family(l) || !Current(RootRef(l)))return nullptr;
     for(auto& old:streams)if(old.held && old.retired) {bool role=false;if(!NativeActionRole(old.root.object,&role) || (old.root.object==l.object && !NativeActionQuiescing(l.object)))ResetStream(old);}
     if(auto* s=Find(l))return s->authority==authority ? s : nullptr;
-    if(!streams.Allocate("boss gun net streams"))return nullptr;
-    for(auto& s:streams)if(!s.held) {if(!Pin(RootRef(l)))return nullptr;s.root=RootRef(l);s.profile=l.profile;s.held=s.rootHeld=true;s.authority=authority;return &s;}
-    return nullptr;
+    auto* s=streams.FindOrAppend("boss gun net streams",[](const Stream& row){return !row.held;});
+    if(!s || !Pin(RootRef(l)))return nullptr;
+    s->root=RootRef(l);s->profile=l.profile;s->held=s->rootHeld=true;s->authority=authority;return s;
 }
 bool Needs(const NativeLease& l) noexcept {return Family(l);}
 bool Before(const NativeLease& l,bool authority,Input*) noexcept {

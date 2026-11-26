@@ -94,11 +94,9 @@ Stream* Find(const NativeLease& l) noexcept {
 Stream* Bind(const NativeLease& l,bool authority) noexcept {
     if(!installed || image!=admittedImage || !Family(l) || !Current(Reference(l),false))return nullptr;
     if(auto* s=Find(l))return s->authority==authority ? s : nullptr;
-    if(!streams.Allocate("walking net streams"))return nullptr;
-    for(auto& s:streams)if(!s.rootHeld) {
-        if(!Pin(Reference(l)))return nullptr;s.root=Reference(l);s.rootHeld=true;s.profile=l.profile;s.authority=authority;return &s;
-    }
-    return nullptr;
+    auto* s=streams.FindOrAppend("walking net streams",[](const Stream& row){return !row.rootHeld;});
+    if(!s || !Pin(Reference(l)))return nullptr;
+    s->root=Reference(l);s->rootHeld=true;s->profile=l.profile;s->authority=authority;return s;
 }
 bool Finite(const float* values,unsigned count) noexcept {for(unsigned i=0;i<count;++i)if(!std::isfinite(values[i]))return false;return true;}
 bool Matrix(const float* v) noexcept {

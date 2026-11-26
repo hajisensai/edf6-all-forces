@@ -84,8 +84,10 @@ Transaction* Existing(const NativeLease& l) noexcept {
     for(auto& t:transactions)if(t.used && t.object==l.object && t.control==l.control)return &t;return nullptr;
 }
 Transaction* Start(const NativeLease& l) noexcept {
-    if(!transactions.Allocate("native pose transactions"))return nullptr;
-    for(auto& t:transactions)if(!t.used){t.writes=t.bodies=0;t.owners=1;t.owner=0;t.stageRag=nullptr;t.retained[0]={l.object,l.control,false,true};t.used=true;t.changed=t.pending=false;t.object=l.object;t.control=l.control;return &t;}return nullptr;
+    auto* t=transactions.FindOrAppend("native pose transactions",[](const Transaction& row){return !row.used;});
+    if(!t)return nullptr;
+    t->writes=t->bodies=0;t->owners=1;t->owner=0;t->stageRag=nullptr;t->retained[0]={l.object,l.control,false,true};
+    t->used=true;t->changed=t->pending=false;t->object=l.object;t->control=l.control;return t;
 }
 bool Clear(Transaction& t) noexcept {
     for(unsigned i=0;i<t.owners;++i)if(t.retained[i].retained && !Readable(t.retained[i].control,16,true)){t.pending=true;return false;}

@@ -1285,8 +1285,7 @@ bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
 }
 bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool networked) noexcept {
     if((InSession() && !networked) || !Validate(plan))return false;
-    if(!deployments.Allocate("support deployments"))return false;
-    Deployment* deployed=nullptr;for(auto& row:deployments)if(!row.used){deployed=&row;break;}
+    Deployment* deployed=deployments.FindOrAppend("support deployments",[](const Deployment& row){return !row.used;});
     if(!deployed)return false;
     deployed->used=true;deployed->id=id;deployed->plan=plan;deployed->remote=remote;deployed->born=GameMs();deployed->networked=networked;
     for(unsigned i=0;i<plan.count;++i) {

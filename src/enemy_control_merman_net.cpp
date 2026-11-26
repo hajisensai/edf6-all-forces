@@ -238,12 +238,14 @@ bool Parts(Stream& s) noexcept {
 Stream* Bind(const NativeLease& l,bool authority) noexcept {
     if(!installed || image!=admittedImage || !Family(l) || !Current({l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))}))return nullptr;
     if(auto* s=Find(l))return !s->retired && s->authority==authority ? s : nullptr;
-    if(!streams.Allocate("merman net streams"))return nullptr;
-    for(auto& s:streams)if(!s.held && !s.executing && !s.beamDepth && !s.cleanupUncertain && NativeProjectileJournalEmpty(s.journal) && !s.postHeld) {
-        ResetStream(s);const Ref ref{l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))};if(!Pin(ref))return nullptr;
-        s.root=ref;s.profile=l.profile;s.held=true;s.authority=authority;return &s;
-    }
-    return nullptr;
+    auto* s=streams.FindOrAppend("merman net streams",[](const Stream& row){
+        return !row.held && !row.executing && !row.beamDepth && !row.cleanupUncertain && NativeProjectileJournalEmpty(row.journal) && !row.postHeld;
+    });
+    if(!s)return nullptr;
+    ResetStream(*s);
+    const Ref ref{l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))};
+    if(!Pin(ref))return nullptr;
+    s->root=ref;s->profile=l.profile;s->held=true;s->authority=authority;return s;
 }
 unsigned char* Muzzle(const Part& p,unsigned ordinal) noexcept {
     if(!Shared(p.battery,0x6C0) || ordinal>=At<std::size_t>(p.battery.object,0x288))return nullptr;

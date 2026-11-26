@@ -178,8 +178,8 @@ bool Before(const NativeLease& l,bool authority,Input*) noexcept {
         const unsigned family=Family(l);if(!installed || admittedImage!=image || !family || !Current(Reference(l)))return false;
         bool role=false;if(!NativeActionRole(l.object,&role) || role!=authority)return false;
         if(auto* s=Find(l))return s->authority==authority && s->rootHeld && !s->cleanupEntered && !s->uncertain && (!s->faulted || s->quiescing);
-        if(!streams.Allocate("monster net streams"))return false;
-        for(auto& s:streams)if(!s.held) {
+        if(auto* found=streams.FindOrAppend("monster net streams",[](const Stream& row){return !row.held;})) {
+            Stream& s=*found;
             if(!Pin(Reference(l)))return false;s.root=Reference(l);s.profile=l.profile;s.held=true;s.rootHeld=true;s.authority=authority;s.family=static_cast<unsigned char>(family);
             s.factory=At<void*>(l.object,DescriptorOffset(family)-0x10);if(!Factory(l,family,s.factory)){s.faulted=true;return false;}
             const auto* descriptor=l.object+DescriptorOffset(family);s.digest=Definition(l,family,descriptor);if(!s.digest || !Patterns(s,l)){s.faulted=true;return false;}

@@ -215,7 +215,7 @@ int main() {
     config.npcEvade=false;config.npcFireLane=false;config.npcGuardFormation=10;sessionOn=true;host=true;
     Put<float>(weapon,kArmReach,100);Put<float>(weapon,kArmDamage,10);Put<int>(weapon,kWeaponAmmo,100);
     for(unsigned i=0;i<4;++i)Unit(i,-900-static_cast<float>(i));
-    Check(deployments.Allocate("fixture deployments"),"the fixture deployment rows exist (the spawn path allocates them first)");
+    Check(deployments.Append("fixture deployments")!=nullptr,"the fixture deployment rows exist (the spawn path allocates them first)");
     auto& d=deployments[0];d.used=true;d.assigned=true;d.networked=true;d.id=7001;d.born=npcFixtureMs;
     d.plan.catalogId=21;d.plan.count=4;
     for(unsigned i=0;i<4;++i){d.objects[i]=ObjRef::Of(units[i]);d.plan.units[i].resourceId=i ? kSoldier : kLeader;
