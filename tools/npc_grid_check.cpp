@@ -154,6 +154,26 @@ int main() {
     visits=0;
     Check(g.AnyAround(start,100.0f,[&](int i){ ++visits;return i==0; }) && visits==1,
           "a match stops a box before subsequent rows");
+    {
+        const float sparse[][3]={{4,0,0},{0,0,80},{8,0,80},{0,0,160},{4,0,80},{4,0,0}};
+        g.Build(6,[&](int i){ return sparse[i]; },4.0f);
+        const float middle[3]={4,0,80};
+        std::vector<int> rows;
+        const auto visit=[&](int i){ rows.push_back(i); };
+        g.Around(middle,100.0f,visit);
+        Check(rows==std::vector<int>({0,5,1,4,2,3}),"box skips long empty spans in row and cell order");
+        rows.clear();
+        const float from[3]={4,0,160},to[3]={4,0,0};
+        g.Capsule(from,to,0.5f,visit);
+        Check(rows==std::vector<int>({0,5,1,4,3}),"reverse capsule keeps row order across empty spans and padded cells");
+        rows.clear();
+        g.NearFirst(4.0f,80.0f,{0,2,0,20},[](float){return false;},visit);
+        Check(rows==std::vector<int>({4,1,2,0,5}),"clipped rings keep center, sides and horizontal edges in order");
+        rows.clear();
+        g.Build(2,[&](int i){ return sparse[1+i]; },4.0f);
+        g.Around(middle,100.0f,visit);
+        Check(rows==std::vector<int>({0,1}),"occupied rows rebuilt when the grid shrinks");
+    }
     struct Case { const char* label; int n; float spread; bool outliers; float cell; };
     const Case kCases[]={{"crowd 4000 / 600 m",4000,600.0f,false,16.0f},{"crowd 3000 / 2 km, outliers",3000,2000.0f,true,16.0f},
                          {"few 7",7,300.0f,false,16.0f},{"one",1,10.0f,false,16.0f},{"empty",0,10.0f,false,16.0f},
