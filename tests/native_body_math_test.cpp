@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <limits>
 #include <random>
+#include <vector>
 
 namespace crew { unsigned char* image=nullptr; }
 namespace crew::perfprobe {
@@ -369,6 +370,76 @@ bool RayResetTemplates() {
     return true;
 }
 
+bool MotionLibraryCases() {
+    using Row=std::array<std::uint32_t,28>;
+    using Add=std::uint16_t*(__fastcall*)(void*,std::uint16_t*,const void*);
+    constexpr int large=70656;
+    std::vector<Row> rows(large);
+    alignas(8) unsigned char library[0x68]{};
+    edf::Put(library,0x40,rows.data());
+    edf::Put(library,0x5C,0xFFFFFFu);
+    const auto add=reinterpret_cast<Add>(image+0xE15190);
+    std::mt19937 rng(0xE15190);
+    for(int i=0;i<large;++i) {
+        for(auto& word:rows[i])word=rng();
+        rows[i][0]=1u;
+    }
+    Row key{};
+    for(unsigned i=1;i<key.size();++i)key[i]=rng();
+    key[4]=0x7FC00001u;
+    key[5]=0x80000000u;
+    const auto finds=[&](int count,const Row& wanted,std::uint16_t expected) {
+        std::uint16_t out=0x1234;
+        edf::Put(library,0x48,count);
+        return add(library,&out,&wanted)==&out && out==expected;
+    };
+    if(!finds(0,key,0xFFFFu) || !finds(-1,key,0xFFFFu))return false;
+    for(unsigned field=1;field<key.size();++field) {
+        rows[0]=key;
+        rows[0][field]^=1;
+        rows[31]=rows[32]=rows[35]=rows[38]=rows[40]=key;
+        if(!finds(41,key,31))return false;
+        rows[31][field]^=1;
+        if(!finds(41,key,32))return false;
+        rows[32][field]^=1;
+        rows[35][field]^=1;
+        rows[38][field]^=1;
+        if(!finds(41,key,40) || !finds(40,key,0xFFFFu))return false;
+        rows[40][field]^=1;
+    }
+    rows[65566]=key;
+    if(!finds(large,key,30) || !finds(65566,key,0xFFFFu))return false;
+    rows[65566][27]^=1;
+    if(!finds(large,key,0xFFFFu))return false;
+
+    // The private PE mapping leaves the CRT imports unresolved. Restore both after checking insertion.
+    constexpr unsigned memcpySlot=0x1756058,memsetSlot=0x1756068;
+    auto* const imports=image+memcpySlot;
+    DWORD protection=0;
+    if(!VirtualProtect(imports,24,PAGE_READWRITE,&protection))return false;
+    const auto copy=edf::At<void*>(image,memcpySlot),fill=edf::At<void*>(image,memsetSlot);
+    edf::Put(image,memcpySlot,reinterpret_cast<void*>(&std::memcpy));
+    edf::Put(image,memsetSlot,reinterpret_cast<void*>(&std::memset));
+    const auto insert=[&](unsigned slot,const Row& props) {
+        rows[slot][0]=0xFFFFFFu;
+        edf::Put(library,0x5C,slot);
+        if(!finds(41,props,static_cast<std::uint16_t>(slot)))return false;
+        return std::memcmp(rows[slot].data(),props.data(),kMotionEntrySize)==0 &&
+               (edf::At<std::uint32_t>(library,0x5C)&0xFFFFFFu)==0xFFFFFFu;
+    };
+    auto exclusive=key;
+    exclusive[0]=1u;
+    rows[8]=exclusive;
+    const bool valid=insert(9,key) && insert(10,exclusive) && finds(41,key,9) &&
+                     finds(41,exclusive,0xFFFFu) && edf::At<std::uint32_t>(library,0x60)==2;
+    edf::Put(image,memcpySlot,copy);
+    edf::Put(image,memsetSlot,fill);
+    DWORD old=0;
+    return VirtualProtect(imports,24,protection,&old) && valid;
+}
+
+
+
 struct BodySignalResult {
     std::uint64_t calls{}, removed{};
 };
@@ -713,6 +784,10 @@ int main(int argc,char** argv) {
     if(!image)return 1;
     const auto* nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
     if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || !edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return 1;
+    if(!MotionLibraryCases()) {
+        std::puts("FAIL: stock motion library behavior does not match the fixture");
+        return 1;
+    }
     auto* const harness=BoxHarness();
     if(!harness || InstallNativeBodyMath()!=kNativeBodyMathSites || image[kBoxMergeCall]!=0xE8 ||
        image[kBoxMerge]!=0x48 || image[kBoxMerge+2]!=0x4D || !CaptureBoxArguments()) {
@@ -800,6 +875,10 @@ int main(int argc,char** argv) {
     if(!BoundsValidation() || !AvoidanceNeighbors())return 1;
     if(!AvoidanceBoxes()) {
         std::puts("FAIL: avoidance sweep changed the first overlap or the X cutoff");
+        return 1;
+    }
+    if(!MotionLibraryCases()) {
+        std::puts("FAIL: motion library ID order, miss or insertion mismatch");
         return 1;
     }
     if(!BodySignalDispatch()) {

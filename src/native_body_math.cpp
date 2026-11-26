@@ -354,7 +354,7 @@ constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20
 constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
-              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+8==kNativeBodyMathSites);
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+9==kNativeBodyMathSites);
 
 using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
 using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
@@ -506,6 +506,87 @@ bool InstallEmptyBodySignalGate() noexcept {
     // The empty heads have no dispatch state. A listener or any flag keeps both original traversals.
     // The shared epilogue is also used by the stock tolerance check. r12 and r15 have only been saved.
     return edf::PatchCode(image+kBodySignalStart,kBodySignalStock,kBodySignalEmptyGate,sizeof(kBodySignalStock));
+}
+
+
+
+constexpr unsigned kMotionSearch=0xE151B5,kMotionSearchHit=0xE151F1,kMotionSearchMiss=0xE15213;
+constexpr unsigned kMotionEntrySize=0x70;
+constexpr unsigned char kMotionSearchStock[]{
+    0x45,0x33,0xED,0x44,0x39,0x6D,0,0x75,0x5E,
+    0x4C,0x63,0x5B,0x48,0x45,0x8B,0xD5,0x4C,0x8B,0x4B,0x40,0x4D,0x85,0xDB,0x7E,0x4E,
+    0x45,0x8B,0xC5,0x4C,0x2B,0xCD,0x0F,0x1F,0x44,0,0,
+    0x49,0x8B,0xD5,0x48,0x8B,0xCD,0x8B,0x01,0x41,0x39,0x04,0x09,0x75,0x26,
+    0x48,0xFF,0xC2,0x48,0x83,0xC1,0x04,0x48,0x83,0xFA,0x1C,0x7C,0xEB,0x41,0x83,0xFA,0xFF,0x74,0x22,
+    0x66,0x45,0x89,0x14,0x24,0x49,0x8B,0xC4,0x48,0x83,0xC4,0x28,0x41,0x5D,0x41,0x5C,0x5D,0x5B,0xC3,
+    0x41,0xFF,0xC2,0x49,0xFF,0xC0,0x49,0x83,0xC1,0x70,0x4D,0x3B,0xC3,0x7C,0xBD,
+};
+static_assert(kMotionSearch-9+sizeof(kMotionSearchStock)==kMotionSearchMiss);
+
+__forceinline __m128i MotionBytes(const unsigned char* row) noexcept {
+    return _mm_loadu_si128(reinterpret_cast<const __m128i*>(row));
+}
+
+__forceinline bool SameMotionProperties(const unsigned char* row,const unsigned char* key,__m128i first) noexcept {
+    if(_mm_movemask_epi8(_mm_cmpeq_epi32(MotionBytes(row),first))!=0xFFFF)return false;
+    const auto a=_mm_xor_si128(MotionBytes(row+0x10),MotionBytes(key+0x10));
+    const auto b=_mm_xor_si128(MotionBytes(row+0x20),MotionBytes(key+0x20));
+    const auto c=_mm_xor_si128(MotionBytes(row+0x30),MotionBytes(key+0x30));
+    const auto d=_mm_xor_si128(MotionBytes(row+0x40),MotionBytes(key+0x40));
+    const auto e=_mm_xor_si128(MotionBytes(row+0x50),MotionBytes(key+0x50));
+    const auto f=_mm_xor_si128(MotionBytes(row+0x60),MotionBytes(key+0x60));
+    const auto changed=_mm_or_si128(_mm_or_si128(_mm_or_si128(a,b),_mm_or_si128(c,d)),_mm_or_si128(e,f));
+    return _mm_movemask_epi8(_mm_cmpeq_epi32(changed,_mm_setzero_si128()))==0xFFFF;
+}
+
+__declspec(noinline) int FindMotionTail(const unsigned char* rows,int i,int count,
+                                            const unsigned char* key) noexcept {
+    const auto first=MotionBytes(key);
+    for(;i<=count-4;i+=4,rows+=4*kMotionEntrySize) {
+        const auto w0=edf::At<std::uint32_t>(rows,0),w1=edf::At<std::uint32_t>(rows,kMotionEntrySize);
+        const auto w2=edf::At<std::uint32_t>(rows,2*kMotionEntrySize),w3=edf::At<std::uint32_t>(rows,3*kMotionEntrySize);
+        if((w0&w1&w2&w3)!=0)continue;
+        // This path is called only when the key's exclusive word is zero.
+        if(!w0 && SameMotionProperties(rows,key,first))return i;
+        if(!w1 && SameMotionProperties(rows+kMotionEntrySize,key,first))return i+1;
+        if(!w2 && SameMotionProperties(rows+2*kMotionEntrySize,key,first))return i+2;
+        if(!w3 && SameMotionProperties(rows+3*kMotionEntrySize,key,first))return i+3;
+    }
+    for(;i<count;++i,rows+=kMotionEntrySize)
+        if(SameMotionProperties(rows,key,first))return i;
+    return -1;
+}
+
+int __fastcall FindMotionProperties(const unsigned char* rows,int count,const unsigned char* key) noexcept {
+    if(count<=0)return -1;
+    const auto first=MotionBytes(key);
+    // Most presets are in the first few slots. Large runs of exclusive and free rows use the tail scan.
+    const int prefix=count<32 ? count : 32;
+    for(int i=0;i<prefix;++i,rows+=kMotionEntrySize)
+        if(SameMotionProperties(rows,key,first))return i;
+    return prefix==count ? -1 : FindMotionTail(rows,prefix,count,key);
+}
+
+bool InstallMotionPropertiesSearch() noexcept {
+    if(!edf::Matches(image,kMotionSearch-9,kMotionSearchStock,sizeof(kMotionSearchStock)))return false;
+    auto* const site=image+kMotionSearch;
+    auto* const thunk=edf::AllocateNearThunk(site,reinterpret_cast<void*>(&FindMotionProperties));
+    if(!thunk)return false;
+    unsigned char code[]{
+        0x48,0x8B,0x4B,0x40,0x8B,0x53,0x48,0x4C,0x8B,0xC5, // table, count, key
+        0xE8,0,0,0,0,                     // call scanner
+        0x85,0xC0,0x78,0x4B,               // test eax,eax; js stock insertion
+        0x44,0x8B,0xD0,0xEB,0x24,          // mov r10d,eax; jmp stock ID store
+    };
+    static_assert(kMotionSearch+19+0x4B==kMotionSearchMiss && kMotionSearch+sizeof(code)+0x24==kMotionSearchHit);
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+15);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        const auto displacement=static_cast<std::int32_t>(delta);
+        std::memcpy(code+11,&displacement,sizeof(displacement));
+        if(edf::PatchCode(site,kMotionSearchStock+9,code,sizeof(code)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
 }
 
 
@@ -706,6 +787,7 @@ unsigned InstallNativeBodyMath() noexcept {
     installed+=InstallContactDecoders();
     installed+=InstallStaticBodyQuaternionSkip();
     installed+=InstallEmptyBodySignalGate();
+    installed+=InstallMotionPropertiesSearch();
     installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
     for(const auto& site:kAttachedBasisCalls) {
