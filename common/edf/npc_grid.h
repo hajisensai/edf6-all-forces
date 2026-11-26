@@ -115,6 +115,19 @@ public:
     template<class Match> bool AnyAround(const float* c,float r,Match&& match) const {
         return AnyInBox(c[0]-r,c[2]-r,c[0]+r,c[2]+r,match);
     }
+
+    // The lowest point indices accepted by keep(), in scan order. Each cell and the apart list are already ordered.
+    template<class Keep> void FirstAround(const float* c,float r,int most,Keep keep,std::vector<int>& out) const {
+        out.clear();
+        if(most<=0)return;
+        if(most<count && nx && FirstInOrder(c,r,most,keep,out))return;
+        Around(c,r,[&](int i){ if(keep(i))out.push_back(i); });
+        if(out.size()>static_cast<std::size_t>(most)) {
+            std::nth_element(out.begin(),out.begin()+most,out.end());
+            out.resize(static_cast<std::size_t>(most));
+        }
+        std::sort(out.begin(),out.end());
+    }
     // Visit the capsule's candidate points in row order and stop as soon as one matches. Each row uses the
     // stretch of the segment whose z can reach it, widened by the margin.
     template<class Match> bool AnyInCapsule(const float* a,const float* b,float margin,Match&& match) const {
@@ -235,6 +248,50 @@ private:
         return std::isfinite(m) ? 1e-3f+m*4e-6f : 0.0f;
     }
     int NextRow(int row) const noexcept { return nextOccupiedRow[static_cast<std::size_t>(row)]; }
+
+    template<class Keep> bool FirstInOrder(const float* c,float r,int most,Keep& keep,std::vector<int>& out) const {
+        if(std::isnan(c[0]-r) || std::isnan(c[2]-r) || std::isnan(c[0]+r) || std::isnan(c[2]+r))return false;
+        const Clip clip=Within(c[0],c[2],r);
+        constexpr int kMaxCells=64;
+        const int width=clip.cx1-clip.cx0+1,height=clip.cz1-clip.cz0+1;
+        if(width<=0 || height<=0 || width>kMaxCells/height)return false;
+
+        struct Run { const int* next; const int* end; };
+        Run runs[kMaxCells+1];
+        int nr=0,candidates=0;
+        const auto add=[&](const int* next,int size) {
+            runs[nr++]={next,next+size};
+            candidates+=size;
+        };
+        if(!apart.empty())add(apart.data(),static_cast<int>(apart.size()));
+        for(int z=NextRow(clip.cz0);z<=clip.cz1;z=NextRow(z+1)) {
+            for(int x=clip.cx0;x<=clip.cx1;++x) {
+                const auto cellIndex=static_cast<std::size_t>(z*nx+x);
+                const int begin=start[cellIndex],size=start[cellIndex+1]-begin;
+                if(size)add(item.data()+begin,size);
+            }
+        }
+        if(nr==0)return true;
+        const auto accept=[&](int i) { if(keep(i))out.push_back(i); };
+        const auto needMore=[&]() { return out.size()<static_cast<std::size_t>(most); };
+        if(nr==1) {
+            for(const int* i=runs[0].next;i!=runs[0].end && needMore();++i)accept(*i);
+            return true;
+        }
+        // Sparse or wide queries are cheaper to select in one pass. Dense local queries can stop the merge early.
+        if(candidates/4<most)return false;
+        const auto later=[](const Run& a,const Run& b){ return *a.next>*b.next; };
+        std::make_heap(runs,runs+nr,later);
+        while(nr && needMore()) {
+            std::pop_heap(runs,runs+nr,later);
+            Run& smallest=runs[nr-1];
+            accept(*smallest.next++);
+            if(smallest.next==smallest.end)--nr;
+            else std::push_heap(runs,runs+nr,later);
+        }
+        return true;
+    }
+
     template<class MatchRow> bool AnyInRows(int first,int last,MatchRow&& match) const {
         if(hasEmptyRows) {
             for(int row=NextRow(first);row<=last;row=NextRow(row+1))
@@ -267,21 +324,5 @@ private:
         return AnyInRows(r0,r1,[&](int row){ return AnyInSpan(row*nx+c0,row*nx+c1,match); });
     }
 };
-
-// The scan `for(i=0; i<n && got<most; ++i) if(keep(i)) out[got++]=i` through `g`: the first `most` points in index
-// order for which keep(i) holds, ascending, into `out`, keep asked only of the points Around(c, r) visits (it must hold
-// of none outside that box: the caller's own test of "within r"). Those it holds of are gathered in the cells' order,
-// then the `most` lowest indices taken by a partial selection (nth_element, linear in what was gathered) and only they
-// sorted: a dense crowd round `c` (hundreds in reach) costs O(k + most log most), not O(k log k).
-template<class Keep> void FirstAround(const Grid& g,const float* c,float r,int most,Keep keep,std::vector<int>& out) {
-    out.clear();
-    if(most<=0)return;
-    g.Around(c,r,[&](int i){ if(keep(i))out.push_back(i); });
-    if(out.size()>static_cast<std::size_t>(most)) {
-        std::nth_element(out.begin(),out.begin()+most,out.end());
-        out.resize(static_cast<std::size_t>(most));
-    }
-    std::sort(out.begin(),out.end());
-}
 
 }  // namespace npc::grid

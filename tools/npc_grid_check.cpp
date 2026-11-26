@@ -88,13 +88,13 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
             const float r=U(1,40);
             std::vector<int> scan;
             for(int i=0;i<n && static_cast<int>(scan.size())<64;++i)if(npc::Horiz(eye,aim(i))<r)scan.push_back(i);
-            npc::grid::FirstAround(g,eye,r,64,[&](int i){ return npc::Horiz(eye,aim(i))<r; },got);
+            g.FirstAround(eye,r,64,[&](int i){ return npc::Horiz(eye,aim(i))<r; },got);
             if(got!=scan)++mismatches[3];
             // Fewer and more than the crowd holds (the partial selection at its edges).
             for(const int most:{0,1,5,1000}) {
                 std::vector<int> scan2;
                 for(int i=0;i<n && static_cast<int>(scan2.size())<most;++i)if(npc::Horiz(eye,aim(i))<r)scan2.push_back(i);
-                npc::grid::FirstAround(g,eye,r,most,[&](int i){ return npc::Horiz(eye,aim(i))<r; },got);
+                g.FirstAround(eye,r,most,[&](int i){ return npc::Horiz(eye,aim(i))<r; },got);
                 if(got!=scan2)++mismatches[3];
             }
             int count=0,count2=0;
@@ -159,6 +159,32 @@ int main() {
     visits=0;
     Check(g.AnyAround(start,100.0f,[&](int i){ ++visits;return i==0; }) && visits==1,
           "a match stops a box before subsequent rows");
+    {
+        constexpr int population=2603,maximum=64;
+        std::vector<P> crowd(population);
+        for(int i=0;i<population;++i) {
+            auto& p=crowd[static_cast<std::size_t>(i)];
+            p.p[0]=static_cast<float>((i*13)%31);
+            p.p[2]=static_cast<float>((i*19)%31);
+        }
+        crowd[2].p[0]=2e6f;   // the apart run must merge at its original index
+        g.Build(population,[&](int i){return crowd[static_cast<std::size_t>(i)].p;},8.0f);
+        const float centre[3]={15,0,15};
+        const auto eligible=[](int i){return i%4!=1;};
+        std::vector<int> expected,got;
+        for(int i=0;static_cast<int>(expected.size())<maximum;++i)if(eligible(i))expected.push_back(i);
+        int calls=0,last=-1;
+        bool ordered=true;
+        g.FirstAround(centre,40.0f,maximum,[&](int i) {
+            ordered=ordered && i>last;
+            last=i;
+            ++calls;
+            return eligible(i);
+        },got);
+        Check(g.Apart()==1 && ordered && got==expected && calls==expected.back()+1,
+              "dense capped lookup merges cells and outliers in registry order and stops at the 64th match",calls,population);
+        std::printf("dense threat query: %d -> %d exact predicate calls for %d results\n",population,calls,maximum);
+    }
     {
         const float sparse[][3]={{4,0,0},{0,0,80},{8,0,80},{0,0,160},{4,0,80},{4,0,0}};
         g.Build(6,[&](int i){ return sparse[i]; },4.0f);

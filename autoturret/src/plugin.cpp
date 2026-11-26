@@ -276,7 +276,7 @@ void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept 
     const bool covers=!(m[12]-r>worldLo[0] || m[12]+r<worldHi[0] || m[14]-r>worldLo[1] || m[14]+r<worldHi[1]);
     if(std::isfinite(r) && !covers) {
         static std::vector<int> rows;   // kept: its room grows to the battle once
-        npc::grid::FirstAround(WorldGrid(),m+12,r,INT_MAX,keep,rows);
+        WorldGrid().FirstAround(m+12,r,INT_MAX,keep,rows);
         for(int i:rows)out.e[static_cast<std::size_t>(out.count++)]=&worldEnemies[static_cast<std::size_t>(i)];
     } else {
         for(int i=0;i<worldCount;++i)if(keep(i))out.e[static_cast<std::size_t>(out.count++)]=&worldEnemies[static_cast<std::size_t>(i)];

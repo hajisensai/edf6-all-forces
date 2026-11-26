@@ -1014,7 +1014,7 @@ void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,const
 constexpr int kMaxThreats=64;
 int ThreatsNear(const float* pos,float reach,npc::Threat* out) noexcept {
     static std::vector<int> rows;
-    npc::grid::FirstAround(world.enemyGrid,pos,reach,kMaxThreats,
+    world.enemyGrid.FirstAround(pos,reach,kMaxThreats,
                            [pos,reach](int i) noexcept { return npc::Horiz(pos,world.enemy[static_cast<std::size_t>(i)].aim)<reach; },rows);
     int n=0;
     for(const int i:rows) {
