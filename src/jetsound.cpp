@@ -18,6 +18,7 @@
 #include "jetaudio.h"
 #include "jetsound_state.h"
 #include "jet_internal.h"
+#include "wing_engine.h"
 #include "stores.h"
 #include "layout.h"
 #include "memory.h"
@@ -41,7 +42,6 @@ constexpr std::size_t kListeners=0x58,kListenerCount=0x68,kListenerFloats=soundp
 constexpr std::size_t kMasterVolume=0x2E8,kEffectVolume=0x2F0;
 constexpr float kJetSize=15.0f;   // m: a fighter's length, how wide it is heard near (surround.h SpreadAt)
 constexpr float kFarAt=2500.0f;                  // the air's dulling at its fullest this far
-constexpr float kBurnerShare=0.5f;               // an NPC jet's burner: this share of the way from cruise to attack
 constexpr float kJetTop=245.0f;                  // m/s: the fastest attack speed (jet.cpp kKinds' interceptor), a
                                                  // jet of no record's (another player's) top: its speed_relative
 constexpr float kParked=3.0f;                    // m/s: another player's jet slower than this stands
@@ -189,12 +189,10 @@ void Step(unsigned char* v) noexcept {
             state.commanded=true;state.parked=false;
             state.rotor=kind.flight==jet::FlightModel::rotor;
             state.speed=std::sqrt(Dot(j->m.vel,j->m.vel));
-            if(state.rotor)state.throttle=j->m.power;   // its engine (Hover): hovering, climbing, braking
+            state.throttle=j->m.power;   // its engine: a rotor's (Hover), a wing's lever (JetSteer, wing_engine.h)
             top=kind.attack>1.0f ? kind.attack : kJetTop;
-            // Ours: past halfway from its cruise to its attack speed it is pushing for the attack, the burner lit. Its
-            // thrust only closes on the attack speed (gravity and its turns on top), so it never quite reaches it: a live
-            // run's fighters peaked at 229 of their 235 m/s, never within the 5 m/s this was once, and never lit it.
-            burner=!state.rotor && state.speed>=kind.cruise+(kind.attack-kind.cruise)*kBurnerShare;
+            // Ours: lit where the thrust its flight commands is saturated (wing_engine.h), the player's lever's last notch.
+            burner=!state.rotor && jet::wing::Burner(j->m.power);
         }
     }
     state.occupied=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none;

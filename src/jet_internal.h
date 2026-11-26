@@ -362,7 +362,8 @@ struct Motion {
     ULONGLONG floorLogAt;    // when HoldOffGround last logged it (once a second)
     float thrust[3];         // a rotor craft's (Hover): the thrust its flight asks for, world, m/s^2
     float acc[3];            // a rotor craft's eased acceleration (see Lean::respond)
-    float power;             // a rotor craft's engine, 0..1: its share of its full thrust `thrust` takes (Hover)
+    float power;             // its engine, 0..1: a rotor craft's share of its full thrust `thrust` takes (Hover); a wing's
+                             // lever, following the thrust its speed command takes (JetSteer, wing_engine.h)
     ULONGLONG thrustLogAt;   // Thrusters' last log
     std::uint8_t sweep;      // Ahead's next stretch of its track
     float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
