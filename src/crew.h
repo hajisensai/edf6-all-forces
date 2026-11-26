@@ -760,6 +760,10 @@ bool InstallJetSound() noexcept;
 // The game's glyph cache under one lock (glyphs.cpp): its threads lost glyphs and showed one character as another.
 bool InstallGlyphLock() noexcept;
 bool InstallEdf5Campaign() noexcept;
+// The offline HQ's Q / E (LB / RB): the previous / next mission pack without the title on the way (pack_switch.cpp).
+bool InstallPackSwitch() noexcept;
+// Whether the mission-pack dialog would let the player pick content `id` (mgr: the GameDataMgr; edf5campaign.cpp).
+bool MissionPackSelectable(std::uintptr_t mgr,int id) noexcept;
 bool InstallPortedMissions() noexcept;   // PortedMissionsUnlocked: the packs' mission select (edf5campaign.cpp)
 void SetMissionPackSaveHook(bool ready) noexcept;   // the save-load hook is in (airstrike.cpp): packs with Legacy rows owned
 void MigrateMissionPackSave(unsigned char* gs) noexcept;   // a pack's loaded save moved to the rows now, once (edf5campaign.cpp)
