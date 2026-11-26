@@ -171,6 +171,30 @@ inline void FeetOnScreen(const rp::ViewCamera& cam,float aspect,float out[2]) no
 }
 
 // ---- the pages' common part ------------------------------------------------------------------------------------------
+// A vehicle unit's model as its loadout makes it (the unified file the battle spawns: its loaded variant EDF6VC_LO_*,
+// else its base; room_preview_logic.h VehicleUnified), when the view can show one: false for a crew unit or a body
+// without a unified file. `there`: that file is in Mods (Env::fileThere; a loadout edited and not yet generated has none).
+inline bool VehicleModelOf(const Env& e,const rm::Unit& u,rp::PreviewSpec* out,bool* there) noexcept {
+    if(there)*there=false;
+    if(rm::IsCrewUnit(u) || u.kind!=rm::UnitKind::vehicle || !roompreview::VehicleUnified(u.body))return false;
+    const rp::PreviewSpec spec=roomui::VehiclePreview(u);
+    wchar_t file[96];
+    if(there)*there=roompreview::VehicleFileOf(spec.body,spec.load,false,file,sizeof(file)/sizeof(file[0])) &&
+                    (!e.fileThere || e.fileThere(file));
+    if(out)*out=spec;
+    return true;
+}
+// The vehicle unit of the menu a squad unit comes with (the same call key: room_menu.h Load adds both for a call with
+// seats and a vehicle body); -1 none.
+inline int LinkedVehicle(const rm::Menu& m,const rm::Unit& squad) noexcept {
+    if(!rm::IsSquad(squad) || !squad.key)return -1;
+    for(int i=0;i<m.unitCount && i<rm::kMostUnits;++i){
+        const rm::Unit& v=m.unit[i];
+        if(v.kind==rm::UnitKind::vehicle && v.key && std::wcscmp(v.key,squad.key)==0)return i;
+    }
+    return -1;
+}
+
 class UnitsPage : public ar::Page {
 public:
     void Bind(Model* m) noexcept {
@@ -389,16 +413,25 @@ public:
         if(p.item==s+1 && count>0)return rm::ResetUnit(model->menu,*Aim(p.row,0,0))==rm::Act::changed;
         return false;
     }
+    // A unit that comes with a vehicle (LinkedVehicle: the vehicle the squad rides in) shows the vehicle, as 载具编成
+    // shows it, unless the cursor is on one of its soldiers in the soldier list or his fields (SoldierFocused): then the
+    // soldiers. A unit without one shows its soldiers as before.
     bool PreviewOf(const ar::Pos& p,rp::PreviewSpec* out) const noexcept override {
         const rm::Unit* u=UnitAt(p.row);
-        if(!u || p.item<0 || p.item>=u->squad.count)return false;
+        if(!u)return false;
+        if(const rm::Unit* v=VehicleShown(p)){
+            bool there=false;
+            return VehicleModelOf(model->env,*v,out,&there) && there;
+        }
+        if(p.item<0 || p.item>=u->squad.count)return false;
         if(out)*out=rp::PreviewSpec{u->squad.kind[p.item],p.item%4==0,u->squad.look[p.item]};
         return true;
     }
-    // The cursor's squad tab (four soldiers, or the soldiers there are), left to right; its first a leader.
+    // The cursor's squad tab (four soldiers, or the soldiers there are), left to right; its first a leader. None while
+    // the view shows the unit's vehicle.
     int SquadOf(const ar::Pos& p,rp::PreviewSpec* out) const noexcept override {
         const rm::Unit* u=UnitAt(p.row);
-        if(!u || p.item<0 || p.item>=u->squad.count)return 0;
+        if(!u || VehicleShown(p) || p.item<0 || p.item>=u->squad.count)return 0;
         const int first=p.item/rp::kSquadMost*rp::kSquadMost;
         const int left=u->squad.count-first,soldiers=left<rp::kSquadMost ? left : rp::kSquadMost;
         for(int k=0;out && k<soldiers;++k)
@@ -429,8 +462,27 @@ public:
         if(column<1 || SquadTabs(p)<2)return nullptr;
         return hudtext::Tr(column==1 ? Tx::spSquadHintCentre : Tx::spSquadHintDetails);
     }
+    // The focused column, kept for the view (Step calls this after every move, before the frame is built).
+    void Relocate(ar::Pos*,int column) noexcept override { focus=column; }
+    // The cursor on one of the unit's soldiers: in the soldier list or his fields (not the unit list, the own load,
+    // ＋添加士兵, 恢复默认).
+    bool SoldierFocused(const ar::Pos& p) const noexcept {
+        const rm::Unit* u=UnitAt(p.row);
+        return u && focus>=1 && p.item>=0 && p.item<u->squad.count;
+    }
+    // The vehicle the view shows at `p` instead of the soldiers (null: the soldiers): the unit's linked vehicle when the
+    // view can show its model and no soldier is focused.
+    const rm::Unit* VehicleShown(const ar::Pos& p) const noexcept {
+        const rm::Unit* u=UnitAt(p.row);
+        if(!u || SoldierFocused(p))return nullptr;
+        const int v=LinkedVehicle(model->menu,*u);
+        return v>=0 && VehicleModelOf(model->env,model->menu.unit[v],nullptr,nullptr) ? &model->menu.unit[v] : nullptr;
+    }
 protected:
     bool Mine(const rm::Unit& u) const noexcept override { return rm::IsSquad(u); }
+    Tx NoModelWhy(const ar::Pos& p) const noexcept override {
+        return VehicleShown(p) ? Tx::spNotGenerated : Tx::spOnlySelected;
+    }
     bool ClickView(ar::Pos& p,float x,float y) noexcept override {
         for(int k=0;k<SquadTabs(p);++k)
             if(SquadTab(k).Contains(x,y)){p.item=4*k;p.field=0;return true;}
@@ -451,7 +503,7 @@ protected:
             detail::Put(s,hudtext::Tr(Tx::spSquadTab),k+1);
             out->Say(s,(r.x0+r.x1)/2,r.y0+10,22,skin::TextOn(at),ar::Align::centre,false,r.W()-8);
         }
-        if(!shown)return;
+        if(!shown || VehicleShown(p))return;   // a vehicle: no feet to ring
         const int soldiers=SquadOf(p,nullptr);
         if(soldiers<2) {
             float feet[2];
@@ -474,6 +526,7 @@ public:
     float aspect=16.f/9.f;   // the screen's (room_preview.cpp reads the window's; the runtime sets it)
 private:
     static int Soldiers(const rm::Unit& u) noexcept { return u.squad.count>0 ? u.squad.count : 1; }
+    int focus=0;   // the focused column (Relocate)
 };
 
 // ---- 载具: the vehicles, the mech, the crews -------------------------------------------------------------------------
@@ -692,19 +745,12 @@ public:
         if(!u)return false;
         const ItemRef it=ItemOf(*u,p.item);
         if(it.kind==It::crew){if(out)*out=roomui::CrewPreview(model->menu,*u,model->env.kinds);return true;}
-        if(rm::IsCrewUnit(*u) || !roompreview::VehicleUnified(u->body) || !FileThere(*u))return false;
-        if(out)*out=roomui::VehiclePreview(*u);
-        return true;
+        bool there=false;
+        return VehicleModelOf(model->env,*u,out,&there) && there;
     }
 protected:
     bool Mine(const rm::Unit& u) const noexcept override { return !rm::IsSquad(u); }
     Tx NoModelWhy(const ar::Pos&) const noexcept override { return Tx::spNotGenerated; }
-    bool FileThere(const rm::Unit& u) const noexcept {
-        const rp::PreviewSpec spec=roomui::VehiclePreview(u);
-        wchar_t file[96];
-        if(!roompreview::VehicleFileOf(spec.body,spec.load,false,file,sizeof(file)/sizeof(file[0])))return false;
-        return !model->env.fileThere || model->env.fileThere(file);
-    }
     // A callout picks its item: a mech's slot row, a jet's pylon.
     bool ClickView(ar::Pos& p,float x,float y) noexcept override {
         const rm::Unit* u=UnitAt(p.row);

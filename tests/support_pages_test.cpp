@@ -599,6 +599,57 @@ void SquadSideBySide() {
     Expect(!HasText(base,hudtext::Tr(Tx::spOnlySelected)),"the squad shown: no 'only the selected one' note");
     Expect(base.quads.dropped==0 && base.droppedTexts==0,"nothing dropped");
 }
+
+// A squad that comes with a vehicle (a call with seats whose key is a vehicle's: its vehicle unit has the same key; none
+// of the stock catalog's is, so a menu of its own) shows the vehicle as 载具编成 does, until a soldier is focused in the
+// soldier list or his fields; a squad without one shows its soldiers.
+void SquadVehicle() {
+    namespace rp=crew::roompreview;
+    Fresh(true);
+    static constexpr rm::UnitSpec kSpecs[]={{L"SQUAD",L"squad",12},{L"TANK_CREWED",L"tank and riders",4,true}};
+    loaded=rm::Menu{};
+    rm::Load(loaded,kSpecs,2,&NoIni,nullptr);
+    sp::Bind(model,&loaded);
+    model.env.previewOn=true;
+    sp::SquadPage squads;sp::VehiclePage vehicles;
+    squads.Bind(&model);vehicles.Bind(&model);
+    const int s=RowOf(squads,L"TANK_CREWED"),v=RowOf(vehicles,L"TANK_CREWED"),plain=RowOf(squads,L"SQUAD");
+    Expect(s>=0 && v>=0,"the tank with riders: a squad and a vehicle");
+    Expect(sp::LinkedVehicle(model.menu,UnitOf(squads,s))==vehicles.UnitIndex(v),"linked by the key");
+    Expect(sp::LinkedVehicle(model.menu,UnitOf(squads,plain))<0,"the infantry squad: no vehicle");
+    Expect(sp::LinkedVehicle(model.menu,UnitOf(vehicles,v))<0,"a vehicle unit links nothing");
+    squads.Activate(ar::Pos{0,s,0,0});   // a soldier for the squad
+    Expect(UnitOf(squads,s).squad.count>=1,"the riders have a soldier");
+    rp::PreviewSpec want{},got{},out[rp::kSquadMost]{};
+    skin::Rect hole{};
+    Expect(vehicles.PreviewOf(ar::Pos{0,v,0,0},&want) && want.body!=VehicleBody::none,"the vehicle page shows it");
+    // the unit list focused: the vehicle, no squad, no soldier to pick
+    squads.Relocate(nullptr,0);
+    Expect(squads.VehicleShown(ar::Pos{0,s,0,0})!=nullptr,"the unit list: the vehicle");
+    Expect(squads.PreviewOf(ar::Pos{0,s,0,0},&got) && got.body==want.body && got.load.On()==want.load.On(),
+           "the same model as the vehicle page");
+    Expect(squads.Hole(ar::Pos{0,s,0,0},&hole) && squads.SquadOf(ar::Pos{0,s,0,0},out)==0,"shown alone");
+    // a soldier focused: him
+    squads.Relocate(nullptr,1);
+    Expect(!squads.VehicleShown(ar::Pos{0,s,0,0}) && squads.PreviewOf(ar::Pos{0,s,0,0},&got) &&
+           got.body==VehicleBody::none && got.kind==UnitOf(squads,s).squad.kind[0],"the soldier list: the soldier");
+    squads.Relocate(nullptr,2);
+    Expect(!squads.VehicleShown(ar::Pos{0,s,0,1}),"his fields: the soldier");
+    // the add line in the soldier list: not a soldier, the vehicle
+    const int add=UnitOf(squads,s).squad.count;
+    squads.Relocate(nullptr,1);
+    Expect(squads.VehicleShown(ar::Pos{0,s,add,0}) && squads.PreviewOf(ar::Pos{0,s,add,0},&got) && got.body==want.body,
+           "the add line: the vehicle");
+    // its file not generated: nothing shown, the box says so
+    squads.Relocate(nullptr,0);
+    model.env.fileThere=[](const wchar_t*) noexcept {return false;};
+    Expect(!squads.Hole(ar::Pos{0,s,0,0},&hole) && !squads.PreviewOf(ar::Pos{0,s,0,0},nullptr),"no file: no model");
+    model.env.fileThere=nullptr;
+    // the infantry squad: its soldier in the unit list as before
+    squads.Activate(ar::Pos{0,plain,0,0});
+    Expect(!squads.VehicleShown(ar::Pos{0,plain,0,0}) && squads.PreviewOf(ar::Pos{0,plain,0,0},&got) &&
+           got.body==VehicleBody::none,"no vehicle: the soldier");
+}
 }  // namespace
 
 int main() {
@@ -610,6 +661,7 @@ int main() {
     InBuild();
     Callouts();
     SquadSideBySide();
+    SquadVehicle();
     RandomWalk();
     if(failures){std::printf("%d failure(s)\n",failures);return 1;}
     std::printf("support_pages: all passed\n");
