@@ -23,6 +23,28 @@ inline fpview::M4 ShellPose(const fpview::M4& original,unsigned mask,int seat) n
     return fpview::Collapse(origin);
 }
 
+// The panoramic cockpit (pylib/cockpit_kits_mech.py panoramic pods; docs/feature-panoramic-cockpit.md). A panoramic
+// seat's kit rides vc_pan_<seat> instead of the vehicle's own bone, so the local rider's draw can fold every bone of
+// the vehicle's own (its hull: nothing of it stands between the eye and the world) and keep the seat and its screens.
+// Its pod's walls are the screen: tiles vc_boot_<seat>_<step>_<kind> (kind 0 the dark tile, 1 its glow, a hair nearer
+// the eye). On a vehicle's first start (crew.cpp VehiclePowered) the boot runs once, kBootEnd seconds, never skipped:
+// all dark, the live screens light at kBootScreens, then each step's tiles flash and give way to the world, steps
+// kBootFirst..kBootFirst+kBootSpan apart (pylib's BOOT_STEPS is kBootSteps: the steps spread outward from ahead).
+// `t` is the seconds since the boot began (a seat that does not boot: past kBootEnd).
+constexpr int kBootSteps=12;
+constexpr float kBootScreens=0.6f,kBootFirst=1.0f,kBootSpan=1.8f,kBootGlow=0.14f,kBootEnd=3.0f;
+constexpr float BootStepAt(int step) noexcept { return kBootFirst+kBootSpan*static_cast<float>(step)/static_cast<float>(kBootSteps-1); }
+constexpr bool BootScreensOn(float t) noexcept { return t>=kBootScreens; }
+// A tile of `step` shown at `t`: the dark one until its step, the glow round it.
+constexpr bool BootShown(float t,int step,int kind) noexcept {
+    if(step<0 || step>=kBootSteps)return false;
+    const float at=BootStepAt(step);
+    return kind==0 ? t<at : (t>at-kBootGlow && t<at+kBootGlow);
+}
+static_assert(BootShown(0.0f,0,0) && !BootShown(0.0f,0,1),"the boot begins dark");
+static_assert(!BootShown(kBootEnd,kBootSteps-1,0) && !BootShown(kBootEnd,kBootSteps-1,1),"the boot is over by kBootEnd");
+static_assert(kBootScreens<BootStepAt(0)-kBootGlow,"the screens light before the first tile");
+
 // One weapon of the seat, for the weapons screen: its round class (hud_cue.h CockpitRound), rounds, magazine fill (< 0
 // no magazine read), loading (< 0 not loading: hud_cue.h CellLoad) and whether it is spent for good (no rounds, no
 // reload).

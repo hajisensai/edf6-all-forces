@@ -45,7 +45,8 @@ bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noex
 // marker was found, whether the seat's sight line is its gun's (`gaze`: the model's vc_gaze_<seat> marker, an open
 // seat's kit: fp_view.h GunCameraSeat). False: on foot, the vehicle or seat cannot be read, or the seat has no cockpit
 // (no marker).
-struct RideView { unsigned char* vehicle; int seat; const char* name; bool station; bool gaze; float frame[16]; };
+// `panoramic`: the seat's kit is a panoramic cockpit (the model's vc_pan_<seat>: cockpit_instruments.h kBootSteps).
+struct RideView { unsigned char* vehicle; int seat; const char* name; bool station; bool gaze; bool panoramic; float frame[16]; };
 bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 
 // A seat's cockpit screens (the model's vc_scr_<seat>_<kind>_<w>x<h> markers, pylib/cockpits.py Screen): where the HUD

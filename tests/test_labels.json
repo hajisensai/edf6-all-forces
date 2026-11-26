@@ -609,6 +609,12 @@
     "tests/cockpit_instruments_test.py"
    ]
   },
+  "cockpit_panoramic": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": []
+  },
   "cockpit_retrofit": {
    "labels": [
     "autoturret-tools",

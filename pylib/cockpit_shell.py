@@ -20,7 +20,7 @@ REPLACEMENTS = frozenset((
     'tank_gunner', 'apc_cab', 'tracked_cab', 'pickup_cab', 'truck_cab', 'kei_cab', 'trailer_cab',
     'heli_gunship', 'heli_gunship_pilot', 'heli_utility', 'jet_f16', 'jet_f16_narrow',
     'plane_deck', 'plane_deck_gun', 'plane_hold', 'heli_cabin', 'passenger',
-    'mech_begaruta', 'mech_nix', 'mech_oldrobot', 'mech_groundrobo', 'mech_large',
+    'mech_begaruta', 'mech_nix', 'mech_oldrobot', 'mech_groundrobo', 'mech_large', 'pano_gunner',
 ))
 PREFIX = 'vc_shell_'
 RETAINED = frozenset(('bike_rider', 'gun_station', 'heli_door_left', 'heli_door_right', 'open_rider',
