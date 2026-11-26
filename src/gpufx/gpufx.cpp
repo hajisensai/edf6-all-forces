@@ -1472,25 +1472,32 @@ constexpr unsigned kEffectGenUtil=0x20B2980;   // EffectGenUtil*: made with the 
 constexpr unsigned kEfsLoad=0x2ECEC0,kEfsSpawn=0x2EC5C0;
 using EfsLoadFn=void(__fastcall*)(void*,const void*);
 using EfsSpawnFn=void*(__fastcall*)(void*,void*,void*);
-struct BenchPhase { const char* name;int native;bool litA,efs,layers; };
-constexpr BenchPhase kLookPhases[]={{"stock",0,false,false,false},{"takeover",1,true,true,false},{"takeover+layers",1,true,true,true}};
-constexpr BenchPhase kLoadPhases[]={{"stock",0,false,false,false},{"takeover",1,true,true,false},{"takeover, 0xA40 stock",1,false,true,false}};
+struct BenchPhase { const char* name;int native;bool litA,efs,layers,trails; };
+constexpr BenchPhase kLookPhases[]={{"stock",0,false,false,false,false},{"takeover",1,true,true,false,true},
+                                    {"takeover+layers",1,true,true,true,true}};
+constexpr BenchPhase kLoadPhases[]={{"stock",0,false,false,false,false},{"takeover",1,true,true,false,true},
+                                    {"takeover, 0xA40 stock",1,false,true,false,true},{"takeover, trails stock",1,true,true,false,false}};
 constexpr ULONGLONG kLookPhaseMs=10000,kLoadPhaseMs=12000;
 // An MSVC std::wstring as the efs loader reads it (const, never grown): the text out of line (capacity past the 7 of
 // the small buffer).
 struct GameWString { const wchar_t* text;unsigned char pad[8];std::uint64_t size,capacity; };
 static_assert(sizeof(GameWString)==0x20);
 struct EfsSource { const wchar_t* file;const wchar_t* esb; };
+// The flashes (0, 1: efs quads) and the trails (2: ExtLine, the plant's smoke; 3: LocusExtendLine, the tank shell's
+// trail; docs/gpufx-re.md "trails").
 constexpr EfsSource kBenchEfs[]={{L"app:/weapon/effect/v601_tank_cannon.efarc",L"fire01.esb"},
-                                 {L"app:/weapon/effect/pale_laser_rifle01.efarc",L"muzzle_flash01.esb"}};
+                                 {L"app:/weapon/effect/pale_laser_rifle01.efarc",L"muzzle_flash01.esb"},
+                                 {L"app:/object/ev601_plant.efarc",L"smoke.esb"},
+                                 {L"app:/weapon/effect/v601_tank_cannon.efarc",L"bullet01.esb"}};
+constexpr int kBenchSources=static_cast<int>(std::size(kBenchEfs));
 struct Bench {
     bool started=false;ULONGLONG startMs=0;int phase=-1;
-    ULONGLONG nextBlast=0,nextEfs=0;
+    ULONGLONG nextBlast=0,nextEfs=0,nextTrail=0;
     // The efs controllers (0x40 bytes each, zeroed: loaded flag, the resource, the instances' weak list, no owner),
     // one per source and mission; never freed (their instances may outlive the mission's Reset and their destructor
     // 0x2EC240 would end them under the efs renderer: a few hundred bytes a mission, bench only).
-    unsigned char* efs[2]{};bool efsReady[2]{};bool efsTried=false;
-    unsigned blasts=0,flashes=0;
+    unsigned char* efs[kBenchSources]{};bool efsReady[kBenchSources]{};bool efsTried=false;
+    unsigned blasts=0,flashes=0,trails=0;
 };
 Bench bench;
 
@@ -1518,7 +1525,7 @@ void ReleaseWeak(void* cb) noexcept {
 
 void BenchLoadEfs() noexcept {
     bench.efsTried=true;
-    for(int i=0;i<2;++i) {
+    for(int i=0;i<kBenchSources;++i) {
         auto* ctrl=static_cast<unsigned char*>(_aligned_malloc(0x40,16));
         bench.efs[i]=ctrl;bench.efsReady[i]=false;
         if(!ctrl)continue;
@@ -1527,7 +1534,7 @@ void BenchLoadEfs() noexcept {
         const bool called=CallEfsLoad(ctrl,&name);
         bench.efsReady[i]=called && At<void*>(ctrl,0x10)!=nullptr;
         Log("GPUFX bench efs %ls (%ls): %s",kBenchEfs[i].file,kBenchEfs[i].esb,
-            bench.efsReady[i] ? "loaded" : called ? "missing; this flash stays off" : "load faulted; this flash stays off");
+            bench.efsReady[i] ? "loaded" : called ? "missing; this source stays off" : "load faulted; this source stays off");
     }
 }
 
@@ -1544,8 +1551,8 @@ void BenchFlash(int i,const float* at,const float* fwd) noexcept {
     *reinterpret_cast<int*>(p+0xA4)=1;*reinterpret_cast<std::uint16_t*>(p+0xA8)=1;*reinterpret_cast<int*>(p+0xAC)=-1;
     *reinterpret_cast<int*>(p+0xB0)=-1;*reinterpret_cast<int*>(p+0xBC)=-1;*reinterpret_cast<int*>(p+0xC0)=-1;
     alignas(16) void* out[2]{};
-    if(!CallEfsSpawn(bench.efs[i],out,p)){bench.efsReady[i]=false;Log("GPUFX bench efs %d: spawn faulted; this flash stays off",i);return;}
-    ++bench.flashes;
+    if(!CallEfsSpawn(bench.efs[i],out,p)){bench.efsReady[i]=false;Log("GPUFX bench efs %d: spawn faulted; this source stays off",i);return;}
+    ++(i>=2 ? bench.trails : bench.flashes);
     if(out[1])ReleaseWeak(out[1]);
 }
 
@@ -1571,6 +1578,7 @@ void BenchOverride() noexcept {
     optLitA.store(ph->litA,std::memory_order_relaxed);
     optEfs.store(on && ph->efs && efsDrawNext,std::memory_order_relaxed);
     optLayers.store(on && ph->layers && layersInstalled,std::memory_order_relaxed);
+    optTrails.store(on && ph->trails && trailsInstalled,std::memory_order_relaxed);
 }
 
 void BenchTick(ULONGLONG now) noexcept {
@@ -1584,9 +1592,9 @@ void BenchTick(ULONGLONG now) noexcept {
     if(index!=bench.phase) {
         bench.phase=index;
         // Each phase starts on the same beat: its blasts and flashes at the same offsets from its start.
-        bench.nextBlast=bench.nextEfs=now+500;
-        Log("GPUFX bench phase %d (%s): native=%d litA=%d efs=%d layers=%d; so far blasts %u, flashes %u",index,ph->name,ph->native,
-            ph->litA,ph->efs,ph->layers,bench.blasts,bench.flashes);
+        bench.nextBlast=bench.nextEfs=bench.nextTrail=now+500;
+        Log("GPUFX bench phase %d (%s): native=%d litA=%d efs=%d layers=%d trails=%d; so far blasts %u, flashes %u, trails %u",index,ph->name,
+            ph->native,ph->litA,ph->efs,ph->layers,ph->trails,bench.blasts,bench.flashes,bench.trails);
     }
     const float fx=anchor[0]-anchorFrom[0],fz=anchor[2]-anchorFrom[2];
     const float len=std::sqrt(fx*fx+fz*fz);
@@ -1616,6 +1624,18 @@ void BenchTick(ULONGLONG now) noexcept {
         const float b[3]{anchor[0]+right[0]*6.0f,ground+1.5f,anchor[2]+right[2]*6.0f};
         const float toRight[3]{right[0],0.0f,right[2]},toLeft[3]{-right[0],0.0f,-right[2]};
         BenchFlash(0,a,toRight);BenchFlash(1,b,toLeft);
+    }
+    if(now>=bench.nextTrail) {
+        bench.nextTrail=now+(look ? 1500 : 400);
+        // The trails: the plant's smoke 10 m ahead 5 m left, the shell's trail 10 m ahead 5 m right (pointing ahead);
+        // the load: a row of them 30..70 m ahead.
+        const float toAhead[3]{f[0],0.0f,f[2]};
+        auto trail=[&](int i,float ahead,float side){
+            const float at[3]{anchor[0]+f[0]*ahead+right[0]*side,ground+0.5f,anchor[2]+f[2]*ahead+right[2]*side};
+            BenchFlash(i,at,toAhead);
+        };
+        if(look){trail(2,10.0f,-5.0f);trail(3,10.0f,5.0f);}
+        else for(int k=0;k<5;++k){trail(2,30.0f+10.0f*static_cast<float>(k),-8.0f);trail(3,30.0f+10.0f*static_cast<float>(k),8.0f);}
     }
 }
 
@@ -1817,7 +1837,7 @@ void Reset() noexcept {
     if(pool)pool->Clear();
     poolDropped.store(0,std::memory_order_relaxed);
     anchored=false;spawnDebt=0.0f;lastMs=0;ticked=~ULONGLONG(0);
-    bench.started=false;bench.efsTried=false;bench.efsReady[0]=bench.efsReady[1]=false;stressFired=0;
+    bench.started=false;bench.efsTried=false;for(bool& r:bench.efsReady)r=false;stressFired=0;
     anchorReady.store(false,std::memory_order_release);
     AcquireSRWLockExclusive(&publishLock);
     published.clear();publishedIds.clear();
