@@ -393,8 +393,10 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     muzzles = vc.hardpoint_muzzles(game)
     assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
     from mdb import mdb_read, rab_read
+    import salvo_model   # the salvo's TU-1600: made from the model pack's folder (pylib/salvo_model.py), where it is there
     models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
-              for f in vc.HARDPOINT_FILES if f not in {vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}}
+              for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE
+              and (f != vc.SALVO_MODEL or salvo_model.model_dir() is not None)}
     raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
     models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
     for f, md in models.items():
@@ -1433,7 +1435,8 @@ def missiles_leave_along_their_rail() -> None:
     assert {'BMPT_ATGM', 'BMPT_ATGMF', 'APOC_SAM', 'TUNGUSKA_SAM', 'PATRIOT_SAM'} <= set(missiles)
     for kind, m in missiles.items():
         assert m.params(4)['FireAccuracy'] == m.spread, kind
-        assert m.spread == 0.0 if m.guided else 0.0 < m.spread <= 0.01, (kind, m.spread)
+        # The salvo's carriers fan out on purpose (vcobjects SALVO_FAN): an air launch, dropped clear of the jet first.
+        assert m.spread == (vc.SALVO_FAN if kind == 'SALVO' else 0.0) if m.guided else 0.0 < m.spread <= 0.01, (kind, m.spread)
     import rootcpk
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         return
@@ -1497,9 +1500,25 @@ def store_looks() -> None:
         child_models = []
         if kind(name) == 'SALVO':
             cp = got['Ammo_CustomParameter']
-            assert got['AmmoClass'] == 'MissileBullet02' and len(cp) == 16 and cp[12][0] == 1
-            assert got['AmmoCount'] == got['FireBurstCount'] == vc.SALVO_ROUNDS and got['FireBurstInterval'] == 1
+            assert got['AmmoClass'] == 'MissileBullet02' and len(cp) == 17 and cp[12][0] == 1
+            assert got['AmmoCount'] == got['FireBurstCount'] == vc.SALVO_ROUNDS and got['FireCount'] == 1
+            assert got['FireBurstInterval'] == vc.SALVO_VOLLEY_GAP
             assert cp[15][2] == vc.SALVO_CHILDREN and cp[15][4] == 'MissileBullet01'
+            near = lambda a, b: all(abs(x - y) < 1e-5 for x, y in zip(a, b, strict=True))  # noqa: E731
+            child = cp[15][13]
+            assert near(got['LockonAngle'], [vc.SALVO_LOCK_CONE] * 2), got['LockonAngle']
+            assert near([got['AmmoSpeed'], got['AmmoGravityFactor'], got['FireAccuracy'], cp[4], cp[6], cp[8]],
+                        [vc.SALVO_EJECT, vc.SALVO_DROP_GRAVITY, vc.SALVO_FAN, vc.SALVO_ACCEL, vc.SALVO_TOP,
+                         vc.SALVO_HOMING_DELAY]), name
+            assert near(cp[7], vc.SALVO_DROP) and near(got['AmmoColor'], vc.SALVO_COLOUR), name
+            assert near(cp[12], [1.0, vc.SALVO_SPLIT_AFTER]) and near(cp[13], [0.0, 0.0, vc.SALVO_SPLIT_CONE]), name
+            assert near([cp[15][5], child[4], child[5], child[6], child[8]],
+                        [vc.SALVO_CHILD_SPEED, vc.SALVO_CHILD_ACCEL, vc.SALVO_CHILD_TURN, vc.SALVO_CHILD_TOP,
+                         vc.SALVO_CHILD_HOMING_DELAY]), name
+            assert near(cp[15][12], vc.SALVO_CHILD_COLOUR) and near(child[10], vc.SALVO_CHILD_SPREAD), name
+            # The rounds' glow declarations (docs/round-glow.md): past every entry their class reads, the last entry.
+            assert near(cp[16], [vc.GLOW_MARK, *vc.SALVO_GLOW]), cp[16]
+            assert len(child) == 14 and child[12] == 0 and near(child[13], [vc.GLOW_MARK, *vc.SALVO_CHILD_GLOW]), child
             child_models = [cp[15][14]]
         assert was['resource'] == [was['AmmoModel'], *child_models], name
         assert (got['AmmoModel'], got['resource'], got['AmmoSize']) == (look.path, [look.path, *child_models], look.size), name
@@ -2058,6 +2077,53 @@ def sortie_copies_agree() -> None:
     assert 'GuardedTick(kStepFollowUp,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
     heli = src('src/heli.cpp')
     assert 'void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept' in heli and 'SortieFly(h,s,w)' in heli
+    # The salvo (pylib/vcobjects.py SALVO_*, docs/missile-re.md §MissileBullet02): locks about 80 deg off the nose and the
+    # AI fires inside it; a carrier never falls behind its launcher (own speed against the inherited velocity's x0.9 a
+    # frame once lit) and hands its own speed at the split to its children; the C++ copies agree.
+    import math
+    salvo = vc.STORES['SALVO'].weapon
+    assert salvo.lock_cone == vc.SALVO_LOCK_CONE >= 1.2, salvo.lock_cone
+    cone = float(re.search(r'constexpr float kRainFireCone=([0-9.]+)f;', plan).group(1))
+    rain = float(re.search(r'kRainSpeed=([0-9.]+)f;', plan).group(1)) / 60.0
+    assert 0.6 <= cone < vc.SALVO_LOCK_CONE, cone
+    lit = vc.SALVO_DROP[1] ** vc.SALVO_DROP[0]   # what is left of the launcher's speed when it lights
+    for n in range(1, int(vc.SALVO_SPLIT_AFTER) + 1):
+        own = min(vc.SALVO_EJECT + vc.SALVO_ACCEL * n, vc.SALVO_TOP)
+        assert own * math.cos(vc.SALVO_FAN) >= rain * (1.0 - lit * 0.9 ** n), (n, own)   # along the nose at the fan's edge
+    at_split = vc.SALVO_EJECT + vc.SALVO_ACCEL * vc.SALVO_SPLIT_AFTER
+    assert abs(at_split * 60.0 - vc.SALVO_CHILD_SPEED * 60.0) < 30.0 and at_split <= vc.SALVO_TOP, at_split
+    assert vc.SALVO_CHILD_SPEED < vc.SALVO_CHILD_TOP, 'the children still accelerate'
+    assert f'constexpr float kRainRoundSpeed={vc.SALVO_CHILD_SPEED * 60.0:.1f}f;' in plan, 'HoldFire flies the children'
+    assert 'off>(salvo ? sortie::kRainFireCone : kMissileCone)' in combat
+    # The glow declaration's mark and the classes' first free indices agree with the plugin's reader (gpufx_glow.h).
+    glow = src('src/gpufx/gpufx_glow.h')
+    assert f'constexpr double kMark={vc.GLOW_MARK:.1f};' in glow and vc.GLOW_MARK not in (vc.MISSILE_MARK, vc.SALVO_MARK)
+    kinds = {'MissileBullet01': '0x17A1C10u', 'MissileBullet02': '0x17A1E28u'}
+    assert set(kinds) == set(vc.GLOW_FIRST_FREE)
+    assert 'constexpr Kind kKinds[]={' + ','.join(f'{{{kinds[k]},{vc.GLOW_FIRST_FREE[k]}}}' for k in kinds) + '};' in glow
+    for ammo_class, free in vc.GLOW_FIRST_FREE.items():
+        node = dsgo.Node([0.0] * (free - len(vc.GLOW_PAD.get(ammo_class, {}))))
+        vc.declare_glow(node, ammo_class, vc.SALVO_GLOW)
+        assert len(node.items) == free + 1 and node.items[free].items[0] == vc.GLOW_MARK, ammo_class
+    for bad in (('SolidBullet01', vc.SALVO_GLOW), ('MissileBullet02', (1.5, 1.0, 1.0, 1.0, 1.0)),
+                ('MissileBullet02', (1.0, 1.0, 1.0, 0.0, 1.0))):
+        try:
+            vc.declare_glow(dsgo.Node([0.0] * 16), *bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'declare_glow took {bad}')
+    assert 'salvo ? sortie::kRainRoundSpeed : ' in combat and 'salvo ? 0.0f : ' in combat
+    # The salvo's volleys (src/salvo_volley.h, src/lockon.cpp ShotHook; the user, 2026-11-26: 「每帧只能出一发 什么垃圾设定，
+    # 改」): its constants the store's, both shot calls patched, one lock enough, the old repeat-lock queue gone.
+    volley = src('src/salvo_volley.h')
+    assert f'constexpr int kRounds={vc.SALVO_ROUNDS};' in volley and f'constexpr int kVolley={vc.SALVO_VOLLEY};' in volley
+    assert f'constexpr int kVolleyGap={vc.SALVO_VOLLEY_GAP};' in volley and vc.SALVO_VOLLEY % 4 == 0
+    frames = (-(-vc.SALVO_ROUNDS // vc.SALVO_VOLLEY) - 1) * vc.SALVO_VOLLEY_GAP
+    assert 1.5 <= frames / 60.0 <= 2.0, frames
+    assert vc.STORES['SALVO'].weapon.burst_gap == vc.SALVO_VOLLEY_GAP
+    lockon = src('src/lockon.cpp')
+    assert 'const bool volleyOk=HookVolleys();' in lockon and 'kStartShot=0x690C7B' in lockon and 'kBurstShot=0x6940DF' in lockon
+    assert 'kRepeatLock' not in lockon and 'locked>0; }' in plan and 'kRainBurstMs=2000;' in plan
     cmake = src('CMakeLists.txt')
     assert 'src/jet_sortie.cpp' in cmake and 'add_executable(sortie_check EXCLUDE_FROM_ALL tools/sortie_check.cpp)' in cmake
     assert ' sortie_check ' in cmake

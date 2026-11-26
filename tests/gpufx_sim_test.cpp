@@ -222,8 +222,12 @@ static void Layers() {
     const ShotCounts far=CountShot(tank,0.25f);
     CHECK(far.ring<tc.ring && far.smoke<tc.smoke && far.smoke>=3);
     CHECK(Near(LodGrow(1.0f),1.0f) && Near(LodGrow(0.25f),2.0f) && Near(LodGrow(0.01f),LodGrow(0.2f)));
-    // the blast size unit: linear to 6 m, then a square root (a 15 m rocket 9.5, a 40 m shell 15.5), never under 1
+    // the long-lived blast layers' size unit: linear to 6 m, then a square root (a 15 m rocket 9.5, a 40 m shell 15.5),
+    // never under 1; the short-lived layers' is linear, 1-40 m
     CHECK(Near(BlastScale(0.5f),1.0f) && Near(BlastScale(6.0f),6.0f) && Near(BlastScale(24.0f),12.0f) && BlastScale(40.0f)<16.0f);
+    CHECK(Near(BlastNearScale(0.5f),1.0f) && Near(BlastNearScale(24.0f),24.0f) && Near(BlastNearScale(100.0f),40.0f));
+    // the stock size units: Explosion radius / 5, Explosion_Big radius / 70
+    CHECK(Near(ExplosionRadius(1.0f),5.0f) && Near(ExplosionBigRadius(1.0f),70.0f));
     const int made=SpawnShot(pool,l,rng,tank,1.0f);
     CHECK(made==tc.flash+tc.ring+tc.dust+tc.smoke && pool.Live()==made);
     // The flash and the ring are gone within a second; the smoke ball lives 8-20 s.
@@ -241,11 +245,11 @@ static void Layers() {
     pool.Clear();
 
     // Blasts: the heavy one adds the wide dust; the lod cuts counts, never to nothing.
-    BlastEvent grenade{{0.0f,0.0f,0.0f},1.0f},shell{{0.0f,0.0f,0.0f},4.0f};
+    BlastEvent grenade{{0.0f,0.0f,0.0f},5.0f},shell{{0.0f,0.0f,0.0f},20.0f};
     const BlastCounts gc=CountBlast(grenade,1.0f),sc=CountBlast(shell,1.0f),sf=CountBlast(shell,0.2f);
     CHECK(gc.bigDust==0 && sc.bigDust>=3 && sc.black>gc.black);
     CHECK(sf.black>=2 && sf.black<sc.black && sf.bigDust>=3 && sf.fireball>=1);
-    CHECK(CountBlast(BlastEvent{{0.0f,0.0f,0.0f},0.0f},1.0f).black==0);
+    CHECK(CountBlast(BlastEvent{{0.0f,0.0f,0.0f},0.0f},1.0f).black==0);   // radius 0
     const int blast=SpawnBlast(pool,l,rng,shell,1.0f);
     CHECK(blast==sc.fireball+sc.dirt+sc.black+sc.debris+sc.residual+sc.bigDust && pool.Live()==blast);
     pool.Step(3.0f);   // fireball, dirt, debris gone
@@ -260,8 +264,57 @@ static void Layers() {
     CHECK(pool.Live()==0);
     pool.Clear();
 
+    // The same 30 m blast through Explosion_Big (size 30/70) and Explosion (size 30/5): the same counts, the same puffs.
+    {
+        const BlastEvent viaBig{{0.0f,0.0f,0.0f},ExplosionBigRadius(30.0f/70.0f)},viaStock{{0.0f,0.0f,0.0f},ExplosionRadius(30.0f/5.0f)};
+        CHECK(Near(viaBig.radius,30.0f,1e-3f) && Near(viaStock.radius,30.0f,1e-3f));
+        const BlastCounts bc=CountBlast(viaBig,1.0f),xc=CountBlast(viaStock,1.0f);
+        CHECK(bc.fireball==xc.fireball && bc.dirt==xc.dirt && bc.black==xc.black && bc.debris==xc.debris &&
+              bc.residual==xc.residual && bc.bigDust==xc.bigDust && bc.bigDust>=3);
+        std::vector<Instance> a(4096),b(4096);
+        Rng ra(23),rb(23);
+        const int ma=SpawnBlast(pool,l,ra,viaBig,1.0f);
+        const int na=pool.Build(a.data(),4096,1);
+        pool.Clear();
+        const int mb=SpawnBlast(pool,l,rb,viaStock,1.0f);
+        const int nb=pool.Build(b.data(),4096,1);
+        pool.Clear();
+        CHECK(ma==mb && na==nb && na==ma);
+        bool same=na==nb;
+        for(int i=0;same && i<na;++i)same=Near(a[static_cast<std::size_t>(i)].size,b[static_cast<std::size_t>(i)].size,1e-3f);
+        CHECK(same);
+    }
+    // The short-lived layers' sizes grow linearly with the radius; residual and bigDust by BlastScale. 24 m and 40 m
+    // make the same counts (the count factor is clamped at 2), so the same seed spawns the same puffs, only scaled.
+    {
+        const BlastEvent r24{{0.0f,0.0f,0.0f},24.0f},r40{{0.0f,0.0f,0.0f},40.0f};
+        const BlastCounts c24=CountBlast(r24,1.0f);
+        const BlastCounts c40=CountBlast(r40,1.0f);
+        CHECK(c24.fireball==c40.fireball && c24.dirt==c40.dirt && c24.black==c40.black && c24.debris==c40.debris &&
+              c24.residual==c40.residual && c24.bigDust==c40.bigDust);
+        std::vector<Instance> a(4096),b(4096);
+        Rng ra(29),rb(29);
+        SpawnBlast(pool,l,ra,r24,1.0f);
+        const int na=pool.Build(a.data(),4096,1);
+        pool.Clear();
+        SpawnBlast(pool,l,rb,r40,1.0f);
+        const int nb=pool.Build(b.data(),4096,1);
+        pool.Clear();
+        CHECK(na==nb);
+        // Build's order is the spawn order (fresh pool): fireball, dirt, black, debris (size not scaled), residual, bigDust.
+        const int nearEnd=c24.fireball+c24.dirt+c24.black,debrisEnd=nearEnd+c24.debris;
+        const float lin=40.0f/24.0f,slow=BlastScale(40.0f)/BlastScale(24.0f);
+        bool ok=na==nb && na==debrisEnd+c24.residual+c24.bigDust;
+        for(int i=0;ok && i<na;++i) {
+            const float ratio=b[static_cast<std::size_t>(i)].size/a[static_cast<std::size_t>(i)].size;
+            const float want=i<nearEnd ? lin : i<debrisEnd ? 1.0f : slow;
+            ok=Near(ratio,want,1e-3f);
+        }
+        CHECK(ok && slow<lin);
+    }
+
     // A heavy barrage stays in the budget: the pool replaces, never grows.
-    for(int i=0;i<400;++i){BlastEvent b{{static_cast<float>(i),0.0f,0.0f},6.0f};SpawnBlast(pool,l,rng,b,LayerLod(80.0f,pool.Live(),4096));}
+    for(int i=0;i<400;++i){BlastEvent b{{static_cast<float>(i),0.0f,0.0f},30.0f};SpawnBlast(pool,l,rng,b,LayerLod(80.0f,pool.Live(),4096));}
     CHECK(pool.Live()<=4096 && pool.Dropped()>0);
     CHECK(Near(LayerLod(30.0f,0,4096),1.0f) && Near(LayerLod(120.0f,0,4096),0.5f) && Near(LayerLod(1000.0f,0,4096),0.2f));
     CHECK(Near(LayerLod(30.0f,4000,4096),0.5f));

@@ -387,7 +387,8 @@ inline View Blend(const View& a,const View& b,float t,const Screen& s) noexcept 
 
 // --- Input ---
 // What the map takes (src/worldmap.cpp reads the devices): a mouse drag pans, the wheel zooms about the pointer, the
-// right stick pans, LB / LT (keyboard Q / E) zoom out / in about the focus (RB / RT are the briefing's scroll).
+// right stick pans, LB / LT (keyboard Z / C) zoom out / in about the focus (RB / RT are the briefing's scroll); keyboard
+// Q / E step the 整备 tabs (StepMapTab).
 inline constexpr float kStickDead=0.24f;
 inline constexpr float kStickPanPerSec=900.f;    // design pixels a second at full deflection
 inline constexpr float kHoldZoomPerSec=1.5f;     // octaves (x2) a second with LB / LT held
@@ -434,7 +435,6 @@ inline Pixel ClientToDesign(float cx,float cy,float cw,float ch,float rw,float r
 // there over the stock draw and the panel on it. A heading (the place), then a line a mission.
 struct Area { float x0,y0,x1,y1; };
 inline constexpr Area kPanel{1396.f,196.f,1860.f,884.f};   // clear of the main frame's corner pieces
-inline constexpr Area kMissionList{170.f,196.f,472.f,884.f};   // inside the left chrome painted by HUiMainFrame
 inline constexpr float kPanelHeading=60.f;   // the place's name
 inline constexpr float kPanelRow=40.f;       // a mission's line
 inline constexpr int kPanelRows=static_cast<int>((kPanel.y1-kPanel.y0-kPanelHeading)/kPanelRow);
@@ -528,6 +528,11 @@ inline constexpr float kPanelFirstLine=kPanel.y0+kPanelHeading+kPanelRow;
 inline constexpr int kPanelLines=kPanelRows-3;
 inline constexpr Area kLaunchRow{kPanel.x0,kPanel.y0+kPanelHeading,kPanel.x1,kPanel.y0+kPanelHeading+kPanelRow};
 inline float PanelLineTop(int line) noexcept { return kPanelFirstLine+kPanelRow*static_cast<float>(line); }
+// The panel's three key lines (the 整备 tabs, places, zoom and 本关出动) under its mission lines, inside its bottom edge.
+inline constexpr float kPanelKeyRow=28.f;
+inline constexpr int kPanelKeyLines=3;
+inline constexpr float kPanelKeysTop=kPanel.y1-6.f-kPanelKeyRow*static_cast<float>(kPanelKeyLines);
+inline constexpr float PanelKeyTop(int line) noexcept { return kPanelKeysTop+kPanelKeyRow*static_cast<float>(line); }
 // The panel line under `p` (0 = the first shown), -1 none.
 inline int PanelLineAt(Pixel p,int shown) noexcept {
     if(!OverPanel(p))return -1;
@@ -729,6 +734,11 @@ inline int TitleTabAt(Pixel p) noexcept {
 inline int TitleChipAt(int presets,Pixel p) noexcept {
     for(int i=0;i<presets;++i)if(MapChip(i,presets).Contains(p.x,p.y))return i;
     return -1;
+}
+// The 整备 tab Q (dir -1) / E (+1) steps to from `cur`: stopping at both ends as in 整备 (armory_logic.h), no wrap.
+inline constexpr int StepMapTab(int cur,int dir) noexcept {
+    const int to=cur+(dir<0 ? -1 : dir>0 ? 1 : 0);
+    return to<0 ? 0 : to>=kTabCount ? kTabCount-1 : to;
 }
 inline bool OverTitle(Pixel p) noexcept {
     return kMapTitle.Contains(p.x,p.y);

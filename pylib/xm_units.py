@@ -191,7 +191,9 @@ class Unit:
     # together (veh+0x2020: holders 0 and 1), 'missile' the missile trigger's (holder 2); each a HeliArm. 'seats': the
     # passenger seats it carries over the V506's (the transport's, tools/make_jets.py with_passenger_seats).
     # A jet's (family jet: pylib/vcobjects.py XM_JETS, flown by the plugin as its other aircraft): 'mark' (src/jet_internal.h
-    # kBodies, its body 'body' flying its 'role' row), 'mass' (kg, clean: vcobjects JET_MASSES, by a real jet its size),
+    # kBodies, its body 'body' flying its 'role' row), 'mass' (kg, clean: vcobjects JET_MASSES' measure, the real jet its size, unscaled: the fighter
+    # and the gunship a Folland Gnat F.1 (2,177 kg empty + 800 L), the heavy assault gunship an Su-25 (9,800 + 3,200 L),
+    # the bomber an A-6E (12,093 + 9,030 L)),
     # 'ram' (src/playerjet_kinds.h kBoardable: m, half its size), 'guns'
     # (the gun pair's muzzle attachments, left and right) and 'gun' (their SGO numbers over the jets' gatling: empty,
     # the stock jet guns: the unit has no gun), 'stores' (Arm, each with `store`: on the missile trigger, cycled).
@@ -784,7 +786,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                         'its wing rails (two every 3 s, homing on flyers) and its gun trigger the jets\' own '
                                         'cannon; very small, thin armour.')},
        gun=('Jet Cannon', '机炮', '機関砲', '機砲'),
-       air={'mark': 7051.0, 'mass': 5000.0, 'body': 'xmFighter', 'role': 'fighter', 'ram': 4.0, 'guns': (), 'gun': {},
+       air={'mark': 7051.0, 'mass': 2800.0, 'body': 'xmFighter', 'role': 'fighter', 'ram': 4.0, 'guns': (), 'gun': {},
             'stores': (Arm('aam', ('main_weapon',), 'air', ('AA Missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'),
                            8, store=('AAM_S', {'damage': 240.0, 'blast': 3.0, 'burst': 2.0, 'burst_gap': 24.0, 'interval': 180.0})),)},
        # models/xm_medium_fighter_aa: 5.7 x 1.6 x 7.7 m
@@ -803,7 +805,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                              'guided), its gun trigger the jets\' own cannon (it has no gun in the game); '
                                              'small, thin armour.')},
        gun=('Jet Cannon', '机炮', '機関砲', '機砲'),
-       air={'mark': 7052.0, 'mass': 6000.0, 'body': 'xmAttack', 'role': 'multirole', 'ram': 5.0, 'guns': (), 'gun': {},
+       air={'mark': 7052.0, 'mass': 2800.0, 'body': 'xmAttack', 'role': 'multirole', 'ram': 5.0, 'guns': (), 'gun': {},
             'stores': (Arm('rockets', ('main_weapon',), 'rocket', ('Rockets', 'ロケット', '火箭', '火箭', '로켓'), 38,
                            store=('RKT', {'damage': 300.0, 'blast': 3.0, 'burst': 2.0, 'burst_gap': 24.0, 'interval': 120.0})),)},
        # models/xm_medium_gunship_aa: 4.8 x 2.8 x 9.2 m
@@ -826,7 +828,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                                    'ripple) or its four air-to-air missile rails, cycled; the heaviest fire of '
                                                    'the fixed-wing craft.')},
        gun=('Miniguns', '转管机枪', 'ミニガン', '轉管機槍'),
-       air={'mark': 7053.0, 'mass': 15000.0, 'body': 'xmHeavyAttack', 'role': 'multirole', 'ram': 7.0,
+       air={'mark': 7053.0, 'mass': 12400.0, 'body': 'xmHeavyAttack', 'role': 'multirole', 'ram': 7.0,
             'guns': ('att_minigun_2', 'att_minigun_1'),
             'gun': {'AmmoCount': 900.0, 'AmmoDamage': 150.0, 'FireInterval': 90.0, 'FireBurstCount': 10.0,
                     'FireBurstInterval': 5.0},
@@ -853,7 +855,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                        'fires the gun turrets on its wings (three every 1.3 s); the heaviest armour of the '
                                        'fixed-wing craft.')},
        gun=('Wing Gun Turrets', '翼上机炮塔', '翼銃塔', '翼上機砲塔'),
-       air={'mark': 7054.0, 'mass': 30000.0, 'body': 'xmBomber', 'role': 'strike', 'ram': 10.0,
+       air={'mark': 7054.0, 'mass': 19300.0, 'body': 'xmBomber', 'role': 'strike', 'ram': 10.0,
             'guns': ('att_left_turret_muzzle_1', 'att_right_turret_muzzle_1'),
             'gun': {'AmmoCount': 600.0, 'AmmoDamage': 150.0, 'FireInterval': 78.0, 'FireBurstCount': 3.0,
                     'FireBurstInterval': 12.0},

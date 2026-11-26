@@ -46,7 +46,7 @@ GENERATOR_NAME = os.path.splitext(installer.GENERATOR)[0]   # EDF6VehicleCrew.ge
 # graft_pure, ledger, mdb, mdb_jet, modfiles, rootcpk, sgo, support_loadout, vcobjects).
 GENERATOR_EXCLUDES = ('numpy', 'PIL', 'scipy', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
                       'aircraft_collision', 'support_config', 'gamelease', 'urllib3', 'requests')
-RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'cockpits', 'wt_m163', 'wt_bmpt', 'wt_tunguska', 'wt_pzh2000', 'wt_sturmtiger', 'emp_phalanx', 'emp_flak88', 'wt_apocalypse', 'emp_gdf005', 'emp_laser', 'emp_railgun', 'wt_tos1', 'emp_patriot')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model / dreadnought_model / c130_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'salvo_tu1600', 'cockpits', 'wt_m163', 'wt_bmpt', 'wt_tunguska', 'wt_pzh2000', 'wt_sturmtiger', 'emp_phalanx', 'emp_flak88', 'wt_apocalypse', 'emp_gdf005', 'emp_laser', 'emp_railgun', 'wt_tos1', 'emp_patriot')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model / dreadnought_model / c130_model / helicarrier_model / salvo_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
 # and every ported X-Morph unit's folder (pylib/xm_units.py; the model pack's, never the repository's: the share package's
 # run_export.py EXTERNAL_MODELS lists the same folders, CLAUDE.md)
 RELEASE_MODELS += tuple(xm_units.folder(u.key) for u in xm_units.ported())

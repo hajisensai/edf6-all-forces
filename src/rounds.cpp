@@ -168,6 +168,33 @@ bool InstallRounds() noexcept {
 
 bool WeaponStatusOk() noexcept { return statusOk; }
 
+int CustomTail(const void* custom,int from,double* out,int most,int* got) noexcept {
+    *got=0;
+    if(!customOk)return -1;
+    __try {
+        const Variant& v=*static_cast<const Variant*>(custom);
+        if(v.tag!=kTagNode)return -1;
+        std::int32_t n=0;
+        reinterpret_cast<CountFn>(image+kCount)(&v,&n);
+        if(n<=0)return n<0 ? -1 : 0;
+        if(n-1<from)return n;
+        Variant tail{};
+        if(!Child(v,n-1,&tail))return n;
+        std::int32_t m=0;
+        reinterpret_cast<CountFn>(image+kCount)(&tail,&m);
+        if(m<0)m=0;
+        if(m>most)m=most;
+        for(int i=0;i<m;++i) {
+            Variant e{};
+            if(!Child(tail,i,&e))break;
+            double d=0.0;
+            reinterpret_cast<NumberFn>(image+kNumber)(&e,&d);
+            out[i]=d;*got=i+1;
+        }
+        return n;
+    } __except(EXCEPTION_EXECUTE_HANDLER){*got=0;return -1;}
+}
+
 bool ReadRound(const unsigned char* w,RoundModel* out) noexcept {
     if(!Readable(w,kWeaponCustom+0x18) || !Readable(w+edf::kWeaponMatrix,0x40))return false;
     RoundModel m{};

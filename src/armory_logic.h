@@ -570,10 +570,12 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
                 if(!page.Click(s.pos,use.x,use.y))ClickColumns(s,page,use);
             }
         }
-        // page tabs, sub tabs
+        // page tabs (stopping at both ends: no wrap from the first round to the last, 任务, which opens the map),
+        // sub tabs
         const int dt=(Pressed(s,use,kTabNext) ? 1 : 0)-(Pressed(s,use,kTabPrev) ? 1 : 0);
-        if(dt && npages>1 && fx.op==Op::none && s.popup==Popup::none && CommitPage(s,page)){
-            s.tab=Wrap(s.tab+dt,npages);
+        const int toTab=s.tab+dt<0 ? 0 : s.tab+dt>=npages ? npages-1 : s.tab+dt;
+        if(dt && npages>1 && toTab!=s.tab && fx.op==Op::none && s.popup==Popup::none && CommitPage(s,page)){
+            s.tab=toTab;
             s.column=0;s.pos=Pos{};s.top[0]=s.top[1]=s.top[2]=0;
         }
         Page& now=*pages[s.tab];

@@ -535,8 +535,8 @@ struct RamHit { float at[3]; float closing; };
 // clean mass, stores.inc kJetMasses, times what its stores add: Burden) and v the closing speed along the normal; in the
 // game's damage at 287 kJ a point (vehicleram.h ram::Damage, the one formula the ground vehicles' ram takes too), scaled
 // by the tier the game gave this aircraft (its max HP over its SGO durability: the same factor scales a weapon's damage,
-// so the ram keeps pace with the mission's difficulty), times ini PlayerJetRamDamage. A 16 t fighter ramming at 200 m/s
-// (320 MJ) hits as about 3/4 of a Mk 82, at 100 m/s a quarter of that. A kind without a mass deals nothing. The blast is
+// so the ram keeps pace with the mission's difficulty), times ini PlayerJetRamDamage. A 19.3 t fighter ramming at 200 m/s
+// (386 MJ) hits as about 9/10 of a Mk 82, at 100 m/s a quarter of that. A kind without a mass deals nothing. The blast is
 // the kind's size (Kind::ram, half its model's width), never the damage's: the damage already carries mass and speed.
 // The aircraft's mass now (kg; 0: its kind has none).
 float RamMass(const PJet& j,const unsigned char* v) noexcept {
