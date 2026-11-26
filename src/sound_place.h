@@ -15,8 +15,9 @@
 namespace crew {
 
 // Its gain in each ear (equal power, the spread kept), its distance (m), the Doppler ratio between it and the camera,
-// the unit line from it to the camera (zero within 1 m).
-struct SoundPlace { float left,right,distance,doppler; float toCamera[3]; };
+// the unit line from it to the camera (zero within 1 m); its direction in the camera's frame for the speakers around
+// the listener (surround.h): `side` +1 to its right, `front` +1 ahead (0, 1 within 1 m: ahead).
+struct SoundPlace { float left,right,distance,doppler; float toCamera[3]; float side,front; };
 
 namespace soundplace {
 constexpr float kSpread=0.75f;                  // how far a sound to one side leaves the other ear
@@ -38,6 +39,7 @@ inline SoundPlace Place(const float* cam,const float* camVel,const float* pos,co
     const float d=std::sqrt(Dot(local,local));
     const float right=d>1.0f ? -local[0]/d : 0.0f;
     SoundPlace p{};
+    p.side=right;p.front=d>1.0f ? local[2]/d : 1.0f;
     p.left=std::sqrt(0.5f*(1.0f-kSpread*right));p.right=std::sqrt(0.5f*(1.0f+kSpread*right));
     p.distance=d;p.doppler=1.0f;
     float u[3]={cam[0]-pos[0],cam[1]-pos[1],cam[2]-pos[2]};

@@ -68,8 +68,12 @@ namespace crew {
 //  18 (2026-11-24): host settings v4 carries the preload set (host_settings_logic.h n= / p=): every member preloads the
 //      host's room set of the plugin's content instead of all of it, so an older build (which preloads everything but
 //      never says what it needs) would leave the host's set without its calls' bodies on the other machines.
+//  21: Zenith's aircraft and split missile assets changed together.
+//  22 (2026-11-26): a registered jet's engine lever goes to every peer (jet_lever_net.h AFJL, state stream jetLever): the
+//      other machines' engine sound, afterburner and exhaust read it instead of guessing from its speed. An older build
+//      would neither send it (its jets silent elsewhere: no guess any more) nor read it.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=21;  // Zenith's aircraft and split missile assets changed together
+constexpr std::int64_t kAllForcesRoomProtocol=22;  // a registered jet's engine lever (jet_lever_net.h)
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

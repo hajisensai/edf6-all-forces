@@ -205,6 +205,7 @@ struct Config {
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
     bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet
+    bool testDriveCycle=false;      // tests (tests/autopilot): the player driver's throttle a fixed cycle (drivegear.cpp TestDriveInput)
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
@@ -249,6 +250,8 @@ struct Config {
     float vehicleGunVolume=1.0f;    // ...the main guns' reports
     float vehicleMgVolume=1.0f;     // ...the machine guns', autocannons' and flak's (their bursts, rounds and cases)
     float vehicleMissileVolume=1.0f;// ...the missiles' and rockets' launches
+    float explosionVolume=1.0f;     // the rounds' explosions as War Thunder layers them (blastsound.cpp), times the game's; 0: the stock ones
+    float flybyVolume=1.0f;         // the rounds going by and coming down (their whiz, crack, incoming whistle; blastsound.cpp); 0: none
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
     float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
@@ -305,6 +308,24 @@ struct Config {
     float scopeSniperHipMinSpread=0.015f; // ...and at least this half angle (rad; FireAccuracy 0 sniper rifles too)
     float scopeHipSpread=1.25f;           // ...another scoped weapon unzoomed: x this
     float scopeAimSpread=0.8f;            // ...and zoomed: x this
+    bool gpuFx=true;             // GPU particle effects (src/gpufx): the module (world-end draw)
+    int gpuFxTest=0;             // ...test cards and a puff column 25 m ahead of the player at mission start (2: and the
+                                 //    stress: the ultimate strike 60 m ahead, three of them 6 s apart, with no pt asked;
+                                 //    3 / 4: the bench, fixed blasts and flashes with the switches cycled: the look / the load; 5: the ultimate
+                                 //    strike every 16 s, the set 0xA40 stock and ours by turns each second)
+    int gpuFxNative=1;           // ...the stock ParticleRender cards drawn by the GPU renderer instead of the stock draw (2: the
+                                 //    screen split, stock left and ours right: the A/B picture)
+    bool gpuFxLitA=true;         // ...and the lit set 0xA40 (the middle-distance lit smoke, per pixel point lights) too
+                                 //    (docs/gpufx-re.md: under the ultimate strike ours about half the stock's GPU time)
+    bool gpuFxLayers=true;       // ...War Thunder style layered smoke for big guns' shots and blasts (gpufx_layers.h); the stock
+                                 //    blast particles and vehicle guns' muzzle effects off
+    bool gpuFxEfs=true;          // ...the efs renderer's Texture quads (muzzle flashes, efs bullets...) drawn by the GPU renderer
+                                 //    (with GpuFxNative 1 / 3)
+    bool gpuFxTrails=true;       // ...the efs renderer's trails (ExtLine / LocusExtendLine / EmittingExtendLine: smoke trails,
+                                 //    tracers) drawn by the GPU renderer with the stock trail shaders, batched (with GpuFxNative 1 / 2)
+    bool gpuFxProbe=false;       // ...render state, matrices, light block and stock particle state to the log
+    int devFrameCap=0;           // with debug: the main loop held to at most this many frames a second (0 off; perf_probe.cpp):
+                                 //    test runs not about the frame rate
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
@@ -758,11 +779,18 @@ void LockSound(unsigned char* vehicle) noexcept;
 // listener this frame.
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;
 bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
+bool ListenerAt(float* pos) noexcept;   // where that listener (the camera) is this frame; false: none
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
 bool InstallVehicleSound() noexcept;
 void VehicleSound(unsigned char* vehicle) noexcept;
 void ResetVehicleSound() noexcept;
+bool VehicleSoundHeld(const void* preset) noexcept;   // a vehicle's stock sound preset held silent (vehsound.cpp)
+// The rounds' explosions as War Thunder layers them (blastsound.cpp, ini ExplosionVolume): the calls that play a round's
+// AmmoHitSe redirected at load; once a frame (SharedFrameTick, after JetSoundTick: the listener); a new mission.
+bool InstallBlastSound() noexcept;
+void BlastSoundTick() noexcept;
+void ResetBlastSound() noexcept;
 
 // --- EDF.dll layout ---
 // The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):

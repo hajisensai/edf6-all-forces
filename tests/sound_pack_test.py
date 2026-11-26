@@ -80,7 +80,8 @@ class SoundPackTest(unittest.TestCase):
     def test_mapping_names_the_plugins_clips(self) -> None:
         table = sp.clip_table()
         self.assertIn('gun_near', table)
-        self.assertTrue(table['engine_heavy_idle'][0])
+        self.assertTrue(table['mg_burst'][0])
+        self.assertNotIn('engine_heavy_idle', table)   # the engines are War Thunder's, not a clip
         self.assertFalse(table['gun_near'][0])
         sp.validate_mapping(table)
 
@@ -129,13 +130,13 @@ class SoundPackTest(unittest.TestCase):
         with open(os.path.join(plugins, sp.PLUGIN + '.dll'), 'wb') as f:
             f.write(b'not run')
         # Installed before this explicit skip; an unrelated custom sound must remain the player's.
-        for clip in ('gun_near', 'tracks'):
+        for clip in ('gun_near', 'turret'):
             with open(os.path.join(plugins, sp.file_name(clip)), 'wb') as f:
                 f.write(b'previous custom override')
         with patch.object(sp, 'game_running', return_value=False):
             sp.install(out, game)
         self.assertFalse(os.path.exists(os.path.join(plugins, sp.file_name('gun_near'))))
-        with open(os.path.join(plugins, sp.file_name('tracks')), 'rb') as f:
+        with open(os.path.join(plugins, sp.file_name('turret')), 'rb') as f:
             self.assertEqual(f.read(), b'previous custom override')
         with self.assertRaises(SystemExit):
             sp.build(self.zip, out, None, {'no_such_clip'})
@@ -159,7 +160,7 @@ class SoundPackTest(unittest.TestCase):
         bad = os.path.join(self.tmp.name, 'bad')
         os.makedirs(bad)
         t = np.arange(48000) / 48000
-        with open(os.path.join(bad, sp.file_name('tracks')), 'wb') as f:
+        with open(os.path.join(bad, sp.file_name('turret')), 'wb') as f:
             f.write(sp.encode_wav(0.5 * np.sin(2 * np.pi * 3.3 * t)))       # ends far from where it starts
         with open(os.path.join(bad, 'EDF6VehicleCrew_veh_nothing.wav'), 'wb') as f:
             f.write(sp.encode_wav(0.1 * np.sin(2 * np.pi * 200 * t)))

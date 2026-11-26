@@ -431,6 +431,22 @@ class DriverTest(unittest.TestCase):
         self.assertFalse(placed.exists())
         self.assertIs(drive.shutil.copy2, real_copy)
 
+    def test_restore_removes_the_folders_a_placement_made(self):
+        """A placement into folders that were not there (wtfxrun's clips in Plugins/EDF6VehicleCrew_wt) takes them back
+        with its files; a folder someone else put a file in since stays, with that file."""
+        for n in ('a.wav', 'b.wav'):
+            drive.place_file(self.game, f'Plugins/EDF6VehicleCrew_wt/{n}', b'clip')
+        drive.place_file(self.game, 'Plugins/deep/er/c.wav', b'clip')
+        with redirect_stdout(io.StringIO()):
+            self.assertTrue(drive.restore_placed(self.game))
+        self.assertEqual(list(self.plugins.iterdir()), [])
+        drive.place_file(self.game, 'Plugins/EDF6VehicleCrew_wt/a.wav', b'clip')
+        theirs = self.plugins / 'EDF6VehicleCrew_wt' / 'theirs.wav'
+        theirs.write_bytes(b'not ours')
+        with redirect_stdout(io.StringIO()):
+            self.assertTrue(drive.restore_placed(self.game))
+        self.assertEqual(sorted(p.name for p in self.plugins.rglob('*')), ['EDF6VehicleCrew_wt', 'theirs.wav'])
+
     def test_restore_refuses_while_the_game_runs(self):
         build = self.root / 'build.dll'
         build.write_bytes(b'our build')

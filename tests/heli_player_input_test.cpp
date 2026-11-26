@@ -29,6 +29,10 @@ void ScopeSpreadShot(unsigned char* weapon,bool replay,ScopeShot* out) noexcept 
     ++scopeShots;shotCallsAtScope=shotCalls;scopeReplay=replay;scopeWeapon=weapon;*out=ScopeShot{};
 }
 void ScopeSpreadRestore(const ScopeShot&) noexcept { ++scopeRestores;shotCallsAtScopeRestore=shotCalls; }
+namespace gpufx {   // gpufx.cpp: the War Thunder layers (gpufx_sim_test); no stock muzzle effect to hold back here
+void* ShotBegin(unsigned char*) noexcept { return nullptr; }
+void ShotEnd(unsigned char*,unsigned,void*) noexcept {}
+}
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here

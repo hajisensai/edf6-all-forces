@@ -29,6 +29,7 @@
 #include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
+#include "gpufx/gpufx.h"
 #include "pvp.h"
 #include "havok_props.h"
 #include "aiworld_capacity.h"
@@ -357,6 +358,8 @@ void Validate(Config& n) noexcept {
     Fix("VehicleGunVolume",n.vehicleGunVolume,0.0f,4.0f);
     Fix("VehicleMgVolume",n.vehicleMgVolume,0.0f,4.0f);
     Fix("VehicleMissileVolume",n.vehicleMissileVolume,0.0f,4.0f);
+    Fix("ExplosionVolume",n.explosionVolume,0.0f,4.0f);
+    Fix("FlybyVolume",n.flybyVolume,0.0f,4.0f);
     Fix("DrillMaxRpm",n.drillMaxRpm,30.0f,1200.0f);
     Fix("DrillSpinUpSec",n.drillSpinUpSec,0.2f,10.0f);
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
@@ -734,6 +737,8 @@ void LoadConfig() noexcept {
     if(n.airdropTest)Log("CONFIG AirdropTest=%d (tests only): a container airdrop asked once a mission",n.airdropTest);
     n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);
     if(n.npcCrewTest)Log("CONFIG NpcCrewTest=1 (tests only): empty vehicles are crewed without a player having driven them");
+    n.testDriveCycle=ReadBool(L"TestDriveCycle",n.testDriveCycle);
+    if(n.testDriveCycle)Log("CONFIG TestDriveCycle=1 (tests only): the player driver's throttle runs a fixed cycle (idle, full, half, brake)");
     n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
     n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
     n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
@@ -760,6 +765,8 @@ void LoadConfig() noexcept {
     n.vehicleGunVolume=ReadFloat(L"VehicleGunVolume",n.vehicleGunVolume);
     n.vehicleMgVolume=ReadFloat(L"VehicleMgVolume",n.vehicleMgVolume);
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
+    n.explosionVolume=ReadFloat(L"ExplosionVolume",n.explosionVolume);
+    n.flybyVolume=ReadFloat(L"FlybyVolume",n.flybyVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.edf41Sound=ReadBool(L"Edf41Sound",n.edf41Sound);
@@ -864,6 +871,15 @@ void LoadConfig() noexcept {
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
     n.enemyControl=ReadBool(L"EnemyControl",n.enemyControl);
+    n.gpuFx=ReadBool(L"GpuFx",n.gpuFx);
+    n.gpuFxTest=static_cast<int>(FixInt("GpuFxTest",ReadInt(L"GpuFxTest",static_cast<DWORD>(n.gpuFxTest)),0,5));
+    n.gpuFxNative=static_cast<int>(FixInt("GpuFxNative",ReadInt(L"GpuFxNative",static_cast<DWORD>(n.gpuFxNative)),0,2));
+    n.gpuFxProbe=ReadBool(L"GpuFxProbe",n.gpuFxProbe);
+    n.gpuFxLayers=ReadBool(L"GpuFxLayers",n.gpuFxLayers);
+    n.gpuFxEfs=ReadBool(L"GpuFxEfs",n.gpuFxEfs);
+    n.gpuFxTrails=ReadBool(L"GpuFxTrails",n.gpuFxTrails);
+    n.gpuFxLitA=ReadBool(L"GpuFxLitA",n.gpuFxLitA);
+    n.devFrameCap=static_cast<int>(FixInt("DevFrameCap",ReadInt(L"DevFrameCap",static_cast<DWORD>(n.devFrameCap)),0,240));
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
     n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
     n.thermalButton=ReadInt(L"VehicleThermalButton",static_cast<DWORD>(n.thermalButton));
@@ -1076,6 +1092,7 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet gearKey=0x%X gearPad=0x%X (XInput bits, held %.1f s)",n.playerJetGearKey,n.playerJetGearPad,kGearPadHoldSec);
     Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
         n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
+    Log("CONFIG explosionVolume=%.2f flybyVolume=%.2f",n.explosionVolume,n.flybyVolume);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X gatlingKey=0x%X",n.playerJetAll,n.playerJetHailKey,
         n.gunshipBoardGunner,n.gunshipGunnerKey,n.gunshipGatlingKey);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d throwDrones=%d",n.jetPilot,n.jetFuelSec,
@@ -1365,6 +1382,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     thermal::Install();    // mesh heat/depth passes, inert in optical mode
+    gpufx::Install();      // GPU particles at the world's end (thermal.cpp's redirect), the stock particle draw slot
     InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     Log("VIEWDIAG umbra watch %s",InstallUmbraWatch() ? "on" : "NOT installed (EDF.dll's Umbra import is not as read)");
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
@@ -1402,6 +1420,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
+    InstallBlastSound();    // the rounds' explosions as War Thunder layers them (blastsound.cpp)
     InstallMissiles();
     InstallBarrages();      // the long-range barrages' rounds: RocketBullet01's update (barrage.cpp)
     InstallAndryusha();     // the Andryusha's carriers: GrenadeBullet01's update, chained (andryusha.cpp)

@@ -94,7 +94,8 @@ void PlayCues() noexcept {
     __try {
         if(!audio::ClipsReady())return;   // made on their own thread from the first call: the first cue may be missed
         audio::Beat(GameEffectVolume());
-        const audio::Heard h{v,v,1.0f,0.0f};
+        // A UI cue, heard from nowhere: ahead, as loud in each front speaker as it was in each ear (sqrt 2 at the centre).
+        const audio::Heard h{1.41421356f*v,0.0f,1.0f,0.0f,1.0f,audio::AirCutoff(0.0f),false};
         if(asked&(1u<<static_cast<int>(QMarkCue::own)))audio::PlayOnce(audio::kClipMarkOwn,h);
         else if(asked&(1u<<static_cast<int>(QMarkCue::off)))audio::PlayOnce(audio::kClipMarkOff,h);
         if(asked&(1u<<static_cast<int>(QMarkCue::team)))audio::PlayOnce(audio::kClipMarkTeam,h);

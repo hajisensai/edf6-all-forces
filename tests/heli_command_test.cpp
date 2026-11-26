@@ -59,6 +59,10 @@ bool FirstPersonAimShot(unsigned char*,unsigned,bool,FpShotAim*) noexcept { Miss
 void FirstPersonAimRestore(const FpShotAim&) noexcept { MissingDependency(); }
 void ScopeSpreadShot(unsigned char*,bool,ScopeShot*) noexcept { MissingDependency(); }   // scope_spread.cpp: no medic shot here
 void ScopeSpreadRestore(const ScopeShot&) noexcept { MissingDependency(); }
+namespace gpufx {   // gpufx.cpp: no medic shot here
+void* ShotBegin(unsigned char*) noexcept { MissingDependency();return nullptr; }
+void ShotEnd(unsigned char*,unsigned,void*) noexcept { MissingDependency(); }
+}
 bool IsDreadnought(const void*) noexcept { return false; }
 namespace jet { int LockersOf(const void*,float (*)[3],int) noexcept { MissingDependency();return 0; } }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingDependency();return 0; }
