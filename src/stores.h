@@ -6,6 +6,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <cwchar>
 
 namespace crew {
 // Preserve native store role ids 0..3; special actions have their own semantics,
@@ -58,6 +59,10 @@ struct StoreSpec {
     float pylonDrag=0.0f;
     unsigned perPylon=0;
 };
+constexpr unsigned kSalvoLockLimit=256;
+inline bool IsSalvoStore(const StoreSpec* spec) noexcept {
+    return spec && std::wcscmp(spec->prefix,L"EDF6VC_SALVO_")==0;
+}
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };
 // A barrel that fires in turn with the other of its pair (pylib/vcobjects.py GroundVehicle.alternate, twin_barrels;

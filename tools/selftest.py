@@ -1494,8 +1494,15 @@ def store_looks() -> None:
         look = looks[kind(name)]
         got, was = (dsgo.to_py(dsgo.parse(files[name]).root) for files in (built, plain))
         assert list(got) == list(was) and all(got[k] == was[k] for k in got if k not in shape), name
-        assert was['resource'] == [was['AmmoModel']], f'{name}: the template preloads its own model alone'
-        assert (got['AmmoModel'], got['resource'], got['AmmoSize']) == (look.path, [look.path], look.size), name
+        child_models = []
+        if kind(name) == 'SALVO':
+            cp = got['Ammo_CustomParameter']
+            assert got['AmmoClass'] == 'MissileBullet02' and len(cp) == 16 and cp[12][0] == 1
+            assert got['AmmoCount'] == got['FireBurstCount'] == vc.SALVO_ROUNDS and got['FireBurstInterval'] == 1
+            assert cp[15][2] == vc.SALVO_CHILDREN and cp[15][4] == 'MissileBullet01'
+            child_models = [cp[15][14]]
+        assert was['resource'] == [was['AmmoModel'], *child_models], name
+        assert (got['AmmoModel'], got['resource'], got['AmmoSize']) == (look.path, [look.path, *child_models], look.size), name
         contact, stock = got['AmmoSize'] * got['AmmoHitSizeAdjust'], was['AmmoSize'] * was['AmmoHitSizeAdjust']
         assert abs(contact - stock) < 1e-9, f'{name}: contact sphere {contact}, the template {stock}'
     # The stock weapon on the holder a stock vehicle's stores hang beside: another model than theirs.

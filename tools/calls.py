@@ -978,10 +978,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('DN Bomber (Low Altitude Loadout)', 'Sortie: a strike jet comes in low, drops two bombs on the mark and climbs steeply away.'),
     },
     'sortie_missile_rain': {
-        'SC': ('天顶截击机', '齐射截击机锁定标记附近的敌人，从四具发光挂架连续打出 32 枚导弹后脱离。'),
-        'CN': ('天頂截擊機', '齊射截擊機鎖定標記附近的敵人，從四具發光掛架連續打出 32 枚飛彈後脫離。'),
-        'JA': ('天頂迎撃機', '斉射迎撃機が指示地点付近の敵をロックし、発光する4基の発射器から32発を斉射して離脱する。'),
-        'EN': ('Zenith Interceptor', 'A salvo interceptor locks an enemy near the mark, fires 32 missiles from four lit pods, then departs.'),
+        'SC': ('天顶截击机', '四具发光挂架可一次齐射 256 枚子母弹，每枚释放 4 枚追踪子弹。锁定框内每个敌人先分一枚，余弹均分，打完后飞出地图边界。'),
+        'CN': ('天頂截擊機', '四具發光掛架可一次齊射 256 枚子母彈，每枚釋放 4 枚追蹤子彈。鎖定框內每個敵人先分一枚，餘彈均分，打完後飛出地圖邊界。'),
+        'JA': ('天頂迎撃機', '発光する4基の発射器から分裂ミサイル256発を一斉発射する。親弾1発から誘導子弾4発を放つ。範囲内の敵に1発ずつ割り当て、残りを均等に配分し、マップ端から離脱する。'),
+        'EN': ('Zenith Interceptor', 'Fires up to 256 cluster missiles from four lit pods. Each launches four guided submunitions. Enemies in the lock box receive one lock each before repeats. The interceptor then flies out of the mission area.'),
     },
     'sortie_hammer': {
         'SC': ('Eros 506／DN 轰炸机', '出击组合：两架 Eros 直升机先低空扫射压制，25 秒后再呼叫一架对地攻击机低空投弹收尾（相当于「直升机扫射」接「打了就跑」）。'),

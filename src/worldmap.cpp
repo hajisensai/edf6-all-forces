@@ -1494,30 +1494,30 @@ void DrawTitle() noexcept {
     const Shot& d=drawn;
     static skin::Quads quads;   // render thread, under gpuLock
     quads.n=0;quads.dropped=0;
-    skin::Bar(&quads,skin::layout::kTitle);
-    for(int i=0;i<kTabCount;++i)skin::Tab(&quads,skin::layout::Tab(i),i==kMapTab);
+    skin::Bar(&quads,kMapTitle);
+    for(int i=0;i<kTabCount;++i)skin::Tab(&quads,MapTab(i),i==kMapTab);
     const int chips=d.presetCount<skin::layout::kChipMost ? d.presetCount : skin::layout::kChipMost-1;
     for(int i=0;i<chips;++i) {
-        const skin::Rect r=skin::layout::Chip(i,chips);
+        const skin::Rect r=MapChip(i,chips);
         skin::Chip(&quads,r,i==d.presetCurrent,
                    (d.pointerShown && r.Contains(d.pointer.x,d.pointer.y)) || i==d.launch);
     }
     for(int i=0;i<quads.n;++i)renderer->QuadColours(quads.q[i].xy,quads.q[i].argb);
     for(int i=0;i<kTabCount;++i) {
-        const skin::Rect r=skin::layout::Tab(i);
-        Text(d.tab[i],r.x0+28.f,r.y0+12.f,26.f,true,skin::TextOn(i==kMapTab),r.W()-40.f);
+        const skin::Rect r=MapTab(i);
+        Text(d.tab[i],r.x0+25.f,r.y0+9.f,24.f,true,skin::TextOn(i==kMapTab),r.W()-35.f);
     }
     for(int i=0;i<chips;++i) {
-        const skin::Rect r=skin::layout::Chip(i,chips);
+        const skin::Rect r=MapChip(i,chips);
         wchar_t n[4];
         _snwprintf_s(n,_TRUNCATE,L"%d",i+1);
-        Text(n,r.x0+16.f,r.y0+8.f,24.f,true,skin::TextOn(i==d.presetCurrent),r.W()-12.f);
+        Text(n,r.x0+13.f,r.y0+6.f,22.f,true,skin::TextOn(i==d.presetCurrent),r.W()-10.f);
     }
     if(d.progress.shown>0) {
         const Area& b=kProgressBar;
         renderer->Rect(b.x0,b.y0,b.x1,b.y1,0xC0141310u);
         renderer->Rect(b.x0+2.f,b.y0+2.f,b.x0+2.f+(b.x1-b.x0-4.f)*ProgressShare(d.progress),b.y1-2.f,0xFFD8C69Cu);
-        Text(d.progressText,b.x1+12.f,b.y0-4.f,22.f,false,0xFFEDE6D2u,500.f);
+        Text(d.progressText,b.x1+12.f,b.y0-4.f,16.f,false,0xFFEDE6D2u,500.f);
     }
 }
 
