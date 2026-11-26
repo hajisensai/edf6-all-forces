@@ -354,7 +354,7 @@ constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20
 constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
-              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+7==kNativeBodyMathSites);
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+8==kNativeBodyMathSites);
 
 using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
 using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
@@ -468,6 +468,44 @@ bool InstallStaticBodyQuaternionSkip() noexcept {
     }
     VirtualFree(thunk,0,MEM_RELEASE);
     return false;
+}
+
+
+
+constexpr unsigned kBodySignalStart=0xE51683,kBodySignalDone=0xE51793;
+constexpr unsigned char kBodySignalStock[]{
+    0x49,0x8B,0x85,0x60,0x07,0,0,0x4D,0x8D,0xB5,0x60,0x07,0,0,
+    0x48,0x83,0xE0,0xFD,0x48,0x83,0xC8,0x01,0x48,0x8B,0xC8,
+    0x49,0x89,0x85,0x60,0x07,0,0,0x48,0x83,0xE1,0xFC,0x74,0x50,0x0F,0x1F,0x80,0,0,0,0,
+};
+constexpr unsigned char kBodySignalEmptyGate[]{
+    0x4D,0x8D,0xB5,0x60,0x07,0,0,  // lea r14,[r13+760h]
+    0x49,0x8B,0x06,                // mov rax,[r14]
+    0x48,0x85,0xC0,0x75,0x0E,      // test rax,rax; jne dispatch
+    0x49,0x83,0xBD,0xB8,0x07,0,0,0,// cmp qword ptr [r13+7b8h],0
+    0x0F,0x84,0xF3,0,0,0,          // je 0xE51793, the shared epilogue
+    0x24,0xFD,0x0C,0x01,           // dispatch: clear bit 1 and set bit 0
+    0x48,0x8B,0xC8,0x49,0x89,0x06, // mov rcx,rax; mov [r14],rax
+    0x48,0x83,0xE1,0xFC,0x74,0x49, // and rcx,-4; je 0xE516F9
+};
+static_assert(sizeof(kBodySignalStock)==sizeof(kBodySignalEmptyGate));
+static_assert(kBodySignalStart+sizeof(kBodySignalStock)==0xE516B0);
+static_assert(kBodySignalStart+29+kBodySignalEmptyGate[25]==kBodySignalDone);
+
+bool InstallEmptyBodySignalGate() noexcept {
+    constexpr unsigned char second[]{
+        0x49,0x8B,0x85,0xB8,0x07,0,0,0x48,0x83,0xE0,0xFD,0x48,0x83,0xC8,1,0x48,0x8B,0xC8,
+        0x49,0x89,0x85,0xB8,0x07,0,0,0x48,0x83,0xE1,0xFC,0x74,0x4E,
+    };
+    constexpr unsigned char epilogue[]{
+        0x0F,0x28,0x74,0x24,0x50,0x0F,0x28,0x7C,0x24,0x40,0x48,0x83,0xC4,0x60,0x41,0x5E,0x41,0x5D,
+        0x5F,0x5E,0x5B,0xC3,
+    };
+    if(!edf::Matches(image,0xE5170B,second,sizeof(second)) ||
+       !edf::Matches(image,kBodySignalDone,epilogue,sizeof(epilogue)))return false;
+    // The empty heads have no dispatch state. A listener or any flag keeps both original traversals.
+    // The shared epilogue is also used by the stock tolerance check. r12 and r15 have only been saved.
+    return edf::PatchCode(image+kBodySignalStart,kBodySignalStock,kBodySignalEmptyGate,sizeof(kBodySignalStock));
 }
 
 
@@ -658,6 +696,7 @@ unsigned InstallNativeBodyMath() noexcept {
     installed+=InstallClingBodyReuse();
     installed+=InstallContactDecoders();
     installed+=InstallStaticBodyQuaternionSkip();
+    installed+=InstallEmptyBodySignalGate();
     installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
     for(const auto& site:kAttachedBasisCalls) {

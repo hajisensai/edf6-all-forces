@@ -368,6 +368,102 @@ bool RayResetTemplates() {
     return true;
 }
 
+struct BodySignalResult {
+    std::uint64_t calls{}, removed{};
+};
+struct BodySignalListener {
+    const void* const* methods;
+    std::uintptr_t next;
+    unsigned id;
+    BodySignalListener* subscribeSecond;
+    BodySignalResult* result;
+};
+
+void __fastcall TestBodySignalRemove(BodySignalListener* listener,unsigned remove) {
+    auto& calls=listener->result->removed;
+    calls=calls*131+listener->id*7+remove;
+}
+
+void __fastcall TestBodySignalNotify(BodySignalListener* listener,unsigned char* world,unsigned id) {
+    const auto tag1=edf::At<std::uintptr_t>(world,0x778)&3;
+    const auto tag2=edf::At<std::uintptr_t>(world,0x7D0)&3;
+    auto& calls=listener->result->calls;
+    calls=calls*131+id+listener->id*17+tag1*3+tag2*5;
+    if(listener->subscribeSecond)edf::Put(world,0x7D0,listener->subscribeSecond);
+}
+
+bool BodySignalDispatch() {
+    using Run=void(__fastcall*)(void*,unsigned,const void*);
+    constexpr unsigned char caller[]{
+        0x53,0x56,0x57,0x41,0x55,0x41,0x56,0x48,0x81,0xEC,0xB0,0,0,0,
+        0x4C,0x8B,0xE9,0x8B,0xDA,0x4C,0x89,0xA4,0x24,0xA0,0,0,0,
+        0x4C,0x89,0xBC,0x24,0xA8,0,0,0,0x41,0xFF,0xE0,
+        0x48,0x81,0xC4,0xB0,0,0,0,0x41,0x5E,0x41,0x5D,0x5F,0x5E,0x5B,0xC3,
+    };
+    constexpr unsigned stockOffset=64,fastOffset=512,resumeOffset=38;
+    constexpr unsigned codeSize=kBodySignalDone-kBodySignalStart;
+    std::array<unsigned char,fastOffset+codeSize+5> executable{};
+    std::memcpy(executable.data(),caller,sizeof(caller));
+    for(const auto offset:{stockOffset,fastOffset}) {
+        auto* const fn=executable.data()+offset;
+        std::memcpy(fn,image+kBodySignalStart,codeSize);
+        if(offset==stockOffset)std::memcpy(fn,kBodySignalStock,sizeof(kBodySignalStock));
+        fn[codeSize]=0xE9;
+        const auto rel=static_cast<std::int32_t>(resumeOffset)-static_cast<std::int32_t>(offset+codeSize+5);
+        edf::Put(fn,codeSize+1,rel);
+    }
+    auto* const mem=static_cast<unsigned char*>(
+        edf::AllocateNearCode(image+kBodySignalStart,executable.data(),executable.size()));
+    if(!mem)return false;
+    const auto run=reinterpret_cast<Run>(mem);
+    const void* const methods[]{reinterpret_cast<const void*>(&TestBodySignalRemove),nullptr,nullptr,
+                                reinterpret_cast<const void*>(&TestBodySignalNotify)};
+    BodySignalResult seen{};
+    BodySignalListener first{methods,0,1,nullptr,&seen},second{methods,0,2,nullptr,&seen},third{methods,0,3,nullptr,&seen};
+    const auto addr=[](const auto* p) {return reinterpret_cast<std::uintptr_t>(p);};
+    alignas(16) unsigned char world[0x7E0]{};
+    const auto check=[&] {
+        if(!edf::Matches(image,kBodySignalStart,kBodySignalEmptyGate,sizeof(kBodySignalEmptyGate)))return false;
+        for(unsigned i=0;i<8;++i) {
+            first.next=(i&1) ? addr(&second)|(i&2 ? 1u : 0u) : 0;
+            first.subscribeSecond=(i&4) ? &third : nullptr;
+            const auto head=i==0 ? 0 : i==2 ? 3 : addr(&first)|(i&3u);
+            const auto tail=i==0 ? 0 : i==1 ? 2 : addr(&second)|(i&1u);
+            // Include a second-list-only dispatch.
+            const auto initialFirst=i==5 ? 0 : head;
+            std::array<BodySignalResult,2> results{};
+            std::array<std::uintptr_t,2> heads{},tails{};
+            for(unsigned version=0;version<2;++version) {
+                seen={};
+                edf::Put(world,0x778,initialFirst);
+                edf::Put(world,0x7D0,tail);
+                run(world+0x18,0xF1230000u+i,mem+(version ? fastOffset : stockOffset));
+                results[version]=seen;
+                heads[version]=edf::At<std::uintptr_t>(world,0x778);
+                tails[version]=edf::At<std::uintptr_t>(world,0x7D0);
+            }
+            if(results[0].calls!=results[1].calls || results[0].removed!=results[1].removed ||
+               heads[0]!=heads[1] || tails[0]!=tails[1])return false;
+            if(i==0 && (heads[1] || tails[1] || seen.calls || seen.removed))return false;
+            if(i!=0 && !seen.calls)return false;
+            if((i&3)==3 && !seen.removed)return false;
+        }
+        return true;
+    };
+    const bool valid=check();
+    if(valid) {
+        edf::Put(world,0x778,std::uintptr_t{0});
+        edf::Put(world,0x7D0,std::uintptr_t{0});
+        Bench("unsubscribed body notifications",
+              [&](unsigned i){run(world+0x18,i,mem+stockOffset);},
+              [&](unsigned i){run(world+0x18,i,mem+fastOffset);});
+    }
+    VirtualFree(mem,0,MEM_RELEASE);
+    return valid;
+}
+
+
+
 bool BodyQuaternionUpdates() {
     using Quaternion=void(__fastcall*)(float*,const float*);
     using Run=void(__fastcall*)(float*,const float*,const void*,Quaternion);
@@ -703,6 +799,10 @@ int main(int argc,char** argv) {
     if(!BoundsValidation() || !AvoidanceNeighbors())return 1;
     if(!AvoidanceBoxes()) {
         std::puts("FAIL: avoidance sweep changed the first overlap or the X cutoff");
+        return 1;
+    }
+    if(!BodySignalDispatch()) {
+        std::puts("FAIL: native empty or subscribed body signal dispatch mismatch");
         return 1;
     }
     if(!BodyQuaternionUpdates()) {
