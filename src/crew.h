@@ -48,7 +48,7 @@ struct Config {
     float heliSpeed=65.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
     float playerHeliStopSec=1.0f;// a stock heli's horizontal response in hover mode (s; 0: stock damping)
-    int heliHoverKey=0x24;     // Home outside the command map: flight / hover
+    int heliHoverKey=0x48;     // H while piloting a rotorcraft: flight / hover
     int heliHoverButton=0;    // optional XInput chord
     bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
     bool stockVehicleHud=true;      // any other stock vehicle the player drives or mans: our HUD and impact points, its seat's aim lines hidden (vhud.cpp)
