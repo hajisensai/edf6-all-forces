@@ -250,7 +250,7 @@ void EnsureSeeded(unsigned char* store) noexcept {
     },&moved);
     if(from>kb::kFirstAction && steps<kb::StepsOf(kb::Owner::crew))
         Log("KEYCONFIG default steps %d..%d on the seeded store: %d key(s) still on an old default moved to the new one "
-            "(2026-11-10: FreeLookKey middle button -> C, HighCamKey C -> L); keys the player set kept",steps+1,
+            "(free look / high view, helicopter hover); custom bindings kept",steps+1,
             kb::StepsOf(kb::Owner::crew),moved);
     if(from>kb::kFirstAction) {
         if(from<kb::OwnerEnd(kb::Owner::crew))
