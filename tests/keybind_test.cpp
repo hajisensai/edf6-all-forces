@@ -319,7 +319,7 @@ void Store() {
     // The default steps (kCrewSteps): the marker keeps the steps taken beside the end; one written before them has none.
     Check(kb::MarkerEnd(kb::MarkerOf(0x80,1))==0x80 && kb::MarkerSteps(kb::MarkerOf(0x80,1))==1 &&
           kb::MarkerSteps(kb::MarkerOf(0x80))==0 && kb::MarkerSteps(0)==0,"the marker: the end and the steps apart");
-    Check(kb::StepsOf(kb::Owner::crew)==1 && kb::StepsOf(kb::Owner::turret)==0,"the crew's one step (2026-11-10), none of the turret's");
+    Check(kb::StepsOf(kb::Owner::crew)==2 && kb::StepsOf(kb::Owner::turret)==0,"the crew's two default steps, none of the turret's");
     Check(kb::SeededSteps(store.data(),kb::Owner::crew)==kb::StepsOf(kb::Owner::crew),
           "a store seeded now takes no step (its ini has the new defaults): marked as taken");
     const auto seededBefore=[](int freeLook,int highCam) {
@@ -378,6 +378,28 @@ void Store() {
         kb::Seed(st.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.action==0x58 ? 0x04 : s.action==0x59 ? 'C' : s.defaultVk; },&moved);
         Check(moved==0 && kb::SlotVk(st.data(),0x58)==0x04 && kb::SlotVk(st.data(),0x59)=='C' && kb::Seeded(st.data(),kb::Owner::crew),
               "slots seeded now from the ini: no step on them");
+    }
+    {
+        auto st=seededBefore('C','L');
+        *kb::SlotPtr(st.data(),0,0,kb::kMarkerAction[0])=kb::MarkerOf(kb::OwnerEnd(kb::Owner::crew),1);
+        kb::WriteSynced(st.data(),0,0x80,kb::CodeOfVk(0x24));
+        const auto homeBindings=st;
+        int moved=-1;
+        seed(st,&moved);
+        Check(moved==1 && kb::SlotVk(st.data(),0x80)=='H' && kb::SlotVk(st.data(),0x51)=='H' &&
+              kb::SlotVk(st.data(),0x70)=='H' && kb::SlotVk(st.data(),0x7C)=='H',
+              "Home migrates to H, shared with the context-specific defaults");
+        kb::WriteSynced(st.data(),0,0x80,kb::CodeOfVk(0x24));
+        seed(st,&moved);
+        Check(moved==0 && kb::SlotVk(st.data(),0x80)==0x24,"choosing Home again keeps it");
+        st=homeBindings;
+        kb::WriteSynced(st.data(),0,0x52,kb::CodeOfVk('H'));
+        seed(st,&moved);
+        Check(moved==0 && kb::SlotVk(st.data(),0x80)==0x24,"a custom H binding that can be used in a helicopter blocks migration");
+        st=homeBindings;
+        kb::WriteSynced(st.data(),0,0x80,kb::CodeOfVk('B'));
+        seed(st,&moved);
+        Check(moved==0 && kb::SlotVk(st.data(),0x80)=='B',"a custom hover binding survives the migration");
     }
 }
 // The jets' gear on the d-pad down, held (plan §3.3 D): a tap is nothing, a hold one toggle's edge.
