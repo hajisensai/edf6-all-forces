@@ -248,6 +248,16 @@ void Models() {
     Check(j.rpm>kJetIdle+300.0f && j.rpm<kJetMil,"the jet: spooling up over seconds");
     for(int i=0;i<600;++i)Step(j,1.0f,true,dt);
     Check(Near(j.rpm,kJetWep) && Near(j.wep,1.0f),"the jet: the afterburner's rpm and lit");
+    // Slammed from idle: unlit through the spool, lit only from military power on.
+    Spool slam;
+    bool early=false;
+    for(int i=0;i<600;++i) {
+        Step(slam,1.0f,true,dt);
+        if(slam.rpm<kJetLight && slam.wep>0.0f)early=true;
+    }
+    Check(!early && Near(slam.rpm,kJetWep) && Near(slam.wep,1.0f),"the jet: the afterburner lights at military power, not before");
+    for(int i=0;i<600;++i)Step(slam,0.6f,false,dt);
+    Check(slam.wep==0.0f && slam.rpm<kJetLight,"the jet: the afterburner out off the last notch");
     Check(Near(AiRpm(kJetIdle),kJetIdle) && Near(AiRpm(kJetWep),kJetAiTop),"the AI's rpm: the player's range onto its sheet");
 }
 

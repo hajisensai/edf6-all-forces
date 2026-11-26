@@ -106,7 +106,7 @@ for body, jet_name in (('PFIGHTER', 'edf6tr_pjet_fighter_mission'), ('PSTRIKE', 
     check(sl.PAYLOAD_KG[body] == int(vc.JET_MASSES[jet.mark]) * share // 100, f"{body}: a player's own jet weighed as its kind")
 check(sl.PAYLOAD_KG['TANK'] == 0, 'the tank is not weighed')
 check(refused(sl.parse_vehicle, 'AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40', 'INTERCEPTOR') and
-      refused(sl.parse_vehicle, 'MK82:40', 'STRIKE') and sl.parse_vehicle('MK82:19,MK82:19', 'STRIKE') is not None and
+      refused(sl.parse_vehicle, 'MK82:40', 'STRIKE') and sl.parse_vehicle('MK82:25,MK82:12', 'STRIKE') is not None and
       sl.parse_vehicle('MK82:6,MK82:6,MK82:4', 'FIGHTER') is not None,
       'over the weight refused, all bombs within it kept (the user\'s own examples)')
 over = sl.Loadout('INTERCEPTOR', False, [('AAM_L', 40)])

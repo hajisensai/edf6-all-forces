@@ -4,8 +4,9 @@
 //  - the NPCs' one budget (lift 0) is bit for bit the code Hover had (OldAccel, copied from it) on random inputs;
 //  - the case from the user's log (2026-10-06 14:57:59): flying 45 m/s forward and sinking 8.3 m/s, the player brakes
 //    (want 0 forward) and holds ascend: the climb rate before (one budget) and after (PlayerLift of the carrier's
-//    120 t) over 4 s. After, it climbs within a second and reaches kWantClimb by 3 s; before, it still sinks at 1 s;
-//  - the lift: the carrier's ~10.6 m/s^2, the heli's own at the heli's mass, capped there for lighter craft, 0 off.
+//    327.2 t, pylib/vcobjects.py JET_MASSES 7005: a C-5M's) over 4 s. After, it climbs within a second and reaches kWantClimb by 3 s; before, it still sinks at 1 s;
+//  - the lift: the carrier's ~10.6 m/s^2 (what it was at its old 120 t: hover_lift.h kFullLiftMass re-weighed with the
+//    jets), the heli's own at kFullLiftMass, capped there for lighter craft (the 0.7 t drones), 0 off.
 //  - the engine (Power, Hover's Motion::power: the player's THR, the engine sound, the carrier's flames): Thrust is bit for
 //    bit Hover's old sum; flown to steady flight at a speed set and a climb (the carrier's drag, kThrustDrag), the
 //    hover takes gravity's share of its full thrust (a middle value), a faster speed set more, a climb more, a descent
@@ -43,7 +44,7 @@ void OldAccel(const float* wantV,const float* vel,float respond,float thrust,flo
     }
 }
 
-constexpr float kDt=1.0f/60.0f,kRespond=2.5f,kJerk=1.2f,kThrust=4.0f,kClimbKey=24.0f,kCarrierMass=120000.0f;
+constexpr float kDt=1.0f/60.0f,kRespond=2.5f,kJerk=1.2f,kThrust=4.0f,kClimbKey=24.0f,kCarrierMass=327200.0f;
 constexpr float kWantClimb=10.0f;   // m/s: the climb the player should have 3 s into braking with ascend held
 constexpr float kDrag=0.12f,kGravity=9.8f;   // jet_internal.h kThrustDrag (kCarrierLean's drag), kG
 
@@ -93,10 +94,10 @@ int main() {
     Expect(same==200000,"lift 0 is the old Hover",same,200000);
 
     const float lift=hover::PlayerLift(kCarrierMass,1.0f);
-    std::printf("lift: carrier %.2f m/s^2, heli %.2f, drone (2.2 t) %.2f, carrier x0 %.2f\n",lift,hover::PlayerLift(hover::kHeliMass,1.0f),
-                hover::PlayerLift(2200.0f,1.0f),hover::PlayerLift(kCarrierMass,0.0f));
-    Expect(std::fabs(lift-24.2f*std::cbrt(10000.0f/120000.0f))<1e-3f,"the carrier's lift",lift);
-    Expect(std::fabs(hover::PlayerLift(2200.0f,1.0f)-hover::kHeliLift)<1e-4f,"a light craft has the heli's lift, no more");
+    std::printf("lift: carrier %.2f m/s^2, heli %.2f, drone (0.7 t) %.2f, carrier x0 %.2f\n",lift,hover::PlayerLift(hover::kFullLiftMass,1.0f),
+                hover::PlayerLift(700.0f,1.0f),hover::PlayerLift(kCarrierMass,0.0f));
+    Expect(std::fabs(lift-24.2f*std::cbrt(10000.0f/120000.0f))<1e-3f,"the carrier's lift: what it had at 120 t",lift);
+    Expect(std::fabs(hover::PlayerLift(700.0f,1.0f)-hover::kHeliLift)<1e-4f,"a light craft has the heli's lift, no more");
     Expect(hover::PlayerLift(kCarrierMass,0.0f)==0.0f,"PlayerRotorLift 0: the one budget");
 
     float before[4],after[4];

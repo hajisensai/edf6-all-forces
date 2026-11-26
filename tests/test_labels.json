@@ -67,7 +67,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -130,7 +129,6 @@
   },
   "allclass_bench_lift": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -376,7 +374,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -433,7 +430,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -451,7 +447,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -469,7 +464,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -487,7 +481,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -505,7 +498,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -523,7 +515,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -541,7 +532,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -559,7 +549,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -602,7 +591,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -621,7 +609,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -639,7 +626,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -675,7 +661,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -891,7 +876,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -943,7 +927,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -970,7 +953,6 @@
   },
   "drive_gear_native": {
    "labels": [
-    "autoturret-tools",
     "native-codec",
     "plugin-native",
     "pylib-model",
@@ -1015,7 +997,6 @@
   },
   "edf41_caption_contract": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -1024,7 +1005,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -1081,7 +1061,6 @@
   },
   "edf41_maps_parallel": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -1118,7 +1097,6 @@
   },
   "edf41_materials": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -1127,7 +1105,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -1265,7 +1242,6 @@
   },
   "edf41_tank_recoil_binding": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -1281,7 +1257,6 @@
   },
   "edf41_vehicle_calls": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -1614,7 +1589,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -2701,6 +2675,13 @@
     "tests/test_goldcoat.py"
    ]
   },
+  "gpufx_glow": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "gpufx_gpu": {
    "labels": [
     "plugin-native",
@@ -2777,7 +2758,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -3104,18 +3084,9 @@
   },
   "ifc_model_guard": {
    "labels": [
-    "autoturret-tools",
-    "cockpit",
-    "edf41",
-    "edf5",
-    "installer",
-    "native-codec",
     "plugin-native",
     "pylib-model",
-    "test-data",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "test-data"
    ],
    "scripts": [
     "tests/ifc_model_guard.py"
@@ -3267,7 +3238,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -3486,7 +3456,6 @@
   },
   "mech_parts": {
    "labels": [
-    "autoturret-tools",
     "native-codec",
     "plugin-native",
     "pylib-model",
@@ -3697,7 +3666,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -3889,19 +3857,11 @@
   "npc_backpack_guard": {
    "labels": [
     "autoturret-tools",
-    "cockpit",
     "docs-guard",
-    "edf41",
-    "edf5",
     "installer",
-    "native-codec",
     "plugin-native",
-    "pylib-model",
     "test-data",
-    "testhub",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "testhub"
    ],
    "scripts": [
     "tests/npc_backpack_guard.py"
@@ -4120,7 +4080,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -4136,7 +4095,6 @@
   },
   "outfit41_color": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -4145,7 +4103,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -4154,7 +4111,6 @@
   },
   "outfit41_color_native": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -4164,7 +4120,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -4174,7 +4129,6 @@
   },
   "outfit41_native": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -4462,7 +4416,6 @@
   },
   "proteus_assets": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -4492,7 +4445,6 @@
   },
   "proteus_install": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -4833,7 +4785,6 @@
   },
   "room_layout": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -4842,7 +4793,6 @@
     "plugin-native",
     "pylib-model",
     "test-data",
-    "testhub",
     "testrange",
     "tools-misc",
     "worldmap"
@@ -5214,7 +5164,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -5235,7 +5184,6 @@
   },
   "sk_terrain_materials": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -5244,7 +5192,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -5578,7 +5525,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -5690,7 +5636,6 @@
   },
   "terrain_shader_native": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -5700,7 +5645,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -5770,7 +5714,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -5840,7 +5783,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6091,7 +6033,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6126,7 +6067,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6239,7 +6179,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6302,7 +6241,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6465,7 +6403,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6483,7 +6420,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6501,7 +6437,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6519,7 +6454,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6537,7 +6471,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6555,7 +6488,6 @@
     "pylib-model",
     "test-data",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6618,17 +6550,8 @@
   },
   "air_chase_wired": {
    "labels": [
-    "autoturret-tools",
-    "cockpit",
-    "edf41",
-    "edf5",
     "installer",
-    "native-codec",
-    "plugin-native",
-    "pylib-model",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "plugin-native"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -6689,7 +6612,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6730,7 +6652,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6779,7 +6700,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6975,7 +6895,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7249,7 +7168,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7361,9 +7279,7 @@
     "native-codec",
     "plugin-native",
     "pylib-model",
-    "testhub",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7380,17 +7296,9 @@
   },
   "cockpit_fields_current": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
-    "edf41",
-    "edf5",
-    "installer",
-    "native-codec",
     "plugin-native",
-    "pylib-model",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "pylib-model"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7405,17 +7313,9 @@
   "cockpit_warnings_wired": {
    "labels": [
     "autoturret-tools",
-    "cockpit",
     "docs-guard",
-    "edf41",
-    "edf5",
-    "installer",
-    "native-codec",
     "plugin-native",
-    "pylib-model",
-    "testhub",
-    "tools-misc",
-    "worldmap"
+    "testhub"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7551,7 +7451,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7577,7 +7476,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7622,7 +7520,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7893,7 +7790,6 @@
   },
   "edf41_calls_convert": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -7912,7 +7808,6 @@
   },
   "edf41_calls_real": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -8122,7 +8017,6 @@
   },
   "edf41_fortress_object_actions": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -8130,7 +8024,6 @@
     "native-codec",
     "plugin-native",
     "pylib-model",
-    "testrange",
     "tools-misc",
     "worldmap"
    ],
@@ -8419,8 +8312,7 @@
    "labels": [
     "edf41",
     "plugin-native",
-    "pylib-model",
-    "test-data"
+    "pylib-model"
    ],
    "scripts": [
     "tests/killcount_native_audit.py",
@@ -8527,7 +8419,6 @@
   },
   "edf41_maps_install": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -8621,7 +8512,6 @@
   },
   "edf41_menu_bg_math": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -8629,7 +8519,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -8641,7 +8530,6 @@
   },
   "edf41_menu_bg_real": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -8650,7 +8538,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -8881,18 +8768,7 @@
   },
   "edf41_objects_after_weapons": {
    "labels": [
-    "autoturret-tools",
-    "cockpit",
-    "edf41",
-    "edf5",
-    "installer",
-    "native-codec",
-    "plugin-native",
-    "pylib-model",
-    "testhub",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "installer"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -8954,7 +8830,6 @@
   },
   "edf41_outfit_item_label": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -8962,9 +8837,7 @@
     "native-codec",
     "plugin-native",
     "pylib-model",
-    "testhub",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -9042,7 +8915,6 @@
   },
   "edf41_outfits_shipped": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -9064,7 +8936,6 @@
   },
   "edf41_rest_behaviour_real": {
    "labels": [
-    "autoturret-tools",
     "edf41",
     "pylib-model"
    ],
@@ -9332,7 +9203,6 @@
   },
   "edf41_sounds_captions_synthetic": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -9340,7 +9210,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -9353,7 +9222,6 @@
   },
   "edf41_sounds_install": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -9399,7 +9267,6 @@
   },
   "edf41_stat_lines": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -9594,7 +9461,6 @@
   },
   "edf41_voice_real": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -9602,7 +9468,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -9616,7 +9481,6 @@
   },
   "edf41_weapon_bank_real": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -9624,7 +9488,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -9652,7 +9515,6 @@
   },
   "edf41_weapons_convert_real": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -9987,7 +9849,6 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -10103,7 +9964,6 @@
   },
   "edf5_dlc_edf6_changed": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -10111,7 +9971,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10130,7 +9989,6 @@
   },
   "edf5_dlc_ownership": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -10138,7 +9996,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10158,7 +10015,6 @@
   },
   "edf5_dlc_round_trip": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -10166,7 +10022,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10186,7 +10041,6 @@
   },
   "edf5_dlc_shipped": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -10471,7 +10325,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10604,7 +10457,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10826,7 +10678,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10958,7 +10809,6 @@
     "pylib-model",
     "testhub",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10987,7 +10837,6 @@
     "pylib-model",
     "testhub",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11015,7 +10864,6 @@
     "pylib-model",
     "testhub",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11300,7 +11148,6 @@
     "pylib-model",
     "testhub",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11662,17 +11509,8 @@
   "installer_removes_what_it_writes": {
    "labels": [
     "autoturret-tools",
-    "cockpit",
-    "edf41",
-    "edf5",
     "installer",
-    "native-codec",
-    "plugin-native",
-    "pylib-model",
-    "testhub",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "plugin-native"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11727,7 +11565,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11763,7 +11600,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11786,7 +11622,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11834,7 +11669,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11874,7 +11708,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11890,7 +11723,6 @@
   },
   "ledger_committed_writer": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -11898,7 +11730,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11915,7 +11746,6 @@
   },
   "ledger_deferred_restore_edges": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -11923,7 +11753,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11940,7 +11769,6 @@
   },
   "ledger_refcounts": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -11948,7 +11776,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12030,7 +11857,6 @@
     "pylib-model",
     "testhub",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12055,7 +11881,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12125,7 +11950,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12314,7 +12138,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12410,7 +12233,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12440,7 +12262,6 @@
     "autoturret-tools",
     "docs-guard",
     "plugin-native",
-    "test-data",
     "testhub"
    ],
    "scripts": [
@@ -12749,7 +12570,6 @@
   },
   "play_edge_margin_is_the_big_maps": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -12758,7 +12578,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12887,7 +12706,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12934,7 +12752,6 @@
   },
   "ported_weapons_registry_current": {
    "labels": [
-    "autoturret-tools",
     "cockpit",
     "edf41",
     "edf5",
@@ -12971,18 +12788,11 @@
   "proteus_wired": {
    "labels": [
     "autoturret-tools",
-    "cockpit",
     "docs-guard",
-    "edf41",
-    "edf5",
-    "installer",
     "native-codec",
     "plugin-native",
     "pylib-model",
-    "testhub",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "testhub"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -13326,18 +13136,9 @@
   },
   "release_reads_no_sources": {
    "labels": [
-    "autoturret-tools",
-    "cockpit",
-    "edf41",
-    "edf5",
     "installer",
-    "native-codec",
-    "plugin-native",
     "pylib-model",
-    "testhub",
-    "testrange",
-    "tools-misc",
-    "worldmap"
+    "testrange"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -13422,7 +13223,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13451,7 +13251,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13842,7 +13641,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13903,7 +13701,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13951,10 +13748,12 @@
    "uses": [
     "ROOT",
     "calls",
+    "dsgo",
     "os",
     "re",
     "sortie_copies_agree",
-    "src"
+    "src",
+    "vc"
    ]
   },
   "sound_at_takes_a_still_sound": {
@@ -14256,7 +14055,6 @@
     "native-codec",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14277,7 +14075,6 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -14404,7 +14201,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14445,7 +14241,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14472,7 +14267,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14837,7 +14631,6 @@
     "plugin-native",
     "pylib-model",
     "testrange",
-    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14914,6 +14707,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",

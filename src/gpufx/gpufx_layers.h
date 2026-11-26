@@ -4,7 +4,8 @@
 //     plane across the bore, a ground dust ring when the muzzle is near the ground, a thick smoke ball pushed out along
 //     the bore that swells, rises and drifts with the wind for 8-20 s; a hand-held launcher's: the smoke ball only,
 //     smaller.
-//   - a blast (EffectGenUtil::Explosion 0x2E5ED0, size = radius / 5): a fireball, a dirt column thrown up and falling
+//   - a blast (EffectGenUtil::Explosion 0x2E5ED0, size = radius / 5; Explosion_Big 0x2E7A30, size = radius / 70; the
+//     event carries the radius): a fireball, a dirt column thrown up and falling
 //     back, a black smoke column rising 10-18 s, debris, low residual smoke 15-25 s; a radius of kHeavyBlast or more (an
 //     artillery shell, a bomb) adds a wide dust cloud for 20-30 s.
 // The counts scale with the size and with `lod` (the caller's: distance to the camera and the pool's load): a far or
@@ -20,6 +21,18 @@ namespace crew::gpufx {
 
 constexpr float kCannonBlast=2.0f;   // m: a shot of a weapon with at least this AmmoExplosion makes smoke
 constexpr float kHeavyBlast=12.0f;   // m: a blast of at least this radius adds the wide dust cloud
+// A vehicle gun's shot is as big as its AmmoExplosion or, for a round that bursts not at all (an APFSDS: 0 m, 350 a
+// round), its AmmoDamage / kDamagePerBlast: a tank's AP shot as big as its HE (8 m, 350), an autocannon's AP (40) or a
+// machine gun's none. A round that leaves slower than kLaunchSpeed (m a frame: a missile off its rail, a rocket out of
+// its tube, 0.3..2) is a launch, not a gun's blast: no flash, no shock ring, its puffs blown back out of the tube, and
+// off the ground nothing (Ace Combat's rail launch: the round drops, then its own motor lights; docs/feature-projectile-look.md).
+constexpr float kDamagePerBlast=40.0f,kLaunchSpeed=2.5f;
+inline float ShotPower(float blast,float damage,float speed,bool vehicle,bool& launch) noexcept {
+    launch=std::isfinite(speed) && speed<kLaunchSpeed;
+    float p=std::isfinite(blast) ? blast : 0.0f;
+    if(vehicle && !launch && std::isfinite(damage))p=(std::max)(p,damage/kDamagePerBlast);
+    return p;
+}
 
 struct LayerDescs {
     int flash=-1,ring=-1,groundDust=-1,muzzleSmoke=-1;
@@ -117,11 +130,21 @@ struct ShotEvent {
     float blast=0.0f;    // the weapon's AmmoExplosion, m
     float ground=0.0f;   // the ground's height under the muzzle (the shooter's feet / hull)
     bool vehicle=false;  // a vehicle's gun (else a hand-held launcher)
+    bool launch=false;   // a missile's or a rocket's launch (ShotPower)
 };
 struct BlastEvent {
     float pos[3];
-    float size=1.0f;     // the stock call's size (radius / 5)
+    float radius=5.0f;   // m (ExplosionRadius / ExplosionBigRadius from the stock call's size)
 };
+
+// The two stock blast calls' size units differ, so a hook turns its size back into the radius first:
+//   - Explosion 0x2E5ED0: the callers pass radius / 5 (0x264B03 divss [0x1765A38] = 5.0; 0x254EE0 the same).
+//   - Explosion_Big 0x2E7A30: the callers pass radius / 70 (0x255192 and 0x287E89 divss [0x179F74C] = 70.0; the
+//     constant callers 0.5-2.5); inside, the stock scatter is size*100 and the point light size*600.
+// Read as radius / 5, a big blast's layers were 14x too small.
+constexpr float kExplosionSizeUnit=5.0f,kExplosionBigSizeUnit=70.0f;
+constexpr float ExplosionRadius(float size) noexcept { return size*kExplosionSizeUnit; }
+constexpr float ExplosionBigRadius(float size) noexcept { return size*kExplosionBigSizeUnit; }
 
 // How many particles of each layer (before the caller's lod), for the budget and the tests.
 struct ShotCounts { int flash,ring,dust,smoke; };
@@ -131,6 +154,12 @@ inline ShotCounts CountShot(const ShotEvent& e,float lod) noexcept {
     const float k=std::clamp(e.blast/10.0f,0.4f,1.6f)*std::clamp(lod,0.0f,1.0f);
     const bool nearGround=e.pos[1]-e.ground<5.0f;
     auto n=[](float v){return static_cast<int>(v+0.5f);};
+    if(e.launch) {   // the tube's backblast on the ground; a rail launch in the air leaves the motor's own trail alone
+        if(!nearGround)return c;
+        c.dust=n(10.0f*k);
+        c.smoke=(std::max)(k>0.0f ? 2 : 0,n(6.0f*k));
+        return c;
+    }
     if(e.vehicle) {
         c.flash=k>0.0f ? 2 : 0;
         c.ring=n(14.0f*k);
@@ -144,7 +173,7 @@ inline ShotCounts CountShot(const ShotEvent& e,float lod) noexcept {
 struct BlastCounts { int fireball,dirt,black,debris,residual,bigDust; };
 inline BlastCounts CountBlast(const BlastEvent& e,float lod) noexcept {
     BlastCounts c{0,0,0,0,0,0};
-    const float r=e.size*5.0f;
+    const float r=e.radius;
     if(!(r>0.2f) || !(lod>0.0f))return c;
     const float k=std::clamp(std::sqrt(r/6.0f),0.35f,2.0f)*std::clamp(lod,0.0f,1.0f);
     auto n=[](float v,int least){return (std::max)(least,static_cast<int>(v+0.5f));};
@@ -153,9 +182,12 @@ inline BlastCounts CountBlast(const BlastEvent& e,float lod) noexcept {
     return c;
 }
 
-// The blast layers' size unit: the radius up to 6 m, then its square root's growth (a 15 m rocket's puffs 9.5, an
-// artillery shell's 40 m 15.5): linear in the radius, a heavy blast's 4x-grown dust puffs were 60 m walls the camera
+// The blast layers' size units. The short-lived ones near the burst (fireball, dirt, black column, debris) are linear
+// in the radius like the stock effect (1-40 m). Only the long-lived low ones (residual smoke, the heavy blast's dust
+// cloud: 15-30 s, growing 3.5-4x) use BlastScale: the radius up to 6 m, then its square root's growth (a 15 m rocket's
+// puffs 9.5, an artillery shell's 40 m 15.5); linear, a heavy blast's 4x-grown dust puffs were 60 m walls the camera
 // stood inside of for half a minute (the range A/B, 2026-11-26).
+inline float BlastNearScale(float r) noexcept { return std::clamp(r,1.0f,40.0f); }
 inline float BlastScale(float r) noexcept { return r<=6.0f ? (std::max)(r,1.0f) : 6.0f*std::sqrt(r/6.0f); }
 
 // A far or crowded event's fewer puffs are bigger: the cover stays about the same (area ~ count * size^2).
@@ -206,7 +238,7 @@ int SpawnShot(Pool<N>& pool,const LayerDescs& l,Rng& rng,const ShotEvent& e,floa
     for(int i=0;i<c.smoke;++i) {
         // Along the bore, the first puffs fastest (they travel furthest before the drag stops them).
         const float f=c.smoke>1 ? static_cast<float>(i)/static_cast<float>(c.smoke-1) : 0.0f;
-        const float speed=(28.0f-20.0f*f)*s+rng.Range(-2.0f,2.0f);
+        const float speed=((28.0f-20.0f*f)*s+rng.Range(-2.0f,2.0f))*(e.launch ? -0.4f : 1.0f);   // a launch's out back
         float v[3];for(int k=0;k<3;++k)v[k]=e.dir[k]*speed+(a[k]*rng.Range(-1.0f,1.0f)+b[k]*rng.Range(-1.0f,1.0f))*2.5f*s;
         made+=pool.Spawn(l.muzzleSmoke,e.pos,v,rng,g*1.5f*s)>=0;
     }
@@ -218,8 +250,9 @@ template<int N>
 int SpawnBlast(Pool<N>& pool,const LayerDescs& l,Rng& rng,const BlastEvent& e,float lod) noexcept {
     const BlastCounts c=CountBlast(e,lod);
     const float g=LodGrow(lod);
-    const float r=e.size*5.0f;
-    const float s=BlastScale(r);                  // the layers' unit sizes are per metre of this
+    const float r=e.radius;
+    const float s=BlastNearScale(r);              // the short-lived layers' unit sizes are per metre of this
+    const float sLow=BlastScale(r);               // the long-lived low layers' (residual, bigDust)
     const float up=std::clamp(std::sqrt(r/6.0f),0.5f,2.2f);   // throw speeds grow slower than the radius
     int made=0;
     auto at=[&](float spread,float lift,float* p){
@@ -251,17 +284,17 @@ int SpawnBlast(Pool<N>& pool,const LayerDescs& l,Rng& rng,const BlastEvent& e,fl
         made+=pool.Spawn(l.debris,p,v,rng,g*1.0f)>=0;
     }
     for(int i=0;i<c.residual;++i) {
-        at(0.5f*s,0.1f*s,p);
+        at(0.5f*sLow,0.1f*sLow,p);
         const float t=rng.Range(0.0f,6.2831853f),speed=rng.Range(1.0f,3.0f)*up;
         const float v[3]{std::cos(t)*speed,rng.Range(0.2f,1.0f),std::sin(t)*speed};
-        made+=pool.Spawn(l.residual,p,v,rng,g*s)>=0;
+        made+=pool.Spawn(l.residual,p,v,rng,g*sLow)>=0;
     }
     for(int i=0;i<c.bigDust;++i) {
         const float t=6.2831853f*(static_cast<float>(i)+rng.Unit())/static_cast<float>(c.bigDust);
         const float speed=rng.Range(6.0f,12.0f)*up;
-        p[0]=e.pos[0]+std::cos(t)*0.3f*s;p[1]=e.pos[1]+0.2f*s;p[2]=e.pos[2]+std::sin(t)*0.3f*s;
+        p[0]=e.pos[0]+std::cos(t)*0.3f*sLow;p[1]=e.pos[1]+0.2f*sLow;p[2]=e.pos[2]+std::sin(t)*0.3f*sLow;
         const float v[3]{std::cos(t)*speed,rng.Range(1.0f,3.0f),std::sin(t)*speed};
-        made+=pool.Spawn(l.bigDust,p,v,rng,g*s)>=0;
+        made+=pool.Spawn(l.bigDust,p,v,rng,g*sLow)>=0;
     }
     return made;
 }

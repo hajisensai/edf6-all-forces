@@ -39,7 +39,11 @@ enum class Kind : std::uint32_t {
     // themselves (Renderer::PrepareTrails), the efs blends 0 / 1 / 2, the stock draw's own depth compare.
     trailAlpha=8,
     trailAdditive=9,
-    trailSubtract=10
+    trailSubtract=10,
+    // A round's halo (gpufx_glow.h): no texel, a smooth radial falloff (1 - r^2)^2 times colour x alpha, added
+    // (ONE/ONE, the target's alpha untouched), softened against the scene depth over `soft`; the card is pulled half
+    // its size towards the camera so the round's own model does not cut it.
+    glow=11
 };
 constexpr bool IsEfs(Kind k) noexcept { return k==Kind::efsAlpha || k==Kind::efsAdditive || k==Kind::efsSubtract; }
 constexpr bool IsTrail(Kind k) noexcept { return k==Kind::trailAlpha || k==Kind::trailAdditive || k==Kind::trailSubtract; }

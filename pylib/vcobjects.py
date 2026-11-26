@@ -218,6 +218,23 @@ class Bomb:
 
 
 ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
+# War Thunder's gun rounds (the user, 2026-11-26: 「抄抄战雷」; docs/feature-projectile-look.md): a bright tracer, no smoke
+# trail. A RocketBullet01 round (the stock bursting tank and autocannon shells) trails white smoke, CP[2] frames a node
+# (the stock 105 mm's 100; white whatever AmmoColor, 0x17A3B60), behind a flame CP[1] frames long in AmmoColor
+# (docs/missile-re.md, RocketBullet01): the smoke off, the flame a short hot streak, its tracer. A SolidBullet01 round's
+# tracer is a 12-point streak of AmmoColor as long as its frame's travel (0x28B6A0): AP_TRACER over the stock's blue.
+SHELL_TRACER_CP = {1: 14.0, 2: 0.0}
+AP_TRACER = (3.6, 1.4, 0.5, 1.0)
+
+
+def wt_tracer(r: dsgo.Node, where: str) -> None:
+    """A RocketBullet01 round's smoke trail off and its flame a tracer (SHELL_TRACER_CP), in place; ValueError when `r`
+    is not one of the stock four-entry RocketBullet01 rounds."""
+    cp = r.get('Ammo_CustomParameter')
+    if r.get('AmmoClass') != 'RocketBullet01' or not isinstance(cp, dsgo.Node) or len(cp.items) != 4:
+        raise ValueError(f'{where} 不是四项 CP 的 RocketBullet01 弹')
+    for i, value in SHELL_TRACER_CP.items():
+        cp.items[i] = value
 
 
 @dataclass(frozen=True)
@@ -495,7 +512,7 @@ STORES: dict[str, Store] = {
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
     # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
     # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
-    'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap'),
+    'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap', colour=AP_TRACER),
                 _local('APFSDS', 'APFSDS（徹甲弾）', 'APFSDS（穿甲彈）', 'APFSDS（穿甲弹）', 'APFSDS（철갑탄）')),
     # Its high-explosive round: the Blacker E's 105 mm round (V_505TANK_CANNON01: RocketBullet01, 3 m a frame rising to
     # its top speed, full gravity, an 8 m blast, 350): the stock E series.
@@ -542,7 +559,7 @@ STORES: dict[str, Store] = {
     # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
     # (V_401STRIKER_CANNONS01: SolidBullet01, penetrating, 40), its HE the Grape's own bursting round
     # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32).
-    'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap'),
+    'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap', colour=AP_TRACER),
                    _local('AP belt', 'AP弾帯（徹甲）', 'AP彈鏈（穿甲）', 'AP弹链（穿甲）', 'AP 탄띠（철갑）')),
     'AC_HE': Store('HE belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNON.SGO', 'RocketBullet01', 'he'),
                    _local('HE belt', 'HE弾帯（榴弾）', 'HE彈鏈（高爆）', 'HE弹链（高爆）', 'HE 탄띠（고폭）')),
@@ -643,17 +660,103 @@ STORES: dict[str, Store] = {
     **{f'MG{tank}': _coax_store(tank, mount) for tank, mount in COAX_MOUNTS.items()},
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
+
+
+@dataclass(frozen=True)
+class Plume:
+    """How a missile store's round looks in flight (the user, 2026-11-26: 「所有导弹、炮弹之类都换得了。抄抄战雷、皇牌空战之类的
+    游戏」; docs/feature-projectile-look.md): Ace Combat's rail drop, white-hot motor and long white trail, on the stock
+    class's own fields (docs/missile-re.md, MissileBullet01):
+      - `ignite`: frames off the rail before the motor lights (CP[7][0]; CP[7][1] 1: the launcher's velocity kept while
+        it drops). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
+        whole flight); the motor's flame and trail emitters open at ignition (0x26AA02).
+      - `trail`: frames a trail node lives (CP[2], a single int: each node 0.9..1.1 of it, 0x268D31; the trail stays
+        where it was laid, it does not drift).
+      - `colour`: AmmoColor, both the trail's start colour (rgb as given, fading to alpha 0) and the motor's flame
+        ((r*4, g*2, b, a), 0x268AEB): over 1 a brighter, whiter trail and a white-hot flame. The trail's and the flame's
+        widths are AmmoSize's (the round's model at its real length, Look), not ours to set."""
+    ignite: float
+    trail: float
+    colour: tuple[float, float, float, float]
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.ignite <= PLUME_IGNITE_MOST and self.trail > 0.0 and len(self.colour) == 4):
+            raise ValueError(f'bad plume {self}')
+
+
+PLUME_IGNITE_MOST = 20.0   # frames: src/missile.cpp neither guides nor fuses-by-proximity it before ignition
+# A jet's (or a helicopter's) rail missile drops 0.2 s clear before it lights, its trail 5-8 s; a ground or ship launcher's
+# tube or cell kicks it out lit almost at once; a gun- or tube-launched anti-tank missile and a rocket light in the tube
+# and trail short and grey. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
+_HOT = (1.5, 1.4, 1.3, 0.85)       # flame (6.0, 2.8, 1.3): white-hot; trail a bright white
+_SAM = (1.6, 1.5, 1.4, 0.9)
+_ATGM = (1.2, 1.1, 1.0, 0.6)       # flame (4.8, 2.2, 1.0), a thinner grey trail
+_ROCKET = (1.25, 1.15, 1.0, 0.7)
+PLUMES: dict[str, Plume] = {
+    'AAM_S': Plume(12.0, 420.0, _HOT), 'AAM_M': Plume(12.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
+    'AGM': Plume(12.0, 300.0, _HOT), 'AGM_L': Plume(10.0, 240.0, _HOT),
+    'ESSM': Plume(4.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(3.0, 360.0, _SAM), 'APOC_SAM': Plume(4.0, 420.0, _SAM),
+    'PATRIOT_SAM': Plume(4.0, 480.0, _SAM),
+    'GLM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGMF': Plume(0.0, 180.0, _ATGM),
+    'RKT': Plume(0.0, 150.0, _ROCKET),
+    'SAZABI_MISSILE': Plume(6.0, 240.0, _HOT),   # SAZABI_MISSILE below: the shield's missiles pop out, then light
+}
+
+
+def plume_of(store: Store) -> Plume | None:
+    """The store's Plume (PLUMES by its STORES key, or the Sazabi's), None: the template's look (the salvo's own)."""
+    kind = next((k for k, s in STORES.items() if s is store), None)
+    if kind is None and store is globals().get('SAZABI_MISSILE'):
+        kind = 'SAZABI_MISSILE'
+    return PLUMES.get(kind) if kind else None
 SALVO_ROUNDS = 256
 SALVO_CHILDREN = 4
+# The salvo's rhythm (src/salvo_volley.h kVolley / kVolleyGap, src/lockon.cpp ShotHook): the plugin fires SALVO_VOLLEY
+# rounds a shot, round n off rail n % 4 (all four rails, twice), and the burst waits FireBurstInterval =
+# SALVO_VOLLEY_GAP frames between volleys: 32 volleys, the last 93 frames (1.55 s) after the first. One lock starts it;
+# the rounds go over every enemy locked, one each first, the rest evenly.
+SALVO_VOLLEY = 8
+SALVO_VOLLEY_GAP = 3
 SALVO_MARK = 7070.0
 SALVO_JET = 'edf6tr_jet_salvo_interceptor_mission'
 SALVO_MODEL = 'EDF6VC_SALVO_INTERCEPTOR.MRAB'
 SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
+# The salvo's launch, after Ace Combat's multi-missile volleys (the user, 2026-11-26: 「参照别的游戏做导弹发射效果…类似王牌空战」):
+# the rounds leave the four rails in volleys (SALVO_VOLLEY every SALVO_VOLLEY_GAP frames), drop clear of the launcher for a beat, light, fan out, then
+# turn onto their locks off the nose; each splits into four bright children. The carrier is MissileBullet02
+# (docs/missile-re.md §MissileBullet02): its CP[7] [frames, factor] the drop before ignition (the launcher's velocity
+# times factor each frame plus AmmoGravityFactor's gravity; own speed AmmoSpeed and no trail), then the motor (own
+# speed + CP[4] a frame to CP[6], the inherited velocity x0.9 a frame and no gravity).
+SALVO_LOCK_CONE = 1.40          # rad, LockonAngle both halves: about 80 deg off the nose (front hemisphere only, 0x22DF30)
+SALVO_EJECT = 0.6               # m a frame off the rail (AmmoSpeed): a push clear, not a shot
+SALVO_DROP = (9.0, 1.0)         # CP[7]: 0.15 s before the motor lights, the launcher's speed kept
+SALVO_DROP_GRAVITY = 12.0       # AmmoGravityFactor, felt only before ignition: ~2 m of drop, 26 m/s down when it lights
+SALVO_FAN = 0.3                 # rad, FireAccuracy: the rounds leave in a 17 deg cone (polar angle uniform in [0, it])
+SALVO_ACCEL = 0.26              # m a frame per frame (CP[4]): own speed SALVO_CHILD_SPEED at the split
+SALVO_TOP = 12.0                # m a frame (CP[6])
+SALVO_HOMING_DELAY = 8.0        # frames after ignition before it steers (CP[8]): the fan opens first
+SALVO_SPLIT_AFTER = 40.0        # frames after ignition it splits (CP[12] = [1, it]: by time, the target alive or not)
+SALVO_SPLIT_CONE = 0.45         # rad, CP[13][2]: the children's cone off the carrier's heading
+SALVO_CHILD_SPEED = 11.0        # m a frame the children leave at (CP[15][5]): the carrier's own speed at the split
+SALVO_CHILD_ACCEL = 0.15        # their CP[4]
+SALVO_CHILD_TURN = 0.15         # their CP[5] (the plugin's PN: lateral acceleration at most |own| x it a frame)
+SALVO_CHILD_TOP = 14.0          # their CP[6]
+SALVO_CHILD_HOMING_DELAY = 6.0  # their CP[8]: a second, smaller fan before they turn
+SALVO_CHILD_SPREAD = (0.9, 1.0)  # their CP[10]: top speed x U[0.9, 1], turn x U[1, 1] (MissileBullet01 ctor 0x267910)
+# AmmoColor, HDR like the stock glowing trails (AWEAPON148's [5, 5, 5, 0.25]): the smoke trail (噴射煙_01.dds) takes
+# it as is, the head flare (Particle3_k.dds) as (r x4, g x2, b) (ctor 0x26BEA4): a white-hot head, a blue-white trail.
+SALVO_COLOUR = (3.0, 3.2, 4.0, 0.4)
+SALVO_CHILD_COLOUR = (2.5, 2.5, 3.0, 0.3)    # CP[15][12]: the children's AmmoColor
+# The rounds' own glow (docs/round-glow.md, drawn by the plugin): (r, g, b, intensity, size m). The carrier white-hot,
+# the children blue-white, the same hues as their trails; the round's model untouched.
+SALVO_GLOW = (1.0, 0.95, 0.9, 6.0, 1.6)
+SALVO_CHILD_GLOW = (0.8, 0.9, 1.0, 4.0, 0.9)
 STORES['SALVO'] = Store(
     'Salvo cluster missile', 'air', 16.0, 0.002,
     replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
-            damage=180.0, blast=4.0, lock_range=4200.0, lock_cone=0.42, lock_time=1.0,
-            burst=float(SALVO_ROUNDS), burst_gap=1.0, interval=float(SALVO_ROUNDS)),
+            damage=180.0, blast=4.0, lock_range=4200.0, lock_cone=SALVO_LOCK_CONE, lock_time=1.0,
+            accel=SALVO_ACCEL * 3600.0, top=SALVO_TOP * 60.0, eject=SALVO_EJECT, spread=SALVO_FAN,
+            burst=float(SALVO_ROUNDS), burst_gap=float(SALVO_VOLLEY_GAP), interval=float(SALVO_ROUNDS)),
     _local('Salvo missile', '斉射ミサイル', '齊射飛彈', '齐射导弹', '일제 사격 미사일'),
     per_pylon=SALVO_ROUNDS // 4, pylon_mass=110.0, pylon_drag=0.015)
 
@@ -832,27 +935,48 @@ def support_file(role: str) -> str:
 
 
 # kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against, and
-# the mass a player-flown aircraft rams with, src/playerjet.cpp RamDamage). Every jet mark has one (tools/selftest.py
-# jet_masses_cover_every_jet): the carriers are the EDF transport x 1.6 (a C-17's class), the Primers' fighter a light
-# fighter's, the blast / doll drones the drone's, the gunship (tools/make_jets.py GUNSHIP_MARK) an AC-130's.
-JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
-              7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
-              7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0,
-              7401.0: 71200.0,   # the Sazabi: its canonical full weight (30.5 t empty)
-              # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a
-              # supercarrier's displacement (~100 kt)
-              7041.0: 14000.0, 7042.0: 15000.0, 7043.0: 22000.0, 7044.0: 13000.0, 7601.0: 1.0e8}
+# the mass a player-flown aircraft rams with, src/playerjet.cpp RamDamage; src/support_loadout.h payloadKg 40 % of it).
+# Every jet mark has one (tools/selftest.py jet_masses_cover_every_jet). Each its real prototype's (the user, 2026-11-26:
+# 「重量全得重新做，全都还原一下」, by the real types; table: docs/feature-support-jet-models.md §8), all in one measure:
+# empty weight + full internal fuel, no external stores (they are weighed on top of it: Burden), crew left out; fuel
+# given as a volume at 0.8 kg/L; rounded to 100 kg. A role's prototype (strike, fighter, interceptor, multirole, the
+# gunship / transport) whatever stock model it wears; a body with none (sci-fi, X-Morph, the drones) the nearest real
+# aircraft its size, unscaled. Figures: Wikipedia's specifications sections unless said.
+JET_MASSES = {
+    7001.0: 21600.0,    # strike: F-15E, 15,694 kg empty + 5,858 kg internal fuel
+    7002.0: 19300.0,    # fighter: F-15C, 13,154 + 6,103
+    7003.0: 27200.0,    # interceptor (AIM-54s): F-14D, 19,838 + 7,348
+    7004.0: 21200.0,    # multirole: F/A-18E, 14,552 + 6,668
+    # the carriers (V508 x 1.6, 59.4 x 17.0 x 76.8 m): the C-5M its size (67.9 x 19.8 x 75.3 m), 172,365 + 154,880
+    7005.0: 327200.0, 7009.0: 327200.0, 7010.0: 327200.0,
+    # the drones (pd607 x 3, 3.5 x 2.3 x 5.7 m; the blast / doll drones the same airframe): the BQM-167A its size
+    # (3.4 x 1.2 x 6.1 m), 313 kg empty + ~435 L of fuel (Kratos' sheet; not a confirmed figure)
+    7006.0: 700.0, 7007.0: 700.0, 7008.0: 700.0,
+    # the gunship (tools/make_jets.py GUNSHIP_MARK): the C-130J airframe, 34,274 + 6,700 US gal (25,360 L); the AC-130J's
+    # guns and mission kit have no published weight (its stores weigh on top)
+    7011.0: 54600.0,
+    7020.0: 25800.0,    # the enemy fighter: Su-27SK, 16,380 + 9,400
+    # the Primers' fighter (19.5 m across, its fuselage 5.9 x 3.2 x 10.9 m: an F-16's box): F-16C Block 50, 8,573 + 3,200
+    7030.0: 11800.0,
+    7201.0: 19300.0, 7202.0: 21600.0,   # the player's fighter and strike jet: their kinds' (7002, 7001)
+    7401.0: 71200.0,   # the Sazabi (not an aircraft): its canonical full weight (30.5 t empty)
+    # the Dreadnought's hangar fighters: the same models as the support's (SUPPORT_JETS), so their roles' prototypes:
+    # the fighter F-15C, the defender F/A-18E, the bomber F-15E, the interceptor F-14D; the Dreadnought (a ship, not an
+    # aircraft): a supercarrier's displacement (~100 kt)
+    7041.0: 19300.0, 7042.0: 21200.0, 7043.0: 21600.0, 7044.0: 27200.0, 7601.0: 1.0e8}
 # ...the support aircraft weigh what their kinds do (SUPPORT_JETS: the same arms, the same payload; src/support_loadout.h
 # kVehicleBodies payloadKg)
 JET_MASSES.update({mark: JET_MASSES[kind_mark] for _n, mark, _m, _k, kind_mark in SUPPORT_JETS.values()})
-JET_MASSES[SALVO_MARK] = JET_MASSES[7003.0]
+# ...the salvo interceptor in the TU-1600 (40.0 x 9.7 x 61.8 m, salvo_model): the Tu-160 its size (55.7 / 35.6 x 13.1 x
+# 54.1 m), 110,000 + 130,000 (a B-1B, 42 / 24 x 10 x 45 m, would be 87,090 + 120,326 per the USAF sheet: 207 t)
+JET_MASSES[SALVO_MARK] = 240000.0
 # ...and the support's C-130s (C130_JETS): the AC-130 the gunship's (C130_GUNSHIP_MARK), the paratroop plane the same
-# airframe's (C130_TRANSPORT_MARK)
+# airframe's (C130_TRANSPORT_MARK): the C-130J's
 C130_GUNSHIP_MARK = 7065.0
 C130_TRANSPORT_MARK = 7066.0
 JET_MASSES[C130_GUNSHIP_MARK] = JET_MASSES[C130_TRANSPORT_MARK] = JET_MASSES[7011.0]
-# ...and the support's air carriers in the model pack's Helicarrier (HELICARRIER_JETS): the carriers' mass (the carrier
-# kind's mark -> the Helicarrier's)
+# ...and the support's air carriers in the model pack's Helicarrier (HELICARRIER_JETS, 46.0 x 16.4 x 80.0 m: the C-5M
+# its size too): the carriers' mass (the carrier kind's mark -> the Helicarrier's)
 HELICARRIER_MARKS = {7005.0: 7067.0, 7009.0: 7068.0, 7010.0: 7069.0}
 JET_MASSES.update({mark: JET_MASSES[kind] for kind, mark in HELICARRIER_MARKS.items()})
 # ...and the X-Morph jets' (pylib/xm_units.py Unit.air 'mass': small airframes, a light jet's to a medium bomber's)
@@ -875,16 +999,16 @@ PRIMER_GUN_FILES: dict[str, tuple[float, float, float, float, float, float, tupl
 }
 _PRIMER_NEEDLE, _PRIMER_SPIT, _PRIMER_BARB, _PRIMER_STING = ('app:/weapon/' + f.lower() for f in PRIMER_GUN_FILES)
 # What a creature sounds like (a Jet's `creature`): the sound bank its cues are in (added to game_sound), the 506's
-# heli_se_table rows (index -> SEPRESET cue: 3 hit, 4 crash, 5 rotor crash, 6-8 the explosions: which of those its
-# death plays is not known, so all three), and ragdoll_contact's cue. A cue the banks do not hold is silence.
+# heli_se_table rows (index -> SEPRESET cue: 3 hit, 4 crash, 6-8 the explosions: which of those its death plays is not
+# known, so all three; 5, the rotor crash, is JET_HELI_SE_ROWS' silence as for every jet), and ragdoll_contact's cue.
 CREATURE_SOUNDS: dict[str, tuple[str, dict[int, str], str]] = {
     # the giant ant's (GIANTANT01.SGO ant_DamageEffectSe / ant_BloodSe / ant_DeadSe)
     'centipede': ('app:/sound/adx/tikyuu4_en_GiantAnt.acb',
-                  {3: '巨大蟻ヒットエフェクト', 4: '巨大蟻衝突', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき大', 7: '敵共通血しぶき小',
+                  {3: '巨大蟻ヒットエフェクト', 4: '巨大蟻衝突', 6: '敵共通血しぶき大', 7: '敵共通血しぶき小',
                    8: '巨大蟻死亡'}, '巨大蟻衝突'),
     # the giant bee's (GIANTBEE01.SGO bee_DamageEffectSe / bee_DamageSe / bee_DeadBloodSe / bee_DeadSe)
     'dragonfly': ('app:/sound/adx/tikyuu4_en_GiantBee.acb',
-                  {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
+                  {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
                    8: '蜂死亡'}, '蜂ダメージ'),
 }
 STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_SALVO, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP,
@@ -897,9 +1021,6 @@ _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
                            *((f, stock) for f, (stock, _k) in XM_GUN_FILES.items()),
                            *((f, JET_BOMB_STOCK if STORES[store_of(_weapon(f))[0]].role == 'bomb' else JET_MISSILE_STOCK)
                              for f in STORE_FILES))}
-# The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
-# does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
-# (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
 # jet_sgo: the seat of an aircraft the player boards. vehicle_riding_position[i][3] is not a pose: it is the seat's
 # name key in the text table (0x7A3500; 505_TANK_DRIVER and 506_HELI_DRIVER both read "Pilot Seat"); the rider's pose
 # is the seat locator's own MAB parameters (Animation / DispCharacter, 0x62B62D), the 506's: rider hidden
@@ -1237,8 +1358,18 @@ TRACKED: dict[str, str] = {
 # what the drill touches (an enemy's lock point within ~6 m) and bursts there; meeting nothing it is gone without a burst.
 DRILL_CHARGE_FILE = 'EDF6VC_DRILL_CHARGE.SGO'
 DRILL_CHARGE_RADIUS, DRILL_CHARGE_SPEED, DRILL_CHARGE_LIFE = 4.0, 2.5, 4
+# The 506's heli_se_table rows a jet must not play (the user, 2026-11-26: 「喷气机的音效怎么用的螺旋桨的…把原版的砍掉吧」),
+# each with the SEPRESET name V506_HELI.SGO holds there (jet_sgo checks them). Its 16 rows (docs/sound-re.md §3):
+# 0 ヘリ起動アイドリング, 1 ヘリローター, 2 ヘリ着陸, 3 ヘリダメージ, 4 ヘリ衝突, 5 ヘリローター衝突, 6-8 ヘリ爆発小/極小/大,
+# 9 ヘリ搭乗, 10 ヘリ降車, 11-13 ビークル水中移動/水中移動停止/水中落ちる, 14-15 ビークル燃料切れ警告/燃料切れ.
+# Silenced: the rotor's (0 start-up and idle, 1 its loop, 5 the rotor striking something) and what only a helicopter
+# does (2 landing, 9 boarding, 10 leaving). Kept: what any vehicle makes (3 hit, 4 crash, 6-8 explosions; 11-15 are
+# the shared ビークル cues: water and fuel). A name SEPRESET.SGO does not hold makes the game's preset empty (0x7B16F0
+# returns false, its cue none) and playing it does nothing (0x7B4510); the plugin plays the engine (src/jetsound.cpp).
 JET_SILENT_SE = 'EDF6VC_SILENT'
-JET_ROTOR_SE_ROWS = (0, 1)
+JET_HELI_SE: dict[int, str] = {0: 'ヘリ起動アイドリング', 1: 'ヘリローター', 2: 'ヘリ着陸', 5: 'ヘリローター衝突', 9: 'ヘリ搭乗',
+                               10: 'ヘリ降車'}
+JET_HELI_SE_ROWS = tuple(JET_HELI_SE)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
     'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _STRIKE),
@@ -1246,8 +1377,8 @@ JETS: dict[str, Jet] = {
     # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
     'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _INTERCEPTOR, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                           'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
-    SALVO_JET: Jet(SALVO_MARK, 1250.0, _SALVO, (f'app:/object/{SALVO_MODEL.lower()}', 'bomber501_2.mdb'),
-                   'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
+    SALVO_JET: Jet(SALVO_MARK, 1250.0, _SALVO, (f'app:/object/{SALVO_MODEL.lower()}', 'edf6vc_salvo_interceptor.mdb'),
+                   SALVO_MODEL, 'body', 'body'),
     # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
@@ -2017,9 +2148,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.file_of(airframe).lower(),
                     _jet_ragdoll(rag[1], body, box[0] if door or airframe is not False else None)]
     se = m.get('heli_se_table')
-    if not isinstance(se, list) or len(se) <= max(JET_ROTOR_SE_ROWS):
+    if not isinstance(se, list) or len(se) <= max(JET_HELI_SE_ROWS) or any(
+            sgo.plain(se[i]) != cue for i, cue in JET_HELI_SE.items()):
         raise ValueError('V506_HELI 的 heli_se_table 不是预期的样子')
-    for i in JET_ROTOR_SE_ROWS:
+    for i in JET_HELI_SE_ROWS:
         se[i] = JET_SILENT_SE
     if jet.creature:
         bank, cues, contact = CREATURE_SOUNDS[jet.creature]
@@ -2252,6 +2384,8 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
     _check_round(shell, r, made=True)
+    if shell.ammo_class == 'RocketBullet01':
+        wt_tracer(r, shell.template)
     if shell.colour is not None:
         colour = r.get('AmmoColor')
         if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
@@ -2410,6 +2544,32 @@ def coax_model(game: Game, name: str) -> bytes:
     return mdb.rab_write(rab)
 
 
+# A round's glow declaration (src/gpufx/gpufx_glow.h, docs/round-glow.md): one more Ammo_CustomParameter entry
+# [GLOW_MARK, r, g, b, intensity, size] at the first index the class's constructor never reads (GLOW_FIRST_FREE: the
+# stock never looks there). MissileBullet01's CP[12] is read only when present (a bool, 0 when absent): padded with 0.
+GLOW_MARK = 7146.0
+GLOW_FIRST_FREE = {'MissileBullet01': 13, 'MissileBullet02': 16}
+GLOW_PAD = {'MissileBullet01': {12: 0.0}}
+
+def declare_glow(cp: dsgo.Node, ammo_class: str, glow: tuple[float, ...]) -> None:
+    """Appends the glow declaration `glow` (r, g, b, intensity, size) to the Ammo_CustomParameter `cp` of a round of
+    `ammo_class`, padding it up to the class's first free index."""
+    free = GLOW_FIRST_FREE.get(ammo_class)
+    if free is None:
+        raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 读法未核实，不能声明发光')
+    r, g, b, intensity, size = glow
+    peak = max(r, g, b)
+    if min(r, g, b) < 0.0 or not 0.0 < peak <= 1.0 or not 0.0 < intensity <= 64.0 or not 0.0 < size <= 50.0:
+        raise ValueError(f'发光声明越界: {glow}')
+    if len(cp.items) > free:
+        raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 已有 {len(cp.items)} 项，超过首个空闲位 {free}')
+    pad = GLOW_PAD.get(ammo_class, {})
+    while len(cp.items) < free:
+        if len(cp.items) not in pad:
+            raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 只有 {len(cp.items)} 项，缺原版读的参数')
+        cp.items.append(pad[len(cp.items)])
+    cp.items.append(dsgo.Node([GLOW_MARK, float(r), float(g), float(b), float(intensity), float(size)]))
+
 def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
     missile = store.weapon
     doc = dsgo.parse(game.read('WEAPON', JET_MISSILE_STOCK))
@@ -2430,6 +2590,16 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         else:
             cp.items[i] = value
     cone.items[0] = cone.items[1] = missile.lock_cone
+    plume = plume_of(store)
+    if plume is not None:
+        if len(cp.items[7].items) != 2 or not isinstance(cp.items[2], float):
+            raise ValueError(f'{JET_MISSILE_STOCK} 的 CP[2] / CP[7] 不是预期的尾烟寿命 / [点火延迟, 衰减]')
+        cp.items[2] = plume.trail
+        cp.items[7].items[:] = [plume.ignite, 1.0]
+        colour = r.get('AmmoColor')
+        if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
+            raise ValueError(f'{JET_MISSILE_STOCK} 的 AmmoColor 不是 4 个数')
+        colour.items[:] = [float(c) for c in plume.colour]
     if missile.muzzle is not None:
         _fire_from(game, r, missile.muzzle)
     if store is STORES['SALVO']:
@@ -2441,14 +2611,27 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         if (source.get('AmmoClass') != 'MissileBullet02' or len(split) != 4
                 or len(split[3].items) != 19 or split[3].items[4] != 'MissileBullet01'):
             raise ValueError('unexpected split missile template')
-        split[0].items[:] = [1.0, 40.0]   # Split after launch even when the target has already died.
-        split[1].items[:] = [0.0, 0.0, 0.24]
+        child = split[3].items[13]
+        if (len(split[3].items[12].items) != 4 or len(child.items) != 12 or len(child.items[10].items) != 2
+                or len(cp.items[7].items) != 2):
+            raise ValueError('unexpected split missile template')
+        split[0].items[:] = [1.0, SALVO_SPLIT_AFTER]   # Split after launch even when the target has already died.
+        split[1].items[:] = [0.0, 0.0, SALVO_SPLIT_CONE]
         split[3].items[2] = float(SALVO_CHILDREN)
-        split[3].items[5] = 5.0
-        split[3].items[13].items[6] = 8.0    # Native guidance can reach a target at the outer edge of the lock box.
+        split[3].items[5] = SALVO_CHILD_SPEED
+        split[3].items[12].items[:] = list(SALVO_CHILD_COLOUR)
+        child.items[4], child.items[5], child.items[6] = SALVO_CHILD_ACCEL, SALVO_CHILD_TURN, SALVO_CHILD_TOP
+        child.items[8] = SALVO_CHILD_HOMING_DELAY
+        child.items[10].items[:] = list(SALVO_CHILD_SPREAD)
+        declare_glow(child, split[3].items[4], SALVO_CHILD_GLOW)
         r.set('AmmoClass', 'MissileBullet02')
-        cp.items[8], cp.items[9] = 4.0, 0.0  # Native guidance for the carrier, not MissileBullet01's plugin mode.
+        r.set('AmmoGravityFactor', SALVO_DROP_GRAVITY)
+        r.get('AmmoColor').items[:] = list(SALVO_COLOUR)
+        cp.items[7].items[:] = list(SALVO_DROP)
+        # Native guidance for the carrier (src/guidance.cpp's PN), not MissileBullet01's plugin mode.
+        cp.items[8], cp.items[9] = SALVO_HOMING_DELAY, 0.0
         cp.items.extend(split)
+        declare_glow(cp, 'MissileBullet02', SALVO_GLOW)
         flash_host = dsgo.parse(game.read('WEAPON', JET_GUN_FILES['EDF6VC_JET_GUN_L.SGO'])).root
         flash = copy.deepcopy(flash_host.get('MuzzleFlash_CustomParameter'))
         if flash_host.get('MuzzleFlash') != 'MuzzleFlash02' or len(flash.items) != 10:

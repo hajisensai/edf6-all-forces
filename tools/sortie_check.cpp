@@ -94,6 +94,43 @@ void Circle() {
     CircleVelocity(c,on,kCircleRadius,kCircleSpeed,-1,v);
     Check(Near(v[2],-kCircleSpeed,1e-4f),"the other way round");
 }
+// The salvo's volleys (src/salvo_volley.h): the rhythm, the rails, and the rounds over the enemies locked.
+void Volleys() {
+    namespace salvo=crew::salvo;
+    Check(salvo::VolleyFrames(salvo::kRounds)==93 && salvo::VolleyFrames(8)==0 && salvo::VolleyFrames(9)==3 &&
+          salvo::VolleyFrames(0)==0,"32 volleys three frames apart");
+    Check(salvo::kVolley>=salvo::kMuzzles && salvo::kVolley%salvo::kMuzzles==0,"every rail fires each volley");
+    // Nodes: enemy A twice (two lock points), B, a dead lock, C.
+    int a=0,b=0,c=0;
+    const void* objects[]={&a,&b,&a,nullptr,&c};
+    int enemyOf[5];
+    Check(salvo::NumberEnemies(objects,5,enemyOf)==3 && enemyOf[0]==0 && enemyOf[1]==1 && enemyOf[2]==0 && enemyOf[3]==-1 &&
+          enemyOf[4]==2,"enemies numbered in the order first locked, a dead lock none");
+    const int first[]={0,1,4,2,1,4};   // A, B, C, then A's second point, B again, C again
+    bool order=true;
+    for(int r=0;r<6;++r)order=order && salvo::SalvoNode(r,enemyOf,5,3)==first[r];
+    Check(order,"every enemy one round before any gets a second; an enemy's lock points in turn");
+    int per[3]={},points[2]={};
+    bool live=true;
+    for(int r=0;r<salvo::kRounds;++r) {
+        const int node=salvo::SalvoNode(r,enemyOf,5,3);
+        live=live && node>=0 && enemyOf[node]>=0;
+        if(node>=0 && enemyOf[node]>=0)++per[enemyOf[node]];
+        if(node==0 || node==2)++points[node/2];
+    }
+    Check(live && per[0]==86 && per[1]==85 && per[2]==85 && points[0]==43 && points[1]==43,
+          "256 rounds over 3 enemies: 86 85 85, never the dead lock");
+    const void* dead[]={nullptr,nullptr};
+    int none[2];
+    Check(salvo::NumberEnemies(dead,2,none)==0 && salvo::SalvoNode(0,none,2,0)==-1 && salvo::SalvoNode(0,enemyOf,0,0)==-1,
+          "no live lock: the round goes unguided");
+    int one=0;
+    const void* single[]={&one};
+    int so[1];
+    bool all=salvo::NumberEnemies(single,1,so)==1;
+    for(int r=0;r<salvo::kRounds;++r)all=all && salvo::SalvoNode(r,so,1,1)==0;
+    Check(all,"one lock takes the whole salvo");
+}
 }  // namespace
 
 int main() {
@@ -101,10 +138,12 @@ int main() {
     Carpet();
     Laps();
     Circle();
-    Check(!SalvoLocked(256,64) && !SalvoLocked(256,255),"missile rain waits for the entire native lock queue");
-    Check(SalvoLocked(256,256) && SalvoLocked(6,8) && !SalvoLocked(0,256),"the native burst has a target for each loaded round");
-    Check(SalvoDraining(1000+256*1000/60,1000) && !SalvoDraining(7000,1000) && !SalvoDraining(1000,0),
-          "the jet stays on its pass until the one-round-per-step burst can finish");
+    Check(SalvoLocked(256,1) && SalvoLocked(256,64) && SalvoLocked(256,256) && !SalvoLocked(256,0) && !SalvoLocked(0,256),
+          "missile rain fires on its first lock");
+    Volleys();
+    const unsigned long long burst=static_cast<unsigned long long>(crew::salvo::VolleyFrames(crew::salvo::kRounds))*1000/60;
+    Check(SalvoDraining(1000+burst,1000) && !SalvoDraining(1000+kRainBurstMs+1,1000) && !SalvoDraining(1000,0),
+          "the jet stays on its pass until the volleys are out");
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n",failures);
     return failures ? 1 : 0;
 }

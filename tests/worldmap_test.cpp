@@ -461,6 +461,12 @@ void Stage6() {
            "the native title and mission region do not receive the armory tab hits");
     Expect(kProgressBar.y0>=kMapTitle.y1 && kProgressBar.y1<=kOpenArea.y0 && kProgressBar.x1<=kOpenArea.x1,
            "the progress bar between the title bar and the open area");
+    // Q / E on the map step the 整备 tabs as in 整备: Q from the map (the last) to 载具, E stays; no wrap at either end.
+    Expect(StepMapTab(kMapTab,-1)==2 && StepMapTab(kMapTab,1)==kMapTab && StepMapTab(0,-1)==0 && StepMapTab(1,1)==2 &&
+           StepMapTab(2,0)==2,"the map's tab keys stop at both ends");
+    // The panel's three key lines: under the last mission line (and its more-below arrow), inside the panel.
+    Expect(kPanelKeysTop>=PanelLineTop(kPanelLines) && PanelKeyTop(kPanelKeyLines)<=kPanel.y1 &&
+           PanelKeyTop(1)-PanelKeyTop(0)>=24.f,"the key lines under the missions, apart, inside the panel");
     // 本关出动: the remembered preset while the book has it, else the one in force.
     Expect(LaunchPreset(2,0,3)==2 && LaunchPreset(5,1,3)==1 && LaunchPreset(-1,1,3)==1 && LaunchPreset(-1,-1,3)==-1 &&
            LaunchPreset(0,0,0)==-1,"the launch preset");

@@ -190,7 +190,7 @@ V EfsVs(uint vid, uint iid) {
 }
 
 V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
-    if (Kind >= 5u) return EfsVs(vid, iid);
+    if (Kind >= 5u && Kind <= 10u) return EfsVs(vid, iid);
     Particle p = Particles[Base + iid];
     float2 c = float2((vid & 1) ? 1.0 : -1.0, (vid & 2) ? -1.0 : 1.0);
     float s, co;
@@ -198,13 +198,15 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     float2 r = float2(c.x * co - c.y * s, c.x * s + c.y * co) * (p.size * CornerScale);
     float4 vp = mul(float4(p.pos, 1.0), View);
     float centre = length(vp.xyz);
+    if (Kind == 11u && centre > 1e-3) vp.xyz *= (centre - min(0.5 * p.size, 0.5 * centre)) / centre;
     vp.xy += r;
     V o;
     o.pos = mul(vp, Proj);
     o.color = p.color;
-    // Ours: a puff whose centre is about as near as its own size fades (the camera inside a dust cloud sees through
-    // it, not a wall); the stock kinds keep their own distance fade.
-    if (Kind == 0u) o.color.a *= saturate((centre - 0.25 * p.size) / max(0.75 * p.size, 0.5));
+    // Ours: a puff fades only once the camera is inside it (its centre nearer than half its size, to nothing at the
+    // centre): the camera inside a dust cloud sees through it, not a wall, while a puff a size away stays whole (a
+    // fade from one size out thinned every near blast). The stock kinds keep their own distance fade.
+    if (Kind == 0u) o.color.a *= saturate(centre / max(0.5 * p.size, 0.5));
     float2 uv = c * float2(0.5, -0.5) + 0.5;
     float last = (float)(max(Frames, 1u) - 1u);
     float fr = clamp(p.frame, 0.0, last);
@@ -219,7 +221,7 @@ V Vs(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     o.vpos = float4(vp.xyz, centre);
     o.nrm = float3(0.0, 1.0, 0.0);
     o.vlight = 0.0;
-    if (Kind >= 3u) {
+    if (Kind >= 3u && Kind <= 4u) {
         // The stock lit VS (0x196F5C0): normalize(normal * w.x + the corner's world direction * w.y + w.z times the
         // direction from the view-space corner to the camera's world position: the stock mixes the two spaces).
         float3 n = LitSet == 1u ? UnpackNormal(asuint(p.emissive)) : float3(0.0, 1.0, 0.0);
@@ -369,6 +371,12 @@ float4 PsGroup(V i, const uint group) {
         }
         float3 rgb = t.rgb * i.color.rgb * light;
         return Kind == 3u ? float4(rgb * a, a) : float4(rgb * fade, a);
+    }
+    if (Kind == 11u) {
+        // The halo: its own falloff, no texel; only colour is added (alpha 0 under ONE/ONE: the target's kept).
+        float2 q = i.uv.xy * 2.0 - 1.0;
+        float g = saturate(1.0 - dot(q, q));
+        return float4(i.color.rgb * (g * g * saturate(i.color.a) * fade), 0.0);
     }
     if (Kind == 1u) return float4(t.rgb * i.color.rgb * a, a);
     return float4(t.rgb * i.color.rgb * fade, a);
@@ -1058,7 +1066,7 @@ bool Renderer::Draw(ID3D11DeviceContext* context,ID3D11Texture2D* depth,unsigned
             ID3D11BlendState* bs=batch.kind==Kind::nativeAlpha || batch.kind==Kind::nativeLitAlpha ? s.blendStockAlpha.Get() :
                 batch.kind==Kind::nativeAdditive || batch.kind==Kind::nativeLitAdditive ? s.blendStockAdd.Get() :
                 batch.kind==Kind::efsAlpha ? s.blendStockAlpha.Get() : batch.kind==Kind::efsAdditive ? s.blendEfsAdd.Get() :
-                batch.kind==Kind::efsSubtract ? s.blendEfsSubtract.Get() : s.blend.Get();
+                batch.kind==Kind::efsSubtract ? s.blendEfsSubtract.Get() : batch.kind==Kind::glow ? s.blendStockAdd.Get() : s.blend.Get();
             context->OMSetBlendState(bs,nullptr,0xFFFFFFFFu);
             const int group=efs ? 3 : lit ? (batch.litSet==2 ? 2 : 4) : batch.kind==Kind::smoke ? 0 : 1;
             ID3D11PixelShader* const pss=s.ps[group].Get();

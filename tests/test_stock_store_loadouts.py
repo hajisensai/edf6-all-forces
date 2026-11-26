@@ -254,6 +254,12 @@ class WithGameTests(unittest.TestCase):
                     changed.add('AmmoColor')
                 if store.weapon.flash is not None:
                     changed.add('MuzzleFlash_CustomParameter')
+                if store.weapon.ammo_class == 'RocketBullet01':   # its smoke trail made a tracer (vc.wt_tracer)
+                    changed.add('Ammo_CustomParameter')
+                    want = list(stock['Ammo_CustomParameter'])
+                    for i, value in vc.SHELL_TRACER_CP.items():
+                        want[i] = value
+                    self.assertEqual(got['Ammo_CustomParameter'], want)
                 self.assertEqual({k: v for k, v in got.items() if k not in changed},
                                  {k: v for k, v in stock.items() if k not in changed})
                 if store.weapon.kind == 'ap':

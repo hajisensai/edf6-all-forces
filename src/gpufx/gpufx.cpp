@@ -1,6 +1,7 @@
 #include "gpufx.h"
 #include "gpufx_batch.h"
 #include "gpufx_efs.h"
+#include "gpufx_glow.h"
 #include "gpufx_gpu.h"
 #include "gpufx_layers.h"
 #include "gpufx_sim.h"
@@ -76,6 +77,10 @@ std::vector<std::uint32_t> publishedIds;   // each one's spawn serial (the fill 
 // at 1080p); past it the biggest puffs are thinned to a stable subset drawn with its opacity raised.
 constexpr float kFillPixels=50.0e6f;
 std::vector<float> fillScratch;
+// The rounds' halos (gpufx_glow.h), published with the smoke, drawn under their own fill budget (about one 4K screen).
+std::vector<Instance> publishedGlow;
+std::vector<std::uint32_t> publishedGlowIds;
+constexpr float kGlowFillPixels=8.0e6f;
 std::atomic<bool> optEnabled{false},optProbe{false},optLayers{false},optEfs{false},optTrails{false};
 std::atomic<int> optTest{0};   // GpuFxTest: 1 the test cards, 2 the cards and the stress (the ultimate strike, three times)
 bool layersInstalled=false;   // Install: the Explosion hook and its particles' branches (game thread reads after)
@@ -111,6 +116,9 @@ ComPtr<ID3D11Texture2D> observedDepth;
 unsigned observedFormat=0;
 std::vector<Instance> renderOwn;
 std::vector<std::uint32_t> renderOwnIds;
+std::vector<Instance> renderGlow;
+std::vector<std::uint32_t> renderGlowIds;
+std::vector<float> glowScratch;
 unsigned lastTargetPixels=0;   // the last drawn view's viewport (the fill budget in screens)
 // The stock cards taken over in this view: their instances and one batch per stock draw (in the stock order).
 // The stock kinds (1..4) may draw up to 1 + Batch::kMore textures in one draw: an instance's slot in its `soft`.
@@ -1241,7 +1249,8 @@ void PublishOptions() noexcept {
 
 // ---- the layered emitters (gpufx_layers.h) ----
 // The events come from the game's own hooks (the shot entry 0x696FD0 through heli.cpp, EffectGenUtil::Explosion
-// 0x2E5ED0 here), queued under eventLock and spawned by TickNative. Both are this machine's: a remote player's round
+// 0x2E5ED0 and Explosion_Big 0x2E7A30 here; each turns its own size unit back into the radius), queued under
+// eventLock and spawned by TickNative. Both are this machine's: a remote player's round
 // is replayed through 0x696FD0 (replay 1), a remote blast is this machine's own bullet's.
 SRWLOCK eventLock=SRWLOCK_INIT;
 constexpr std::size_t kQueueMost=256;
@@ -1258,8 +1267,10 @@ RecentShot recentShots[16]{};
 // Weapon fields (docs/gpufx-re.md, layers): the owner +0x120, the stock muzzle effect +0x480 (0x697F85 skips a null
 // one), AmmoExplosion +0x8B0, the muzzle list +0x1D0 / count +0x1E0, stride 0xF0, an entry's forward +0x70 and
 // position +0x80.
+// AmmoSpeed +0x894 (m a frame) and AmmoDamage +0x89C (the SGO's, vehmix.h) size the shot (gpufx_layers.h ShotPower).
 constexpr std::size_t kWeaponOwner=0x120,kWeaponMuzzleEffect=0x480,kWeaponBlast=0x8B0,kWeaponMuzzles=0x1D0,
-    kWeaponMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleForward=0x70,kMuzzlePosition=0x80;
+    kWeaponMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleForward=0x70,kMuzzlePosition=0x80,kWeaponSpeed=0x894,
+    kWeaponDamage=0x89C;
 
 // EffectGenUtil::Explosion 0x2E5ED0: its head hook (the 15-byte prologue, no relative instructions) and the two
 // "nothing to spawn" branches made unconditional so its own particles are ours: 0x2E68BC (the three ParticleObjects'
@@ -1281,14 +1292,14 @@ using ExplosionBigFn=void(__fastcall*)(void*,const float*,const float*,float,flo
 ExplosionFn explosionNext=nullptr;
 ExplosionBigFn explosionBigNext=nullptr;
 
-void QueueBlast(const float* pos,float size) noexcept {
+void QueueBlast(const float* pos,float radius) noexcept {
     if(!optLayers.load(std::memory_order_relaxed))return;
     __try {
-        if(Readable(pos,12) && std::isfinite(pos[0]) && std::isfinite(pos[1]) && std::isfinite(pos[2]) && std::isfinite(size) && size>0.0f) {
+        if(Readable(pos,12) && std::isfinite(pos[0]) && std::isfinite(pos[1]) && std::isfinite(pos[2]) && std::isfinite(radius) && radius>0.0f) {
             AcquireSRWLockExclusive(&eventLock);
             if(blastQueued<kQueueMost) {
                 BlastEvent& e=blastQueue[blastQueued++];
-                std::memcpy(e.pos,pos,sizeof(e.pos));e.size=size;
+                std::memcpy(e.pos,pos,sizeof(e.pos));e.radius=radius;
             } else layerQueueFull.fetch_add(1,std::memory_order_relaxed);
             ReleaseSRWLockExclusive(&eventLock);
         }
@@ -1296,12 +1307,12 @@ void QueueBlast(const float* pos,float size) noexcept {
 }
 
 void __fastcall ExplosionHook(void* egu,const float* pos,const float* dir,float size,float shake,const float* color,float light) {
-    QueueBlast(pos,size);
+    QueueBlast(pos,ExplosionRadius(size));      // size = radius / 5 (gpufx_layers.h)
     explosionNext(egu,pos,dir,size,shake,color,light);
 }
 
 void __fastcall ExplosionBigHook(void* egu,const float* pos,const float* dir,float size,float shake,unsigned char flag) {
-    QueueBlast(pos,size);
+    QueueBlast(pos,ExplosionBigRadius(size));   // size = radius / 70 (gpufx_layers.h)
     explosionBigNext(egu,pos,dir,size,shake,flag);
 }
 
@@ -1647,6 +1658,84 @@ void BenchTick(ULONGLONG now) noexcept {
     }
 }
 
+// ---- the rounds that glow (gpufx_glow.h, docs/round-glow.md) ----
+// Every live round is on the bullet system's list (blastsound.cpp Flyby: *(EDF+0x20B32F0), the sentinel node at +8,
+// each node {next, prev, core at +0x10}), the player's, the NPCs', the enemies' and a remote player's copies (replayed
+// through the same 0x696FD0, from the same SGO) alike. The round's class: its vtable at core-0x140; its
+// Ammo_CustomParameter: the core's copy at core+0xA58 (0x2307F0; the missiles' constructors read it there, 0x267AB6).
+constexpr unsigned kBulletSystem=0x20B32F0;
+constexpr std::size_t kSystemSentinel=8,kNodeCore=0x10,kBulletCore=0x140,kCoreCustom=0xA58,kCorePos=0xB80,kCoreVel=0xB90;
+constexpr int kMostWalked=4096;
+glow::Cache glowCache;
+struct GlowHit { const unsigned char* core; glow::Glow glow; };
+std::vector<GlowHit> glowHits;
+std::vector<Instance> glowStaging;
+std::vector<std::uint32_t> glowStagingIds;
+std::atomic<unsigned> glowSeen{0},glowKept{0};   // the last frame's glowing rounds and the halos made of them (probe)
+
+// The glowing rounds on the list now into `hits` (at most `most`): their core and their declaration.
+int WalkGlows(GlowHit* hits,int most,ULONGLONG now) noexcept {
+    int n=0;
+    __try {
+        const unsigned char* system=At<const unsigned char*>(image,kBulletSystem);
+        if(!system)return 0;
+        const unsigned char* const sentinel=At<const unsigned char*>(system,kSystemSentinel);
+        if(!sentinel)return 0;
+        int walked=0;
+        for(const unsigned char* node=At<const unsigned char*>(sentinel,0);node && node!=sentinel && walked<kMostWalked;
+            node=At<const unsigned char*>(node,0),++walked) {
+            const unsigned char* core=At<const unsigned char*>(node,kNodeCore);
+            if(!core)continue;
+            const auto vt=static_cast<unsigned>(At<std::uintptr_t>(core-kBulletCore,0)-reinterpret_cast<std::uintptr_t>(image));
+            const int free=glow::FirstFree(vt);
+            if(free<0)continue;
+            const unsigned char* key=core+kCoreCustom;
+            const glow::Cache::Entry* e=glowCache.Find(key,now);
+            if(!e) {
+                double v[glow::kMostFields];int got=0;
+                const int count=CustomTail(key,free,v,glow::kMostFields,&got);
+                glow::Glow g{};
+                const bool ok=glow::CanDeclare(count,free) && glow::Parse(v,got,&g);
+                e=glowCache.Put(key,now,ok ? &g : nullptr);
+            }
+            if(!e->glows || n>=most)continue;
+            hits[n].core=core;hits[n].glow=e->glow;++n;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return n;
+}
+
+// A glowing round's position and velocity (m/s) now; false: not readable or not finite.
+bool GlowAt(const unsigned char* core,float* pos,float* vel) noexcept {
+    __try {
+        std::memcpy(pos,core+kCorePos,12);std::memcpy(vel,core+kCoreVel,12);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+    return std::isfinite(pos[0]+pos[1]+pos[2]);
+}
+
+// This frame's halos into glowStaging / glowStagingIds (their count).
+int BuildGlows(ULONGLONG now) {
+    if(glowHits.size()!=static_cast<std::size_t>(kMostWalked))glowHits.resize(kMostWalked);
+    if(glowStaging.size()!=static_cast<std::size_t>(glow::kMostGlows)) {
+        glowStaging.resize(glow::kMostGlows);glowStagingIds.resize(glow::kMostGlows);
+    }
+    const int hits=WalkGlows(glowHits.data(),kMostWalked,now);
+    const float share=glow::KeepShare(hits);
+    int n=0;
+    for(int i=0;i<hits && n<glow::kMostGlows;++i) {
+        const GlowHit& h=glowHits[static_cast<std::size_t>(i)];
+        const std::uint32_t id=glow::IdOf(reinterpret_cast<std::uintptr_t>(h.core));
+        float pos[3],vel[3];
+        if(!glow::Kept(id,share) || !GlowAt(h.core,pos,vel))continue;
+        glowStaging[static_cast<std::size_t>(n)]=glow::Make(h.glow,pos,vel,share);
+        glowStagingIds[static_cast<std::size_t>(n)]=id;
+        ++n;
+    }
+    glowSeen.store(static_cast<unsigned>(hits),std::memory_order_relaxed);
+    glowKept.store(static_cast<unsigned>(n),std::memory_order_relaxed);
+    return n;
+}
+
 void TickNative() noexcept {
     const ULONGLONG now=GameMs();
     const float dt=lastMs && now>lastMs ? (std::min)(0.1f,static_cast<float>(now-lastMs)*0.001f) : 0.0f;
@@ -1684,8 +1773,12 @@ void TickNative() noexcept {
     poolDropped.store(pool->Dropped(),std::memory_order_relaxed);
     std::vector<Instance> next(staging.begin(),staging.begin()+n);
     std::vector<std::uint32_t> nextIds(stagingIds.begin(),stagingIds.begin()+n);
+    const int glows=BuildGlows(now);
+    std::vector<Instance> nextGlow(glowStaging.begin(),glowStaging.begin()+glows);
+    std::vector<std::uint32_t> nextGlowIds(glowStagingIds.begin(),glowStagingIds.begin()+glows);
     AcquireSRWLockExclusive(&publishLock);
     published.swap(next);publishedIds.swap(nextIds);
+    publishedGlow.swap(nextGlow);publishedGlowIds.swap(nextGlowIds);
     ReleaseSRWLockExclusive(&publishLock);
 }
 
@@ -1772,9 +1865,11 @@ bool ExplosionBigHooked() noexcept { return explosionBigNext!=nullptr; }
 void* ShotBegin(unsigned char* weapon) noexcept {
     if(!optLayers.load(std::memory_order_relaxed))return nullptr;
     __try {
-        if(!Readable(weapon,kWeaponBlast+4,true))return nullptr;
-        const float blast=At<float>(weapon,kWeaponBlast);
-        if(!(blast>=kCannonBlast) || !KnownVehicle(At<const void*>(weapon,kWeaponOwner)))return nullptr;
+        if(!Readable(weapon,kWeaponBlast+4,true) || !KnownVehicle(At<const void*>(weapon,kWeaponOwner)))return nullptr;
+        bool launch=false;
+        const float power=ShotPower(At<float>(weapon,kWeaponBlast),At<float>(weapon,kWeaponDamage),At<float>(weapon,kWeaponSpeed),
+                                    true,launch);
+        if(launch || !(power>=kCannonBlast))return nullptr;   // a launch keeps its stock tube puff
         void* effect=At<void*>(weapon,kWeaponMuzzleEffect);
         *reinterpret_cast<void**>(weapon+kWeaponMuzzleEffect)=nullptr;   // ours draws a vehicle gun's flash and smoke
         return effect;
@@ -1785,7 +1880,11 @@ void ShotEnd(unsigned char* weapon,unsigned muzzle,void* muzzleEffect) noexcept 
     __try {
         if(muzzleEffect)*reinterpret_cast<void**>(weapon+kWeaponMuzzleEffect)=muzzleEffect;
         if(!optLayers.load(std::memory_order_relaxed) || !Readable(weapon,kWeaponBlast+4))return;
-        const float blast=At<float>(weapon,kWeaponBlast);
+        const unsigned char* owner=At<const unsigned char*>(weapon,kWeaponOwner);
+        const bool vehicle=KnownVehicle(owner);
+        bool launch=false;
+        const float blast=ShotPower(At<float>(weapon,kWeaponBlast),At<float>(weapon,kWeaponDamage),At<float>(weapon,kWeaponSpeed),
+                                    vehicle,launch);
         if(!(blast>=kCannonBlast))return;
         const unsigned char* list=At<const unsigned char*>(weapon,kWeaponMuzzles);
         const std::uint64_t count=At<std::uint64_t>(weapon,kWeaponMuzzleCount);
@@ -1796,8 +1895,7 @@ void ShotEnd(unsigned char* weapon,unsigned muzzle,void* muzzleEffect) noexcept 
         const float len=std::sqrt(e.dir[0]*e.dir[0]+e.dir[1]*e.dir[1]+e.dir[2]*e.dir[2]);
         if(!(len>1e-3f) || !std::isfinite(e.pos[0]) || !std::isfinite(e.pos[1]) || !std::isfinite(e.pos[2]))return;
         for(float& v:e.dir)v/=len;
-        const unsigned char* owner=At<const unsigned char*>(weapon,kWeaponOwner);
-        e.vehicle=KnownVehicle(owner);
+        e.vehicle=vehicle;e.launch=launch;
         e.ground=Readable(owner,edf::kPosition+12) ? At<float>(owner,edf::kPosition+4) : e.pos[1]-10.0f;
         e.blast=blast;
         // A fast gun: the full layers once per kShotRefire, a thin shot (a fifth) between.
@@ -1829,7 +1927,9 @@ void Reset() noexcept {
     anchorReady.store(false,std::memory_order_release);
     AcquireSRWLockExclusive(&publishLock);
     published.clear();publishedIds.clear();
+    publishedGlow.clear();publishedGlowIds.clear();
     ReleaseSRWLockExclusive(&publishLock);
+    glowCache.Clear();
     probeReset.store(true,std::memory_order_release);
 }
 
@@ -1870,6 +1970,8 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         AcquireSRWLockShared(&publishLock);
         renderOwn.assign(published.begin(),published.end());
         renderOwnIds.assign(publishedIds.begin(),publishedIds.end());
+        renderGlow.assign(publishedGlow.begin(),publishedGlow.end());
+        renderGlowIds.assign(publishedGlowIds.begin(),publishedGlowIds.end());
         float anchorNow[3];std::memcpy(anchorNow,anchorShared,sizeof(anchorNow));
         ReleaseSRWLockShared(&publishLock);
         // The depth: what is bound at the world's end, else the scene depth seen in this view's opaque pass.
@@ -1914,6 +2016,19 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         }
         if(!renderOwn.empty() && flipGiven) {
             Batch b{};b.instances=renderOwn.data();b.count=static_cast<int>(renderOwn.size());
+            batches.push_back(b);
+        }
+        // The rounds' halos: their own fill budget, one additive batch (Kind::glow draws its own falloff; the renderer
+        // still binds a texture: the flipbook, not sampled for it).
+        if(!renderGlow.empty() && renderGlowIds.size()==renderGlow.size()) {
+            const float screens=kGlowFillPixels/static_cast<float>(lastTargetPixels ? lastTargetPixels : 3840u*2160u);
+            const Thinned t=ThinToBudget(renderGlow.data(),renderGlowIds.data(),static_cast<int>(renderGlow.size()),vp.view,vp.proj,
+                                         vp.proj[11]<0.0f,screens,glowScratch);
+            renderGlow.resize(static_cast<std::size_t>(t.count));
+        }
+        if(!renderGlow.empty() && flipGiven) {
+            Batch b{};b.instances=renderGlow.data();b.count=static_cast<int>(renderGlow.size());
+            b.kind=Kind::glow;b.gridX=b.gridY=b.frames=1;b.sorted=false;
             batches.push_back(b);
         }
         // The records' payloads regrouped: instances, or a trail kind's quads.
@@ -1964,6 +2079,8 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         Log("GPUFX   gpu by bucket (ms, instances): ours %.3f %d, stock %.3f %d, lit 0xC08 %.3f %d, lit 0xA40 %.3f %d, efs %.3f %d, trails %.3f %d",
             st.bucketMs[0],st.bucketDrawn[0],st.bucketMs[1],st.bucketDrawn[1],st.bucketMs[2],st.bucketDrawn[2],st.bucketMs[3],st.bucketDrawn[3],
             st.bucketMs[4],st.bucketDrawn[4],st.bucketMs[5],st.bucketDrawn[5]);
+        Log("GPUFX   round glows: %u glowing rounds, %u halos published, %d drawn this view (the stock-kinds bucket)",
+            glowSeen.load(std::memory_order_relaxed),glowKept.load(std::memory_order_relaxed),static_cast<int>(renderGlow.size()));
         {
             const double screen=st.viewport[2]>0.0f ? static_cast<double>(st.viewport[2])*st.viewport[3] : 3840.0*2160.0;
             Log("GPUFX   ours px by bucket (screens): ours %.2f, stock %.2f, lit 0xC08 %.2f, lit 0xA40 %.2f, efs %.2f, trails %.2f",

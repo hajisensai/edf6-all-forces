@@ -3,7 +3,8 @@
 //
 // ui::HUiHQMissionSelect's vtable 0x18052E8, three slots chained (read and chained, never assumed stock):
 //  - slot 1, OnUpdate 0x8A4F60 (UI thread): the list's elements hidden (shown flag +0x1F8), the map's input read
-//    (a left drag pans, the wheel zooms about the pointer, the right stick pans, LB / LT zoom; only while the select
+//    (a left drag pans, the wheel zooms about the pointer, the right stick pans, LB / LT and Z / C zoom, Q / E step the
+//    整备 tabs as in 整备; only while the select
 //    owns the input: ctx+8, its ui::Input*, not null), the opening move (the whole Earth, then in about a second to
 //    the current mission and its routes' ends), choosing (left / right, R3, a pin or panel line clicked: the native
 //    focus 0x953350; a second click: the stock confirm 0x8A85C0), the rows, pins and panel published for the draw. On a frame the map used input
@@ -372,7 +373,7 @@ void Subclass() noexcept {
     if(!prevProc)return;
     const LONG_PTR was=unicodeProc ? SetWindowLongPtrW(w,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(&WheelProc))
                                    : SetWindowLongPtrA(w,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(&WheelProc));
-    if(!was){Log("WORLDMAP the window's procedure could not be subclassed (%lu): no wheel zoom (LB / LT, Q / E, the stick)",GetLastError());return;}
+    if(!was){Log("WORLDMAP the window's procedure could not be subclassed (%lu): no wheel zoom (LB / LT, Z / C, the stick)",GetLastError());return;}
     prevProc=reinterpret_cast<WNDPROC>(was);
     subclassed=w;
     Log("WORLDMAP window %p subclassed for the wheel",static_cast<void*>(w));
@@ -540,8 +541,6 @@ struct Shot {
     // The panel: the chosen place's missions from `first` (of `total`).
     int lines=0,first=0,total=0;
     PanelLine line[kShownLines]{};
-    int listFirst=0,listLines=0;
-    PanelLine list[kShownLines]{};
     hudtext::Lang lang=hudtext::Lang::en;
     // Stage 6: the title bar (the 整备 tabs, this the last; the preset chips), 本关出动, the campaign's progress.
     wchar_t tab[kTabCount][24]{};
@@ -549,6 +548,7 @@ struct Shot {
     int launch=-1;            // the preset the chosen mission starts with (-1: as equipped, no presets)
     bool remembered=false;    // ...remembered for it (else the one in force)
     wchar_t launchLabel[24]{},launchName[64]{},launchKeys[48]{};
+    wchar_t placeKeys[64]{},zoomKeys[48]{},tabKeys[80]{};   // the panel's key lines (hudtext mapPlaceKeys / ...)
     // A start held for the generator (Launch): what 本关出动's row says instead of the preset; failed: an error.
     wchar_t launchNote[160]{};
     bool launchFailed=false;
@@ -656,7 +656,7 @@ struct Ui {
     int panelFirst=0,panelLines=0;    // the panel's lines as last published (the mouse's hit test)
     int panelEntry[kShownLines]{};
     // Stage 6
-    bool rbWas=false,digitWas[8]{};
+    bool rbWas=false,digitWas[8]{},qWas=false,eWas=false;
     int backTab=-1;           // a 整备 tab clicked: the stock 返回 given to this frame's stock OnUpdate, 整备 opened there
     crew::armory::Presets ps; // the preset book's chips (armory_presets.h), read when the select opened
     // A start held for the generator (Launch): the entry confirmed, the last poll; the entry whose start was refused
@@ -665,7 +665,6 @@ struct Ui {
     ULONGLONG polled=0;
     wchar_t note[160]{};
     bool noteFailed=false;
-    int listFirst=0,listLines=0;
 };
 Ui ui;
 bool backOk=false,launchOk=false;   // kBackSig / the confirm callback's slot checked at load
@@ -893,16 +892,17 @@ void FollowPending(unsigned char* self) noexcept {
     if(launchOk)roomsync::RoomSyncNudge();
     Confirm(self);
 }
-// The title bar clicked: a 整备 tab (the select closed the stock way, 整备 opened at it), a chip (that preset in force).
+// A 整备 tab asked for (`why`: clicked, a key): the select closed the stock way, 整备 opened at it.
+void GoTab(unsigned char* self,int tab,const char* why) noexcept {
+    if(!backOk){Log("WORLDMAP tab %d (%s): the 返回 key's code did not check out at load: not left",tab,why);return;}
+    if(!crew::armoryui::Installed()){Log("WORLDMAP tab %d (%s): 整备 is not installed: not left",tab,why);return;}
+    ui.backTab=tab;
+    Log("WORLDMAP select %p: tab %d (%s): back to the screen under it, 整备 there",static_cast<void*>(self),tab,why);
+}
+// The title bar clicked: a 整备 tab (GoTab), a chip (that preset in force).
 void TitleClick(unsigned char* self) noexcept {
     const int tab=TitleTabAt(ui.pointer);
-    if(tab>=0 && tab!=kMapTab) {
-        if(!backOk){Log("WORLDMAP tab %d clicked: the 返回 key's code did not check out at load: not left",tab);return;}
-        if(!crew::armoryui::Installed()){Log("WORLDMAP tab %d clicked: 整备 is not installed: not left",tab);return;}
-        ui.backTab=tab;
-        Log("WORLDMAP select %p: tab %d clicked: back to the screen under it, 整备 there",static_cast<void*>(self),tab);
-        return;
-    }
+    if(tab>=0 && tab!=kMapTab){GoTab(self,tab,"clicked");return;}
     const int chip=TitleChipAt(ui.ps.count,ui.pointer);
     if(chip<0 || chip==ui.ps.current)return;
     crew::armory::Effects fx;
@@ -918,13 +918,12 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     const bool front=InFront() && !MapHoldsKeys();   // (the mission's map view is never open over the select; the census)
     const Pixel previous=ui.pointer;
     ReadPointer(s);
-    const bool overList=ui.pointerShown && In(kMissionList,ui.pointer);
     const bool overTitle=ui.pointerShown && OverTitle(ui.pointer);
-    const bool overMap=ui.pointerShown && !overTitle && !overList && !OverPanels(ui.pointer) && !OverPanel(ui.pointer);
+    const bool overMap=ui.pointerShown && !overTitle && !OverPanels(ui.pointer) && !OverPanel(ui.pointer);
     const bool overPanel=ui.pointerShown && OverPanel(ui.pointer);
     const bool overLaunch=ui.pointerShown && In(kLaunchRow,ui.pointer);
     const bool rb=front && Down(VK_RBUTTON);
-    wheelToMapUntil.store(input && front && (overMap || overList) ? GetTickCount64()+kWheelHoldMs : 0,std::memory_order_relaxed);
+    wheelToMapUntil.store(input && front && overMap ? GetTickCount64()+kWheelHoldMs : 0,std::memory_order_relaxed);
     const int notches=wheel.exchange(0);
     XINPUT_STATE pad{};
     const bool havePad=(front || edf::PadSource()) && PadState(&pad);
@@ -933,9 +932,10 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     const bool lb=front && Down(VK_LBUTTON);
     bool digit[8];
     for(int i=0;i<8;++i)digit[i]=front && Down('1'+i);
+    const bool qKey=front && Down('Q'),eKey=front && Down('E');
     if(!input) {
         ui.dragging=false;
-        ui.lbWas=lb;ui.r3Was=r3;ui.rKeyWas=rKey;ui.rbWas=rb;
+        ui.lbWas=lb;ui.r3Was=r3;ui.rKeyWas=rKey;ui.rbWas=rb;ui.qWas=qKey;ui.eWas=eKey;
         for(int i=0;i<8;++i)ui.digitWas[i]=digit[i];
         return false;
     }
@@ -975,12 +975,10 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
         if(overTitle) {
             TitleClick(self);
             used=true;
-        } else if(overPanel || overList) {
-            Pixel relative=ui.pointer;
-            if(overList)relative.x+=kPanel.x0-kMissionList.x0;
-            const int line=PanelLineAt(relative,overList ? ui.listLines : ui.panelLines);
+        } else if(overPanel) {
+            const int line=PanelLineAt(ui.pointer,ui.panelLines);
             if(line>=0) {
-                const int entry=overList ? ui.listFirst+line : ui.panelEntry[line];
+                const int entry=ui.panelEntry[line];
                 if(entry==cursor)ui.confirm=Confirmable(self) ? entry : -1;
                 else Choose(self,entry,"a panel line clicked");
             }
@@ -996,11 +994,6 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
     if(!lb)ui.dragging=false;
     ui.lbWas=lb;
     if(notches && overMap){ZoomAt(ui.view,s,ui.pointer,WheelZoom(notches));used=true;}
-    if(notches && overList && rows.n>0) {
-        const int entry=std::clamp(cursor-notches,0,rows.n-1);
-        if(entry!=cursor)Choose(self,entry,"mission list scrolled");
-        used=true;
-    }
     // Left / right (the stock select reads neither: its list is vertical): the nearest place that way with a mission
     // that may be chosen. The stock OnUpdate still gets the input (up / down / confirm in the same frame are its).
     const unsigned repeat=RepeatMask(ctx);
@@ -1036,8 +1029,16 @@ bool TakeInput(unsigned char* self,const unsigned char* ctx,const Screen& s,floa
         }
     }
     if(front) {
-        const bool out=Down('Q'),in=Down('E');
+        const bool out=Down('Z'),in=Down('C');
         if(out || in){const float f=HoldZoom(out,in,dt);if(f!=1.f)ZoomAt(ui.view,s,kMapFocus,f);ui.moving=false;}
+    }
+    // Q / E: the 整备 tabs, as in 整备 (Q the previous, E the next; the map is the last: E stays). The pad has none here
+    // (LB / LT zoom, RB / RT scroll the briefing: the stock's).
+    const int tabDir=(qKey && !ui.qWas ? -1 : 0)+(eKey && !ui.eWas ? 1 : 0);
+    ui.qWas=qKey;ui.eWas=eKey;
+    if(tabDir!=0) {
+        const int tab=StepMapTab(kMapTab,tabDir);
+        if(tab!=kMapTab){GoTab(self,tab,tabDir<0 ? "the Q key" : "the E key");used=true;}
     }
     if(used && (ui.dragging || notches))ui.moving=false;
     return used;
@@ -1094,16 +1095,14 @@ void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     if(out.launch>=0)_snwprintf_s(out.launchName,_TRUNCATE,L"%d  %ls",out.launch+1,ui.ps.names[out.launch]);
     else wcsncpy_s(out.launchName,hudtext::Tr(hudtext::Tx::mapLaunchNone),_TRUNCATE);
     wcsncpy_s(out.launchKeys,hudtext::Tr(hudtext::Tx::mapLaunchKeys),_TRUNCATE);
+    wcsncpy_s(out.placeKeys,hudtext::Tr(hudtext::Tx::mapPlaceKeys),_TRUNCATE);
+    wcsncpy_s(out.zoomKeys,hudtext::Tr(hudtext::Tx::mapZoomKeys),_TRUNCATE);
+    wcsncpy_s(out.tabKeys,hudtext::Tr(hudtext::Tx::mapTabKeys),_TRUNCATE);
     wcsncpy_s(out.launchNote,ui.note,_TRUNCATE);
     out.launchFailed=ui.noteFailed;
     out.progress=CountProgress(rows.state,rows.n);
     _snwprintf_s(out.progressText,_TRUNCATE,hudtext::Tr(hudtext::Tx::mapProgress),out.progress.cleared,out.progress.shown);
     const int total=RowCount();
-    out.listFirst=ScrollFirst(rows.n,cursor,kShownLines);
-    for(int entry=out.listFirst;entry<rows.n && out.listLines<kShownLines;++entry)
-        DescribeLine(out.list[out.listLines++],entry,cursor,total);
-    ui.listFirst=out.listFirst;
-    ui.listLines=out.listLines;
     ui.panelLines=0;
     if(out.chosen<0)return;
     int at[kMaxEntries];
@@ -1420,18 +1419,6 @@ void DrawMarks(const View& v,const Screen& s) noexcept {
         }
 }
 
-// The keys the map adds, in the game's language, two lines (the stock key guide is the main frame's text; not
-// changed): the panel's last two lines, left of the corner piece some HQ themes draw at the bottom right.
-const wchar_t* KeysLine(hudtext::Lang l,int line) noexcept {
-    static const wchar_t* const text[4][2]={
-        {L"←→ Place   R3, R Current mission",L"LB / LT, Q / E Zoom"},
-        {L"←→ 切换地点   R3·R 当前任务",L"LB/LT·Q/E 缩放"},
-        {L"←→ 切換地點   R3·R 目前任務",L"LB/LT·Q/E 縮放"},
-        {L"←→ 地点   R3・R 現在の任務",L"LB/LT・Q/E ズーム"}};
-    const int k=static_cast<int>(l);
-    return text[k>=0 && k<4 ? k : 0][line ? 1 : 0];
-}
-
 // The chosen place's panel: its name, its missions (number, title, state), the cursor's line lit, the keys.
 void DrawPanel() noexcept {
     const Shot& d=drawn;
@@ -1481,10 +1468,14 @@ void DrawPanel() noexcept {
         const float tri[4][2]={{ax-8.f,y-10.f},{ax+8.f,y-10.f},{ax,y},{ax,y}};
         renderer->Quad(tri,0xFFFFFFFFu);
     }
-    Text(KeysLine(d.lang,0),x,kPanel.y1-62.f,20.f,false,0xFFD0D8E0u,300.f);
-    wchar_t second[96];
-    _snwprintf_s(second,_TRUNCATE,L"%ls   %ls",KeysLine(d.lang,1),d.launchKeys);   // 本关出动's keys after the zoom's
-    Text(second,x,kPanel.y1-34.f,20.f,false,0xFFD0D8E0u,w);
+    // The keys the map adds (the stock key guide is the main frame's text, not changed), three lines under the missions
+    // (worldmap_logic.h kPanelKeysTop), left of the corner piece some HQ themes draw at the bottom right: the 整备 tabs,
+    // places, then zoom and 本关出动.
+    Text(d.tabKeys,x,PanelKeyTop(0),20.f,false,0xFFD0D8E0u,w);
+    Text(d.placeKeys,x,PanelKeyTop(1),20.f,false,0xFFD0D8E0u,300.f);
+    wchar_t third[112];
+    _snwprintf_s(third,_TRUNCATE,L"%ls   %ls",d.zoomKeys,d.launchKeys);   // 本关出动's keys after the zoom's
+    Text(third,x,PanelKeyTop(2),20.f,false,0xFFD0D8E0u,w);
 }
 
 // The 整备 title bar (armory_skin.h: the same bar, tabs, chips as the armory's; the map's tab lit) and the campaign's
@@ -1518,25 +1509,6 @@ void DrawTitle() noexcept {
         renderer->Rect(b.x0,b.y0,b.x1,b.y1,0xC0141310u);
         renderer->Rect(b.x0+2.f,b.y0+2.f,b.x0+2.f+(b.x1-b.x0-4.f)*ProgressShare(d.progress),b.y1-2.f,0xFFD8C69Cu);
         Text(d.progressText,b.x1+12.f,b.y0-4.f,16.f,false,0xFFEDE6D2u,500.f);
-    }
-}
-
-void DrawMissionList() noexcept {
-    const Shot& d=drawn;
-    const int lang=static_cast<int>(d.lang);
-    constexpr const wchar_t* titles[]={L"Missions",L"所有关卡",L"所有關卡",L"任務一覧"};
-    const float x=kMissionList.x0+12.f,y=kMissionList.y0;
-    const float w=kMissionList.x1-x-10.f;
-    const float bottom=y+kPanelHeading+kPanelRow*static_cast<float>(d.listLines);
-    renderer->Rect(kMissionList.x0,y,kMissionList.x1,bottom,0x700A1420u);
-    Text(titles[lang>=0 && lang<4 ? lang : 0],x,y+12.f,26.f,true,0xFFFFFFFFu,w);
-    for(int i=0;i<d.listLines;++i) {
-        const PanelLine& l=d.list[i];
-        const float rowY=y+kPanelHeading+kPanelRow*static_cast<float>(i);
-        if(l.cursor)renderer->Rect(kMissionList.x0,rowY,kMissionList.x1,rowY+kPanelRow-2.f,0x70FFD23Cu);
-        const std::uint32_t colour=l.state==3 ? 0xFFC0C0C0u : 0xFFFFFFFFu;
-        Text(l.num,x,rowY+6.f,22.f,true,colour,62.f);
-        Text(l.title,x+68.f,rowY+6.f,22.f,true,colour,w-68.f);
     }
 }
 
@@ -1646,7 +1618,6 @@ void DrawOver(unsigned char* ctx) noexcept {
     renderer->Unclip();
     DrawPanel();
     DrawTitle();
-    if(drawn.listLines>0)DrawMissionList();
     // The pointer: a small cross (the select draws no cursor of its own over the map).
     if(drawn.pointerShown) {
         const float x=drawn.pointer.x,y=drawn.pointer.y;

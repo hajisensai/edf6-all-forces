@@ -22,6 +22,8 @@ bool BodyWorldBox(const void*,float*) noexcept{return false;}
 int VehicleClassOf(const void*) noexcept{return -1;}
 bool IsHelicopter(const void*) noexcept{return false;}
 }
+static_assert(crew::kDrop==crew::rounds::kRailDrop,"missile.cpp's rail drop is the predictor's");
+
 int main(){
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));

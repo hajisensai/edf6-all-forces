@@ -590,15 +590,15 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float tdist=Len(to),off=tdist>1.0f ? std::acos(Clamp(Dot(to,nose)/tdist,-1.0f,1.0f)) : 0.0f;
         const bool salvo=j.sortie.pass==SortiePass::missileRain;
         const float missileReach=salvo ? a.missileRange : MissileReach(k,a);
-        if(!missileOk || off>(salvo ? 0.32f : kMissileCone))t.lockAt=0;
+        if(!missileOk || off>(salvo ? sortie::kRainFireCone : kMissileCone))t.lockAt=0;
         else if(!t.lockAt)t.lockAt=ms;
         missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=SortieLockMs(j,kLockMs) && tdist>kMissileMin &&
                 tdist<missileReach && ms-t.missileAt>SortieMissileGapMs(j,kMissileMs) && !FriendInLine(pos,t.aim,v);
         if(salvo)
             missile=missile && sortie::SalvoLocked(a.missiles,a.locked);
         if(missile && a.pick>=0)
-            missile=!HoldFire(v,t.target,pos,At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
-                              At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);
+            missile=!HoldFire(v,t.target,pos,salvo ? sortie::kRainRoundSpeed : At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
+                              salvo ? 0.0f : At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);
         if(missile) {
             t.missileAt=ms;
             if(Cfg().debug && j.sortie.pass==SortiePass::missileRain && a.pick>=0)LogSalvoLocks(a.stores[a.pick].weapon);
