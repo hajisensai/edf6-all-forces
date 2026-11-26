@@ -6161,6 +6161,24 @@
    ],
    "scripts": []
   },
+  "vehsound_gun": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehsound_trace_record": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehsound_trace_replay": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "view_clip_check": {
    "labels": [
     "plugin-native"

@@ -313,6 +313,10 @@ float GameEffectVolume() noexcept {
 
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept { return sigOk && !broken && Place(pos,vel,out); }
 bool SoundListening() noexcept { return sigOk && !broken && hasListener; }
+bool ListenerState(float* pos,float* vel) noexcept {
+    std::memcpy(pos,listener,sizeof(listener));std::memcpy(vel,listenerVel,sizeof(listenerVel));
+    return sigOk && !broken && hasListener;
+}
 bool ListenerAt(float* pos) noexcept {
     if(!SoundListening())return false;
     std::memcpy(pos,listener,3*sizeof(float));
