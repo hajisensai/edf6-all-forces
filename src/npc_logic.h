@@ -24,10 +24,11 @@ constexpr float kPi=3.14159265f;
 // --- Vectors (x, y, z; y up) ---
 inline float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 inline float Len(const float* a) noexcept { return std::sqrt(Dot(a,a)); }
-inline float Dist(const float* a,const float* b) noexcept {
+inline float DistSquared(const float* a,const float* b) noexcept {
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
-    return Len(d);
+    return Dot(d,d);
 }
+inline float Dist(const float* a,const float* b) noexcept { return std::sqrt(DistSquared(a,b)); }
 inline float Horiz(const float* a,const float* b) noexcept {
     const float dx=b[0]-a[0],dz=b[2]-a[2];
     return std::sqrt(dx*dx+dz*dz);

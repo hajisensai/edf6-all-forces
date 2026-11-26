@@ -149,6 +149,22 @@ void Compare(const std::vector<P>& pts,const npc::grid::Grid& g,int queries,cons
 }  // namespace
 
 int main() {
+    {
+        const auto infinity=std::numeric_limits<float>::infinity();
+        for(int exponent=-32;exponent<=40;++exponent) {
+            const float base=std::ldexp(1.0f,exponent);
+            for(float squared:{std::nextafter(base,0.0f),base,std::nextafter(base,infinity)}) {
+                const float distance=std::sqrt(squared);
+                for(float reach:{0.0f,std::nextafter(distance,0.0f),distance,std::nextafter(distance,infinity)}) {
+                    for(bool current:{false,true}) {
+                        const float score=npc::TargetScore(distance,reach,current);
+                        const float limit=npc::grid::TargetDistanceLimitSquared(score,reach,current ? npc::kKeepTarget : 0.0f);
+                        Check(squared<=limit,"a candidate tied with the best score stays eligible",exponent,current);
+                    }
+                }
+            }
+        }
+    }
     npc::grid::Grid g;
     const float start[3]={0.0f,0.0f,0.0f},end[3]={0.0f,0.0f,100.0f};
     const float points[][3]={{0.0f,0.0f,10.0f},{0.0f,0.0f,40.0f},{0.0f,0.0f,70.0f}};

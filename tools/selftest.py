@@ -7627,7 +7627,8 @@ def air_chase_wired() -> None:
     grid = src('src/npc_grid.h')
     pick = grid.split('int PickTarget(const Grid& g,', 1)[1].split('\n}\n', 1)[0]
     assert 'return npc::PickTarget(n,aimOf,isCurrent,usable,eye,anchor,scope,reach);' in pick and 'g.Odd()' in pick
-    assert 'TargetScore(Dist(eye,aim),reach,isCurrent(i))' in pick and 'if(Horiz(anchor,aim)>scope)return;' in pick
+    assert 'TargetScore(std::sqrt(squared),reach,current)' in pick and 'if(Horiz(anchor,aim)>scope)return;' in pick
+    assert 'squared>distanceLimit[current]' in pick and 'TargetDistanceLimitSquared(bestScore,reach,kKeepTarget)' in pick
     assert '(score==bestScore && i<best)' in pick, 'a tie: the lower index, as the scan'
     assert 'w.enemyGrid.Build(w.enemies,' in npcai and 'w.friendGrid.Build(w.friends,' in npcai, 'the grids built with the lists in Gather'
     assert 'EXCLUDE_FROM_ALL tools/npc_grid_check.cpp' in src('CMakeLists.txt') and \
@@ -7652,8 +7653,10 @@ def air_chase_wired() -> None:
     assert wasted.count('hitpredict::Observe(') == 1
     gather = npcai.split('void Gather(std::int32_t team) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'for(int i=0;i<w.enemies;++i)WatchTarget(w.enemy[static_cast<std::size_t>(i)].object);' in gather
-    assert 'for(const enemypoints::Point& p:s.points)WatchTarget(p.object);' in src('src/heli.cpp')
     heli = src('src/heli.cpp')
+    watch = heli.split('if(!s->watched) {', 1)[1].split('\n    }', 1)[0]
+    assert 's->watched=true;' in watch and 'enemypoints::Visit(stepRegistry,nullptr,' in watch
+    assert 'WatchTarget(object); },s->enemies);' in watch
     assert 'f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });' in heli and heli.count('held())return;') >= 3
     assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
     hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
