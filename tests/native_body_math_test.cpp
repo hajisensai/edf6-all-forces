@@ -65,12 +65,13 @@ unsigned char* BoxHarness() noexcept {
     DWORD protect=0;
     if(!VirtualProtect(mem,4096,PAGE_EXECUTE_READ,&protect)) {VirtualFree(mem,0,MEM_RELEASE);return nullptr;}
     FlushInstructionCache(GetCurrentProcess(),mem,4096);
+    return mem;
+}
+
+bool CaptureBoxArguments() noexcept {
     unsigned char continuation[sizeof(kCapture)];
     std::memcpy(continuation,image+kBoxMergeEnd,sizeof(continuation));
-    if(!edf::PatchCode(image+kBoxMergeEnd,continuation,kCapture,sizeof(kCapture))) {
-        VirtualFree(mem,0,MEM_RELEASE);return nullptr;
-    }
-    return mem;
+    return edf::PatchCode(image+kBoxMergeEnd,continuation,kCapture,sizeof(kCapture));
 }
 
 bool ArgumentsMatch(const MergeFrame& frame,const Proxy& proxy) noexcept {
@@ -714,7 +715,7 @@ int main(int argc,char** argv) {
     if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || !edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return 1;
     auto* const harness=BoxHarness();
     if(!harness || InstallNativeBodyMath()!=kNativeBodyMathSites || image[kBoxMergeCall]!=0xE8 ||
-       image[kBoxMerge]!=0x48 || image[kBoxMerge+2]!=0x4D) {
+       image[kBoxMerge]!=0x48 || image[kBoxMerge+2]!=0x4D || !CaptureBoxArguments()) {
         std::puts("FAIL: native attachment math call sites or signatures do not match");
         return 1;
     }

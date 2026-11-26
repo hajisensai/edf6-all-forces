@@ -542,6 +542,10 @@ void __fastcall TransformBox(float* out,const float* box,const float* matrix) no
 }
 
 void __fastcall TransformAndMergeBox(float* bounds,float* proxy) noexcept {
+    // The continuation reads the body ID and world reference after the box math.
+    const auto body=edf::At<std::uintptr_t>(proxy,0x10);
+    _mm_prefetch(reinterpret_cast<const char*>(body+0xF0),_MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(body+0x100),_MM_HINT_T0);
     const auto transformed=BoxTransform(proxy+0x20/sizeof(float),proxy+0x60/sizeof(float));
     const auto lo=_mm_loadu_ps(bounds),hi=_mm_loadu_ps(bounds+4);
     const auto shrink=_mm_sub_ps(transformed.centre,transformed.half);
@@ -553,7 +557,12 @@ void __fastcall TransformAndMergeBox(float* bounds,float* proxy) noexcept {
 }
 
 bool InstallBoxMerge() noexcept {
-    if(!edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return false;
+    constexpr unsigned char submit[]{
+        0x48,0x8B,0x53,0x10,0x0F,0x10,0x8B,0x90,0,0,0,0x0F,0x5A,0xC1,
+        0x48,0x8B,0x82,0x00,0x01,0,0,0x8B,0x92,0xF0,0,0,0,
+    };
+    if(!edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)) ||
+       !edf::Matches(image,kBoxMergeEnd,submit,sizeof(submit)))return false;
     auto* const site=image+kBoxMerge;
     auto* const target=edf::AllocateNearThunk(site,reinterpret_cast<void*>(&TransformAndMergeBox));
     if(!target)return false;
