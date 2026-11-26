@@ -1,15 +1,20 @@
 // Offline check of the GPU particle effects' pure half (src/gpufx/gpufx_sim.h): curves, the pool's budget and
 // replacement, the step's physics, back-to-front ordering, the depth formulas against standard and reversed
 // projections, the procedural smoke flipbook (clear tile borders, determinism, time), and the taken-over draws
-// coalesced (gpufx_batch.h), the fill budget (ThinToBudget).
+// coalesced (gpufx_batch.h), the fill budget (ThinToBudget), the efs trails' quads (gpufx_trail.h) against the
+// stock strips.
 #include "gpufx/gpufx_batch.h"
 #include "gpufx/gpufx_efs.h"
 #include "gpufx/gpufx_layers.h"
 #include "gpufx/gpufx_sim.h"
+#include "gpufx/gpufx_trail.h"
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 using namespace crew::gpufx;
@@ -419,8 +424,152 @@ static void FillBudget() {
     CHECK(pool.Build(b,4,1,bi)==2 && bi[0]==1u && bi[1]==2u);
 }
 
+// Two payloads (cards and trail quads) through CoalesceWith: each record's emit goes to its own kind's output.
+static void CoalescePayloads() {
+    auto same=[](const Rec& a,const Rec& b){return a.key==b.key && a.add==b.add;};
+    auto orderFree=[](const Rec& r){return r.add;};
+    // key 1 cards (payload A), key 2 trails (payload B), both additive, interleaved: A0 B0 A1 B1.
+    const std::vector<int> a{100,101,102,103},b{200,201,202,203,204,205};
+    std::vector<Rec> records{{1,true,0,2},{2,true,0,3},{1,true,2,2},{2,true,3,3}};
+    std::vector<Rec> out;std::vector<int> outA,outB;
+    CoalesceWith(records,out,same,orderFree,[&](const Rec& r) {
+        const std::vector<int>& from=r.key==1 ? a : b;std::vector<int>& to=r.key==1 ? outA : outB;
+        const std::size_t at=to.size();
+        to.insert(to.end(),from.begin()+r.start,from.begin()+r.start+r.count);
+        return at;
+    });
+    CHECK(out.size()==2u);
+    if(out.size()==2u){CHECK(out[0].key==1 && out[0].start==0 && out[0].count==4);CHECK(out[1].key==2 && out[1].start==0 && out[1].count==6);}
+    CHECK(outA==a);CHECK(outB==b);
+}
+
+// The stock strips (0x10C2240 / 0x10C1E20 as decompiled): the untransformed vertices and the strip's triangles.
+struct StockStrip { std::vector<TrailVertex> v;std::vector<std::uint32_t> tri; };   // tri: three vertex indices each
+static void StripTriangles(StockStrip& s,const std::vector<std::uint32_t>& strip,std::uint32_t base) {
+    for(std::size_t i=0;i+2<strip.size();++i) {
+        std::uint32_t t[3]{strip[i],strip[i+1],strip[i+2]};
+        if(i&1u)std::swap(t[0],t[1]);   // a strip's odd triangle: (i+1, i, i+2)
+        if(t[0]==t[1] || t[1]==t[2] || t[0]==t[2])continue;   // degenerate: no pixels
+        for(const auto k:t)s.tri.push_back(base+k);
+    }
+}
+static TrailVertex StockVertex(const TrailPoint& p,float u,float sign,const float f[3]) {
+    TrailVertex v{};
+    for(int k=0;k<3;++k){v.pos[k]=p.pos[k];v.front[k]=f[k];}
+    for(int k=0;k<4;++k)v.color[k]=p.color[k];
+    v.uvSize[0]=u;v.uvSize[1]=p.v;v.uvSize[2]=sign*p.halfWidth;
+    return v;
+}
+static StockStrip StockExtLine(const std::vector<TrailPoint>& p) {
+    StockStrip s;
+    const unsigned n=static_cast<unsigned>(p.size())&~1u;
+    std::vector<std::uint32_t> idx;
+    for(unsigned i=0;i<n;i+=2) {
+        const float f[3]{p[i+1].pos[0]-p[i].pos[0],p[i+1].pos[1]-p[i].pos[1],p[i+1].pos[2]-p[i].pos[2]};
+        const std::uint32_t at=static_cast<std::uint32_t>(s.v.size());
+        s.v.push_back(StockVertex(p[i],0.0f,1.0f,f));s.v.push_back(StockVertex(p[i],1.0f,-1.0f,f));
+        s.v.push_back(StockVertex(p[i+1],0.0f,1.0f,f));s.v.push_back(StockVertex(p[i+1],1.0f,-1.0f,f));
+        if(i){idx.push_back(at-1);idx.push_back(at);}   // the stitch: 4k+3, 4k+4
+        for(std::uint32_t k=0;k<4;++k)idx.push_back(at+k);
+    }
+    if(n)CHECK(idx.size()==3u*n-2u);
+    StripTriangles(s,idx,0);
+    return s;
+}
+static StockStrip StockLocus(const std::vector<TrailPoint>& p) {
+    StockStrip s;
+    const std::size_t total=p.size();
+    std::size_t at=0,left=total;
+    while(left) {
+        const std::size_t batch=left>512 ? 512 : left,rest=left>512 ? left-512 : 0;
+        const std::uint32_t base=static_cast<std::uint32_t>(s.v.size());
+        std::vector<std::uint32_t> strip;
+        for(std::size_t j=0;j<batch;++j) {
+            const std::size_t i=at+j;
+            float f[3];
+            for(int k=0;k<3;++k) {
+                if(i==0)f[k]=p[i+1].pos[k]-p[i].pos[k];
+                else f[k]=(i==total-1 ? p[i].pos[k] : p[i+1].pos[k])-p[i-1].pos[k];
+            }
+            s.v.push_back(StockVertex(p[i],0.0f,1.0f,f));s.v.push_back(StockVertex(p[i],1.0f,-1.0f,f));
+            strip.push_back(static_cast<std::uint32_t>(2*j));strip.push_back(static_cast<std::uint32_t>(2*j+1));
+        }
+        StripTriangles(s,strip,base);
+        if(!rest)break;
+        at+=batch-1;left=rest+1;   // the next draw restarts at the last point
+    }
+    return s;
+}
+static bool SameVertex(const TrailVertex& ours,const TrailVertex& stock,const float m[16]) {
+    float pos[3],f[3];TrailTransform(stock.pos,m,pos);TrailTurn(stock.front,m,f);
+    for(int k=0;k<3;++k)if(!Near(ours.pos[k],pos[k],1e-3f) || !Near(ours.front[k],f[k],1e-3f) || !Near(ours.uvSize[k],stock.uvSize[k]))return false;
+    for(int k=0;k<4;++k)if(!Near(ours.color[k],stock.color[k]))return false;
+    return true;
+}
+// Ours (quads drawn as the TrailIndex list) against the stock strip: the same non-degenerate triangles, in order,
+// each corner the same vertex (transformed as the stock VS would).
+static void CheckTrail(const StockStrip& stock,const std::vector<TrailQuad>& quads,int n,const float m[16]) {
+    CHECK(stock.tri.size()==static_cast<std::size_t>(n)*6u);
+    if(stock.tri.size()!=static_cast<std::size_t>(n)*6u)return;
+    int bad=0;
+    for(int i=0;i<n*kTrailIndices;++i) {
+        const TrailVertex& ours=quads[static_cast<std::size_t>(i/kTrailIndices)].v[TrailIndex(i)%4];
+        if(!SameVertex(ours,stock.v[stock.tri[static_cast<std::size_t>(i)]],m))++bad;
+    }
+    CHECK(bad==0);
+}
+static std::vector<TrailPoint> TrailPoints(int n) {
+    std::vector<TrailPoint> p(static_cast<std::size_t>(n));
+    for(int i=0;i<n;++i) {
+        TrailPoint& t=p[static_cast<std::size_t>(i)];
+        const float a=0.07f*static_cast<float>(i);
+        t.pos[0]=std::cos(a)*5.0f;t.pos[1]=0.3f*static_cast<float>(i);t.pos[2]=std::sin(a*1.3f)*2.0f;
+        t.color[0]=0.1f*static_cast<float>(i%7);t.color[1]=0.5f;t.color[2]=1.0f-0.01f*static_cast<float>(i%50);
+        t.color[3]=0.02f*static_cast<float>(i%40);
+        t.v=0.013f*static_cast<float>(i);t.halfWidth=0.5f+0.01f*static_cast<float>(i%9);
+    }
+    return p;
+}
+static void Trails() {
+    for(int i=0;i<12;++i) {
+        const int want[]{0,1,2,2,1,3,4,5,6,6,5,7};
+        CHECK(TrailIndex(i)==want[i]);
+    }
+    // A rotated, scaled, moved transform (the engine's layout: rows 0..2 the axes, 12..14 the translation).
+    const float m[16]{0.0f,2.0f,0.0f,0.0f, -2.0f,0.0f,0.0f,0.0f, 0.0f,0.0f,1.5f,0.0f, 10.0f,-4.0f,3.0f,1.0f};
+    for(const int n:{0,1,2,3,7,12,1000,1001}) {
+        const auto p=TrailPoints(n);
+        std::vector<TrailQuad> q(static_cast<std::size_t>(n/2+1));
+        const int got=ExtLineQuads(p.data(),static_cast<unsigned>(n),m,q.data());
+        CHECK(got==n/2);
+        CheckTrail(StockExtLine(p),q,got,m);
+    }
+    for(const int n:{2,3,9,511,512,513,1024,1100}) {
+        const auto p=TrailPoints(n);
+        std::vector<TrailQuad> q(static_cast<std::size_t>(n));
+        const int got=LocusQuads(p.data(),static_cast<unsigned>(n),m,q.data());
+        CHECK(got==n-1);
+        CheckTrail(StockLocus(p),q,got,m);
+    }
+    {
+        const auto p=TrailPoints(1);
+        TrailQuad q[1];
+        CHECK(LocusQuads(p.data(),1u,m,q)==0);CHECK(LocusQuads(p.data(),0u,m,q)==0);
+    }
+    // A quad's four corners share the segment's front; A is u 0 / +half width, B u 1 / -half width.
+    {
+        const auto p=TrailPoints(2);
+        TrailQuad q[1];
+        const float id[16]{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        ExtLineQuads(p.data(),2u,id,q);
+        for(int k=0;k<4;++k)for(int c=0;c<3;++c)CHECK(Near(q[0].v[k].front[c],p[1].pos[c]-p[0].pos[c]));
+        CHECK(Near(q[0].v[0].uvSize[0],0.0f) && Near(q[0].v[1].uvSize[0],1.0f) && Near(q[0].v[0].uvSize[2],-q[0].v[1].uvSize[2]));
+        CHECK(Near(q[0].v[2].pos[0],p[1].pos[0]) && Near(q[0].v[2].uvSize[1],p[1].v));
+    }
+}
+
 int main() {
-    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();Layers();Efs();CoalesceRuns();FillBudget();
+    Curves();Budget();Physics();Ordering();Depth();Flipbook();Determinism();StockCard();Layers();Efs();CoalesceRuns();CoalescePayloads();Trails();FillBudget();
     if(failures){std::printf("gpufx_sim: %d failure(s)\n",failures);return 1;}
     std::printf("gpufx_sim: ok\n");
     return 0;

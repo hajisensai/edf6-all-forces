@@ -42,25 +42,21 @@ struct Coalescing {
     }
 };
 
-// At the world's end: `records` (start / count into `instances`, in the stock order) into `out` (one per draw) with
-// their instances regrouped into `outInstances`.
-template<class Record,class Instance,class Same,class OrderFree>
-void Coalesce(const std::vector<Record>& records,const std::vector<Instance>& instances,std::vector<Record>& out,
-              std::vector<Instance>& outInstances,Same same,OrderFree orderFree) {
-    out.clear();outInstances.clear();
-    outInstances.reserve(instances.size());
+// At the world's end: `records` (in the stock order) into `out` (one per draw). `emit(record)` appends a record's
+// payload to the caller's output and returns where it starts there; a draw's start is its first record's, its count
+// the sum of its records' (the records of one draw are emitted one after another).
+template<class Record,class Same,class OrderFree,class Emit>
+void CoalesceWith(const std::vector<Record>& records,std::vector<Record>& out,Same same,OrderFree orderFree,Emit emit) {
+    out.clear();
     std::vector<std::size_t> groups;   // per record of the run: its group's first record
     std::vector<std::size_t> heads;
     const std::size_t n=records.size();
     std::size_t i=0;
-    auto append=[&](const Record& r) {
-        outInstances.insert(outInstances.end(),instances.begin()+r.start,instances.begin()+r.start+r.count);
-    };
     while(i<n) {
         if(!orderFree(records[i])) {
             Record r=records[i];
-            r.start=static_cast<decltype(r.start)>(outInstances.size());
-            append(records[i]);out.push_back(r);
+            r.start=static_cast<decltype(r.start)>(emit(records[i]));
+            out.push_back(r);
             ++i;continue;
         }
         std::size_t end=i;
@@ -74,12 +70,32 @@ void Coalesce(const std::vector<Record>& records,const std::vector<Instance>& in
         }
         for(std::size_t g=0;g<heads.size();++g) {
             Record r=records[heads[g]];
-            r.start=static_cast<decltype(r.start)>(outInstances.size());r.count=0;
-            for(std::size_t k=i;k<end;++k)if(groups[k-i]==g){append(records[k]);r.count+=records[k].count;}
+            r.count=0;
+            bool first=true;
+            for(std::size_t k=i;k<end;++k) {
+                if(groups[k-i]!=g)continue;
+                const auto at=emit(records[k]);
+                if(first){r.start=static_cast<decltype(r.start)>(at);first=false;}
+                r.count+=records[k].count;
+            }
             out.push_back(r);
         }
         i=end;
     }
+}
+
+// The same with one payload: `records` (start / count into `instances`) with their instances regrouped into
+// `outInstances`.
+template<class Record,class Instance,class Same,class OrderFree>
+void Coalesce(const std::vector<Record>& records,const std::vector<Instance>& instances,std::vector<Record>& out,
+              std::vector<Instance>& outInstances,Same same,OrderFree orderFree) {
+    outInstances.clear();
+    outInstances.reserve(instances.size());
+    CoalesceWith(records,out,same,orderFree,[&](const Record& r) {
+        const std::size_t at=outInstances.size();
+        outInstances.insert(outInstances.end(),instances.begin()+r.start,instances.begin()+r.start+r.count);
+        return at;
+    });
 }
 
 }  // namespace crew::gpufx
