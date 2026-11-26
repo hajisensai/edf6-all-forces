@@ -106,27 +106,55 @@ template<class Before,class After> void Bench(const char* name,Before before,Aft
     std::sort(newTimes.begin(),newTimes.end());
     std::printf("500,000 %s: %.2f -> %.2f ms (median of five runs)\n",name,oldTimes[2],newTimes[2]);
 }
-bool TargetBonusCases() {
-    using Score=void(__fastcall*)(void*,void*);
-    using Read=const void*(__fastcall*)(const void*);
-    using Match=bool(__fastcall*)(const void*,const void*,Read);
-    const auto score=reinterpret_cast<Score>(image+kTargetBonus);
-    const auto stock=reinterpret_cast<Read>(image+kReadWeakTarget);
+using TargetScore=void(__fastcall*)(void*,void*);
+constexpr std::size_t kReferenceEntry=kTargetScore&63u;
+
+void* PreviousTargetScore() noexcept {
+    // Copy the stock callback and reproduce the previous separate held-target check for the timing comparison.
+    constexpr std::size_t bodySize=kTargetScoreFunctionEnd-kTargetScore;
+    constexpr unsigned char gate[]{
+        0x48,0x39,0xB9,0x18,0x05,0,0,0x74,0x03,0x33,0xC0,0xC3,0xFF,0x25,0,0,0,0,
+        0,0,0,0,0,0,0,0,
+    };
+    constexpr unsigned char jump[]{0xFF,0x25,0,0,0,0,0,0,0,0,0,0,0,0};
+    std::array<unsigned char,kReferenceEntry+bodySize+sizeof(gate)+sizeof(jump)> copy{};
+    auto* const body=copy.data()+kReferenceEntry;
+    std::memcpy(body,image+kTargetScore,bodySize);
+    std::memcpy(body+bodySize,gate,sizeof(gate));
+    std::memcpy(body+bodySize+sizeof(gate),jump,sizeof(jump));
+    edf::Put(body,bodySize+sizeof(gate)-sizeof(void*),image+kReadWeakTarget);
+    edf::Put(copy.data(),copy.size()-sizeof(void*),image+0x12DA8BE);
+    const auto redirect=[&](unsigned site,std::size_t destination) {
+        const auto offset=site-kTargetScore;
+        edf::Put(body,offset+1,static_cast<std::int32_t>(destination-(offset+5)));
+    };
+    redirect(0x54A46B,bodySize);
+    redirect(0x54A445,bodySize+sizeof(gate));
+    return edf::AllocateNearCode(image+kTargetScore,copy.data(),copy.size());
+}
+
+bool TargetScoreCases() {
+    const auto score=reinterpret_cast<TargetScore>(image+kTargetScore);
+    auto* const reference=PreviousTargetScore();
+    if(!reference)return false;
+    const auto previous=reinterpret_cast<TargetScore>(static_cast<unsigned char*>(reference)+kReferenceEntry);
     alignas(16) unsigned char observer[0x550]{},holder[0x530]{};
     alignas(16) unsigned char first[0x480]{},second[0x480]{},control[16]{};
-    edf::Put(first,0x90,12.0f);
-    edf::Put(second,0x90,12.0f);
     edf::Put(first,0x47C,0.75f);
     edf::Put(second,0x47C,0.75f);
     edf::Put(observer,0x538,3.0f);
-    edf::Put(observer,0x548,holder+0);
-    edf::Put(holder,0x520,control+0);
 
     struct Choice {
         const void* candidate;
         std::uint32_t score;
+        unsigned fpStatus;
+        int strong;
     };
-    const auto choose=[&](unsigned flags) {
+    using PositionBits=std::array<std::uint32_t,12>;
+    const auto same=[](const Choice& a,const Choice& b) {
+        return a.candidate==b.candidate && a.score==b.score && a.fpStatus==b.fpStatus && a.strong==b.strong;
+    };
+    const auto choose=[&](TargetScore run,unsigned flags,unsigned mxcsr,const PositionBits* bits=nullptr) {
         alignas(16) unsigned char walk[0x40]{};
         edf::Put(walk,0x20,FLT_MAX);
         edf::Put(walk,0x28,observer+0);
@@ -136,45 +164,84 @@ bool TargetBonusCases() {
         edf::Put(holder,0x520,(flags&16) ? static_cast<unsigned char*>(nullptr) : control+0);
         edf::Put(control,8,(flags&32) ? 0 : 2);
         edf::Put(first,0x39C,(flags&64) ? 4u : 0u);
-        edf::Put(first,0x90,(flags&128) ? std::numeric_limits<float>::quiet_NaN() : 12.0f);
-        score(walk,first);
-        score(walk,second);
-        return Choice{edf::At<const void*>(walk,0x30),edf::At<std::uint32_t>(walk,0x20)};
+        const float defaultA[4]{(flags&128) ? std::numeric_limits<float>::quiet_NaN() : 12.0f,0,0,0};
+        constexpr float defaultB[4]{12.0f,0,0,0};
+        std::memcpy(first+0x90,bits ? static_cast<const void*>(bits->data()+4) : defaultA,16);
+        std::memcpy(second+0x90,bits ? static_cast<const void*>(bits->data()+8) : defaultB,16);
+        if(bits)std::memcpy(walk+0x10,bits->data(),16);
+        _mm_setcsr(mxcsr);
+        run(walk,first);
+        run(walk,second);
+        return Choice{edf::At<const void*>(walk,0x30),edf::At<std::uint32_t>(walk,0x20),_mm_getcsr()&0x3F,
+                      edf::At<int>(control,8)};
     };
-    std::array<Choice,256> expected{};
-    for(unsigned i=0;i<expected.size();++i)expected[i]=choose(i);
-    if(expected[0].candidate!=first || expected[4].candidate!=second ||
-       expected[36].candidate!=first || expected[20].candidate!=first)return false;
-    if(!InstallNativeTargetBonus())return false;
-    for(unsigned i=0;i<expected.size();++i) {
-        const auto actual=choose(i);
-        if(actual.candidate!=expected[i].candidate || actual.score!=expected[i].score ||
-           edf::At<int>(control,8)!=((i&32) ? 0 : 2))return false;
-    }
 
-    // Reproduce the native call's use of nonvolatile rdi and the comparison after the call.
-    constexpr unsigned char caller[]{
-        0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xFA,0x41,0xFF,0xD0,0x48,0x3B,0xC7,
-        0x0F,0x94,0xC0,0x48,0x83,0xC4,0x20,0x5F,0xC3,
-    };
-    auto* const code=edf::AllocateNearCode(image+kTargetBonusCall,caller,sizeof(caller));
-    if(!code)return false;
-    const auto match=reinterpret_cast<Match>(code);
-    const auto fast=Redirected<Read>(kTargetBonusCall);
-    edf::Put(holder,0x518,second+0);
-    edf::Put(holder,0x520,control+0);
-    edf::Put(control,8,2);
-    const bool valid=match(holder,second,stock) && match(holder,second,fast) &&
-                     !match(holder,first,stock) && !match(holder,first,fast);
+    const unsigned oldMxcsr=_mm_getcsr();
+    const bool valid=[&] {
+        constexpr unsigned nearest=0x1F80;
+        constexpr unsigned modes[]{nearest,0x3F80,0x5F80,0x7F80,0x9FC0,0xBFC0};
+        constexpr std::uint32_t special[]{0,0x80000000,1,0x807FFFFF,0x00800000,0x7F7FFFFF,0xFF7FFFFF,
+                                          0x7F800000,0xFF800000,0x7FC00091,0x7F8000EA,0x3F800000};
+        std::array<Choice,256> structured{};
+        for(unsigned i=0;i<structured.size();++i) {
+            structured[i]=choose(score,i,nearest);
+            if(!same(choose(previous,i,nearest),structured[i]))return false;
+        }
+        if(structured[0].candidate!=first || structured[4].candidate!=second ||
+           structured[36].candidate!=first || structured[20].candidate!=first)return false;
+
+        constexpr std::size_t cases=1024;
+        std::array<PositionBits,cases> positions{};
+        std::array<std::array<Choice,cases>,std::size(modes)> expected{};
+        std::mt19937 rng(20261127);
+        for(auto& position:positions) {
+            for(auto& field:position) {
+                const auto bits=rng();
+                field=(bits%4) ? bits : special[rng()%std::size(special)];
+            }
+        }
+        for(std::size_t mode=0;mode<std::size(modes);++mode)
+            for(unsigned i=0;i<positions.size();++i)
+                expected[mode][i]=choose(score,i%256,modes[mode],&positions[i]);
+
+        if(!InstallNativeTargetScore())return false;
+        for(unsigned i=0;i<structured.size();++i)
+            if(!same(choose(score,i,nearest),structured[i]))return false;
+        for(std::size_t mode=0;mode<std::size(modes);++mode) {
+            for(unsigned i=0;i<positions.size();++i) {
+                if(!same(choose(score,i%256,modes[mode],&positions[i]),expected[mode][i]))return false;
+            }
+        }
+        std::printf("native target scoring: %zu identical decisions and floating-point status values\n",
+                    structured.size()+std::size(modes)*positions.size());
+        return true;
+    }();
+    _mm_setcsr(oldMxcsr);
+
     if(valid) {
-        Bench("held-target checks (63 unrelated candidates per match)",
-              [&](unsigned i){match(holder,i ? first : second,stock);},
-              [&](unsigned i){match(holder,i ? first : second,fast);});
-        Bench("held-target checks (all match)",
-              [&](unsigned){match(holder,second,stock);},
-              [&](unsigned){match(holder,second,fast);});
+        alignas(16) unsigned char legacyWalk[0x40]{},packedWalk[0x40]{};
+        for(auto* walk:{legacyWalk,packedWalk}) {
+            edf::Put(walk,0x20,FLT_MAX);
+            edf::Put(walk,0x28,observer+0);
+        }
+        constexpr float from[4]{12.0f,2.0f,13.0f,1.0f};
+        constexpr float to[4]{20.0f,4.0f,10.0f,1.0f};
+        std::memcpy(first+0x90,from,16);
+        std::memcpy(second+0x90,to,16);
+        edf::Put(first,0x39C,0u);
+        edf::Put(holder,0x518,second+0);
+        edf::Put(holder,0x520,control+0);
+        edf::Put(control,8,2);
+        edf::Put(observer,0x548,holder+0);
+        Bench("full target scores (63 unrelated candidates per match)",
+              [&](unsigned i){previous(legacyWalk,i ? first : second);},
+              [&](unsigned i){score(packedWalk,i ? first : second);});
+        edf::Put(observer,0x548,static_cast<unsigned char*>(nullptr));
+        Bench("full target scores (no held-target owner)",
+              [&](unsigned i){previous(legacyWalk,i ? first : second);},
+              [&](unsigned i){score(packedWalk,i ? first : second);});
     }
-    VirtualFree(code,0,MEM_RELEASE);
+    VirtualFree(reference,0,MEM_RELEASE);
     return valid && edf::At<int>(control,8)==2;
 }
 
@@ -1004,8 +1071,8 @@ int main(int argc,char** argv) {
     if(!image)return 1;
     const auto* nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
     if(nt->FileHeader.TimeDateStamp!=0x678CCB46 || !edf::Matches(image,kBoxMerge,kBoxMergeStock,sizeof(kBoxMergeStock)))return 1;
-    if(!TargetBonusCases()) {
-        std::puts("FAIL: native held-target bonus differs from stock");
+    if(!TargetScoreCases()) {
+        std::puts("FAIL: native packed target score differs from stock");
         return 1;
     }
     if(!MotionLibraryCases(false)) {
