@@ -25,6 +25,7 @@
 #include "online_authority.h"
 #include "plugin_net.h"
 #include "command_net.h"
+#include "lazy_rows.h"
 #include <cmath>
 #include <cstring>
 
@@ -68,7 +69,7 @@ struct Truck {
     float speed=-1.0f;       // m/s; -1: not measured yet
     bool driven=false;
 };
-Truck trucks[kTrucks]{};
+LazyRows<Truck,kTrucks> trucks;   // heap from the first use (plugin_image_size_guard: no image table)
 bool ok=false,netReady=false;
 unsigned logs=0;
 aura::Msg heard{},sentMsg{};
@@ -76,7 +77,7 @@ ULONGLONG heardAt=0,sentAt=0,lastMs=0,lastFrame=0;
 bool sent=false;
 
 struct Carry { const void* weapon; float carry; ULONGLONG frame; };
-Carry carries[kCarries]{};
+LazyRows<Carry,kCarries> carries;
 
 SRWLOCK viewLock=SRWLOCK_INIT;
 AuraView view{};
@@ -323,6 +324,7 @@ bool InstallAura() noexcept {
         ok=false;
         return false;
     }
+    if(!trucks.Allocate("aura trucks") || !carries.Allocate("aura carries")){ok=false;return false;}
     ok=true;
     Log("AURA ready: %zu sites checked",sizeof(kSigs)/sizeof(kSigs[0]));
     return true;
