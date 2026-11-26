@@ -23,6 +23,7 @@
 #include "memory.h"
 #include "sound_place.h"
 #include "sound_engine.h"
+#include "lazy_rows.h"
 #include "surround.h"
 #include <cmath>
 #include <cstdio>
@@ -59,7 +60,9 @@ struct Sound {
     ULONGLONG lastFrame=0,seen=0,logAt=0;
 };
 Sound sounds[kSounds]{};
-engine::Trail trails[kSounds]{};   // each sound's past (sounds[i]'s): kept apart, 46 KB each
+// Each sound's past (sounds[i]'s), 46 KB each: on the heap from the first jet heard, not in the image (1.5 MB of
+// .data committed for every player otherwise: tests/plugin_image_size_guard.py).
+LazyRows<engine::Trail,kSounds> trails;
 bool sigOk=false,broken=false,started=false;
 float listener[kListenerFloats]{},listenerVel[3]{};
 bool hasListener=false;
@@ -126,7 +129,7 @@ Sound* EntryFor(const unsigned char* v,ULONGLONG ms) noexcept {
     if(!free)return nullptr;
     Silence(*free);
     free->ref=ObjRef::Of(v);
-    trails[free-sounds].count=0;
+    trails[static_cast<std::size_t>(free-sounds)].count=0;   // EntryFor runs after trails.Allocate
     return free;
 }
 
@@ -207,6 +210,7 @@ void Step(unsigned char* v) noexcept {
         if(known)Silence(*known);
         return;
     }
+    if(!trails.Allocate("jet engine sound"))return;   // no heap for the trails: the engines stay silent (logged once)
     Sound* const s=known ? known : EntryFor(v,ms);
     if(!s)return;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -234,7 +238,7 @@ void Step(unsigned char* v) noexcept {
     x.in.v[engine::kSpeed]=kmh;x.in.v[engine::kTurn]=0.0f;
     x.in.v[engine::kSpeedShare]=100.0f*s->speed/top;
     x.ms=ms;
-    engine::Trail& trail=trails[s-sounds];
+    engine::Trail& trail=trails[static_cast<std::size_t>(s-sounds)];
     engine::Push(trail,x);
     const engine::Sample* r=engine::Retarded(trail,listener,ms);
     SoundPlace p{};
