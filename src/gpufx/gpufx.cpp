@@ -1421,6 +1421,7 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         }
         Stats st{};
         bool drew=false;
+        vp.profile=optProbe.load(std::memory_order_relaxed);
         if(!batches.empty() && depth)drew=renderer.Draw(context,depth.Get(),format,vp,batches.data(),static_cast<int>(batches.size()),&st);
         if(drew){Calibrate(st,vp);lastTargetPixels=static_cast<unsigned>(st.viewport[2]*st.viewport[3]);}
         ClearCollected();litCapture.Reset();
@@ -1437,6 +1438,9 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
             st.viewport[3],source,format,st.reversed,st.lookNegZ,st.drawn,st.batches,drew ? "" : " refused: ",drew ? "" : (st.refused ? st.refused : "nothing to draw"),
             probe.cpuSamples ? probe.cpuMs/probe.cpuSamples : 0.0,st.gpuMs,
             st.pixelsShaded>=0.0 && st.viewport[2]>0.0f ? st.pixelsShaded/(static_cast<double>(st.viewport[2])*st.viewport[3]) : -1.0);
+        Log("GPUFX   gpu by bucket (ms, instances): ours %.3f %d, stock %.3f %d, lit 0xC08 %.3f %d, lit 0xA40 %.3f %d, efs %.3f %d",
+            st.bucketMs[0],st.bucketDrawn[0],st.bucketMs[1],st.bucketDrawn[1],st.bucketMs[2],st.bucketDrawn[2],st.bucketMs[3],st.bucketDrawn[3],
+            st.bucketMs[4],st.bucketDrawn[4]);
         const float* P=vp.proj;const float* V=vp.view;
         Log("GPUFX   P=[%.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.6f %.4f | %.4f %.4f %.6f %.4f] jitter x %.6f..%.6f y %.6f..%.6f",
             P[0],P[1],P[2],P[3],P[4],P[5],P[6],P[7],P[8],P[9],P[10],P[11],P[12],P[13],P[14],P[15],

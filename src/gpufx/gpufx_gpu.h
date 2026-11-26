@@ -80,6 +80,7 @@ struct ViewParams {
     float fadeMul=0.0f,fadeAdd=0.0f;
     StockLights lights;   // lit batches are skipped unless complete
     ID3D11Buffer* efsSystem=nullptr;   // xgl_system as an efs draw bound it (608 bytes); efs batches skipped without
+    bool profile=false;   // the probe: a timestamp around every batch, summed per bucket (Stats::bucketMs)
 };
 
 // A unit normal into a float's bits (10 bits a component, below the NaN patterns) and back (the HLSL decodes it).
@@ -101,6 +102,11 @@ struct Stats {
     int drawn=0,batches=0;
     float gpuMs=-1.0f;     // the last resolved GPU time of a Draw (timestamp queries, a few frames late; -1: none yet)
     double pixelsShaded=-1.0;   // the same Draw's pixel shader invocations (pipeline statistics; -1: none yet)
+    // ViewParams::profile: the last resolved per-bucket GPU time and this Draw's instances per bucket (0 ours, 1 the
+    // stock unlit kinds, 2 the stock lit set 0xC08 (lit per vertex), 3 the stock lit set 0xA40 (per pixel), 4 efs).
+    static constexpr int kBuckets=5;
+    float bucketMs[kBuckets]{-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
+    int bucketDrawn[kBuckets]{};
     // The scene's luminance before our draw (the median of five 16x16 blocks of the colour target, read back a few
     // frames late without a stall; -1: none yet) and the brightest block's.
     float sceneLuma=-1.0f,sceneLumaMax=-1.0f;
