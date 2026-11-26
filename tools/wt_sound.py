@@ -3,8 +3,13 @@ Gaijin's official FMOD project for modders (GaijinEntertainment/fmod_studio_wart
 The processed WAVs and assets/sound/wt/SOURCE.md are committed (the repository owner allowed it); the installer puts them in
 Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav (i from 1), which is where the plugin reads them.
 
-  python -I tools/wt_sound.py --src <extracted gaijin_fmod_project> [--out assets/sound/wt]
+  python -I tools/wt_sound.py --src <extracted gaijin_fmod_project> --engine-src <extracted banks> [--out assets/sound/wt]
   python -I tools/wt_sound.py --check [--out assets/sound/wt]     tables and committed files agree (needs no source)
+
+The engines (ENGINES, src/sound_engine.h) are not among the modder project's assets: they are War Thunder's own banks
+(sound/aircraft_engines.assets.bank, sound/tanks_engines.assets.bank), each stream decoded by vgmstream to
+<engine-src>/<bank>.assets.bank/<subsong, 4 digits>_<stream name>.wav; the project's Metadata says which stream is which
+event's file (an AudioFile's assetPath and length against the bank's stream name and length, docs/feature-wt-sound.md).
 
 The source is untrusted downloaded data: run with -I and pass the path as an argument.
 Each file: 16-bit PCM read, channels kept (the MONO set: mixed down to mono), resampled to 48 kHz, 20 Hz high-pass. No per-file
@@ -12,6 +17,10 @@ levelling or normalising (the clips' relative levels are what the FMOD events' d
 peak is over 0.98 full scale every file is scaled by the same gain. The start is kept (layers of one event line up by
 their starts); the tail under -60 dBFS is cut, with a 20 ms fade-out; a clip with a maximum length is cut to it with a
 300 ms fade-out. Output: 16-bit PCM WAV, never lossy-coded again (the source is already vorbis).
+The engines: every one mixed to mono, the same resampling and high-pass (both by FFT over the whole file: a loop's end
+still runs into its start), loops kept whole but their end cross-faded into their start first (loop_seam: several
+of the bank's loops are cut at round lengths and jump there), one gain of their own (ENGINE_PEAK: the engines' levels are their events',
+not set against the guns').
 """
 from __future__ import annotations
 
@@ -32,7 +41,7 @@ PEAK_LIMIT = 0.98
 TAIL_FLOOR = 10 ** (-60 / 20)
 TAIL_FADE = 0.020
 CUT_FADE = 0.300
-MAX_MB = 80
+MAX_MB = 110           # the whole set (the guns' about 66 MiB, the engines' under ENGINE_MAX_MB)
 W = 'tanks/weapon/'
 CLOSE = W + 'cannons/cannons_close_modules/close_17_12_2021/'
 TAILS = W + 'cannons/cannon_common_tails/'
@@ -118,6 +127,56 @@ MONO = {'sub', 'ex_sub', 'xs_far', 'ex_attack_far', 'art_attack_far', 'bomb_far'
 LOOPS = {'turret_loop'}
 MAX_SECONDS = {'close_150': 5.0, 'tail_heavy': 7.0, 'crack_big': 2.5, 'bypass_big': 2.0}
 
+# The engines (src/sound_engine.h): (name, bank, ((subsong, stream name), ...)), an entry a variant. Jets: Master/aircraft/
+# engines/engine05_ej200_WEP (the listener's own), engine05_ej200_WEP_ai and engine_jet_far_ai (the others'). Ground:
+# Master/ground/engines/abrams (gas turbine), leo2a5 (diesel: the strv121 recordings and diesel_hiss), m8 (petrol),
+# tracks_heavy and tracks_wheels, and their ai/ events. A MultiSound loop of several recordings keeps its first (the size).
+AIR, TANK = 'aircraft_engines', 'tanks_engines'
+ENGINES = (
+    ('jet_idle_rear', AIR, ((1050, 'typhoon_idle_rear'),)), ('jet_max_rear', AIR, ((1202, 'typhoon_max_rear'),)),
+    ('jet_idle_front', AIR, ((993, 'typhoon_idle_front'),)), ('jet_max_front', AIR, ((1031, 'typhoon_max_front'),)),
+    ('jet_ab', AIR, ((1259, 'typhoon_afterburner'),)),
+    ('jet_ab_start', AIR, ((1299, 'afterburner_start-001'), (800, 'afterburner_start-002'), (166, 'afterburner_start-003'))),
+    ('jet_turb_02', AIR, ((1207, 'turbine_04_N1_12800_02'),)), ('jet_turb_04', AIR, ((408, 'turbine_04_N1_12800_04'),)),
+    ('jet_turb_06', AIR, ((316, 'turbine_04_N1_12800_06'),)), ('jet_turb_08', AIR, ((1117, 'turbine_04_N1_12800_08'),)),
+    ('jet_turb_085', AIR, ((119, 'turbine_06_N1_8867_085'),)),
+    ('jet_far_low', AIR, ((354, 'jet_low_far'),)), ('jet_far', AIR, ((624, 'jet_far_loop-001'),)),
+    ('jet_approach', AIR, ((709, 'jet-001'),)),
+    ('gt_00', TANK, ((390, 'engine_00'),)), ('gt_33', TANK, ((2577, 'engine_33'),)), ('gt_66', TANK, ((421, 'engine_66'),)),
+    ('gt_99', TANK, ((810, 'engine_99'),)), ('gt_00_load', TANK, ((211, 'engine_00_load'),)),
+    ('gt_33_load', TANK, ((2496, 'engine_33_load'),)), ('gt_66_load', TANK, ((2795, 'engine_66_load'),)),
+    ('gt_99_load', TANK, ((1810, 'engine_99_load'),)), ('gt_dist', TANK, ((33, 'abrams_dist-001'),)),
+    ('di_00', TANK, ((1542, 'strv121_engine_00_exterior'),)), ('di_33', TANK, ((1937, 'strv121_engine_33_exterior'),)),
+    ('di_66', TANK, ((3106, 'strv121_engine_66_exterior'),)),
+    ('di_33_load', TANK, ((892, 'strv121_engine_33_load_exterior'),)),
+    ('di_66_load', TANK, ((1818, 'strv121_engine_66_load_exterior'),)),
+    ('di_99_load', TANK, ((3113, 'strv121_engine_99_load_exterior'),)),
+    ('di_hiss_idle', TANK, ((2641, 'diesel_hiss_idle'),)), ('di_hiss_low', TANK, ((2022, 'diesel_hiss_low'),)),
+    ('di_hiss_high', TANK, ((175, 'diesel_hiss_high'),)),
+    ('di_switch', TANK, ((3063, 'strv121_engine_loadswitch_exterior-001'), (3130, 'strv121_engine_loadswitch_exterior-002'),
+                         (2792, 'strv121_engine_loadswitch_exterior-003'))),
+    ('di_hiss_load', TANK, ((497, 'diesel_hiss_load-001'), (1970, 'diesel_hiss_load-002'))),
+    ('di_off', TANK, ((356, 'engine_turbine_off-001'), (1561, 'engine_turbine_off-002'))),
+    ('pe_00', TANK, ((2026, 'engine_00'),)), ('pe_33', TANK, ((416, 'engine_33'),)), ('pe_66', TANK, ((1325, 'engine_66'),)),
+    ('pe_99', TANK, ((1589, 'engine_99'),)), ('pe_33_load', TANK, ((1566, 'engine_33_load'),)),
+    ('pe_66_load', TANK, ((1136, 'engine_66_load'),)), ('pe_99_load', TANK, ((3088, 'engine_99_load'),)),
+    ('pe_revv', TANK, ((1428, 'engine_revv-001'), (3038, 'engine_revv-002'), (2617, 'engine_revv-003'))),
+    ('pe_release', TANK, ((42, 'engine_release-001'), (1628, 'engine_release-002'), (2635, 'engine_release-003'))),
+    ('tr_33', TANK, ((266, 'tracks_33'),)), ('tr_66', TANK, ((2185, 'tracks_66'),)), ('tr_99', TANK, ((2729, 'tracks_99'),)),
+    ('tr_stop', TANK, ((2650, 'tracks_stop-001'), (694, 'tracks_stop-002'), (741, 'tracks_stop-003'))),
+    ('su_33', TANK, ((1546, 'suspension_33'),)), ('su_66', TANK, ((1152, 'suspension_66'),)),
+    ('su_99', TANK, ((1791, 'suspension_99'),)),
+    ('su_load', TANK, ((2250, 'suspension_load-001'), (1897, 'suspension_load-002'))),
+)
+ENGINE_SOURCES = {n: [f'{bank}.assets.bank/{sub:04d}_{stream}.wav' for sub, stream in v] for n, bank, v in ENGINES}
+# The engines' one-shots (the rest are loops).
+ENGINE_SHOTS = {'jet_ab_start', 'di_switch', 'di_hiss_load', 'di_off', 'pe_revv', 'pe_release', 'tr_stop', 'su_load'}
+ENGINE_LOOPS = set(ENGINE_SOURCES) - ENGINE_SHOTS
+ENGINE_PEAK = 0.9      # the engines' set scaled so its loudest file peaks here (one gain for them all)
+ENGINE_MAX_MB = 40     # the engines' share of the size limit
+LOOP_FADE = 0.1        # s: an engine loop's end cross-faded into its start (loop_seam)
+ALL_SOURCES = {**SOURCES, **ENGINE_SOURCES}
+
 
 def clip_table(path: str = CLIPS_H) -> dict[str, int]:
     with open(path, encoding='utf-8') as f:
@@ -131,7 +190,7 @@ def clip_table(path: str = CLIPS_H) -> dict[str, int]:
 
 def validate_tables() -> dict[str, int]:
     want = clip_table()
-    have = {n: len(v) for n, v in SOURCES.items()}
+    have = {n: len(v) for n, v in ALL_SOURCES.items()}
     if want != have:
         diff = sorted(set(want) ^ set(have)) + sorted(n for n in want if n in have and want[n] != have[n])
         raise SystemExit(f'src/wt_clips.h and the source table of tools/wt_sound.py differ: {diff}')
@@ -139,7 +198,12 @@ def validate_tables() -> dict[str, int]:
 
 
 def out_names() -> list[str]:
-    return [f'{n}_{i}.wav' for n, v in SOURCES.items() for i in range(1, len(v) + 1)]
+    return [f'{n}_{i}.wav' for n, v in ALL_SOURCES.items() for i in range(1, len(v) + 1)]
+
+
+def is_mono(name: str) -> bool:
+    """Whether the group `name` (a file's name without _<i>.wav) is written in mono."""
+    return name in MONO or name in ENGINE_SOURCES
 
 
 def read_wav(path: str):
@@ -153,14 +217,28 @@ def read_wav(path: str):
     return x.reshape(-1, ch), rate
 
 
-def process(path: str, mono: bool, max_seconds: float):
-    """Float samples (frames, channels) at 48 kHz, 20 Hz high-passed, cut to max_seconds with a fade; no gain yet."""
+def loop_seam(x, fade: int):
+    """A recording made a seamless loop: its last `fade` frames cross-faded (equal power: the engines and tracks are
+    broadband) into its first, the rest of the end dropped, so its new last frame runs into its first. Several of the
+    bank's loops are cut at round lengths (7.5 s, 8 s) and jump at the end; FMOD plays them whole and clicks."""
+    import numpy as np
+    t = (np.arange(fade) + 0.5) / fade
+    y = x[:len(x) - fade].copy()
+    y[:fade] = x[:fade] * np.sin(t * np.pi / 2)[:, None] + x[len(x) - fade:] * np.cos(t * np.pi / 2)[:, None]
+    return y
+
+
+def process(path: str, mono: bool, max_seconds: float, loop: bool = False):
+    """Float samples (frames, channels) at 48 kHz, 20 Hz high-passed, cut to max_seconds with a fade; no gain yet. An
+    engine loop is made seamless first (loop_seam: the FFT resampling and high-pass treat a file as one period)."""
     import numpy as np
     sys.path.insert(0, HERE)
     import sound_pack
     x, rate = read_wav(path)
     if mono and x.shape[1] > 1:
         x = x.mean(axis=1, keepdims=True)
+    if loop:
+        x = loop_seam(x, int(LOOP_FADE * rate))
     cols = []
     for c in range(x.shape[1]):
         y = x[:, c]
@@ -199,31 +277,47 @@ def write_wav(path: str, y) -> None:
         w.writeframes(pcm.tobytes())
 
 
-def build(src: str, out: str) -> None:
+def _read_all(root: str, table: dict, mono, label: str) -> dict:
+    done = {}
+    for name, files in table.items():
+        for i, rel in enumerate(files, 1):
+            path = os.path.join(root, *rel.split('/'))
+            if not os.path.isfile(path):
+                raise SystemExit(f'missing {label} source: {rel}')
+            done[f'{name}_{i}.wav'] = (name, rel, process(path, mono(name), MAX_SECONDS.get(name, 0.0),
+                                                          name in ENGINE_LOOPS))
+    return done
+
+
+def build(src: str, engine_src: str, out: str) -> None:
     import numpy as np
     validate_tables()
-    done = {}
-    for name, files in SOURCES.items():
-        for i, rel in enumerate(files, 1):
-            path = os.path.join(src, *rel.split('/'))
-            if not os.path.isfile(path):
-                raise SystemExit(f'missing source: {rel}')
-            done[f'{name}_{i}.wav'] = (name, rel, process(path, name in MONO, MAX_SECONDS.get(name, 0.0)))
-    peak = max(float(np.abs(y).max()) for _, _, y in done.values())
+    guns = _read_all(src, SOURCES, lambda n: n in MONO, 'gun')
+    engines = _read_all(engine_src, ENGINE_SOURCES, lambda n: True, 'engine')
+    peak = max(float(np.abs(y).max()) for _, _, y in guns.values())
     gain = min(1.0, PEAK_LIMIT / peak)
+    engine_peak = max(float(np.abs(y).max()) for _, _, y in engines.values())
+    engine_gain = ENGINE_PEAK / engine_peak
+    done = {**guns, **engines}
     os.makedirs(out, exist_ok=True)
     for stale in os.listdir(out):
         if stale.endswith('.wav') and stale not in done:
             os.remove(os.path.join(out, stale))
-    lines, total = [], 0
+    lines, engine_lines, total, engine_total = [], [], 0, 0
     for fn, (name, rel, y) in done.items():
-        z = finish(y, gain, name in LOOPS)
+        engine = name in ENGINE_SOURCES
+        z = finish(y, engine_gain if engine else gain, name in (ENGINE_LOOPS if engine else LOOPS))
         write_wav(os.path.join(out, fn), z)
         size = os.path.getsize(os.path.join(out, fn))
         total += size
-        lines.append(f'| {fn} | {rel} | {z.shape[1]} | {len(z) / RATE:.3f} | {size} |')
+        row = f'| {fn} | {rel} | {z.shape[1]} | {len(z) / RATE:.3f} | {size} |'
+        if engine:
+            engine_total += size
+            engine_lines.append(row)
+        else:
+            lines.append(row)
     head = (
-        '# War Thunder gun, explosion and passby sounds (assets/sound/wt)\n\n'
+        '# War Thunder gun, explosion, passby and engine sounds (assets/sound/wt)\n\n'
         f'Source: {UPSTREAM} , commit `{COMMIT}`.\n'
         'The upstream Readme says the project "allows you to create sound modifications" and that using the content means\n'
         'agreeing to the War Thunder contribution agreement (https://live.warthunder.com/contribution_agreement/?lang=en).\n'
@@ -239,11 +333,42 @@ def build(src: str, out: str) -> None:
         'Installed to `Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav` by the installer.\n\n'
         f'Files: {len(done)}, total size {total} bytes ({total / 1048576:.2f} MiB).\n\n'
         '| file | source (under the project root) | channels | seconds | bytes |\n|---|---|---|---|---|\n')
+    engine_head = (
+        '\n## The engines (src/sound_engine.h)\n\n'
+        'Source: War Thunder\'s own sound banks `sound/aircraft_engines.assets.bank` and `sound/tanks_engines.assets.bank`\n'
+        '(the streams the modder project\'s events above name as their files: each AudioFile\'s assetPath and length matched\n'
+        'to the bank\'s stream name and length), decoded by vgmstream; under the same terms as the project they belong to.\n'
+        'The source column: `<bank>/<subsong>_<stream name>`. Every file mixed to mono, resampled to '
+        f'{RATE} Hz and 20 Hz high-passed by FFT over the whole file (a loop\'s end still runs into its start), loops kept\n'
+        f'whole, each made seamless by a {int(LOOP_FADE * 1000)} ms equal-power cross-fade of its end into its start\n'
+        f'(one-shots: {", ".join(f"`{n}`" for n in sorted(ENGINE_SHOTS))}: their tails cut as above).\n'
+        f'One gain for the engines: **{engine_gain:.6f}** (their peak before gain {engine_peak:.6f}, after it {ENGINE_PEAK}).\n\n'
+        f'Files: {len(engines)}, {engine_total} bytes ({engine_total / 1048576:.2f} MiB, limit {ENGINE_MAX_MB} MiB).\n\n'
+        '| file | source | channels | seconds | bytes |\n|---|---|---|---|---|\n')
     with open(os.path.join(out, 'SOURCE.md'), 'w', encoding='utf-8', newline='\n') as f:
-        f.write(head + '\n'.join(lines) + '\n')
-    print(f'{len(done)} files, {total} bytes ({total / 1048576:.2f} MiB), gain {gain:.6f}')
+        f.write(head + '\n'.join(lines) + '\n' + engine_head + '\n'.join(engine_lines) + '\n')
+    print(f'{len(done)} files, {total} bytes ({total / 1048576:.2f} MiB), gain {gain:.6f}; engines {len(engines)} files, '
+          f'{engine_total} bytes ({engine_total / 1048576:.2f} MiB), gain {engine_gain:.6f}')
     if total > MAX_MB * 1048576:
         raise SystemExit(f'over the {MAX_MB} MB limit')
+    if engine_total > ENGINE_MAX_MB * 1048576:
+        raise SystemExit(f'the engines over their {ENGINE_MAX_MB} MB limit')
+
+
+def seam(path: str, edge: int = 4800) -> tuple[int, int]:
+    """A loop's jump from its last sample to its first, and the largest step between samples within `edge` of the seam
+    (16-bit units): a seamless loop's jump is no bigger than its own steps there."""
+    import array
+    with wave.open(path, 'rb') as w:
+        n = w.getnframes()
+        head = array.array('h', w.readframes(edge))
+        w.setpos(max(0, n - edge))
+        tail = array.array('h', w.readframes(edge))
+    if sys.byteorder != 'little':
+        head.byteswap()
+        tail.byteswap()
+    steps = [abs(b - a) for x in (head, tail) for a, b in zip(x, x[1:])]
+    return abs(head[0] - tail[-1]), max(steps) if steps else 0
 
 
 def check(out: str) -> list[str]:
@@ -257,24 +382,35 @@ def check(out: str) -> list[str]:
         errors.append(f'unexpected {f}')
     md = os.path.join(out, 'SOURCE.md')
     text = open(md, encoding='utf-8').read() if os.path.isfile(md) else ''
-    total = 0
+    total = engine_total = 0
     for f in sorted(names & have):
         p = os.path.join(out, f)
-        total += os.path.getsize(p)
+        group = f.rsplit('_', 1)[0]
+        size = os.path.getsize(p)
+        total += size
+        if group in ENGINE_SOURCES:
+            engine_total += size
         if f'| {f} |' not in text:
             errors.append(f'SOURCE.md does not list {f}')
         with wave.open(p, 'rb') as w:
             ch, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
-        if width != 2 or rate != RATE or ch not in (1, 2) or (f.rsplit('_', 1)[0] in MONO and ch != 1):
+        if width != 2 or rate != RATE or ch not in (1, 2) or (is_mono(group) and ch != 1):
             errors.append(f'{f}: {ch} ch, {width * 8}-bit, {rate} Hz')
+        elif group in ENGINE_LOOPS:
+            jump, step = seam(p)
+            if jump > step:
+                errors.append(f'{f}: the loop jumps {jump} at its seam, its steps there at most {step}')
     if total > MAX_MB * 1048576:
         errors.append(f'total {total} bytes over {MAX_MB} MB')
+    if engine_total > ENGINE_MAX_MB * 1048576:
+        errors.append(f'the engines {engine_total} bytes over {ENGINE_MAX_MB} MB')
     return errors
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--src')
+    ap.add_argument('--engine-src')
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--check', action='store_true')
     a = ap.parse_args(argv)
@@ -283,9 +419,9 @@ def main(argv=None) -> int:
         for e in errors:
             print(e)
         return 1 if errors else 0
-    if not a.src:
-        ap.error('--src is required unless --check')
-    build(a.src, a.out)
+    if not a.src or not a.engine_src:
+        ap.error('--src and --engine-src are required unless --check')
+    build(a.src, a.engine_src, a.out)
     return 0
 
 

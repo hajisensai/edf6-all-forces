@@ -1,6 +1,6 @@
-"""The War Thunder gun, explosion and passby sounds agree everywhere: src/wt_clips.h (CREW_WT_CLIPS) == the source table of tools/wt_sound.py ==
-the files under assets/sound/wt (no more, no fewer), each 16-bit PCM 48 kHz mono / stereo (wt_sound.MONO's: mono), the set within the
-size limit, SOURCE.md naming every file. Needs no source recordings. Run: python -I tests/wt_sound_test.py"""
+"""The War Thunder gun, explosion, passby and engine sounds agree everywhere: src/wt_clips.h (CREW_WT_CLIPS) == the source table of tools/wt_sound.py ==
+the files under assets/sound/wt (no more, no fewer), each 16-bit PCM 48 kHz mono / stereo (wt_sound.MONO's and the engines: mono), the set and the
+engines within their size limits, every engine loop seamless, SOURCE.md naming every file. Needs no source recordings. Run: python -I tests/wt_sound_test.py"""
 from __future__ import annotations
 
 import os
@@ -18,7 +18,7 @@ LIMIT = wt_sound.MAX_MB * 1024 * 1024
 def main() -> int:
     errors = []
     want = wt_sound.clip_table()
-    have = {n: len(v) for n, v in wt_sound.SOURCES.items()}
+    have = {n: len(v) for n, v in wt_sound.ALL_SOURCES.items()}
     if want != have:
         errors.append(f'src/wt_clips.h and tools/wt_sound.py differ: {sorted(set(want) ^ set(have))} '
                       f'{[n for n in want if n in have and want[n] != have[n]]}')
@@ -37,7 +37,7 @@ def main() -> int:
             channels, width, rate, frames = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
         if width != 2 or rate != 48000 or channels not in (1, 2) or frames <= 0:
             errors.append(f'{name}: {width * 8}-bit {rate} Hz {channels} ch {frames} frames')
-        if name.rsplit('_', 1)[0] in wt_sound.MONO and channels != 1:
+        if wt_sound.is_mono(name.rsplit('_', 1)[0]) and channels != 1:
             errors.append(f'{name}: must be mono, has {channels} channels')
     if total > LIMIT:
         errors.append(f'total {total} bytes over {LIMIT}')
