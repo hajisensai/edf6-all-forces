@@ -15,6 +15,7 @@
 // those stay the ini's.
 #include "keyconfig.h"
 #include "keyconfig_menu.h"
+#include "native_pad.h"
 #include "code_signatures.h"
 #include "edf/keybind.h"
 #include "edf/input_source.h"
@@ -48,11 +49,9 @@ const unsigned char kPadModeCode[]={0x0F,0xB6,0x05,0xA5,0xB0,0xE6,0x00,0xC3};
 const unsigned char kSetPadModeCode[]={0x88,0x0D,0x06,0xA8,0xE6,0x00,0xC6,0x05,0xA2,0x1A,0xFB,0x00,0x01,0xC3};
 const unsigned char kPadRouteCode[]={0xE8,0xF2,0xB9,0xFF,0xFF,0x84,0xC0,0x75,0x0C,0x38,0x1D,0xE8,0xEB,0xFA,0x00,
                                     0x75,0x04,0x41,0x8D,0x76,0xFF};
-const unsigned char kReadPadCode[]={0xFF,0x15,0x39,0xE1,0xFA,0x00,0x85,0xC0,0x75,0x75};
 const Signature kInputRoutes[]={
     {kInputFocus,kInputFocusCode,sizeof(kInputFocusCode)},{kPadMode,kPadModeCode,sizeof(kPadModeCode)},
     {kSetPadMode,kSetPadModeCode,sizeof(kSetPadModeCode)},{0x1188379,kPadRouteCode,sizeof(kPadRouteCode)},
-    {0x11883D1,kReadPadCode,sizeof(kReadPadCode)},
 };
 using FocusFn=bool(__fastcall*)();
 using SetPadModeFn=void(__fastcall*)(bool);
@@ -119,7 +118,8 @@ bool __fastcall InputFocusHook() noexcept {
 }
 
 bool InstallInputSwitch() noexcept {
-    if(!CheckSignatures(kInputRoutes,"INPUT"))return false;
+    // The pad read 0x11883D1 that calls kNativePadState's function: native_pad.cpp owns it (redirected or as shipped).
+    if(!CheckSignatures(kInputRoutes,"INPUT") || !nativepad::ReadSiteKnown())return false;
     bool changed=false;
     return edf::RedirectCall(image+kInputFocusCall,image+kInputFocus,reinterpret_cast<void*>(&InputFocusHook),changed) || changed;
 }

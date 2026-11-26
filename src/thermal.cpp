@@ -11,6 +11,7 @@
 #include "edf/input_source.h"
 #include "enemy_control_pad.h"
 #include "seat_switch_logic.h"
+#include "native_pad.h"
 #include <d3d11.h>
 #include <atomic>
 #include <cstring>
@@ -251,10 +252,14 @@ Toggle Down(unsigned char* vehicle,unsigned seat,unsigned toggleKey) noexcept {
 // On foot: the keyboard key in this game's foreground window and the first XInput pad's chord (ini
 // InfantryNightVisionButton, XInput button bits: map.cpp MapPadButtons), both this machine's first local player's
 // (enemy_control_pad.h FirstLocalPad: the soldier bound to local pad 0); a split screen's other player has neither.
+bool FirstLocal(const unsigned char* human) noexcept {
+    return Readable(human+enemy_control::kHumanLocalPad,4) &&
+           enemy_control::FirstLocalPad(At<int>(human,enemy_control::kHumanLocalPad));
+}
+// FirstLocal's soldier: the key and the chord down now.
 Toggle FootDown(const unsigned char* human,unsigned toggleKey) noexcept {
     Toggle t{};
-    if(!Readable(human+enemy_control::kHumanLocalPad,4) ||
-       !enemy_control::FirstLocalPad(At<int>(human,enemy_control::kHumanLocalPad)))return t;
+    if(!FirstLocal(human))return t;
     DWORD process=0;GetWindowThreadProcessId(edf::ForegroundWindow(),&process);
     t.key=toggleKey && toggleKey<=0xFF && process==GetCurrentProcessId() && (edf::AsyncKey(static_cast<int>(toggleKey))&0x8000)!=0;
     std::uint16_t buttons=0;
@@ -302,6 +307,10 @@ void TickPlayer(Player& p,unsigned char* human,bool enabled,unsigned toggleKey) 
     // On foot (alive, every class): the same toggle is the night vision's.
     const bool onFoot=enabled && !seated && Readable(human,kHumanVehicleCtrl+8) && !human[kDead] && HumanOnFoot(human);
     shot.night=FootNight(p,onFoot,enabled && Cfg().nightVision,onFoot && Pressed(p,FootDown(human,toggleKey)),admitted);
+    // The chord is the night vision's wherever it switches it: kept out of the game's own pad read (native_pad.h), else
+    // the stock soldier takes the same L3 / R3 as its own presses (2026-11-26: the Ranger dashed with every switch).
+    if(FirstLocal(human))
+        nativepad::OwnChord(onFoot && enabled && Cfg().nightVision && admitted ? static_cast<std::uint16_t>(Cfg().nightVisionButton) : 0);
     if(!equipped) {
         // A seat without the equipment: the press is answered on the HUD (rejectedAt), never turned into a request.
         // On foot the press was the night vision's (FootDown above); held states otherwise as a held key.
@@ -402,6 +411,7 @@ Status GetStatus(const void* human) noexcept {
     return s;
 }
 void Reset() noexcept {
+    nativepad::OwnChord(0);
     for(auto& p:players){Clear(p);p.human={};p.seen=0;}
     ticked=~ULONGLONG(0);nightLogged.store(false,std::memory_order_release);
 }
