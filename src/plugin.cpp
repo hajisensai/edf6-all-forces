@@ -1359,7 +1359,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     InstallFrameRate();
     if(Cfg().enabled)Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
-    if(Cfg().enabled)Log("PHYSICS attachment and contact math: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
+    if(Cfg().enabled)Log("PHYSICS attachment and collision: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
     if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
         Log("RENDER pose snapshots installed=%d",renderpose::Install());
     if(Cfg().enabled && Cfg().renderRecordThread)

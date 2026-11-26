@@ -1,5 +1,6 @@
 #include "native_body_math.h"
 #include "crew.h"
+#include "perf_probe.h"
 #include "edf/memory.h"
 #include "edf/patch.h"
 #include <cfloat>
@@ -37,7 +38,80 @@ constexpr BasisCall kAttachedBasisCalls[]={
     {0x6ED902,0x6ED9EB,{0x48,0x8D,0x4C,0x24,0x20},{0xE8,0xD0,0x37,0x96,0xFF}},
     {0x6EDB05,0x6EDBF4,{0x48,0x8D,0x4C,0x24,0x60},{0xE8,0xC7,0x35,0x96,0xFF}},
 };
-static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+2==kNativeBodyMathSites);
+static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+3==kNativeBodyMathSites);
+
+constexpr unsigned kStreamCall=0xE782CB,kStockStream=0xE776F0,kContactCommand=0x12FE960;
+constexpr unsigned char kStreamCaller[]={0x4C,0x8D,0x4D,0x07,0x49,0x8B,0xD6,0x49,0x8B,0xCC,0xE8,0x20,0xF4,0xFF,0xFF};
+constexpr unsigned char kStockStreamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18};
+constexpr unsigned char kContactCommandSig[]={0x0F,0xB6,0x42,0x03,0x48,0x8B,0x4C,0xC1,0x08,0x48,0x8B,0x01,0x48,0xFF,0x60,0x18};
+constexpr unsigned kStreamPayload=0x20;
+
+struct ContactRange {
+    unsigned char* block;
+    std::uint16_t offset,firstCount;
+    int count;
+    const ContactRange* next;
+};
+static_assert(offsetof(ContactRange,count)==0xC && offsetof(ContactRange,next)==0x10);
+using ContactStreamFn=void(__fastcall*)(void*,void*,const ContactRange*,void*);
+using ContactCommandFn=void(__fastcall*)(void*,unsigned char*);
+
+template<bool tracing>
+void ContactRanges(void* storage,void* dispatcher,const ContactRange* range,void* writer) {
+    const auto stock=reinterpret_cast<ContactStreamFn>(image+kStockStream);
+    for(;range;range=range->next) {
+        int inBlock=range->firstCount;
+        if(!range->count || !inBlock)continue;
+        auto* block=range->block;
+        if(!block || range->count<inBlock) {
+            stock(storage,dispatcher,range,writer);
+            return;
+        }
+        auto* command=block+kStreamPayload+range->offset;
+        int remaining=range->count-inBlock;
+        for(;;) {
+            for(int i=0;i<inBlock;++i) {
+                if(command[2]&1) {
+                    const unsigned kind=command[3];
+                    if constexpr(tracing)perfprobe::ObserveContactCommand(kind);
+                    auto* const handler=edf::At<void*>(dispatcher,(kind+1)*sizeof(void*));
+                    edf::At<ContactCommandFn>(edf::At<const void*>(handler,0),0x18)(handler,command);
+                } else {
+                    // Deferred records still use the original writer and its allocation path.
+                    const auto offset=static_cast<std::uint16_t>(command-(block+kStreamPayload));
+                    const ContactRange single{block,offset,1,1,nullptr};
+                    stock(storage,dispatcher,&single,writer);
+                }
+                // Subscribers run first: read the record length after they have returned.
+                command+=edf::At<std::uint16_t>(command,0);
+            }
+            if(!remaining)break;
+            block=edf::At<unsigned char*>(block,8);
+            if(!block)break;
+            const int available=edf::At<std::uint16_t>(block,0);
+            inBlock=available<remaining ? available : remaining;
+            if(!inBlock)break;
+            remaining-=inBlock;
+            command=block+kStreamPayload;
+            _mm_prefetch(edf::At<const char*>(block,8),_MM_HINT_NTA);
+            _mm_prefetch(reinterpret_cast<const char*>(block+0x80),_MM_HINT_NTA);
+        }
+    }
+}
+
+void __fastcall DispatchContactRanges(void* storage,void* dispatcher,const ContactRange* range,void* writer) {
+    if(perfprobe::ContactCommandsActive())ContactRanges<true>(storage,dispatcher,range,writer);
+    else ContactRanges<false>(storage,dispatcher,range,writer);
+}
+
+bool InstallContactStream() noexcept {
+    if(!edf::Matches(image,kStreamCall-10,kStreamCaller,sizeof(kStreamCaller)) ||
+       !edf::Matches(image,kStockStream,kStockStreamSig,sizeof(kStockStreamSig)) ||
+       !edf::Matches(image,kContactCommand,kContactCommandSig,sizeof(kContactCommandSig)))return false;
+    bool changed=false;
+    edf::RedirectCall(image+kStreamCall,image+kStockStream,reinterpret_cast<void*>(&DispatchContactRanges),changed);
+    return changed;
+}
 
 constexpr unsigned kClingGate=0x6DAC9B,kClingBody=0x6DACD5;
 constexpr unsigned char kClingFirstCall[]={0xE8,0x45,0x26,0xAD,0x00};
@@ -200,6 +274,7 @@ unsigned InstallNativeBodyMath() noexcept {
         }
     }
     installed+=InstallClingBodyReuse();
+    installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
     for(const auto& site:kAttachedBasisCalls) {
         if(!edf::Matches(image,site.arguments,site.argumentSig,sizeof(site.argumentSig)) ||

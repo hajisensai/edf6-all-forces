@@ -8,6 +8,12 @@
 #include <random>
 
 namespace crew { unsigned char* image=nullptr; }
+namespace crew::perfprobe {
+bool traceCommands=false;
+unsigned tracedCommands[256]{};
+bool ContactCommandsActive() noexcept {return traceCommands;}
+void ObserveContactCommand(unsigned kind) noexcept {++tracedCommands[kind];}
+}
 
 namespace {
 using namespace crew;
@@ -96,6 +102,118 @@ template<class Before,class After> void Bench(const char* name,Before before,Aft
     std::sort(oldTimes.begin(),oldTimes.end());
     std::sort(newTimes.begin(),newTimes.end());
     std::printf("500,000 %s: %.2f -> %.2f ms (median of five runs)\n",name,oldTimes[2],newTimes[2]);
+}
+struct StreamBlock {
+    std::uint16_t records=0;
+    unsigned char padding[6]{};
+    StreamBlock* next=nullptr;
+    unsigned char footer[16]{};
+    unsigned char payload[0xEE0]{};
+};
+static_assert(offsetof(StreamBlock,payload)==0x20 && offsetof(StreamBlock,next)==8);
+struct StreamWriter {
+    void* stream=nullptr;
+    void* allocator=nullptr;
+    StreamBlock* block=nullptr;
+    int size=0,count=0;
+};
+static_assert(offsetof(StreamWriter,size)==0x18);
+struct StreamResults {
+    std::uint64_t digest=0;
+    unsigned calls=0;
+};
+struct StreamHandler {
+    void** table;
+    StreamResults* state;
+    unsigned kind;
+};
+
+void __fastcall TestCommand(StreamHandler* handler,unsigned char* record) {
+    auto& state=*handler->state;
+    state.digest=state.digest*131+edf::At<std::uint32_t>(record,4)+handler->kind;
+    ++state.calls;
+    if(record[2]&2)record[0]=16; // The virtual callback may change the recorded length.
+}
+void WriteRecord(StreamBlock& block,unsigned offset,std::uint16_t size,unsigned char flags,
+                 unsigned char kind,std::uint32_t payload) {
+    auto* const record=block.payload+offset;
+    std::memcpy(record,&size,sizeof(size));
+    record[2]=flags;
+    record[3]=kind;
+    std::memcpy(record+4,&payload,sizeof(payload));
+}
+bool ContactStreams() {
+    void* callbacks[4]={nullptr,nullptr,nullptr,reinterpret_cast<void*>(&TestCommand)};
+    void* dispatcher[7]{};
+    StreamResults state{};
+    StreamHandler first{callbacks,&state,4},second{callbacks,&state,5};
+    dispatcher[5]=&first;
+    dispatcher[6]=&second;
+    const auto stock=reinterpret_cast<ContactStreamFn>(image+kStockStream);
+    const auto fast=Redirected<ContactStreamFn>(kStreamCall);
+    if(image[kStreamCall]!=0xE8)return false;
+
+    for(bool emptyNext:{false,true}) {
+        StreamResults results[2]{};
+        StreamBlock output[2]{};
+        StreamWriter writers[2]={{nullptr,nullptr,&output[0]},{nullptr,nullptr,&output[1]}};
+        for(unsigned version=0;version<2;++version) {
+            state={};
+            StreamBlock a{},b{},empty{};
+            a.records=3;
+            b.records=4;
+            a.next=emptyNext ? &empty : &b;
+            empty.next=&b;
+            WriteRecord(a,0,16,1,4,10);
+            WriteRecord(a,16,32,3,5,11);
+            WriteRecord(a,32,16,0,0,12);
+            WriteRecord(b,0,32,1,4,20);
+            WriteRecord(b,32,16,0,0,21);
+            WriteRecord(b,48,16,1,5,22);
+            WriteRecord(b,64,16,1,4,23);
+            const ContactRange late{reinterpret_cast<unsigned char*>(&b),64,1,1,nullptr};
+            const ContactRange missing{reinterpret_cast<unsigned char*>(&b),0,0,3,&late};
+            const ContactRange start{reinterpret_cast<unsigned char*>(&a),0,3,6,&missing};
+            perfprobe::traceCommands=version!=0;
+            std::fill(std::begin(perfprobe::tracedCommands),std::end(perfprobe::tracedCommands),0u);
+            (version ? fast : stock)(nullptr,dispatcher,&start,&writers[version]);
+            results[version]=state;
+        }
+        perfprobe::traceCommands=false;
+        const unsigned count=emptyNext ? 3 : 5;
+        if(results[0].digest!=results[1].digest || results[0].calls!=count || results[1].calls!=count ||
+           writers[0].count!=(emptyNext ? 1 : 2) || writers[0].count!=writers[1].count ||
+           writers[0].size!=writers[1].size || std::memcmp(output[0].payload,output[1].payload,sizeof(output[0].payload))!=0 ||
+           perfprobe::tracedCommands[4]!=(emptyNext ? 2u : 3u) || perfprobe::tracedCommands[5]!=(emptyNext ? 1u : 2u))
+            return false;
+    }
+
+    state={};
+    constexpr unsigned blocks=70,perBlock=56,repeats=1000;
+    auto* chain=new StreamBlock[blocks]{};
+    for(unsigned block=0;block<blocks;++block) {
+        chain[block].records=perBlock;
+        if(block+1<blocks)chain[block].next=&chain[block+1];
+        for(unsigned j=0;j<perBlock;++j)WriteRecord(chain[block],j*64,64,1,4,block*perBlock+j);
+    }
+    const ContactRange range{reinterpret_cast<unsigned char*>(chain),0,perBlock,blocks*perBlock,nullptr};
+    std::array<double,5> oldTimes{},newTimes{};
+    const auto time=[&](ContactStreamFn run) {
+        const auto before=std::chrono::steady_clock::now();
+        for(unsigned i=0;i<repeats;++i)run(nullptr,dispatcher,&range,nullptr);
+        return std::chrono::duration<double,std::nano>(std::chrono::steady_clock::now()-before).count()/
+            (static_cast<double>(repeats)*blocks*perBlock);
+    };
+    for(unsigned trial=0;trial<oldTimes.size();++trial) {
+        if(trial%2){newTimes[trial]=time(fast);oldTimes[trial]=time(stock);}
+        else {oldTimes[trial]=time(stock);newTimes[trial]=time(fast);}
+    }
+    std::sort(oldTimes.begin(),oldTimes.end());
+    std::sort(newTimes.begin(),newTimes.end());
+    std::printf("contact command stream: %.3f -> %.3f ns/record, %u records per batch\n",
+                oldTimes[2],newTimes[2],blocks*perBlock);
+    delete[] chain;
+    return state.calls==repeats*blocks*perBlock*oldTimes.size()*2;
 }
 }
 
@@ -187,6 +305,10 @@ int main(int argc,char** argv) {
        std::memcmp(packedProxies.data(),newProxies.data(),sizeof(packedProxies))!=0 ||
        std::memcmp(oldMatrices.data(),newMatrices.data(),sizeof(oldMatrices))!=0) {
         std::puts("FAIL: repeated updates changed the outputs");return 1;
+    }
+    if(!ContactStreams()) {
+        std::puts("FAIL: contact stream changed record dispatch, deferred bytes or command accounting");
+        return 1;
     }
     VirtualFree(harness,0,MEM_RELEASE);
     return 0;
