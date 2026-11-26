@@ -9,6 +9,15 @@ namespace crew::thermal {
 
 enum class Polarity { whiteHot, blackHot };
 
+// A soldier's night vision (thermal.h NightVision): the world colour's luminance amplified (gain, a soft knee that
+// keeps the bright end from clipping), a green phosphor tint, frame-varying grain and a vignette round the viewport.
+struct NightLook {
+    float gain = 6.0f;      // the amplification of the dark scene (InfantryNightVisionGain)
+    float seed = 0.0f;      // the grain's frame (any value; a new one every frame makes it move)
+    float grain = 0.05f;    // the grain's amplitude, in output brightness
+    float vignette = 0.35f; // the darkening at the viewport's corners (0 none)
+};
+
 // Render-thread only. The caller identifies opaque enemy draws; this module never
 // changes the native IA/VS/HS/DS/GS transforms, reads pixels on the CPU, or hooks COM.
 // Capture and Composite submit extra draws. Their call sites must be outside
@@ -52,6 +61,13 @@ public:
     // observed view with no enemy captures still receives grayscale.
     bool Composite(ID3D11DeviceContext* context, Polarity polarity) noexcept;
 
+    // Night vision on the bound world colour (one RTV, no other target; any viewport: a split screen's half or the scope
+    // lens's own view), before the post stage and the HUD. It needs no BeginView, observation or capture and leaves the
+    // thermal view state alone. Only the viewport's pixels are copied and rewritten; alpha is kept. False: the surface
+    // is not one it draws on (the image untouched), or the device would not give its resources (then refused until
+    // Reset, so a failing device is not rebuilt every frame).
+    bool NightVision(ID3D11DeviceContext* context, const NightLook& look) noexcept;
+
     // End the current view without touching any resource (a view drawn optically).
     void Invalidate() noexcept;
 
@@ -60,7 +76,9 @@ public:
 
 private:
     struct Impl;
+    bool Ready(ID3D11DeviceContext* context) noexcept;
     std::unique_ptr<Impl> impl_;
+    bool refused_ = false;
 };
 
 } // namespace crew::thermal

@@ -9,6 +9,7 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <new>
 #include <utility>
@@ -83,6 +84,33 @@ float4 WhiteHot24(float4 position : SV_Position) : SV_Target0 {
 
 float4 BlackHot24(float4 position : SV_Position) : SV_Target0 {
     return Shade(position, true, false, true);
+}
+
+// A soldier's night vision (NightLook): luminance amplified with a soft knee, a green phosphor, grain, a vignette.
+cbuffer NightConstants : register(b0) {
+    float4 NightParams;    // gain, seed, grain, vignette
+    float4 NightViewport;  // left, top, width, height (render-target pixels)
+};
+
+float NightGrain(float2 cell) {
+    float3 q = frac(cell.xyx * 0.1031);
+    q += dot(q, q.yzx + 33.33);
+    return frac((q.x + q.y) * q.z);
+}
+
+float4 NightVision(float4 position : SV_Position) : SV_Target0 {
+    int3 pixel = int3(int2(position.xy), 0);
+    float4 scene = Scene.Load(pixel);
+    // The HDR world colour (before the post stage): a non-finite or huge sample is clamped, not propagated.
+    float luminance = min(dot(max(scene.rgb, 0.0), float3(0.2126, 0.7152, 0.0722)), 65504.0);
+    float amplified = luminance * NightParams.x;
+    float value = amplified / (1.0 + amplified);
+    float2 cell = floor(position.xy) + NightParams.y * float2(37.0, 17.0);
+    value += (NightGrain(cell) - 0.5) * NightParams.z;
+    float2 centre = (position.xy - NightViewport.xy) / max(NightViewport.zw, 1.0) * 2.0 - 1.0;
+    value *= saturate(1.0 - dot(centre, centre) * NightParams.w);
+    value = max(value, 0.0);
+    return float4(float3(0.25, 1.0, 0.35) * (0.04 + value), scene.a);
 }
 )hlsl";
 
@@ -241,6 +269,19 @@ struct Renderer::Impl final {
     ComPtr<ID3D11PixelShader> blackShader16;
     ComPtr<ID3D11PixelShader> whiteShader24;
     ComPtr<ID3D11PixelShader> blackShader24;
+    ComPtr<ID3D11PixelShader> nightShader;
+    ComPtr<ID3D11Buffer> nightConstants;
+    // Night vision's copies of the world colour: two sizes kept (a soldier's main view and the scope lens's own view
+    // alternate every frame under InfantryScope=2; one copy would be recreated twice a frame).
+    struct ColorSlot {
+        ComPtr<ID3D11Texture2D> texture;
+        ComPtr<ID3D11ShaderResourceView> resource;
+        UINT width = 0, height = 0;
+        DXGI_FORMAT textureFormat = DXGI_FORMAT_UNKNOWN, viewFormat = DXGI_FORMAT_UNKNOWN;
+        std::uint64_t used = 0;
+    };
+    std::array<ColorSlot, 2> nightColor;
+    std::uint64_t nightUses = 0;
     ComPtr<ID3D11BlendState> overwriteBlend;
     ComPtr<ID3D11BlendState> nearestMinBlend;
     ComPtr<ID3D11BlendState> nearestMaxBlend;
@@ -261,6 +302,7 @@ struct Renderer::Impl final {
     DXGI_FORMAT depthViewFormat = DXGI_FORMAT_UNKNOWN;
     DXGI_FORMAT colorViewFormat = DXGI_FORMAT_UNKNOWN;
     DXGI_FORMAT colorTextureFormat = DXGI_FORMAT_UNKNOWN;
+    UINT colorWidth = 0, colorHeight = 0;
     std::uint64_t frameToken = 0;
     bool active = false;
     bool observed = false;
@@ -315,8 +357,9 @@ struct Renderer::Impl final {
         std::memcpy(&compile, &address, sizeof(compile));
         if (!compile) return false;
         ComPtr<ID3DBlob> captureCode, fullscreenCode, whiteCode, blackCode;
-        ComPtr<ID3DBlob> whiteCode16, blackCode16, whiteCode24, blackCode24;
+        ComPtr<ID3DBlob> whiteCode16, blackCode16, whiteCode24, blackCode24, nightCode;
         if (!Compile("Capture", "ps_5_0", captureCode) ||
+            !Compile("NightVision", "ps_5_0", nightCode) ||
             !Compile("Fullscreen", "vs_5_0", fullscreenCode) ||
             !Compile("WhiteHot", "ps_5_0", whiteCode) ||
             !Compile("BlackHot", "ps_5_0", blackCode) ||
@@ -339,7 +382,15 @@ struct Renderer::Impl final {
             FAILED(device->CreatePixelShader(whiteCode24->GetBufferPointer(),
                 whiteCode24->GetBufferSize(), nullptr, &whiteShader24)) ||
             FAILED(device->CreatePixelShader(blackCode24->GetBufferPointer(),
-                blackCode24->GetBufferSize(), nullptr, &blackShader24))) return false;
+                blackCode24->GetBufferSize(), nullptr, &blackShader24)) ||
+            FAILED(device->CreatePixelShader(nightCode->GetBufferPointer(),
+                nightCode->GetBufferSize(), nullptr, &nightShader))) return false;
+        D3D11_BUFFER_DESC constantsDesc{};
+        constantsDesc.ByteWidth = 32;
+        constantsDesc.Usage = D3D11_USAGE_DYNAMIC;
+        constantsDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        constantsDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(device->CreateBuffer(&constantsDesc, nullptr, &nightConstants))) return false;
         D3D11_BLEND_DESC blendDesc{};
         blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
         if (FAILED(device->CreateBlendState(&blendDesc, &overwriteBlend))) return false;
@@ -479,7 +530,8 @@ struct Renderer::Impl final {
     }
 
     bool PrepareColor(const D3D11_TEXTURE2D_DESC& desc, DXGI_FORMAT format) noexcept {
-        if (colorCopy && colorTextureFormat == desc.Format && colorViewFormat == format)
+        if (colorCopy && colorTextureFormat == desc.Format && colorViewFormat == format &&
+            colorWidth == desc.Width && colorHeight == desc.Height)
             return true;
         D3D11_TEXTURE2D_DESC copyDesc = desc;
         copyDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -499,15 +551,50 @@ struct Renderer::Impl final {
         colorResource = std::move(nextResource);
         colorTextureFormat = desc.Format;
         colorViewFormat = format;
+        colorWidth = desc.Width;
+        colorHeight = desc.Height;
         return true;
+    }
+
+    // Night vision's copy for this target: the slot of its size and format, else the least recently used one remade.
+    ColorSlot* PrepareNightColor(const D3D11_TEXTURE2D_DESC& desc, DXGI_FORMAT format) noexcept {
+        ColorSlot* slot = nullptr;
+        for (auto& candidate : nightColor) {
+            if (candidate.texture && candidate.width == desc.Width && candidate.height == desc.Height &&
+                candidate.textureFormat == desc.Format && candidate.viewFormat == format) { slot = &candidate; break; }
+        }
+        if (!slot) {
+            slot = nightColor[0].used <= nightColor[1].used ? &nightColor[0] : &nightColor[1];
+            D3D11_TEXTURE2D_DESC copyDesc = desc;
+            copyDesc.Usage = D3D11_USAGE_DEFAULT;
+            copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            copyDesc.CPUAccessFlags = 0;
+            copyDesc.MiscFlags = 0;
+            D3D11_SHADER_RESOURCE_VIEW_DESC resourceDesc{};
+            resourceDesc.Format = format;
+            resourceDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            resourceDesc.Texture2D.MipLevels = 1;
+            ComPtr<ID3D11Texture2D> nextColor;
+            ComPtr<ID3D11ShaderResourceView> nextResource;
+            if (FAILED(device->CreateTexture2D(&copyDesc, nullptr, &nextColor)) ||
+                FAILED(device->CreateShaderResourceView(nextColor.Get(), &resourceDesc,
+                    &nextResource))) return nullptr;
+            slot->texture = std::move(nextColor);
+            slot->resource = std::move(nextResource);
+            slot->width = desc.Width;
+            slot->height = desc.Height;
+            slot->textureFormat = desc.Format;
+            slot->viewFormat = format;
+        }
+        slot->used = ++nightUses;
+        return slot;
     }
 };
 
 Renderer::Renderer() noexcept = default;
 Renderer::~Renderer() noexcept = default;
 
-bool Renderer::BeginView(ID3D11DeviceContext* context, std::uint64_t frameToken) noexcept {
-    if (impl_) impl_->Invalidate();
+bool Renderer::Ready(ID3D11DeviceContext* context) noexcept {
     if (!context) return false;
     if (!impl_ || impl_->context.Get() != context ||
         FAILED(impl_->device->GetDeviceRemovedReason())) {
@@ -515,6 +602,12 @@ bool Renderer::BeginView(ID3D11DeviceContext* context, std::uint64_t frameToken)
         if (!next || !next->Initialize(context)) return false;
         impl_ = std::move(next);
     }
+    return true;
+}
+
+bool Renderer::BeginView(ID3D11DeviceContext* context, std::uint64_t frameToken) noexcept {
+    if (impl_) impl_->Invalidate();
+    if (!Ready(context)) return false;
     impl_->frameToken = frameToken;
     impl_->active = true;
     // A view can begin before the renderer binds its G-buffer/depth surface.
@@ -693,12 +786,87 @@ bool Renderer::Composite(ID3D11DeviceContext* context, Polarity polarity) noexce
     return true;
 }
 
+bool Renderer::NightVision(ID3D11DeviceContext* context, const NightLook& look) noexcept {
+    if (refused_ || !context) return false;
+    std::array<ComPtr<ID3D11RenderTargetView>, kTargets> targets;
+    std::array<ID3D11RenderTargetView*, kTargets> rawTargets{};
+    ComPtr<ID3D11DepthStencilView> boundDepth;
+    context->OMGetRenderTargets(kTargets, rawTargets.data(), &boundDepth);
+    for (UINT i = 0; i < kTargets; ++i) targets[i].Attach(rawTargets[i]);
+    if (!targets[0]) return false;
+    for (UINT i = 1; i < kTargets; ++i) if (targets[i]) return false;
+    D3D11_RENDER_TARGET_VIEW_DESC targetDesc{};
+    targets[0]->GetDesc(&targetDesc);
+    if (targetDesc.ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D ||
+        targetDesc.Texture2D.MipSlice != 0 || !ColorFormat(targetDesc.Format)) return false;
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<ID3D11Texture2D> color;
+    targets[0]->GetResource(&resource);
+    if (FAILED(resource.As(&color))) return false;
+    D3D11_TEXTURE2D_DESC desc{};
+    color->GetDesc(&desc);
+    if (!SimpleTexture(desc)) return false;
+    // The native viewport (the first): its pixels are the view's. Clamped to the target; an empty one draws nothing.
+    std::array<D3D11_VIEWPORT, D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE> views{};
+    UINT count = static_cast<UINT>(views.size());
+    context->RSGetViewports(&count, views.data());
+    if (count == 0) return false;
+    const D3D11_VIEWPORT native = views[0];
+    if (!(native.Width > 0.0f) || !(native.Height > 0.0f) || !(native.TopLeftX >= 0.0f) ||
+        !(native.TopLeftY >= 0.0f)) return false;
+    const auto clamp = [](float value, UINT most) noexcept {
+        return value >= static_cast<float>(most) ? most : static_cast<UINT>(value);
+    };
+    D3D11_BOX box{};
+    box.left = clamp(native.TopLeftX, desc.Width);
+    box.top = clamp(native.TopLeftY, desc.Height);
+    box.right = clamp(std::ceil(native.TopLeftX + native.Width), desc.Width);
+    box.bottom = clamp(std::ceil(native.TopLeftY + native.Height), desc.Height);
+    box.front = 0;
+    box.back = 1;
+    if (box.right <= box.left || box.bottom <= box.top) return false;
+    if (!Ready(context)) { refused_ = true; return false; }
+    auto& state = *impl_;
+    Impl::ColorSlot* const slot = state.PrepareNightColor(desc, targetDesc.Format);
+    if (!slot) { refused_ = true; return false; }
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(context->Map(state.nightConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return false;
+    const float constants[8] = {look.gain, look.seed, look.grain, look.vignette,
+        native.TopLeftX, native.TopLeftY, native.Width, native.Height};
+    std::memcpy(mapped.pData, constants, sizeof(constants));
+    context->Unmap(state.nightConstants.Get(), 0);
+
+    // The same isolation as Composite: the native pipeline bindings are swapped out whole and come back untouched.
+    ScopedContextState restore(state.context1.Get(), state.isolatedState.Get());
+    context->ClearState();
+    context->CopySubresourceRegion(slot->texture.Get(), 0, box.left, box.top, 0, color.Get(), 0, &box);
+    ID3D11RenderTargetView* target = targets[0].Get();
+    context->OMSetRenderTargets(1, &target, nullptr);
+    context->OMSetBlendState(state.overwriteBlend.Get(), nullptr, 0xFFFFFFFFu);
+    context->OMSetDepthStencilState(state.noDepthState.Get(), 0);
+    context->RSSetState(state.fullscreenRasterizer.Get());
+    const D3D11_VIEWPORT viewport{native.TopLeftX, native.TopLeftY, native.Width, native.Height, 0.0f, 1.0f};
+    context->RSSetViewports(1, &viewport);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(state.fullscreenShader.Get(), nullptr, 0);
+    context->PSSetShader(state.nightShader.Get(), nullptr, 0);
+    ID3D11Buffer* buffers[] = {state.nightConstants.Get()};
+    context->PSSetConstantBuffers(0, 1, buffers);
+    ID3D11ShaderResourceView* inputs[] = {slot->resource.Get()};
+    context->PSSetShaderResources(0, 1, inputs);
+    context->Draw(3, 0);
+    // Drop isolated bindings before returning to native state (no native target stays retained in the private state).
+    context->ClearState();
+    return true;
+}
+
 void Renderer::Invalidate() noexcept {
     if (impl_) impl_->Invalidate();
 }
 
 void Renderer::Reset() noexcept {
     impl_.reset();
+    refused_ = false;
 }
 
 } // namespace crew::thermal

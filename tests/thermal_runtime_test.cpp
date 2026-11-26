@@ -9,6 +9,8 @@ bool testPaused=false,testMap=false,testOptic=true,testTrait=true,testOnFoot=fal
 unsigned char* testHuman=nullptr;
 unsigned char* testLocal[2]{};int testLocals=0;   // split screen: the local cameras' players (firstperson.cpp LocalPlayers)
 const void* testViewOwner=nullptr;
+const void* testLensOwner=nullptr;            // the scope lens's view's soldier (infantryscope.cpp InfantryScopeLensOwner)
+bool testPadPresent=false;std::uint16_t testPadButtons=0;   // the first XInput pad (map.cpp MapPadButtons)
 HWND testWindow=nullptr;
 SHORT WINAPI Key(int key) {return key==0x4E && testKey ? static_cast<SHORT>(0x8000) : 0;}
 HWND WINAPI Window() {return testWindow;}
@@ -39,6 +41,8 @@ bool InSession() noexcept {return false;}
 void Log(const char*,...) noexcept {}
 // The soldier's scope lens at the world's end (infantryscope.cpp): its own test is scope_crosshair_test.
 void InfantryScopeWorldEnd(ID3D11DeviceContext*,const void*) noexcept {}
+const unsigned char* InfantryScopeLensOwner(const void*) noexcept {return static_cast<const unsigned char*>(testLensOwner);}
+bool MapPadButtons(std::uint16_t* buttons) noexcept {*buttons=testPadButtons;return testPadPresent;}
 // GPU particles at the world's begin / end (src/gpufx): their own tests are gpufx_sim_test / gpufx_gpu_test.
 namespace gpufx {
 void WorldBegin(ID3D11DeviceContext*,const void*) noexcept {}
@@ -53,6 +57,8 @@ bool Renderer::BeginView(ID3D11DeviceContext*,std::uint64_t) noexcept {return tr
 bool Renderer::ObserveSurface(ID3D11DeviceContext*) noexcept {return true;}
 bool Renderer::CaptureIndexed(ID3D11DeviceContext*,unsigned,unsigned,int) noexcept {return true;}
 bool Renderer::Composite(ID3D11DeviceContext*,Polarity) noexcept {return true;}
+bool Renderer::NightVision(ID3D11DeviceContext*,const NightLook&) noexcept {return true;}
+bool Renderer::Ready(ID3D11DeviceContext*) noexcept {return true;}
 void Renderer::Invalidate() noexcept {}
 void Renderer::Reset() noexcept {}
 std::size_t EnemyModels(const void*,const void**,std::size_t) noexcept {return 0;}
@@ -167,6 +173,62 @@ int main() {
     for(int i=0;i<200;++i){++testFrame;Tick(true,0x4E);}
     check(GetStatus(human).eligible,"the first player stays");
     testLocals=0;testLocal[0]=testLocal[1]=nullptr;Reset();
+
+    // Night vision on foot (every class): the same key switches it off / on; drawn while on foot and the player's view is up.
+    Put<void*>(seats,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRider,nullptr);
+    Put<int>(human,enemy_control::kHumanLocalPad,0);   // this machine's first local player: the keyboard's and pad 0's
+    testOnFoot=true;testTrait=true;config.nightVision=true;config.nightVisionButton=0xC0;config.nightVisionGain=6.0f;
+    step(false);check(GetStatus().nightEligible && !GetStatus().nightVision && !GetStatus().eligible,"on foot: night vision usable, off, no thermal");
+    check(!ReadSnapshot(*Find(human)).night,"nothing drawn before the press");
+    step(true);check(GetStatus().nightVision && ReadSnapshot(*Find(human)).night,"N on foot switches night vision on and publishes it");
+    check(GetStatus().requested==Mode::optical,"the on-foot press is no thermal request");
+    step(true);check(GetStatus().nightVision,"held N is one edge");
+    step(false);step(true);check(!GetStatus().nightVision && !ReadSnapshot(*Find(human)).night,"the second press switches it off");
+    step(false);step(true);check(GetStatus().nightVision,"and on again");
+    testMap=true;step(false);check(GetStatus().nightVision && !ReadSnapshot(*Find(human)).night,"the map's view is not tinted, the choice kept");
+    step(true);check(GetStatus().nightVision,"the map holds the key: no switch");
+    testMap=false;step(true);step(false);
+    testPaused=true;step(true);check(GetStatus().nightVision,"the pause holds the key");
+    testPaused=false;step(false);
+    // Pad 0's chord (XInput bits: 0xC0 L3 + R3).
+    testPadPresent=true;
+    const auto padFoot=[&](std::uint16_t buttons){testPadButtons=buttons;testKey=false;++testFrame;Tick(true,0x4E);};
+    padFoot(0x40);check(GetStatus().nightVision,"L3 alone is no night vision press");
+    padFoot(0xC0);check(!GetStatus().nightVision,"L3 + R3 switches it off");
+    padFoot(0xC0);check(!GetStatus().nightVision,"the chord held is one edge");
+    padFoot(0);padFoot(0xC0);check(GetStatus().nightVision,"the chord again: on");
+    config.nightVisionButton=0;padFoot(0);padFoot(0xC0);check(GetStatus().nightVision,"InfantryNightVisionButton=0: no pad toggle");
+    config.nightVisionButton=0xC0;padFoot(0);testPadPresent=false;
+    // Another local pad's soldier (split screen's second player): neither the keyboard nor pad 0 is theirs.
+    Put<int>(human,enemy_control::kHumanLocalPad,1);step(false);step(true);check(GetStatus().nightVision,"local pad 1: the keyboard is not theirs");
+    Put<int>(human,enemy_control::kHumanLocalPad,0);step(false);
+    // Into a vehicle: not drawn there, the key is the seat's thermal again; out again: night vision as it was.
+    Put<void*>(seats,kSeatRider,human);testOnFoot=false;step(false);
+    check(GetStatus().nightVision && !GetStatus().nightEligible && !ReadSnapshot(*Find(human)).night,"in a vehicle: night vision kept, not drawn");
+    step(true);check(GetStatus().requested==Mode::whiteHot && GetStatus().nightVision,"in a vehicle N cycles thermal, night vision untouched");
+    step(false);Put<void*>(seats,kSeatRider,nullptr);testOnFoot=true;step(false);
+    check(GetStatus().nightVision && ReadSnapshot(*Find(human)).night && GetStatus().requested==Mode::optical,
+          "out of the vehicle: night vision back, thermal retired");
+    check(SetNightVision(false) && !GetStatus().nightVision && SetNightVision(true) && GetStatus().nightVision,"UI request on foot");
+    // Dead: not usable, not drawn; the ini off: never on.
+    human[kDead]=1;step(false);check(!GetStatus().nightEligible && !ReadSnapshot(*Find(human)).night,"a dead soldier's view is not tinted");
+    check(!SetNightVision(true),"UI cannot switch it on while not usable");
+    human[kDead]=0;config.nightVision=false;step(false);
+    check(!GetStatus().nightVision && !GetStatus().nightEligible && !ReadSnapshot(*Find(human)).night,"InfantryNightVision=0: off");
+    step(true);check(!GetStatus().nightVision,"InfantryNightVision=0: the key does nothing on foot");
+    config.nightVision=true;step(false);step(true);check(GetStatus().nightVision,"enabled again");
+    // The render: a fresh night snapshot marks the view; its end draws night vision (stub) and reports it shown.
+    alignas(16) unsigned char nightView[0x100]{};
+    testViewOwner=human;
+    ViewBegin(nullptr,nightView);
+    check(frame.night && !frame.active,"the night view is marked, no thermal capture");
+    ThermalEnd(nullptr,nightView);check(GetStatus().nightShown && !frame.night,"the world's end drew night vision");
+    // The scope lens's own view (InfantryScope=2) is the soldier's too.
+    testViewOwner=nullptr;Put<unsigned>(nightView,0,3);testLensOwner=human;
+    check(ViewPlayer(nightView)==Find(human),"the scope lens's view is its soldier's");
+    testLensOwner=nullptr;Put<unsigned>(nightView,0,0);
+    Reset();check(!GetStatus().nightVision,"mission reset: night vision off");
+    testOnFoot=false;
     edf::SetInputSource(nullptr,nullptr);DestroyWindow(testWindow);VirtualFree(image,0,MEM_RELEASE);
     std::printf("thermal runtime: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }
