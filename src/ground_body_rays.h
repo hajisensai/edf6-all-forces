@@ -2,7 +2,7 @@
 
 namespace crew {
 
-// One fixed map body looked up for a short, synchronous navigation edge.
+// One fixed map body resolved for a validated box during a synchronous navigation call.
 class GroundBodyRays {
 public:
     bool Capture(const float* lower,const float* upper) noexcept;

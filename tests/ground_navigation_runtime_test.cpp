@@ -105,6 +105,36 @@ void BodyClearanceScope() {
           "later covered floor rays reuse the body while the edge keeps its logical floor budget");
 
 }
+void SharedBodyView() {
+    struct Outcome { crew::GroundProbeStats stats;std::array<float,3> waypoint; };
+    const float from[3]={0,0,0},goal[3]={11,0,4};
+    const auto run=[&](bool available,float maxWidth) {
+        auto s=std::make_unique<State>();
+        Scene(0,crew::Sea::land);
+        crew::TakeGroundProbeStats();
+        ground_ray_fixture::bodyAvailable=available;
+        ground_ray_fixture::bodyClear=true;
+        ground_ray_fixture::bodyMaxWidth=maxWidth;
+        float next[3]{};
+        Check(Advance(*s,from,goal,next)==Result::moving,"body query reuse preserves route admission");
+        ground_ray_fixture::bodyAvailable=false;
+        ground_ray_fixture::bodyMaxWidth=0;
+        return Outcome{crew::TakeGroundProbeStats(),{next[0],next[1],next[2]}};
+    };
+    const auto worldRun=run(false,0),sharedRun=run(true,0),limitedRun=run(true,3.2f);
+    const auto& world=worldRun.stats;
+    const auto& shared=sharedRun.stats;
+    const auto& limited=limitedRun.stats;
+    Check(worldRun.waypoint==sharedRun.waypoint && worldRun.waypoint==limitedRun.waypoint,
+          "single-body regions and world queries pick the same waypoint");
+    Check(shared.bodyListReused>0 && shared.bodyListQueries<world.bodyListQueries,
+          "nearby short edges reuse the captured fixed body");
+    Check(limited.bodyListQueries>limited.bodyLists && limited.bodyLists>0,
+          "a rejected wider box still allows a smaller body query");
+    Check(world.floor==shared.floor && world.clearance==shared.clearance && world.water==shared.water &&
+          world.floor==limited.floor && world.clearance==limited.clearance && world.water==limited.water,
+          "shared body views preserve the original logical probes");
+}
 void Corners() {
     auto s=std::make_unique<State>();Profile vehicle{};vehicle.cell=4;vehicle.waypointRadius=1.5f;
     float from[3]={3.1f,0,0},to[3]={4,0,4},next[3]{};
@@ -392,4 +422,4 @@ void VehicleRoute() {
     Check(blind>0 && seeing*100>=blind*50,"the vehicles' unspent rays given back to the frame's shared budget");
 }
 }
-int main(){Water();GroundBatchScope();BodyClearanceScope();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+int main(){Water();GroundBatchScope();BodyClearanceScope();SharedBodyView();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

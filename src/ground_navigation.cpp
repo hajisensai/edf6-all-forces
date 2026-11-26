@@ -11,6 +11,56 @@ std::uint64_t frame=~std::uint64_t{0};int queries=0;
 const void* start=nullptr;const void* nextStart=nullptr;bool waiting=false;
 GroundProbeStats probeStats{};
 
+struct GroundBox {
+    float lower[3]{},upper[3]{};
+
+    bool Covers(const GroundBox& other) const noexcept {
+        for(int axis=0;axis<3;++axis)
+            if(!(lower[axis]<=other.lower[axis] && upper[axis]>=other.upper[axis]))return false;
+        return true;
+    }
+};
+
+// Bounds and the native body pointer only live during this synchronous, read-only navigation call.
+class GroundBodyView {
+public:
+    const GroundBodyRays* For(const GroundBox& requested,float cell,float step) noexcept {
+        if(ready && bounds.Covers(requested)) {
+            ++probeStats.bodyListReused;
+            return &body;
+        }
+        // Wait for a second uncovered edge before trying a larger box. If it contains more than
+        // one body, the original short box is still available for this edge.
+        if(ready && !expanded) {
+            expanded=true;
+            GroundBox wider;
+            for(int axis=0;axis<3;++axis) {
+                const float pad=(std::max)(0.0f,axis==1 ? step : cell);
+                wider.lower[axis]=(std::min)(bounds.lower[axis],requested.lower[axis])-pad;
+                wider.upper[axis]=(std::max)(bounds.upper[axis],requested.upper[axis])+pad;
+            }
+            if(Capture(wider))return &body;
+        }
+        return Capture(requested) ? &body : nullptr;
+    }
+
+private:
+    bool Capture(const GroundBox& box) noexcept {
+        GroundBodyRays found;
+        ++probeStats.bodyListQueries;
+        if(!found.Capture(box.lower,box.upper))return false;
+        ++probeStats.bodyLists;
+        ready=true;
+        body=found;
+        bounds=box;
+        return true;
+    }
+
+    GroundBodyRays body;
+    GroundBox bounds;
+    bool ready=false,expanded=false;
+};
+
 // The frame's turn: whether `state`'s call waits for the first caller the last frame denied (the call then returns
 // pending at once, its waypoint its `from`). The frame's budget is begun here, by whichever asks first: the call or
 // GroundNavigateDeferred, so the order of the turn is the same whether a caller asked before calling or not.
@@ -37,6 +87,7 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
     if(state.hull!=hull.object){state.hull=hull.object;state.initialized=false;}
     GroundRayBatch local;
     auto& rays=batch ? *batch : local;
+    GroundBodyView view;
     bool sampled=false;
     auto edge=[&](Point a,Point b,Point& out) noexcept {
         const float distance=Horizontal(a,b);
@@ -51,18 +102,20 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
         if(queries+worst>4096){if(!nextStart)nextStart=&state;return Edge::pending;}
         int cast=0;
         bool waterUnknown=false;
-        GroundBodyRays candidates;
-        bool gathered=steps<4,ready=false;
-        float lower[3]{},upper[3]{};
+        const GroundBodyRays* edgeBody=nullptr;
+        bool gathered=steps<4;
+        GroundBox edgeBox;
+        auto& lower=edgeBox.lower;
+        auto& upper=edgeBox.upper;
         auto ground=[&](Point at,float step,float& y) noexcept {
             cast+=2;
             if(!sampled){sampled=true;++probeStats.batches;}
             ++probeStats.floor;
             const float top[3]={at.x,at.y+step,at.z},bottom[3]={at.x,at.y-step,at.z};float hit[3];
-            const bool use=ready && at.x>=lower[0] && at.x<=upper[0] && at.z>=lower[2] && at.z<=upper[2] &&
+            const bool use=edgeBody && at.x>=lower[0] && at.x<=upper[0] && at.z>=lower[2] && at.z<=upper[2] &&
                 bottom[1]>=lower[1] && bottom[1]<=upper[1] && top[1]>=lower[1] && top[1]<=upper[1];
             if(use)++probeStats.bodyFloor;
-            if(rays.Floor(top,bottom,hit,use ? &candidates : nullptr)<0.0f || !std::isfinite(hit[1]))return false;
+            if(rays.Floor(top,bottom,hit,use ? edgeBody : nullptr)<0.0f || !std::isfinite(hit[1]))return false;
             float surface=0.0f;
             ++probeStats.water;
             const Sea sea=rays.Water(at.x,at.z,&surface);
@@ -112,13 +165,12 @@ npc::navigation::Result Navigate(State& state,const float* from,const float* to,
                 upper[2]=(std::max)(a.z,b.z)+sideZ+0.005f;
                 lower[1]=(std::min)(minY,(std::min)(prev.y,at.y)-profile.step)-0.125f;
                 upper[1]=(std::max)(maxY,(std::max)(prev.y,at.y)+profile.step)+0.125f;
-                ready=candidates.Capture(lower,upper);
-                if(ready)++probeStats.bodyLists;
+                edgeBody=view.For(edgeBox,profile.cell,profile.step);
             }
-            const bool use=ready && minY>=lower[1] && maxY<=upper[1] &&
+            const bool use=edgeBody && minY>=lower[1] && maxY<=upper[1] &&
                 (std::min)(prev.x,at.x)-sideX>=lower[0] && (std::max)(prev.x,at.x)+sideX<=upper[0] &&
                 (std::min)(prev.z,at.z)-sideZ>=lower[2] && (std::max)(prev.z,at.z)+sideZ<=upper[2];
-            return [&,use](Point a0,Point b0) noexcept {return clear(a0,b0,use ? &candidates : nullptr);};
+            return [&,use](Point a0,Point b0) noexcept {return clear(a0,b0,use ? edgeBody : nullptr);};
         };
         const bool walkable=WalkEdge(a,b,out,profile,ground,clear,body,sweep);
         queries+=(std::min)(cast,worst);
