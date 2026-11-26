@@ -28,10 +28,11 @@ constexpr int kMostPoints=13,kMostLayers=6,kMostGroups=6,kMostShots=3,kMostEvent
 constexpr float kQuietDb=-60.0f;   // a layer under this is not given a voice (FMOD's curves end at -80: silence)
 constexpr float kOpenGain=0.001f,kCloseGain=0.0005f;   // ...its voice opened over -60 dB, closed under -66 (no chatter)
 
-// Ours: the engines' level against the plugin's other sounds (WT's buses are its own mix): the loudest layer of a tank's
-// own engine at full load about the cannons' shot layer's level near the gun, a jet's the same at full power. Each
-// family's master and bus below are WT's.
-constexpr float kTrimDb=-14.0f;
+// Ours: the engines' level against the plugin's other sounds (WT's buses are its own mix). Measured on the recordings
+// (their RMS through Hear, the riding camera 14 m off, behind): a tank's own engine at full load 14 dB under a 75 mm
+// shot's first 0.3 s at the same distance (sound_event.h kMedium), its idle 22 dB under; a jet's own at full power
+// 16 dB under from 15 m behind. Each family's master and bus below are WT's.
+constexpr float kTrimDb=-2.0f;
 
 struct Point { float at,value; };
 // A value over a parameter: straight between its points (FMOD's linear automation: dB for a volume, semitones for a
