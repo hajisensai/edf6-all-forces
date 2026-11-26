@@ -367,6 +367,105 @@ bool RayResetTemplates() {
     return true;
 }
 
+bool ContactManifolds() {
+    alignas(16) unsigned char world[0x8A0]{},bodies[4*0xB0]{},motions[4*0x80]{};
+    alignas(16) unsigned char event[0xB0]{},cache[0x40]{},compressed[0x240]{},lookup[0x60]{};
+    alignas(16) unsigned char expected[0x80],actual[0x80];
+    const void* const table=image+kContactWorldVtable;
+    edf::Put(world,0x20,table);
+    edf::Put(world,0x38,bodies+0);
+    edf::Put(world,0x40,4u);
+    edf::Put(world,0x178,motions+0x80);
+    edf::Put(world,0x540+0x160,1.0f);
+    for(unsigned i=0;i<4;++i) {
+        edf::Put(world,0x540+0x40+i*4,0.25f);
+        edf::Put(world,0x540+0x70+i*4,0.125f);
+    }
+    for(unsigned i=0;i<4;++i) {
+        edf::Put(bodies,i*0xB0+0x50,0x80000000u+i);
+        edf::Put(bodies,i*0xB0+0x80,static_cast<std::int32_t>(i)-1);
+        auto* const motion=motions+i*0x80;
+        edf::Put(motion,0x0C,1.0f);
+        edf::Put(motion,0x10,1.25+static_cast<double>(i));
+        edf::Put(motion,0x18,-1.0-static_cast<double>(i));
+        edf::Put(motion,0x20,0.5*static_cast<double>(i));
+        edf::Put(motion,0x4C,i&1u);
+    }
+    edf::Put(event,0x20,cache+0);
+    edf::Put(cache,0x20,compressed+0);
+    edf::Put(cache,0x28,static_cast<std::uint16_t>(0x10));
+    auto* const packed=compressed+0x10;
+    for(unsigned i=0;i<4;++i)edf::Put(packed,0x10+4*i,0.25f*static_cast<float>(i+1));
+
+    const auto stock=reinterpret_cast<DecodeContactFn>(image+kDecodeContact);
+    const auto compare=[&](DecodeContactFn fast,const void* result) {
+        std::memset(expected,0xA5,sizeof(expected));
+        std::memset(actual,0xA5,sizeof(actual));
+        const auto* const before=stock(event,world,expected);
+        const auto* const after=fast(event,world,actual);
+        return before==(result==actual ? expected : result) && after==result &&
+               std::memcmp(expected,actual,sizeof(actual))==0;
+    };
+    std::mt19937 rng(20261127);
+    for(const auto site:kContactDecoders) {
+        const auto fast=Redirected<DecodeContactFn>(site);
+        if(fast==stock)return false;
+        edf::Put(event,0x30,7u);
+        if(!compare(fast,event+0x30) || fast(event,nullptr,actual)!=event+0x30)return false;
+        edf::Put(event,0x30,0xFFFFFFFFu);
+        for(unsigned i=0;i<6000;++i) {
+            const unsigned a=rng()%4,b=rng()%4;
+            const auto aId=0x80000000u+a,bId=0x80000000u+b;
+            edf::Put(event,8,aId);
+            edf::Put(event,0xC,bId);
+            for(unsigned j=0;j<4;++j)bodies[j*0xB0+0x54]=static_cast<unsigned char>(j&1u ? 1 : 2);
+            world[0x898]=static_cast<unsigned char>((i%4)*8);
+            packed[3]=static_cast<unsigned char>(1+rng()%4);
+            packed[4]=static_cast<unsigned char>(i&1u ? 8 : 0);
+            edf::Put(packed,0x20,i&2u ? lookup+0 : nullptr);
+            for(unsigned j=0;j<8;++j)edf::Put(packed,0x30+2*j,static_cast<std::uint16_t>(rng()));
+            const void* result=nullptr;
+            switch(i%12) {
+                case 0: edf::Put(event,0xC,0xFFFFFFFFu); break;
+                case 1: edf::Put(event,8,0x00FFFFFFu); break;
+                case 2: edf::Put(event,0xC,0x80000004u); break;
+                case 3: edf::Put(event,8,a); break;
+                case 4: bodies[b*0xB0+0x54]=4; break;
+                case 5: bodies[a*0xB0+0x54]=0; break;
+                default: result=actual; break;
+            }
+            if(!compare(fast,result)) {
+                std::printf("FAIL: contact decoder %x, case %u\n",site,i);
+                return false;
+            }
+        }
+        edf::Put(event,8,0x80000001u);
+        edf::Put(event,0xC,0x80000003u);
+        bodies[0xB0+0x54]=2;
+        bodies[3*0xB0+0x54]=1;
+        const void* alternate[32];
+        std::memcpy(alternate,table,sizeof(alternate));
+        edf::Put(world,0x20,alternate+0);
+        if(!compare(fast,actual))return false;
+        alternate[0x68/sizeof(void*)]=reinterpret_cast<const void*>(+[](const void*,std::uint32_t) {return 0u;});
+        if(!compare(fast,nullptr))return false;
+        edf::Put(world,0x20,table);
+    }
+
+    packed[4]=0;
+    edf::Put(packed,0x20,lookup+0);
+    world[0x898]=0;
+    const auto fast=Redirected<DecodeContactFn>(kContactDecoders[0]);
+    for(unsigned points:{1u,4u}) {
+        packed[3]=static_cast<unsigned char>(points);
+        char label[70];
+        std::snprintf(label,sizeof(label),"contact manifold decode with %u point(s)",points);
+        Bench(label,[&](unsigned){stock(event,world,expected);},[&](unsigned){fast(event,world,actual);});
+    }
+    return true;
+}
+
+
 bool ContactStreams() {
     void* callbacks[4]={nullptr,nullptr,nullptr,reinterpret_cast<void*>(&TestCommand)};
     void* dispatcher[7]{};
@@ -538,6 +637,10 @@ int main(int argc,char** argv) {
     if(!BoundsValidation() || !AvoidanceNeighbors())return 1;
     if(!AvoidanceBoxes()) {
         std::puts("FAIL: avoidance sweep changed the first overlap or the X cutoff");
+        return 1;
+    }
+    if(!ContactManifolds()) {
+        std::puts("FAIL: native contact manifold return or output mismatch");
         return 1;
     }
     if(!ContactStreams()) {

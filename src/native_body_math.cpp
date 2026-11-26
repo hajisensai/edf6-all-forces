@@ -53,8 +53,7 @@ constexpr unsigned kAvoidanceOverflow=kAvoidancePush.call-5,kAvoidancePop=0xD5F5
 constexpr unsigned kAvoidanceOverflowCall=kAvoidanceOverflow+3;
 constexpr unsigned char kAvoidanceFirstHeapSkip[]{0xEB,0x0A};
 constexpr unsigned char kAvoidanceDoneSig[]{0x4C,0x8B,0x55,0xF7,0x4C,0x8B,0x5D,0xEF};
-static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
-              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+6==kNativeBodyMathSites);
+
 
 struct AvoidanceNeighbor { std::uint64_t handle; float distanceSquared; std::uint32_t padding; };
 struct AvoidanceHeap { AvoidanceNeighbor* entries; int count; };
@@ -350,6 +349,75 @@ bool InstallClingBodyReuse() noexcept {
     return false;
 }
 
+constexpr unsigned kDecodeContact=0xDD2480,kUnpackContact=0xDD4230,kContactWorldVtable=0x18BC9C0;
+constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20;
+constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
+static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
+              sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+6==kNativeBodyMathSites);
+
+using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
+using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
+
+__forceinline bool IsContactWorld(const void* table) noexcept {
+    return table==image+kContactWorldVtable && edf::At<const void*>(table,0x68)==image+kIsBodyValid &&
+           edf::At<const void*>(table,0x80)==image+kBodyById && edf::At<const void*>(table,0xF8)==image+kMotionById;
+}
+
+__forceinline const unsigned char* FindContactBody(const unsigned char* world,std::uint32_t id) noexcept {
+    const auto index=id&0xFFFFFFu;
+    if(index==0xFFFFFFu || index>=edf::At<std::uint32_t>(world,0x40))return nullptr;
+    const auto* const body=edf::At<const unsigned char*>(world,0x38)+index*0xB0ull;
+    return (body[0x54]&3) && edf::At<std::uint32_t>(body,0x50)==id ? body : nullptr;
+}
+
+const void* __fastcall DecodeContact(const unsigned char* event,const unsigned char* world,void* out) noexcept {
+    if(edf::At<std::uint32_t>(event,0x30)!=0xFFFFFFFFu)return event+0x30;
+    if(!IsContactWorld(edf::At<const void*>(world,0x20)))
+        return reinterpret_cast<DecodeContactFn>(image+kDecodeContact)(event,world,out);
+
+    // Validate the full generation ID and retain the row for its motion lookup.
+    const auto* const bodyB=FindContactBody(world,edf::At<std::uint32_t>(event,0xC));
+    if(!bodyB)return nullptr;
+    const auto* const bodyA=FindContactBody(world,edf::At<std::uint32_t>(event,8));
+    if(!bodyA)return nullptr;
+    const auto* const motions=edf::At<const unsigned char*>(world,0x178);
+    const auto* const motionB=motions+static_cast<std::ptrdiff_t>(edf::At<std::int32_t>(bodyB,0x80))*0x80;
+    const auto* const motionA=motions+static_cast<std::ptrdiff_t>(edf::At<std::int32_t>(bodyA,0x80))*0x80;
+    const auto* const cache=edf::At<const void*>(event,0x20);
+    const auto* const compressed=edf::At<const unsigned char*>(cache,0x20)+edf::At<std::uint16_t>(cache,0x28);
+    reinterpret_cast<UnpackContactFn>(image+kUnpackContact)(world+0x540,compressed,motionB,motionA,
+                                                          (world[0x898]&0x18)==0,out);
+    return out;
+}
+
+unsigned InstallContactDecoders() noexcept {
+    constexpr unsigned char decoderSig[]{0x40,0x55,0x41,0x56,0x41,0x57,0x48,0x83,0xEC,0x30,
+        0x83,0x79,0x30,0xFF,0x48,0x8D,0x41,0x30};
+    constexpr unsigned char unpackCall[]{0xE8,0x84,0x7D,0xF9,0xFF};
+    constexpr unsigned char unpackThunk[]{0x4C,0x8B,0xD2,0x48,0x8B,0xD1,0x49,0x8B,0xCA,0xE9,0x42,0x9F,0x06,0};
+    constexpr unsigned char isBodyValidSig[]{0x8B,0xC2,0x25,0xFF,0xFF,0xFF,0,0x3D,0xFF,0xFF,0xFF,0,
+        0x74,0x23,0x3B,0x41,0x20,0x73,0x1E,0x4C,0x69,0xC0,0xB0,0,0,0,0x4C,0x03,0x41,0x18,
+        0x41,0xF6,0x40,0x54,0x03,0x74,0x0C,0x41,0x39,0x50,0x50,0x75,0x06,0xB8,1,0,0,0,0xC3,0x33,0xC0,0xC3};
+    constexpr unsigned char bodyByIdSig[]{0x8B,0xC2,0x25,0xFF,0xFF,0xFF,0,0x48,0x69,0xC0,0xB0,0,0,0,
+        0x48,0x03,0x41,0x18,0xC3};
+    constexpr unsigned char motionByIdSig[]{0x48,0x63,0xC2,0x48,0xC1,0xE0,7,0x48,0x03,0x81,0x58,1,0,0,0xC3};
+    if(!edf::Matches(image,kDecodeContact,decoderSig,sizeof(decoderSig)) ||
+       !edf::Matches(image,0xDD2557,unpackCall,sizeof(unpackCall)) ||
+       !edf::Matches(image,0xD6A2E0,unpackThunk,sizeof(unpackThunk)) ||
+       !edf::Matches(image,kIsBodyValid,isBodyValidSig,sizeof(isBodyValidSig)) ||
+       !edf::Matches(image,kBodyById,bodyByIdSig,sizeof(bodyByIdSig)) ||
+       !edf::Matches(image,kMotionById,motionByIdSig,sizeof(motionByIdSig)))return 0;
+    unsigned installed=0;
+    for(const auto call:kContactDecoders) {
+        if(image[call]!=0xE8)continue;
+        bool changed=false;
+        edf::RedirectCall(image+call,image+kDecodeContact,reinterpret_cast<void*>(&DecodeContact),changed);
+        installed+=changed;
+    }
+    return installed;
+}
+
 inline __m128 XyzMask() noexcept { return _mm_castsi128_ps(_mm_set_epi32(0,-1,-1,-1)); }
 
 inline __m128 KeepW(__m128 xyz,__m128 original) noexcept {
@@ -534,6 +602,7 @@ unsigned InstallNativeBodyMath() noexcept {
     installed+=InstallAvoidanceHeap();
     installed+=InstallAvoidanceScan();
     installed+=InstallClingBodyReuse();
+    installed+=InstallContactDecoders();
     installed+=InstallContactStream();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
     for(const auto& site:kAttachedBasisCalls) {
