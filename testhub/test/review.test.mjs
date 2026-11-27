@@ -131,6 +131,10 @@ test('review: visitor writes are rate limited per IP and refused cross-site', as
 test('review: the page and its script are public; the page puts text in as text only', async () => {
   const e = env();
   for (const p of ['/rate.html', '/rate.js']) assert.equal(await (await worker.fetch(new Request('https://edf6.test' + p), e)).text(), 'asset');
+  // The language suffix serves the same page (rate.js reads the suffix); an unknown one is not the page.
+  const seen = { ...e, ASSETS: { fetch: (req) => new Response(new URL(req.url).pathname) } };
+  for (const l of ['en', 'ja', 'zh']) assert.equal(await (await worker.fetch(new Request('https://edf6.test/rate/' + l), seen)).text(), '/rate.html');
+  assert.notEqual(await (await worker.fetch(new Request('https://edf6.test/rate/fr'), seen)).text(), '/rate.html');
   const js = readFileSync(new URL('../public/rate.js', import.meta.url), 'utf8');
   assert.doesNotMatch(js, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   const html = readFileSync(new URL('../public/rate.html', import.meta.url), 'utf8');
