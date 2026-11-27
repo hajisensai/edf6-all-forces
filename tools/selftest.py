@@ -6560,16 +6560,11 @@ def frame_rate_cap_default_170() -> None:
     assert installer.NEW_DEFAULTS_1127[installer.SECTION] == {'FrameRateCap': ('0', '170')}
     steps = [m for m, flips in installer.DEFAULTS_STEPS if 'FrameRateCap' in flips.get(installer.SECTION, {})]
     assert steps == [installer.DEFAULTS_MARK_1127], steps
-    text, flipped = installer.apply_new_defaults('[VehicleCrew]
-Enabled=1
-FrameRateCap=0
-')
+    text, flipped = installer.apply_new_defaults('[VehicleCrew]\nEnabled=1\nFrameRateCap=0\n')
     assert 'FrameRateCap' in flipped and 'FrameRateCap=170' in text and installer.DEFAULTS_MARK_1127 in text
     text2, flipped2 = installer.apply_new_defaults(text.replace('FrameRateCap=170', 'FrameRateCap=0'))
     assert 'FrameRateCap' not in flipped2 and 'FrameRateCap=0' in text2, 'the player turned it back to 0 after the step'
-    kept, _ = installer.apply_new_defaults('[VehicleCrew]
-FrameRateCap=144
-')
+    kept, _ = installer.apply_new_defaults('[VehicleCrew]\nFrameRateCap=144\n')
     assert 'FrameRateCap=144' in kept
 
 @test
