@@ -171,9 +171,63 @@ def scenarios() -> None:
     check(perfrun.plan_for('stress:10').squads == 30, 'stress: 3*N squads below the cap')
     check(perfrun.plan_for('stress:1:giantspider01').waves.enemy == 'giantspider01' and
           perfrun.stress_fields(1)[2] == 40.0 and perfrun.stress_fields(100)[2] == 90.0, 'stress: its enemy, its warm-up')
+    bench_scenario()
     for name, (wave, friends, _) in perfrun.PRESETS.items():
         check(wave.split(':')[0] in {s for s, _, _ in gen.ENEMIES} and all(f in gen.DERIVED or f in gen.JETS or
               f.startswith('vehicle') for f in friends), f'preset {name}: an enemy and friends the range knows')
+
+
+def bench_scenario() -> None:
+    """bench:E[:S[:ENEMY]]: the pinned population (gen.BENCH) -- its plan, its script (nothing dies, the refill to E),
+    its warm-up counted from E reached, and the readiness rule (E reached, or a count that stopped rising)."""
+    import re
+    import rmpa
+    p = perfrun.plan_for('bench:2000')
+    check(p.scenario == gen.BENCH and (p.waves.enemy, p.waves.max_alive, p.waves.per_wave) ==
+          ('giantant01', 2000, gen.BENCH_BATCH) and not p.vehicles and not p.friends
+          and p.squads * 6 >= perfrun.BENCH_SOLDIERS > (p.squads - 1) * 6,
+          'bench:E: E enemies, the default soldiers in squads of six, no vehicles')
+    p = perfrun.plan_for('bench:500:60:giantspider01')
+    check((p.waves.max_alive, p.squads, p.waves.enemy) == (500, 10, 'giantspider01'), 'bench:E:S:ENEMY reach the plan')
+    check(perfrun.plan_for('bench:100:7').squads == 2, 'bench: S rounded up to whole squads')
+    check(perfrun.is_range('bench:500') and perfrun.warm_for('bench:500', None) == perfrun.BENCH_SETTLE
+          and perfrun.warm_for('bench:500', 9.0) == 9.0, 'bench is a range leg, warmed BENCH_SETTLE after E')
+    check(perfrun.population_want(p) == 500 and perfrun.population_want(perfrun.plan_for('stress:1')) == 1
+          and perfrun.population_want(None) == 1, 'bench waits for E enemies, the other waves for the first')
+    for bad in ('bench:0', 'bench:10:-6'):
+        try:
+            perfrun.plan_for(bad)
+            check(False, f'{bad} refused')
+        except ValueError:
+            check(True, f'{bad} refused')
+    ready = perfrun.population_ready
+    check(ready([(0.0, 10), (5.0, 500)], 500, 5.0) and not ready([(0.0, 10), (5.0, 400)], 500, 10.0)
+          and ready([(0.0, 10), (5.0, 400), (40.0, 400)], 500, 40.0) and not ready([(0.0, 0)], 500, 99.0)
+          and ready([(0.0, 1)], 1, 0.0) and not ready([(0.0, 0)], 1, 99.0),
+          'population_ready: E reached, or a live count not risen for BENCH_PLATEAU s; never an empty one')
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))] + [
+        rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+        for x in range(-20, 21) for z in range(-20, 21) if (x, z) != (0, 0) and x * x + z * z <= 400]
+    plan = perfrun.plan_for('bench:3000:12')
+    text = gen.script(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan)))
+    squads = re.findall(r'CreateFriendSquad\([^;]*;', text)
+    check(len(squads) == 2 and all(s.endswith('.SetTeamDamageAdjust_Squad(TEAM_ID_ENEMY, 0.0)'
+                                              '.SetAutoResurrectionSquad(true);') for s in squads),
+          'bench script: its squads take no damage from the enemy and come back')
+    check('SetObjectInvincible(GetPlayerObject(0), true);' in text, 'bench script: the player invincible')
+    groups = re.findall(r'CreateEnemyGroup\([^;]*;', text)
+    check(len(groups) == 1 and groups[0].endswith('.SetInvincible(true);') and '"app:/object/giantant01.sgo"' in groups[0]
+          and f', {gen.BENCH_SPREAD:.0f}, ' in groups[0],
+          'bench script: one refill call, its groups invincible, spread BENCH_SPREAD')
+    check('int slots = 3000 - int(GetTeamObjectCount(TEAM_ID_ENEMY));' in text
+          and f'slots < {gen.BENCH_BATCH} ? slots : {gen.BENCH_BATCH}' in text and 'CreateFriend(' not in text
+          and 'CreateVehicle2(' not in text, 'bench script: the refill tops up to E, BENCH_BATCH a call, no vehicles')
+    check(text == gen.script(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))),
+          'bench script: the same every time (spots in a fixed order)')
+    plain = perfrun.plan_for('stress:1')
+    plain_text = gen.script(plain, gen.layout(points, gen.small_count(plain), gen.far_reserved(plain)))
+    check('SetInvincible' not in plain_text and 'SetTeamDamageAdjust' not in plain_text,
+          'stress is unchanged: its enemies and soldiers die')
 
 
 def report_parsing() -> None:
@@ -1010,7 +1064,7 @@ def legs_run() -> None:
         gen.restore_scenario = lambda game_: calls.append(('restore',)) or True
         perfrun._sample = fake_sample
 
-        def fake_population(game_, log_, timeout, gate):
+        def fake_population(game_, log_, timeout, gate, want=1):
             calls.append(('population',))
             return 'no live enemy wave' if enter[0] == 'empty' else None
 
