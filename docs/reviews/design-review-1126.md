@@ -200,6 +200,11 @@
 - 前提：改 wire 就要升 `kAllForcesRoomProtocol`，按项目规则直接拒绝旧版本，不写兼容分支。
 - 护栏：现有 `*_net_test.cpp` 加上 tests/gamenet 不开游戏的联机测试；新增「同一对象两种 tag 消息互不干扰」用例。
 - 规模：约 6 个文件，1000 行左右。风险中等（联机），需要一次双机实测。
+- 状态（2026-11-27，分支 `wave1-objnet`）：已做。`src/object_net.h`（共用头、Gate、种类登记表 `Kinds`、类表 `kClasses`）+ `src/object_net.cpp`
+  （每个链上的表一个接收钩子、一个发送者身份与序号、slot 16 发送、开发回环）；drill / proteus / sazabi / dreadnought 改为 `ChainClass`，
+  `edf41net` 改为对象消息的 `E41N` 种类（tag 12 → 15，头版本 1 → 2，不再复制虚表）；pvp 通道补 magic `AFPV`（`6d2b1281`）。
+  按任务要求没有升 `kAllForcesRoomProtocol`（23）：改了线格式的只有 `E41N`，旧版本插件的原版接收对 tag 15 只读类型就返回，不会误解析。
+  测试：`object_net_test`（登记表、类表、两种消息同一对象互不干扰）、`edf41net_test`、四个 native 测试；双机实测未做。
 
 ### 第 8 步：直升机和战机的状态显式化（解决 P10 后半）
 - 范围：`heli.cpp` 的 `struct Heli` 和 `jet_internal.h` 的 `struct Jet` 里描述「任务阶段」的那几个 bool（called / guard / leaving / reap / extend / orbiting / cmdMoving…）收成 `enum class Phase` 加一个 `Transition()` 函数，放进 `heli_logic.h` / `jet_logic.h`，可离线测试。飞控学习量（hover、k、params）不动。

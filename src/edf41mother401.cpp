@@ -1882,7 +1882,7 @@ template<Kind K> void CreatePart(void* info) noexcept {
     void* obj=CloneObject(partClone,kEaoCtor,kEaoSize,info);
     if(!obj)return;
     Register(obj,K);
-    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
+    edf41net::Install();   // online: its class's NetworkObject takes the host's events (edf41net, object_net)
     if(++partsMade<=3)Log("EDF41M401 create %s %p",KindName(K),obj);
 }
 

@@ -1,77 +1,48 @@
+#define _CRT_RAND_S   // object_net.cpp (rand_s) may share this file's translation unit (the native tests)
 // EDF4.1 classes online: the shared network layer (src/edf41net.h has what it is for; docs/edf41-classes.md section 联机 the
 // reading of EDF.dll behind it). EDF.dll TimeDateStamp 0x678CCB46, RVAs; every function checked by its first bytes before use.
 //
-// The transport is the one the plugin's drill uses (drill_net.cpp, its native test tests/drill_net_native_test.cpp): the game's
-// stream writer (0x79A460 construct, 0x12B5790 small int, 0x12B5200 block), the object's NetworkObject slot 16 (+0x80,
-// 0x773DA0) to send, slot 17 to receive (the reader: 0x12B4660 small int, 0x12B4900 block, 0x12B48A0 / 0x12B4FD0 mark and
-// rewind). The classes' objects get a copy of their stock NetworkObject vtable (EventAnimationObject 0x17D4E90, UfoCarrier508
-// 0x17C9F50, both slot 17 = GameObjectBase's 0x54D770) with slot 17 wrapped: tag 12 is read here and queued for the object, any
-// other tag goes on to the slot the live table had, the read position put back first.
+// The events are one kind (magic E41N) of the plugin's object messages (object_net.h / object_net.cpp, the transport the
+// drill's flight and the seats' picks use: the game's stream writer, the object's NetworkObject slot 16 to send, its slot 17
+// to receive). object_net chains the EventAnimationObject and UfoCarrier508 NetworkObject slot 17 (its class table; both are
+// GameObjectBase's 0x54D770 in the stock tables) and hands this layer's blocks to Received by their magic; every other tag or
+// kind goes on to the receiver the slot held. Received checks the block and queues it for the object's next update.
 // The child identity is MovingFortress's (0x4C79C0): 0x54EDB0(child) when the parent is another machine's, then
 // 0x781630(manager [0x20B2AC8], weak child*, weak parent*, int index, int sub, byte remoteOwned) — both weak arguments are
 // released by the callee (0x781878 / 0x781894), so each is a copy holding one weak count of its own.
-#define _CRT_RAND_S
 #include "edf41net.h"
 
 #include "crew.h"
 #include "edf41classes.h"
 #include "memory.h"
+#include "object_net_transport.h"
 #include "online_authority.h"
 
 #include <atomic>
-#include <cstdlib>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
 
 namespace crew::edf41net {
 namespace {
-constexpr unsigned kConstruct=0x79A460,kDestroy=0x760180,kWriteSmall=0x12B5790,kWriteBlock=0x12B5200;
-constexpr unsigned kReadValue=0x12B4660,kReadBlock=0x12B4900,kMark=0x12B48A0,kRewind=0x12B4FD0,kReaderFrom=0x12B4530;
-constexpr unsigned kRegisterChild=0x781630,kGuestChild=0x54EDB0,kStockReceive=0x54D770,kStockSend=0x773DA0;
-constexpr unsigned kEaoNet=0x17D4E90,kCarrierNet=0x17C9F50;
+constexpr unsigned kRegisterChild=0x781630,kGuestChild=0x54EDB0;
 constexpr std::size_t kNetManager=0x20B2AC8;
-constexpr std::size_t kNet=0x120,kNetWord=0x128,kTargetSync=0x591,kSelfControl=0x30;
-constexpr int kNetSlots=22,kSlotSend=16,kSlotReceive=17;
-constexpr std::size_t kStreamData=0x10,kStreamSize=0x5F0;
+constexpr std::size_t kNetWord=0x128,kTargetSync=0x591,kSelfControl=0x30;
 constexpr int kMostQueued=64,kMostLoops=4;
 
 struct Signature { unsigned rva; unsigned char bytes[8]; };
+// The stream, the send and the receive are object_net's (object_transport::signatures); these are the child identity's.
 const Signature kSignatures[]={
-    {kConstruct,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},
-    {kDestroy,{0x48,0x8D,0x05,0x01,0xCE,0x08,0x01,0x48}},
-    {kWriteSmall,{0x8D,0x42,0x0E,0x4C,0x8D,0x41,0x10,0x3C}},
-    {kWriteBlock,{0x48,0x8B,0x81,0xF0,0x05,0x00,0x00,0x4D}},
-    {kReadValue,{0x48,0x89,0x5C,0x24,0x08,0x4C,0x8B,0x51}},
-    {kReadBlock,{0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41}},
-    {kMark,{0x48,0x8B,0x41,0x08,0x41,0xB8,0xFF,0xFF}},
-    {kRewind,{0xB8,0xFF,0xFF,0xFF,0xFF,0x48,0x39,0x41}},
-    {kReaderFrom,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8D}},
     {kRegisterChild,{0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41}},
     {kGuestChild,{0xC7,0x81,0x38,0x03,0x00,0x00,0xFF,0xFF}},
-    {kStockSend,{0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57}},
 };
 
 template<class F> F Fn(unsigned rva) noexcept { return reinterpret_cast<F>(image+rva); }
-using ReceiveFn=void(__fastcall*)(unsigned char*,void*);
-using SendFn=bool(__fastcall*)(void*,void*);
 using RegisterChildFn=void*(__fastcall*)(void*,void*,void*,int,int,unsigned char);
 using GuestChildFn=void(__fastcall*)(void*);
 
-// The game's stream object (0x5F8 bytes: +8 the read position, +0x10 the bytes, +0x5F0 the size); its destructor only resets
-// vtables (0x760180 -> 0x12B45A0), nothing is allocated. A plain buffer: the functions with __try hold no object to unwind.
-struct RawStream { alignas(16) unsigned char bytes[0x600]; };
-void Construct(RawStream& s) noexcept { std::memset(s.bytes,0,sizeof(s.bytes)); Fn<void*(__fastcall*)(void*,int)>(kConstruct)(s.bytes,0x40); }
-void Destroy(RawStream& s) noexcept { Fn<void(__fastcall*)(void*)>(kDestroy)(s.bytes); }
-
-// The classes' NetworkObject vtables: the 22 slots of the live table copied (RTTI first), slot 17 ours.
-struct NetTable { unsigned rva; const char* name; void* block[kNetSlots+1]; void* next; };
-NetTable tables[2]={{kEaoNet,"EventAnimationObject",{},nullptr},{kCarrierNet,"UfoCarrier508",{},nullptr}};
-
 std::mutex lock;
 std::atomic<int> state{0};   // 0 not tried, 1 ready, -1 off
-std::uint64_t sender=0;
-std::uint32_t sequence=0;
 Stats stats;
 
 // Per object: its control block (a new object at the same address is not the old one), the sender watermarks, the queue.
@@ -101,9 +72,9 @@ void Say(const char* what) noexcept {
     Log("EDF41NET %s",what);
 }
 
-void __fastcall Receive(unsigned char* net,void* reader);
+void Received(unsigned char* object,const void* block,std::size_t size) noexcept;
 
-bool Install() noexcept {
+bool InstallOnce() noexcept {
     int s=state.load();
     if(s)return s>0;
     std::lock_guard<std::mutex> hold(lock);
@@ -114,34 +85,16 @@ bool Install() noexcept {
             state=-1;
             return false;
         }
-    // The stock receiver 0x54D770 is not fingerprinted: EDF6Coop hooks its first instruction (W3 / W4, `mov [rsp+0x10],rbx` ->
-    // jmp; found on the real game 2026-10-15, where a fingerprint turned this layer off). It is only called on, never read.
-    static const unsigned char kReceiveEntry[]={0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83};
-    if(!Matches(kStockReceive,kReceiveEntry,sizeof(kReceiveEntry)))
-        Log("EDF41NET GameObjectBase's NetworkObject receiver EDF+%X starts with other bytes (another module's hook, EDF6Coop's W3 / W4): called on as it is",kStockReceive);
-    unsigned lo=0,hi=0;
-    if(rand_s(&lo) || rand_s(&hi)) { Log("EDF41NET off: no sender identity"); state=-1; return false; }
-    sender=(static_cast<std::uint64_t>(hi)<<32 | lo) | 1;
-    for(NetTable& t:tables) {
-        void* const* vt=reinterpret_cast<void* const*>(image+t.rva);
-        if(!Readable(vt-1,sizeof(void*)*(kNetSlots+1))) { Log("EDF41NET off: the %s NetworkObject vtable is not readable",t.name); state=-1; return false; }
-        for(int i=-1;i<kNetSlots;++i)t.block[i+1]=vt[i];
-        if(vt[kSlotSend]!=image+kStockSend)Log("EDF41NET %s NetworkObject slot 16 is %p, not EDF+%X: kept as it is",t.name,vt[kSlotSend],kStockSend);
-        if(vt[kSlotReceive]!=image+kStockReceive)Log("EDF41NET %s NetworkObject slot 17 is %p (patched): this layer calls it on for other tags",t.name,vt[kSlotReceive]);
-        t.next=vt[kSlotReceive];
-        t.block[kSlotReceive+1]=reinterpret_cast<void*>(&Receive);
+    if(!object_net::Install() || !object_net::Register(kMagic,&Received) ||
+       !object_net::ChainClass(object_net::Class::eventAnimationObject) || !object_net::ChainClass(object_net::Class::ufoCarrier508)) {
+        Log("EDF41NET off: the object message layer is not on, or the classes' NetworkObject slot 17 is not chained");
+        state=-1;
+        return false;
     }
-    Log("EDF41NET on: tag %d on copies of the EventAnimationObject / UfoCarrier508 NetworkObject vtables, sender %016llX%s",kTag,
-        static_cast<unsigned long long>(sender),Cfg().edf41NetMirror ? " (development loopback Edf41NetMirror on: offline only)" : "");
+    Log("EDF41NET on: kind E41N of the object messages (tag %d) on the EventAnimationObject / UfoCarrier508 NetworkObject%s",kTag,
+        Cfg().edf41NetMirror ? " (development loopback Edf41NetMirror on: offline only)" : "");
     state=1;
     return true;
-}
-
-NetTable* TableOf(const unsigned char* net) noexcept {
-    if(!Readable(net,8))return nullptr;
-    void* const* vt=*reinterpret_cast<void* const* const*>(net);
-    for(NetTable& t:tables)if(vt==&t.block[1])return &t;
-    return nullptr;
 }
 
 bool MirrorLocked(const void* object) noexcept {
@@ -155,7 +108,7 @@ void Enqueue(void* object,const unsigned char* data,std::size_t n) noexcept {
     const unsigned char* payload=nullptr;
     if(!Decode(data,n,&h,&payload)) {
         { std::lock_guard<std::mutex> hold(lock); ++stats.refused; }
-        Say("a tag-12 event that is not this layer's (bad magic, version or size): dropped");
+        Say("an E41N event that does not decode (version, size, reserved bytes): dropped");
         return;
     }
     const bool guest=Guest(object);
@@ -167,7 +120,7 @@ void Enqueue(void* object,const unsigned char* data,std::size_t n) noexcept {
             const void* control=ControlOf(object);
             Record& r=records[object];
             if(r.control!=control) { r=Record{}; r.control=control; }
-            if(!r.gate.Admit(h.sender,h.sequence))++stats.refused;
+            if(!r.gate.AdmitSequence(h.head.sender,h.head.sequence))++stats.refused;
             else {
                 if(static_cast<int>(r.queue.size())>=kMostQueued) { r.queue.erase(r.queue.begin()); full=true; }
                 Message m{};
@@ -183,39 +136,11 @@ void Enqueue(void* object,const unsigned char* data,std::size_t n) noexcept {
     if(full)Say("an object's event queue overflowed (its update did not drain it): the oldest dropped");
 }
 
-// Tag 12: 1, consumed; another tag: 0; -1 the reader raised an exception. The read position is put back in each case (as the
-// drill's Peek does; GameObjectBase's own receiver reads one small int and returns on a tag it does not know).
-int Peek(unsigned char* net,void* reader,RawStream& block) noexcept {
-    __try {
-        std::int64_t mark=0;
-        Fn<void(__fastcall*)(void*,std::int64_t*)>(kMark)(reader,&mark);
-        const bool ours=Fn<std::int64_t(__fastcall*)(void*)>(kReadValue)(reader)==kTag;
-        if(ours) {
-            Construct(block);
-            const bool read=Fn<bool(__fastcall*)(void*,void*)>(kReadBlock)(reader,block.bytes);
-            const std::size_t n=read ? At<std::size_t>(block.bytes,kStreamSize) : 0;
-            if(read && n<=kMostMessage)Enqueue(net-kNet,block.bytes+kStreamData,n);
-            else Say("a tag-12 event without a readable block of a size this layer sends: dropped");
-            Destroy(block);
-        }
-        Fn<void(__fastcall*)(void*,std::int64_t)>(kRewind)(reader,mark);
-        return ours ? 1 : 0;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        return -1;
-    }
+// object_net's receiver of kind E41N: `object` the copy here the message came for (EventAnimationObject or UfoCarrier508).
+void Received(unsigned char* object,const void* block,std::size_t size) noexcept {
+    Enqueue(object,static_cast<const unsigned char*>(block),size);
 }
 
-void __fastcall Receive(unsigned char* net,void* reader) {
-    NetTable* t=TableOf(net);
-    if(reader && t) {
-        RawStream block;
-        const int r=Peek(net,reader,block);
-        if(r>0)return;
-        if(r<0)Say("reading an event raised an exception: passed on to the stock receiver");
-    }
-    void* next=t ? t->next : static_cast<void*>(image+kStockReceive);
-    reinterpret_cast<ReceiveFn>(next)(net,reader);
-}
 
 // 0x781630 under __try: 1 done, 0 not, -1 an exception.
 int CallRegister(void* manager,void* child,unsigned char* weakChild,unsigned char* weakParent,std::uint16_t index,std::uint16_t sub,
@@ -301,40 +226,10 @@ void PumpFor(const void* parent) noexcept {
         edf41c::WeakReset(p.child);
     }
 }
-
-// The stream the game writes (tag, block), sent on `object`'s NetworkObject when `online`, and read back by the game's reader
-// into each of `to`'s receivers (the development loopback). 1 sent, 0 not, -1 an exception.
-int Transmit(void* object,bool online,void* const* to,int toCount,const unsigned char* message,std::size_t n) noexcept {
-    __try {
-        RawStream stream;
-        Construct(stream);
-        int sent=0;
-        if(Fn<bool(__fastcall*)(void*,std::int8_t)>(kWriteSmall)(stream.bytes,kTag) &&
-           Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(kWriteBlock)(stream.bytes,message,n)) {
-            if(online) {
-                unsigned char* net=static_cast<unsigned char*>(object)+kNet;
-                void* const* vt=*reinterpret_cast<void* const* const*>(net);
-                sent=reinterpret_cast<SendFn>(vt[kSlotSend])(net,stream.bytes) ? 1 : 0;
-            }
-            for(int i=0;i<toCount;++i) {
-                RawStream reader;
-                Fn<void(__fastcall*)(void*,const void*,std::size_t)>(kReaderFrom)(reader.bytes,stream.bytes+kStreamData,At<std::size_t>(stream.bytes,kStreamSize));
-                unsigned char* net=static_cast<unsigned char*>(to[i])+kNet;
-                void* const* vt=*reinterpret_cast<void* const* const*>(net);
-                reinterpret_cast<ReceiveFn>(vt[kSlotReceive])(net,reader.bytes);
-                Destroy(reader);
-                sent=1;
-            }
-        }
-        Destroy(stream);
-        return sent;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        return -1;
-    }
-}
 }  // namespace
 
-bool Enabled() noexcept { return Cfg().edf41Net && Install(); }
+bool Enabled() noexcept { return Cfg().edf41Net && InstallOnce(); }
+bool Install() noexcept { return Enabled(); }
 bool Online() noexcept { return InSession(); }
 
 bool Registered(const void* object) noexcept {
@@ -352,44 +247,27 @@ bool Guest(const void* object) noexcept {
     return !OnlineRunsHere(object);
 }
 
-void Attach(void* object) noexcept {
-    if(!object || !Enabled())return;
-    unsigned char* net=static_cast<unsigned char*>(object)+kNet;
-    if(!Readable(net,8))return;
-    void* const* vt=*reinterpret_cast<void* const* const*>(net);
-    for(NetTable& t:tables)
-        if(vt==reinterpret_cast<void* const*>(image+t.rva)) { *reinterpret_cast<void**>(net)=&t.block[1]; return; }
-    for(NetTable& t:tables)if(vt==&t.block[1])return;
-    Say("an object whose NetworkObject vtable is neither EventAnimationObject's nor UfoCarrier508's: left as it is");
-}
-
 bool Send(void* object,std::uint8_t kind,const void* payload,std::size_t size) noexcept {
     if(!object || !kind || size>kMostPayload || !Enabled())return false;
     void* to[kMostLoops]{};
     int toCount=0;
-    Header h;
     {
         std::lock_guard<std::mutex> hold(lock);
         for(const Pair& p:loops)if(toCount<kMostLoops && Same(p.from,object) && edf41c::WeakAlive(p.to))to[toCount++]=p.to.object;
     }
     const bool online=Online() && Registered(object) && !Guest(object);
     if(!online && !toCount)return false;
-    {
-        std::lock_guard<std::mutex> hold(lock);
-        if(++sequence==0)++sequence;
-        h.sequence=sequence;
-        h.sender=sender;
-    }
+    Header h;
     h.kind=kind;
     unsigned char message[kMostMessage];
     std::size_t n=0;
-    if(!Encode(h,payload,size,message,sizeof(message),&n))return false;
-    const int r=Transmit(object,online,to,toCount,message,n);
-    if(r<0) { Say("sending an event raised an exception: not sent"); return false; }
+    if(!object_net::Stamp(&h,sizeof(h)) || !Encode(h,payload,size,message,sizeof(message),&n))return false;
+    bool sent=online && object_net::Send(static_cast<unsigned char*>(object),message,n);
+    for(int i=0;i<toCount;++i)sent=object_net::Loopback(static_cast<unsigned char*>(to[i]),message,n) || sent;
     std::lock_guard<std::mutex> hold(lock);
     stats.looped+=static_cast<std::uint32_t>(toCount);
-    if(r>0)++stats.sent;
-    return r>0;
+    if(sent)++stats.sent;
+    return sent;
 }
 
 int Drain(const void* object,Visit visit,void* context) noexcept {

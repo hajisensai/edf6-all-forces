@@ -2168,13 +2168,13 @@ void Prune() noexcept {
     }
 }
 void CreatePart(void* info) noexcept {
-    void* obj=CloneObject(partClass,kEaoCtor,kEaoSize,info);
-    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
+    edf41net::Install();   // online: its class's NetworkObject takes the host's events (edf41net, object_net)
+    CloneObject(partClass,kEaoCtor,kEaoSize,info);
 }
 void CreateHull(void* info) noexcept {
     void* obj=CloneObject(hullClass,kCarrierCtor,kCarrierSize,info);
     if(!obj)return;
-    edf41net::Attach(obj);   // the controlled hull receives its own semantic events, as its child parts do
+    edf41net::Install();   // the controlled hull receives its own semantic events, as its child parts do
     Log("EDF41MOTHER create #%d: UfoMother301 %p on UfoCarrier508's constructor",++created,obj);
     // The parts are made here, as 4.1's constructor makes them (0x24FFF0) and EDF6's UfoMother511 makes its ring units in its own
     // (0x4FE740 -> 0x4FEF00): M603 and M993 send ObjectAction / GetPartsObject on the creation frame, before any Update.

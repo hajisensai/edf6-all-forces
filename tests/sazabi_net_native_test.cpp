@@ -1,7 +1,7 @@
 // Read-only EDF.dll: its real serializer, native object envelope and final event packet writer. No game entry point,
 // no running-game attachment, no EOS call. 750130's queue/peer lookup is replaced with a recorder only in this process.
 #include "../src/sazabi_net.cpp"
-#include "../src/seat_net.cpp"
+#include "../src/object_net.cpp"
 #include "edf/host.h"
 #include <cstdio>
 #include <climits>
@@ -18,7 +18,7 @@ void DrillNetReceived(unsigned char*,const drill_net::State&) noexcept { ++drill
 }
 namespace {
 using namespace crew;
-namespace transport=crew::seat_transport;
+namespace transport=crew::object_transport;
 int checks=0;
 std::size_t messageBytes=0,objectBytes=0,packetBytes=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::printf("FAIL: %s\n",why);std::exit(1);} }
@@ -87,7 +87,7 @@ int main(int argc,char** argv) {
         Check(transport::Peek(reader,&magic,&block)==(tag==15) && (tag!=15 || magic==sazabi_net::kMagic) && At<std::int64_t>(reader,8)==0,
               "peek preserves unrelated coop message position");
         unsigned char before[sizeof(sazabiVehicle)];std::memcpy(before,sazabiVehicle,sizeof(before));
-        transport::Fn<transport::ReceiveFn>(transport::kReceive)(sazabiVehicle+0x120,reader);
+        transport::Fn<transport::ReceiveFn>(transport::kVehicleReceive)(sazabiVehicle+0x120,reader);
         Check(!std::memcmp(before,sazabiVehicle,sizeof(before)) && At<std::int64_t>(reader,8)==1,"stock receiver ignores custom tags safely");
     }
     // Another feature's type-15 block is not swallowed just because this receiver also uses type 15.

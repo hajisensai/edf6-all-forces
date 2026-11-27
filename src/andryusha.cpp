@@ -33,7 +33,8 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "plugin_net.h"      // RoomGeneration
-#include "seat_net_transport.h"
+#include "object_net_transport.h"
+#include "seat_net.h"
 #include "seat_switch_logic.h"
 #include "edf/patch.h"
 #include "edf/weapon.h"
@@ -210,8 +211,8 @@ bool switchHeld=false;
 constexpr int kMostSpeakers=16;
 struct Speaker { ObjRef ref{}; std::uint8_t sent=0; ULONGLONG at=0; };
 Speaker speakers[kMostSpeakers]{};
-// The receivers' watermarks, one stream a vehicle (seat_net.h StreamGates), dropped with the room's members.
-seat_net::StreamGates<kMostSpeakers*2,64> fuseGates;
+// The receivers' watermarks, one stream a vehicle (object_net.h StreamGates), dropped with the room's members.
+object_net::StreamGates<kMostSpeakers*2,64> fuseGates;
 std::uint32_t fuseGatesRoom=0;
 bool netReady=false;
 int fuseSaid=0;
@@ -264,7 +265,7 @@ void FuseReceived(unsigned char* v,const void* block,std::size_t size) noexcept 
         auto* const gate=fuseGates.For({ref.obj,ref.ctrl,0},[](const void* obj,const void* ctrl) noexcept {
             return Readable(obj,kSelfCtrl+8) && ObjRef{obj,ctrl}.Is(obj);
         });
-        if(!gate || !gate->Admit(s.head,true,SpeaksHere(v),seat_net::SeatController(v,0)))return;
+        if(!gate || !gate->Admit(s.head,true,SpeaksHere(v),object_net::SeatController(v,0)))return;
         const Fuse fuse=static_cast<Fuse>(s.fuse);
         std::uint32_t bits;std::memcpy(&bits,w+kWeaponHitAdjust,4);
         if(andryusha::FuseOf(bits)==fuse)return;
@@ -276,11 +277,11 @@ void FuseReceived(unsigned char* v,const void* block,std::size_t size) noexcept 
 }  // namespace
 
 void AndryushaFrame(unsigned char* v) noexcept {
-    if(!netReady || !Cfg().enabled || v[edf::kDead] || !InSession() || !seat_net::Replicated(true,At<std::uint16_t>(v,0x128)))return;
+    if(!netReady || !Cfg().enabled || v[edf::kDead] || !InSession() || !object_net::Replicated(true,At<std::uint16_t>(v,0x128)))return;
     unsigned char* w=nullptr;
     const int holder=FuseHolder(v,&w);
     if(holder<0)return;
-    seat_net::ChainVehicle(v);   // this class hears its copies' fuses too
+    object_net::ChainVehicle(v);   // this class hears its copies' fuses too
     const ULONGLONG now=GameMs();
     Speaker* const slot=SpeakerFor(v,now);
     if(!slot)return;
@@ -289,9 +290,9 @@ void AndryushaFrame(unsigned char* v) noexcept {
     const auto fuse=static_cast<std::uint8_t>(andryusha::FuseOf(bits));
     if(!andryusha_net::Due(fuse,slot->sent,now,slot->sent ? slot->at : 0))return;
     andryusha_net::State m;
-    m.holder=holder;m.fuse=fuse;m.head.controller=seat_net::SeatController(v,0);
-    if(!seat_net::Stamp(&m,sizeof(m)) || !andryusha_net::Valid(m))return;
-    if(seat_net::Send(v,&m,sizeof(m))) {
+    m.holder=holder;m.fuse=fuse;m.head.controller=object_net::SeatController(v,0);
+    if(!object_net::Stamp(&m,sizeof(m)) || !andryusha_net::Valid(m))return;
+    if(object_net::Send(v,&m,sizeof(m))) {
         if(fuse!=slot->sent && fuseSaid<16){++fuseSaid;Log("ANDRYUSHA v=%p fuse sent to its copies: %s",v,fuse==2 ? "airburst" : "impact");}
         slot->sent=fuse;slot->at=now;
     }
@@ -371,7 +372,7 @@ bool InstallAndryusha() noexcept {
         const auto slot=reinterpret_cast<void**>(image+kGrenadeVtable)+kUpdateSlot;
         if(*slot!=image+kGrenadeUpdate)Log("ANDRYUSHA grenade update: chaining onto %p (EDF6AutoTurret's fuses)",*slot);
         hooked=edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&UpdateHook),&nextUpdate);
-        netReady=hooked && seat_net::Install() && seat_net::Register(andryusha_net::kMagic,&FuseReceived);
+        netReady=hooked && object_net::Install() && object_net::Register(andryusha_net::kMagic,&FuseReceived);
         Log("HOOK andryusha=%d online=%d (the Andryusha's carriers: fuses and bomblets; its fuse on tag 15 'AFUZ')",hooked,netReady);
         return hooked;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

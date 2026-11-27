@@ -4254,6 +4254,12 @@
     "tests/npc_vehicle_ai_native_audit.py"
    ]
   },
+  "object_net": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "online_authority": {
    "labels": [
     "plugin-native"
