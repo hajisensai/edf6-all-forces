@@ -4266,6 +4266,10 @@ alignas(16) const float kMapOrder[4]={0.3f,0.9f,1.0f,1.0f};
 alignas(16) const float kMapOrderDim[4]={0.3f,0.9f,1.0f,0.55f};
 alignas(16) const float kMapBoxFill[4]={0.3f,0.9f,1.0f,0.08f};
 alignas(16) const float kMapLocked[4]={0.6f,0.6f,0.6f,0.6f};   // a squad a mission script drives: shown, takes no order
+alignas(16) const float kMapPathReverse[4]={0.85f,0.5f,1.0f,1.0f};   // a reverse move's path (violet)
+// A point order's path and ring by its kind (the legend's rows; Broken Arrow's paths coloured by order): a move white,
+// an attack-move amber, a fast move green, a reverse violet, an unload yellow, a guard the map's own cyan.
+const float* MapPathColour(Order o) noexcept;
 constexpr float kMapGuardRing=12.0f;      // m: the ring at a guard order's point (formation slots are 30 m apart)
 // The squad panel (docs/npc-ai-design.md §6.1), the map's right edge under the title band: a row a squad (the number key
 // that picks it, its class, members alive, what it is doing, its order), selected rows white, a script's grey.
@@ -4285,9 +4289,27 @@ const wchar_t* MapOrderWord(Order o) noexcept {
     case Order::dismountAll: return Tr(Tx::orderDismountAll);
     case Order::hold: return Tr(Tx::orderHold);
     case Order::formation: return Tr(Tx::btnFormationShort);
+    case Order::fastMove: return Tr(Tx::orderFastMove);
+    case Order::reverseMove: return Tr(Tx::orderReverseMove);
+    case Order::unloadAt: return Tr(Tx::orderUnloadAt);
+    case Order::holdFire: return Tr(Tx::orderHoldFire);
+    case Order::altitude: return Tr(Tx::orderAltitude);
+    case Order::sprint: return Tr(Tx::orderSprint);
+    case Order::smoke: return Tr(Tx::orderSmoke);
+    case Order::decoy: return Tr(Tx::orderDecoy);
     case Order::none: break;
     }
     return L"-";
+}
+const float* MapPathColour(Order o) noexcept {
+    switch(o) {
+    case Order::move: return kWhite;
+    case Order::attackMove: return kAmber;
+    case Order::fastMove: return kGreen;
+    case Order::reverseMove: return kMapPathReverse;
+    case Order::unloadAt: return kYellow;
+    default: return kMapOrder;
+    }
 }
 // SquadCommandUnits supplies "RANGER x4"; translate the identifier, preserving the live member count.
 void MapUnitName(const char* name,wchar_t* out,std::size_t size) noexcept {
@@ -4501,6 +4523,37 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
         Seg(d,c,x-r*0.8f,y-r*0.6f,x+r*0.8f,y+r*0.7f,t*0.7f,rgba);Seg(d,c,x+r*0.8f,y-r*0.6f,x-r*0.8f,y+r*0.7f,t*0.7f,rgba);break;
     case Id::health:        // a cross
         Rect(d,c,x-r*0.25f,y-r*0.8f,x+r*0.25f,y+r*0.8f,kGreen);Rect(d,c,x-r*0.8f,y-r*0.25f,x+r*0.8f,y+r*0.25f,kGreen);break;
+    case Id::fastMove:      // two arrow heads (the arrow twice as fast)
+        Seg(d,c,x-r*0.8f,y+r*0.8f,x+r*0.3f,y-r*0.3f,t,rgba);Tri(d,c,x-r*0.3f,y+r*0.3f,x+r*0.3f,y-r*0.3f,r*0.4f,kGreen);
+        Tri(d,c,x+r*0.1f,y-r*0.1f,x+r*0.85f,y-r*0.85f,r*0.45f,kGreen);break;
+    case Id::reverseMove:   // the arrow backwards (down and left)
+        Seg(d,c,x+r*0.8f,y-r*0.8f,x-r*0.3f,y+r*0.3f,t,rgba);Tri(d,c,x-r*0.1f,y+r*0.1f,x-r*0.85f,y+r*0.85f,r*0.45f,kMapPathReverse);break;
+    case Id::unloadAt:      // out of the box onto a point
+        Seg(d,c,x-r*0.2f,y-r*0.8f,x+r*0.9f,y-r*0.8f,t,rgba);Seg(d,c,x+r*0.9f,y-r*0.8f,x+r*0.9f,y+r*0.2f,t,rgba);
+        Seg(d,c,x+r*0.9f,y+r*0.2f,x-r*0.2f,y+r*0.2f,t,rgba);Seg(d,c,x+r*0.3f,y-r*0.3f,x-r*0.5f,y-r*0.3f,t,rgba);
+        Arc(d,c,x-r*0.55f,y+r*0.65f,r*0.3f,0.0f,kTurn,t,10,kYellow);break;
+    case Id::holdFire:      // a crosshair struck through
+        Arc(d,c,x,y,r*0.6f,0.0f,kTurn,t,14,rgba);
+        Seg(d,c,x-r,y,x-r*0.3f,y,t,rgba);Seg(d,c,x+r*0.3f,y,x+r,y,t,rgba);Seg(d,c,x,y-r,x,y-r*0.3f,t,rgba);Seg(d,c,x,y+r*0.3f,x,y+r,t,rgba);
+        Seg(d,c,x-r*0.85f,y-r*0.85f,x+r*0.85f,y+r*0.85f,t,kRed);break;
+    case Id::altitude:      // up and down
+        Seg(d,c,x,y-r*0.5f,x,y+r*0.5f,t,rgba);Tri(d,c,x,y-r*0.3f,x,y-r*0.95f,r*0.45f,rgba);Tri(d,c,x,y+r*0.3f,x,y+r*0.95f,r*0.45f,rgba);break;
+    case Id::sprint:        // a bolt
+        Seg(d,c,x+r*0.35f,y-r*0.9f,x-r*0.35f,y+r*0.05f,t,kAmber);Seg(d,c,x-r*0.35f,y+r*0.05f,x+r*0.35f,y-r*0.05f,t,kAmber);
+        Seg(d,c,x+r*0.35f,y-r*0.05f,x-r*0.35f,y+r*0.9f,t,kAmber);break;
+    case Id::smoke:         // a cloud
+        Arc(d,c,x-r*0.45f,y+r*0.2f,r*0.38f,0.0f,kTurn,t,10,rgba);Arc(d,c,x+r*0.45f,y+r*0.2f,r*0.38f,0.0f,kTurn,t,10,rgba);
+        Arc(d,c,x,y-r*0.25f,r*0.45f,0.0f,kTurn,t,12,rgba);break;
+    case Id::decoy:         // a burst of flares
+        for(int k=0;k<6;++k) {
+            const float a=kTurn*static_cast<float>(k)/6.0f;
+            Seg(d,c,x+std::sin(a)*r*0.3f,y+std::cos(a)*r*0.3f,x+std::sin(a)*r*0.9f,y+std::cos(a)*r*0.9f,t,kAmber);
+        }
+        break;
+    case Id::pace:          // three in step
+        Seg(d,c,x-r*0.9f,y+r*0.55f,x+r*0.9f,y+r*0.55f,t,rgba);
+        for(const float o:{-0.6f,0.0f,0.6f})Rect(d,c,x+o*r-r*0.18f,y-r*0.25f,x+o*r+r*0.18f,y+r*0.11f,rgba);
+        break;
     case Id::count: break;
     }
 }
@@ -4682,8 +4735,21 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     constexpr int n=mapbtn::kCount;
     static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
                               Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::orderWithdraw,
-                              Tx::orderDismountAll,Tx::orderHold,Tx::btnFormationShort,Tx::btnSweep,Tx::btnHealth};
-    const wchar_t* const kKey[n]={L"",L"Z",L"-",L"V",L"X",L"J",L"-",L"B",L"N",L"K",L"U",L"",Tr(Tx::keyDismountAll),L"H",L"T",L"Y",L"O"};
+                              Tx::orderDismountAll,Tx::orderHold,Tx::orderFastMove,Tx::orderReverseMove,Tx::orderUnloadAt,
+                              Tx::orderHoldFire,Tx::orderAltitude,Tx::orderSprint,Tx::orderSmoke,Tx::orderDecoy,
+                              Tx::btnFormationShort,Tx::btnSweep,Tx::btnHealth,Tx::btnPace};
+    // Each button's key in its tooltip: the configured one (map_keys.h, the ini's Map*Key), "-" for a button alone.
+    wchar_t kKey[n][32];
+    for(auto& k:kKey)wcscpy_s(k,L"-");
+    const auto keyOf=[&](Id b,mapkeys::Key key){ControlKeyName(Cfg().mapKeys.vk[key],kKey[static_cast<int>(b)],32);};
+    keyOf(Id::attackMove,mapkeys::attackMove);keyOf(Id::release,mapkeys::stop);keyOf(Id::withdraw,mapkeys::back);
+    keyOf(Id::fastMove,mapkeys::fastMove);keyOf(Id::reverseMove,mapkeys::reverse);keyOf(Id::unloadAt,mapkeys::unload);
+    keyOf(Id::holdFire,mapkeys::holdFire);keyOf(Id::altitude,mapkeys::altitude);keyOf(Id::sprint,mapkeys::sprint);
+    keyOf(Id::smoke,mapkeys::smoke);keyOf(Id::decoy,mapkeys::decoy);
+    {   // ALL OUT: the unload key twice
+        wchar_t u[24];ControlKeyName(Cfg().mapKeys.vk[mapkeys::unload],u,24);
+        _snwprintf_s(kKey[static_cast<int>(Id::dismountAll)],32,_TRUNCATE,L"%ls %ls",u,u);
+    }
     const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
     const bool tools=c.allowed && c.selectedSquads>0;
     const float scale=kLineScale*0.7f;
@@ -4707,15 +4773,17 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         if(!(q.x1>q.x0))continue;   // no room for its row
         const Id b=static_cast<Id>(shownIds[k]);
         const bool lit=(c.armedOrder && mapbtn::IsOrder(b) && mapbtn::Arms(b) && c.armed==mapbtn::OrderOf(b)) ||
-                       (b==Id::sweep && c.sweepOn) || (b==Id::health && c.healthOn);
+                       (b==Id::sweep && c.sweepOn) || (b==Id::health && c.healthOn) || (b==Id::holdFire && c.holdFireOn) ||
+                       (b==Id::altitude && c.highOn) || (b==Id::pace && c.paced);
+        const bool available=mapbtn::Available(b,orders);   // SMOKE / DECOY with none of it: greyed
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
         Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : hover ? kMapBoxFill : kBtnFill);
         const float t=1.5f*s;
         Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,t,kMapOrder);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,t,kMapOrder);
         Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,t,kMapOrder);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,t,kMapOrder);
         const float iconX=q.x0+(kBtnPad+kBtnIcon*0.5f)*s,mid=(q.y0+q.y1)*0.5f;
-        MapOrderIcon(drawer,ctx,b,iconX,mid,kBtnIcon*s,s,kWhite);
-        Label(text,lines,at,q.x0+(kBtnPad+kBtnIcon+6.0f)*s,mid,0,scale,kWhite,L"%ls",word[k]);
+        MapOrderIcon(drawer,ctx,b,iconX,mid,kBtnIcon*s,s,available ? kWhite : kMapLocked);
+        Label(text,lines,at,q.x0+(kBtnPad+kBtnIcon+6.0f)*s,mid,0,scale,available ? kWhite : kMapLocked,L"%ls",word[k]);
         if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+(kBtnPad+kBtnIcon+6.0f)*s,q.x1-kBtnPad*s);
         // The tooltip: the full word (the formation's name, the health boxes' state) and how to give it.
         wchar_t full[96];
@@ -5219,7 +5287,10 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
                                   {MapKind::vehicle,kMapEmpty,Tx::legendEmpty},{MapKind::carrier,0,Tx::legendCarrier},
                                   {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
                                   {MapKind::marker,0,Tx::legendObjective}};
-    constexpr int kItems=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5;   // the player, the dots, the brackets
+    // The order paths' colours (MapPathColour) after them, a row each.
+    static const Order kPaths[]={Order::move,Order::attackMove,Order::fastMove,Order::reverseMove,Order::unloadAt,Order::guard};
+    constexpr int kPathRows=static_cast<int>(sizeof(kPaths)/sizeof(kPaths[0]));
+    constexpr int kItems=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5+kPathRows;   // the player, the dots, the brackets, the paths
     constexpr int kRows=(kItems+1)/2;
     const MapDock dock=MapDockAt(width,s);
     const float titleH=28.0f*s,rowH=22.0f*s,y1=bottom,y0=y1-titleH;
@@ -5276,6 +5347,10 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
     Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendLock));
     slot();MapBrackets(drawer,ctx,ix,y,8.0f*s,2.0f*s,kAmber);
     Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
+    for(const Order o:kPaths) {
+        slot();Seg(drawer,ctx,ix-8.0f*s,y,ix+8.0f*s,y,2.5f*s,MapPathColour(o));
+        Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls %ls",o==kPaths[0] ? Tr(Tx::legendPaths) : L"",MapOrderWord(o));
+    }
     for(int i=first;i<*at;++i) {
         Line& row=lines[i];
         MapFitLabel(text,row,row.x,row.x<lx0+colW ? lx0+colW-4.0f*s : lx1-6.0f*s);
@@ -5418,7 +5493,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
     // Where a point order goes: the pointer (a ring and a cross), or with a pad the crosshair at the centre; an armed
     // point order or support call in its colour.
-    const float* aim=c.armedOrder ? (c.armed==Order::attackMove ? kAmber : kWhite) : c.supportArmed>=0 || c.placeArmed>=0 ? kGreen : tint;
+    const float* aim=c.armedOrder ? MapPathColour(c.armed) : c.supportArmed>=0 || c.placeArmed>=0 ? kGreen : tint;
     const float cx=c.pointer ? c.px : width*0.5f,cy=c.pointer ? c.py : height*0.5f;
     Seg(drawer,ctx,cx-16.0f*s,cy,cx-5.0f*s,cy,2.0f*s,aim);Seg(drawer,ctx,cx+5.0f*s,cy,cx+16.0f*s,cy,2.0f*s,aim);
     Seg(drawer,ctx,cx,cy-16.0f*s,cx,cy-5.0f*s,2.0f*s,aim);Seg(drawer,ctx,cx,cy+5.0f*s,cx,cy+16.0f*s,2.0f*s,aim);
@@ -5429,6 +5504,42 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Rect(drawer,ctx,x0,y0,x1,y1,kMapBoxFill);
         Seg(drawer,ctx,x0,y0,x1,y0,1.5f*s,kMapOrder);Seg(drawer,ctx,x1,y0,x1,y1,1.5f*s,kMapOrder);
         Seg(drawer,ctx,x1,y1,x0,y1,1.5f*s,kMapOrder);Seg(drawer,ctx,x0,y1,x0,y0,1.5f*s,kMapOrder);
+    }
+    // A right drag laying a line (mapcmd_logic.h LineOf): the line on the ground, ticks along it where the units will
+    // stand, and an arrow from its middle the way they will face (square to the line, away from the camera).
+    if(c.dragLine) {
+        const float a[3]={c.lineFrom[0],c.lineFrom[1]+1.0f,c.lineFrom[2]},b[3]={c.lineTo[0],c.lineTo[1]+1.0f,c.lineTo[2]};
+        MapLine(drawer,ctx,vp,width,height,a,b,2.5f*s,kWhite);
+        const float dx=b[0]-a[0],dz=b[2]-a[2],length=std::hypot(dx,dz);
+        if(length>1.0f) {
+            const float face[2]={dz/length,-dx/length};   // a side of the line; the units' facing (mapcmd.cpp: away from the camera)
+            const float mid[3]={(a[0]+b[0])*0.5f,a[1],(a[2]+b[2])*0.5f};
+            const float tip[3]={mid[0]+face[0]*kMapGuardRing,mid[1],mid[2]+face[1]*kMapGuardRing};
+            const float rear[3]={mid[0]-face[0]*kMapGuardRing,mid[1],mid[2]-face[1]*kMapGuardRing};
+            float mx,my,md,tx,ty,td,bx,by,bd;
+            // The camera's side of the line is the back: the arrow points to the far side (the greater depth).
+            if(Project(vp,mid,width,height,&mx,&my,&md) && Project(vp,tip,width,height,&tx,&ty,&td) &&
+               Project(vp,rear,width,height,&bx,&by,&bd)) {
+                if(td>bd)Tri(drawer,ctx,mx,my,tx,ty,6.0f*s,kWhite);
+                else Tri(drawer,ctx,mx,my,bx,by,6.0f*s,kWhite);
+            }
+        }
+    }
+    // The pings (F1-F4, this machine's and the room's): rings opening out on the point while they last, its number.
+    {
+        static const float* const kPingColour[4]={kAmber,kWhite,kGreen,kRed};
+        const std::uint64_t now=GetTickCount64();
+        for(int i=0;i<c.pings && i<MapCommandReadout::kPings;++i) {
+            const auto& p=c.ping[i];
+            float px,py,pd;
+            if(!Project(vp,p.at,width,height,&px,&py,&pd))continue;
+            const float* colour=kPingColour[p.kind&3u];
+            const float phase=static_cast<float>((now-p.at_ms)%1000u)/1000.0f;
+            Arc(drawer,ctx,px,py,(8.0f+22.0f*phase)*s,0.0f,kTurn,2.5f*s,20,colour);
+            Arc(drawer,ctx,px,py,6.0f*s,0.0f,kTurn,2.0f*s,14,colour);
+            WorldLabel(text,lines,at,vp,width,height,p.at,WorldKey(kWorldMapHover,static_cast<std::uint64_t>(i)+0x50494E47u),0.0f,-34.0f*s,1,
+                       kLineScale*0.6f,colour,Tr(Tx::cmdPing),static_cast<int>(p.kind)+1);
+        }
     }
     // The enemy-control target picked (a click on its mark, L3, the card's arrows): cyan brackets on it.
     {
@@ -5460,8 +5571,8 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         mapcmd::BodyPoint(u.pos,u.air,body);
         const bool shown=Project(vp,body,width,height,&ux,&uy,&ud);
         if(mapcmd::PointOrder(u.now.order)) {
-            // The ring round its point (white: a move, amber: an attack-move, dim: a guard), its line from the unit.
-            const float* order=u.now.order==Order::move ? kWhite : u.now.order==Order::attackMove ? kAmber : kMapOrder;
+            // The ring round its point (MapPathColour: the order's own colour, the legend's), its line from the unit.
+            const float* order=MapPathColour(u.now.order);
             float last[3];
             for(int k=0;k<=16;++k) {
                 const float a=kTurn*static_cast<float>(k)/16.0f;
@@ -5535,10 +5646,21 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     if(!c.allowed)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kAmber,L"%ls",Tr(Tx::npcOfflineOnly));
     else if(!c.pickable)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::npcNone));
     else if(!c.selected && !m.pad)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::cmdHintSelect));
-    else Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(m.pad ? Tx::npcPadKeys : Tx::npcMouseKeys),sel);
+    else if(m.pad)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(Tx::npcPadKeys),sel);
+    else {
+        wchar_t key[6][24];
+        const mapkeys::Key shown[6]={mapkeys::attackMove,mapkeys::fastMove,mapkeys::reverse,mapkeys::stop,mapkeys::holdFire,mapkeys::subgroup};
+        for(int i=0;i<6;++i)ControlKeyName(Cfg().mapKeys.vk[shown[i]],key[i],24);
+        Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(Tx::npcMouseKeys),sel,key[0],key[1],key[2],key[3],key[4],key[5]);
+    }
     if(c.noteFresh)Label(text,lines,at,width*0.5f,height-124.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
     for(int i=footerFirst;i<*at;++i) {
         Line& row=lines[i];MapFitLabel(text,row,16.0f*s,width-16.0f*s);row.x=(width-row.w)*0.5f;
+    }
+    // Tab's sub-selection: the kind the orders go to, over the band's left.
+    if(c.subKind[0] && c.selected>0) {
+        wchar_t kind[32];hudtext::WordTo(c.subKind,kind,_countof(kind));
+        Label(text,lines,at,16.0f*s,height-124.0f*s,0,kLineScale*0.75f,kWhite,Tr(Tx::cmdSubShown),kind);
     }
 }
 

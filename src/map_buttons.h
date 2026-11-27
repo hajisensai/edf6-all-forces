@@ -20,9 +20,11 @@ enum class Id : int {
     move, attackMove, guard, follow, release, engage, focus, board, dismount, dismiss, recruit,   // the orders
     withdraw,                                                                                    // ...a squad's transport sent off
     dismountAll,                                                                                 // ...every rider off, its crew too
-    hold,                                                                                        // ...each unit where it stands (H)
+    hold,                                                                                        // ...each unit where it stands
+    fastMove, reverseMove, unloadAt, holdFire, altitude, sprint, smoke, decoy,                   // ...Broken Arrow's (2026-11-27)
     formation,                                                                                   // the squads' shape
     sweep, health,                                                                               // the box sweep, its health-box switch
+    pace,                                                                                        // the paced march's switch
     count
 };
 constexpr int kCount=static_cast<int>(Id::count);
@@ -33,8 +35,12 @@ constexpr int kCount=static_cast<int>(Id::count);
 // one button that reads as the squad's state. STOP (release) apart from DISMISS it was mistaken for.
 // SPLIT / JOIN went on 2026-10-19 (the user: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): the RTS
 // groups (Ctrl+number) put any units together without changing the squads (mapcmd_logic.h GroupKey). HOLD came.
-constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::hold,Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,
-                           Id::dismiss,Id::release,Id::formation,Id::sweep,Id::health};
+// Broken Arrow's (the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」): its orders on the keys (map_keys.h) and
+// on the card too, GUARD back as the card's (an attack-move's guard at a point clicked), the paced march's switch a
+// button. SMOKE and DECOY shown greyed for a selection that has none (mapcmd.cpp Takes: the order unavailable).
+constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::guard,Id::fastMove,Id::reverseMove,Id::unloadAt,Id::hold,Id::holdFire,
+                           Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,Id::dismiss,Id::release,
+                           Id::altitude,Id::sprint,Id::smoke,Id::decoy,Id::formation,Id::sweep,Id::health,Id::pace};
 constexpr int kCardCount=static_cast<int>(sizeof(kCardOrder)/sizeof(kCardOrder[0]));
 constexpr int kOrders=static_cast<int>(Id::formation);
 struct Rect { float x0,y0,x1,y1; };
@@ -44,7 +50,8 @@ inline mapcmd::Order OrderOf(Id b) noexcept {
     using mapcmd::Order;
     static const Order kOrder[kOrders]={Order::move,Order::attackMove,Order::guard,Order::follow,Order::none,Order::engage,
                                          Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit,Order::withdraw,
-                                         Order::dismountAll,Order::hold};
+                                         Order::dismountAll,Order::hold,Order::fastMove,Order::reverseMove,Order::unloadAt,
+                                         Order::holdFire,Order::altitude,Order::sprint,Order::smoke,Order::decoy};
     const int i=static_cast<int>(b);
     return i>=0 && i<kOrders ? kOrder[i] : Order::none;
 }
@@ -57,12 +64,19 @@ inline bool OnCard(Id b) noexcept {
 // An order button arms a click on the map (its point) instead of acting at once.
 inline bool Arms(Id b) noexcept { return IsOrder(b) && mapcmd::PointOrder(OrderOf(b)); }
 // Shown on the card: an order the selection takes (`allowedOrders`: Order bits), a squad tool with squads selected,
-// the sweep and its switch always (they work on the recruited squads with nothing selected).
+// the sweep and its switch always (they work on the recruited squads with nothing selected). SMOKE and DECOY with any
+// order taken (a selection), greyed (Available) when it has none of them.
 inline bool Shown(Id b,std::uint32_t allowedOrders,bool squadTools) noexcept {
     if(!OnCard(b))return false;
+    if(b==Id::smoke || b==Id::decoy)return allowedOrders!=0;
     if(IsOrder(b))return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
     if(b==Id::sweep || b==Id::health)return true;
     return squadTools;
+}
+// A shown button that does something for the selection (SMOKE / DECOY with none of it: drawn greyed, its click says so).
+inline bool Available(Id b,std::uint32_t allowedOrders) noexcept {
+    if(!IsOrder(b))return true;
+    return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
 }
 
 // Lays `n` buttons of widths `w[i]` (px, the label's own plus its padding) out in rows `rowH` high, `gap` apart, each

@@ -41,7 +41,9 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
         if(mapcmd::PointOrder(command.order)) {
             const auto total=request.formationTotal ? request.formationTotal : request.count;
             const auto slot=request.formationTotal ? request.formationSlots[i] : i;
-            mapcmd::Formation(static_cast<int>(slot),static_cast<int>(total),request.command.at,mapcmd::kFormationSpacing,command.at);
+            // A right drag's line (v11 param, mapcmd_logic.h LineSlot) as on the sender's map; else the rings round the point.
+            if(mapcmd::IsLine(command.param))mapcmd::LineSlot(static_cast<int>(slot),static_cast<int>(total),request.command.at,command.param,command.at);
+            else mapcmd::Formation(static_cast<int>(slot),static_cast<int>(total),request.command.at,mapcmd::kFormationSpacing,command.at);
             float y=0;
             ground=MapGroundNear(command.at[0],command.at[2],command.at[1],&y,true) && std::isfinite(y);
             if(ground)command.at[1]=y;

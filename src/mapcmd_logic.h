@@ -430,7 +430,8 @@ inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float 
 // The Broken Arrow keys (2026-11-27) after them: F fast move, R reverse move, U unload at a point (unloadNow: U twice,
 // DISMOUNT ALL where it is), H hold fire, V altitude, Z sprint, X smoke, C decoys, B back to base (WITHDRAW).
 struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove,dismountAll,withdraw,hold,
-               fastMove,reverseMove,unloadAt,unloadNow,holdFire,altitude,sprint,smoke,decoy,back; };
+               fastMove,reverseMove,unloadAt,unloadNow,holdFire,altitude,sprint,smoke,decoy,back,
+               guardAt; };   // guardAt: the card's GUARD button armed and its point clicked (a guard there, not an attack-move)
 enum class Refusal : std::uint8_t { none, noUnit, noPoint, online, noMark };
 // What a frame's presses come to: a command to the selection (issue), or why not (why). The cycle (next / prev) has
 // already moved the selection (Cycle).
@@ -439,6 +440,7 @@ struct Step { bool issue; Command cmd; Refusal why; };
 // The order a frame's presses give (one at a time, in this order of precedence); false with none pressed.
 inline bool Wanted(const Press& p,Order* o) noexcept {
     if(p.move)*o=Order::move;
+    else if(p.guardAt)*o=Order::guard;
     else if(p.attackMove || p.guard)*o=Order::attackMove;
     else if(p.fastMove)*o=Order::fastMove;
     else if(p.reverseMove)*o=Order::reverseMove;
