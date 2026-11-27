@@ -399,8 +399,6 @@ bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return
 // The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
 bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
-// The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
-bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
 namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.
@@ -834,22 +832,23 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.squad[sceneCmd.squads-1].cooldown=42;
     // The support catalog as support_dispatch.cpp names it (its air calls in pairs, the infantry, the ground pairs).
     static const struct { const wchar_t* name; SupportIcon icon; } kCatalog[]={
-        {L"截击机·守点",SupportIcon::jet},{L"截击机·跟随",SupportIcon::jet},{L"无人机母舰·守点",SupportIcon::carrier},
-        {L"无人机母舰·跟随",SupportIcon::carrier},{L"武装直升机·守点",SupportIcon::heli},{L"武装直升机·跟随",SupportIcon::heli},
+        // The sorties (2026-11-27): each its airframe's 「·出击」 chip beside 守点 / 跟随 (tools/calls.py FLOWN).
+        {L"截击机·守点",SupportIcon::jet},{L"截击机·跟随",SupportIcon::jet},{L"轰炸机·守点",SupportIcon::jet},
+        {L"轰炸机·跟随",SupportIcon::jet},{L"轰炸机·出击",SupportIcon::jet},{L"无人机母舰·守点",SupportIcon::carrier},
+        {L"无人机母舰·跟随",SupportIcon::carrier},{L"武装直升机·守点",SupportIcon::heli},{L"武装直升机·出击",SupportIcon::heli},
         {L"潜水母舰支援",SupportIcon::sub},{L"炮舰机·守点",SupportIcon::gunship},{L"炮舰机·跟随",SupportIcon::gunship},
+        {L"炮舰机·出击",SupportIcon::gunship},
         {L"步兵小队（4人）",SupportIcon::squad},{L"步兵大队（12人）",SupportIcon::platoon},{L"坦克·有人",SupportIcon::tank},
         {L"坦克·空车交付",SupportIcon::tank},{L"装甲运兵车·有人",SupportIcon::apc},{L"装甲运兵车·空车交付",SupportIcon::apc},
         {L"民用轻卡·有人",SupportIcon::truck},{L"民用轻卡·空车交付",SupportIcon::truck},
-        // The sorties and the strikes (2026-10-26: every support on the bar): more rows than a column holds at 1080 lines.
-        {L"直升机扫射",SupportIcon::heli},{L"导弹猎手",SupportIcon::heli},{L"死亡回旋",SupportIcon::heli},{L"俯冲扫射",SupportIcon::jet},
-        {L"导弹掠过",SupportIcon::jet},{L"地毯轰炸",SupportIcon::jet},{L"打了就跑",SupportIcon::jet},{L"天顶导弹雨",SupportIcon::jet},
-        {L"锤与砧",SupportIcon::heli},{L"狼群",SupportIcon::jet},{L"引导打击",SupportIcon::gunship},
+        // The salvo interceptor and the strikes (2026-10-26: every support on the bar).
+        {L"天顶截击机",SupportIcon::jet},
         {L"火箭齐射",SupportIcon::barrage},{L"精确制导火箭",SupportIcon::barrage},{L"温压齐射",SupportIcon::barrage},
         {L"子母火箭",SupportIcon::barrage},{L"徐进弹幕",SupportIcon::barrage},{L"同时弹着射击",SupportIcon::barrage},
         {L"重型臼炮",SupportIcon::barrage},{L"巡航导弹",SupportIcon::barrage},{L"弹道导弹",SupportIcon::barrage},
         {L"天罚",SupportIcon::satellite}};
     sceneCmd.supports=static_cast<int>(sizeof(kCatalog)/sizeof(kCatalog[0]));
-    for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;const wchar_t* v=mapbtn::VariantOf(kCatalog[i].name);sceneCmd.support[i].variant=!v ? SupportVariant::none : std::wcscmp(v,L"守点")==0 ? SupportVariant::guard : std::wcscmp(v,L"跟随")==0 ? SupportVariant::follow : std::wcscmp(v,L"有人")==0 ? SupportVariant::crewed : SupportVariant::empty;}
+    for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;const wchar_t* v=mapbtn::VariantOf(kCatalog[i].name);sceneCmd.support[i].variant=!v ? SupportVariant::none : std::wcscmp(v,L"守点")==0 ? SupportVariant::guard : std::wcscmp(v,L"跟随")==0 ? SupportVariant::follow : std::wcscmp(v,L"出击")==0 ? SupportVariant::sortie : std::wcscmp(v,L"有人")==0 ? SupportVariant::crewed : SupportVariant::empty;}
     // Their prices (support_dispatch.cpp SupportCallPrice) and the pool: the dear ones past it red.
     sceneCmd.points=6180;sceneCmd.pointsMost=30000;
     for(int i=0;i<sceneCmd.supports;++i){sceneCmd.support[i].price=1800+(i*1300)%13200;sceneCmd.support[i].afford=sceneCmd.support[i].price<=sceneCmd.points;}
@@ -869,7 +868,9 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // Wing Diver and a Fencer one, of its twelve seats.
     sceneCmd.composeEntry=-1;sceneCmd.composeSeats=0;sceneCmd.compose=SupportLoadout{};
     if(payload) {
-        sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=10;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
+        int platoon=0;   // the platoon's entry, by its name (the catalog above changes)
+        while(platoon<sceneCmd.supports && std::wcscmp(kCatalog[platoon].name,L"步兵大队（12人）")!=0)++platoon;
+        sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=platoon;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
         sceneCmd.supportTab=static_cast<int>(SupportTab::ground);   // the platoon's tab shown
         for(int i=0;i<4;++i){sceneCmd.compose.soldier[i]=SupportWeapon::wingLance;sceneCmd.compose.soldier[4+i]=SupportWeapon::fencerCannon;}
     }

@@ -697,11 +697,12 @@ void MapSupportIcon(void* d,void* c,SupportIcon icon,float x,float y,float h,flo
     }
 }
 // A variant chip's icon (support_call.h SupportCallVariant: the catalog's own data, never its words): guarding a point,
-// following the player, a crew aboard, an empty vehicle delivered, the vehicle a plane drops.
+// following the player, its one attack pass (a crosshair), a crew aboard, an empty vehicle delivered, the vehicle a plane drops.
 void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float h,float s,const float* rgba) noexcept {
     switch(variant) {
     case SupportVariant::guard: MapOrderIcon(d,c,mapbtn::Id::guard,x,y,h,s,rgba);break;
     case SupportVariant::follow: MapOrderIcon(d,c,mapbtn::Id::follow,x,y,h,s,rgba);break;
+    case SupportVariant::sortie: MapOrderIcon(d,c,mapbtn::Id::engage,x,y,h,s,rgba);break;
     case SupportVariant::empty: MapBox(d,c,x,y,h*0.4f,1.6f*s,rgba);break;
     case SupportVariant::crewed:
         Arc(d,c,x,y-h*0.15f,h*0.18f,0.0f,kTurn,1.6f*s,8,rgba);Seg(d,c,x-h*0.3f,y+h*0.35f,x+h*0.3f,y+h*0.35f,1.6f*s,rgba);break;
@@ -2285,13 +2286,6 @@ void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at
     KeyName(c.key,key,_countof(key));
     if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
     else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
-}
-// The caller's strike calls (airstrike.cpp PlayerStrikeCue): a barrage that could not start, a sortie's second wave not
-// called; a moment, under the ultimate's banner.
-void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
-    wchar_t line[200];
-    if(!PlayerStrikeCue(line,_countof(line)))return;
-    Label(text,lines,at,width*0.5f,height*0.5f+370.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
 }
 }  // namespace hudi
 }  // namespace crew

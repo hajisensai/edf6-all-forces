@@ -200,9 +200,8 @@ def check_calls(root: str) -> None:
     request = body(dispatch, 'bool Request(int index,')
     if 'return SupportCallComposedAt(index,target,nullptr,note,capacity);' not in body(dispatch, 'bool SupportCallAt('):
         fail('SupportCallAt must only delegate to SupportCallComposedAt (one gated path)')
-    # (a flown call's sortie second wave rides on it: queued only once the first wave is out, Request's `followUp`)
     composed = body(dispatch, 'bool SupportCallComposedAt(')
-    if 'return Request(index,target,load,SupportCallPrice(index),index>=0 && index<SupportAirCallCount(),note,capacity,strikeHeading,run);' not in composed:
+    if 'return Request(index,target,load,SupportCallPrice(index),note,capacity,strikeHeading,run);' not in composed:
         fail('src/support_dispatch.cpp SupportCallComposedAt: not through the request path (Request) for its price')
     # A strike is never planned or deployed by the host: it is started here (SupportStrikeAt), before the online branch.
     if not before(request, 'StrikeCatalog(static_cast<std::uint32_t>(index),strike)', 'else if(InSession())'):

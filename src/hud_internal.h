@@ -456,7 +456,6 @@ void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float widt
 void FormationBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept;
 void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept;
 void RescueCueBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept;
-void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept;
 const Tx* DebugSpawnCategoryWords() noexcept;
 }  // namespace hudi
 void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,sightzoom::Mask mask,Line* lines,int* at) noexcept;

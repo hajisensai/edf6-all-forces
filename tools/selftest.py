@@ -904,11 +904,11 @@ def calls_table_consistent() -> None:
         assert bool(c.barrage) == (c.brings == 'barrage') and (not c.barrage or c.barrage in calls.BARRAGE_KINDS), c.id
         assert (c.damage > 0) == (c.brings in ('barrage', 'ultimate')) and \
             (c.brings != 'barrage' or float(c.mark).is_integer()), c.id
-        # A sortie: a pass of SORTIE_PASSES on a jets / helis call, no follow version; its second wave another such call.
+        # A sortie: a pass of SORTIE_PASSES on a jets / helis call, no follow version (2026-11-27: no second waves). A
+        # retired one: a sortie whose pass went (its row a placeholder, kMovedRows), nothing flown.
         assert not c.sortie or (c.sortie in calls.SORTIE_PASSES and c.brings in ('jets', 'helis') and not c.follow), c.id
         assert not c.sortie or (c.sortie.startswith('heli')) == (c.brings == 'helis'), c.id
-        assert bool(c.then) == (c.then_after > 0) and (not c.then or (c.sortie and c.then_after >= 10)), c.id
-        assert not c.then or any(f.id == c.then and f.sortie and not f.then for f in calls.FLOWN), c.id
+        assert not c.retired or (not c.sortie and c.brings in ('jets', 'helis') and c not in calls.FLOWN), c.id
         thrown = c.brings == 'throw'
         assert bool(c.drone) == thrown and (not c.drone or c.drone in drones), c.id
         # A thrown drone's marker: the bits of 1.0 with its code in the low ones, never 1.0 itself (calls.throw_mark).
@@ -924,7 +924,7 @@ def calls_table_consistent() -> None:
         assert sum(map(bool, (c.jet, c.ground, c.heli))) <= 1 and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
         assert not c.heli or (c.heli in xm_units.UNITS and xm_units.UNITS[c.heli].family == 'heli'), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
-        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings in ('ultimate', 'barrage')), c.id
+        assert (c.count > 0) == (c.flown or thrown or bool(c.retired)) and bool(c.log) == (c.flown or thrown or bool(c.retired) or c.brings in ('ultimate', 'barrage')), c.id
         assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
@@ -1330,13 +1330,15 @@ def supports_on_map_pt() -> None:
     assert round(cw.star_value(_STOCK_PT, 0)) == 2040, cw.star_value(_STOCK_PT, 0)
     on_map = [c for c in calls.CALLS if c.on_map]
     assert {c.brings for c in on_map} == {'jets', 'helis', 'sub', 'barrage', 'ultimate'}
-    assert len(on_map) == 42 and [c for c in on_map if c.flown] == list(calls.FLOWN), len(on_map)
+    # FLOWN: the flown calls, each sortie beside its airframe (calls._catalog); the retired sorties' rows kept, not flown.
+    assert len(on_map) == 42 and sorted(c.id for c in on_map if c.flown) == sorted(c.id for c in calls.FLOWN), len(on_map)
+    on_map = [c for c in on_map if not c.retired]
     assert list(calls.STRIKES) == [c for c in on_map if c.brings == 'barrage'] + [c for c in on_map if c.brings == 'ultimate']
     inc = src('src/calls.inc')
     for c in on_map:
         if c.flown:
             assert c.pt == round(cw.star_value([float(c.reload), *_STOCK_PT[1:]], 0)) == round(2 * c.reload), (c.id, c.pt)
-            assert f'L"{c.id}",' in inc and f'u,{c.pt}u}},' in inc, (c.id, 'kCalls row without its pt')
+            assert f'L"{c.id}",{1 + calls.SORTIE_PASSES.index(c.sortie) if c.sortie else 0},{c.pt}u}},' in inc, (c.id, 'kCalls row without its pt')
         else:
             assert c.pt == round(c.reload), (c.id, c.pt)
             key = c.id[len(calls.ID_PREFIX):]
@@ -2140,7 +2142,7 @@ def sortie_copies_agree() -> None:
     """The sorties (src/jet_sortie.cpp, src/heli.cpp HeliSortie, src/sortie_plan.h; docs/plan-2026-10-25-strikes.md §1.2): the
     passes in one order in calls.py and jet.h (kCalls carries 1 + the index), each sortie call a flown one with its catalog key
     and label (tools/support_config.py), the plugin wired through (the spec, the activation of jets and helis, the guidance, the
-    bombs, the second waves' queue, tick and reset), the offline check built."""
+    bombs; 2026-11-27: no second waves), the offline check built."""
     crew_h = src('src/jet.h')
     # The enum is tools/gen_calls.py's (src/sortie_pass.inc; gen --check keeps it current).
     assert '#include "sortie_pass.inc"' in crew_h
@@ -2152,21 +2154,16 @@ def sortie_copies_agree() -> None:
     assert {c.sortie for c in sorties} == set(calls.SORTIE_PASSES), 'a call for every pass'
     inc = src('src/calls.inc')
     for c in sorties:
-        then = [f.id for f in calls.FLOWN].index(c.then) if c.then else -1
-        row = f'L"{c.id}",{1 + calls.SORTIE_PASSES.index(c.sortie)},{then},{c.then_after * 1000}u,{c.pt}u}},'
+        row = f'L"{c.id}",{1 + calls.SORTIE_PASSES.index(c.sortie)},{c.pt}u}},'
         assert row in inc, (c.id, row)
     spawn, jet, combat, air = src('src/jet_spawn.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/airstrike.cpp')
     assert srcscan.has(spawn, 'SortieBegin(*entry,static_cast<SortiePass>(spec.sortie),') and srcscan.has(spawn, 'HeliSortie(vehicle,static_cast<SortiePass>(spec.sortie),')
     assert srcscan.has(jet, 'SortieGuide(j,kind,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk)') and srcscan.has(jet, 'SortieFire(*j,v,pos,arms,ms);')
     assert srcscan.has(combat, 'SortieStruck(*k.j,object)') and srcscan.has(combat, 'SortieLockMs(j,kLockMs)')
-    assert srcscan.has(air, 'out->sortie=c.sortie;') and srcscan.has(air, 'void SupportFollowUpTick() noexcept')
+    assert srcscan.has(air, 'out->sortie=c.sortie;')
+    # No second waves (2026-11-27: a sortie is its airframe's one pass): nothing queues, ticks or resets one.
     dispatch = src('src/support_dispatch.cpp')
-    # The second wave goes with its first's pt (2026-10-27 review): queued once the first is made offline, held under its
-    # open request online and settled by its outcome.
-    assert srcscan.has(dispatch, 'else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0,plan.run);')
-    assert srcscan.has(dispatch, 'SupportFollowUpQueue(index,target,localRequest.id,run);')
-    assert srcscan.has(dispatch, 'SupportFollowUpSettle(request,true);') and srcscan.has(dispatch, 'SupportFollowUpSettle(request,false);')
-    assert ticks('SupportFollowUpTick') and resets('ResetSupportFollowUps')
+    assert 'SupportFollowUp' not in air + dispatch and not ticks('SupportFollowUpTick') and not resets('ResetSupportFollowUps')
     heli = src('src/heli.cpp')
     assert srcscan.has(heli, 'void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept') and srcscan.has(heli, 'SortieFly(h,s,w)')
     # The salvo (pylib/vcobjects.py SALVO_*, docs/missile-re.md §MissileBullet02): locks about 80 deg off the nose and the
@@ -7758,7 +7755,7 @@ def soft_edge_wired() -> None:
     # strike flies the ordered height, a sortie's run in takes mapcmd::JetOver (the missile rain's kRainAlt not yet).
     assert 'Level(pos,to,entering && !j.heightOrdered ? pos[1] : height,want);' in combat and 'j->heightOrdered=true;' in jet
     sortie = src('src/jet_sortie.cpp')
-    for alt in ('kMissilePassAlt', 'kCarpetAlt', 'kPopAlt'):
+    for alt in ('kMissilePassAlt',):
         assert f'mark+sortie::{alt}' not in sortie and f'mark+mapcmd::JetOver(sortie::{alt},j.high)' in sortie, alt
     assert 'mark+mapcmd::JetOver(sortie::StrafeHeight(run,preferred),j.high)' in sortie
     assert '#include "../src/airbound.h"' in src('tools/airbound_check.cpp')

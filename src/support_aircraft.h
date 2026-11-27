@@ -13,22 +13,11 @@ struct SupportAircraft {
     int sortie=0;              // a sortie call's pass (jet.h SortiePass; 0 none): one pass at the target, then away
 };
 int SupportAirCallCount() noexcept;
-// A sortie's second wave's catalog entry (tools/calls.py `then`), -1 none.
-int SupportAirCallThen(int index) noexcept;
 const wchar_t* SupportAirCallName(int index) noexcept;
 const wchar_t* SupportAirCallKey(int index) noexcept;
 std::uint32_t SupportAirCallPt(int index) noexcept;   // its pt on the map's bar (tools/calls.py Call.pt)
 bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept;
 bool SupportGroundRun(int catalog) noexcept;
-// A sortie's second wave (airstrike.cpp; tools/calls.py `then`): called onto `target` by this machine `then_after` s after
-// its first wave (`catalog`) went out (the tick: crew.cpp SharedFrameTick); forgotten at a new mission. Queued once the
-// first is out (`request` 0: offline, made), or online under the first's open `request` until SupportFollowUpSettle tells
-// its outcome (`out`: active; else it came to nothing and so does its second wave).
-// `run`: the first wave's way in (sortie_plan.h RunSpec), the second's too (its line only where it flies one).
-void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request,const sortie::RunSpec& run={}) noexcept;
-void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept;
-void SupportFollowUpTick() noexcept;
-void ResetSupportFollowUps() noexcept;
 // Whether call `catalog` brings the submarine carrier (no aircraft: SupportAircraftSpec is false for it; the dispatcher
 // plans its real hull and pilot, support_dispatch.cpp PlanSubmarine).
 bool SupportSubCatalog(int catalog) noexcept;

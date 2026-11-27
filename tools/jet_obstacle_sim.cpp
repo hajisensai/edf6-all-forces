@@ -960,7 +960,7 @@ WobbleResult WobbleCase(Role role,float stepDeg,float cross,SortiePass pass,bool
     boxes.clear();
     const Kind& k=KindOf(role);
     const float speed=bombSpeed>0.0f ? bombSpeed : role==Role::gunship ? k.cruise : k.attack;
-    const float alt=sortie ? (pass==SortiePass::carpet ? sortie::kCarpetAlt : sortie::kMissilePassAlt) : 400.0f;
+    const float alt=sortie ? sortie::kMissilePassAlt : 400.0f;
     const float off=stepDeg*kPi/180.0f;
     const float at[3]={cross,alt,bombSpeed>0.0f ? -30000.0f : -9000.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
     const float mark[3]={0.0f,0.0f,0.0f},heading[3]={0.0f,0.0f,1.0f};
@@ -1018,10 +1018,10 @@ int WobbleSuite(const char* out) {
     const struct { const char* name;Role role; } roles[]={{"strike",Role::strike},{"fighter",Role::fighter},
         {"interceptor",Role::interceptor},{"multirole",Role::multirole},{"gunship",Role::gunship}};
     const struct { const char* name;float step,cross;bool sortie;SortiePass pass;float settle; } cs[]={
-        {"level, on its heading",0.0f,0.0f,false,SortiePass::carpet,5.0f},
-        {"level, 30 deg heading step",30.0f,0.0f,false,SortiePass::carpet,20.0f},
-        {"level, 120 deg heading step",120.0f,0.0f,false,SortiePass::carpet,30.0f},
-        {"carpet line 150 m aside",0.0f,150.0f,true,SortiePass::carpet,25.0f},
+        {"level, on its heading",0.0f,0.0f,false,SortiePass::none,5.0f},
+        {"level, 30 deg heading step",30.0f,0.0f,false,SortiePass::none,20.0f},
+        {"level, 120 deg heading step",120.0f,0.0f,false,SortiePass::none,30.0f},
+        {"missile pass line 150 m aside",0.0f,150.0f,true,SortiePass::missilePass,25.0f},
         {"missile pass line 300 m aside",0.0f,300.0f,true,SortiePass::missilePass,25.0f}};
     for(const auto& ro:roles)for(const auto& c:cs) {
         if(c.sortie && ro.role==Role::gunship)continue;
@@ -1042,7 +1042,7 @@ int WobbleSuite(const char* out) {
     // from aside without swinging across it, settled level on it. Before (its lead a fixed 250 m against a turn of 1.3 to
     // 2.9 km at 1.5 g) it crossed the line and swung back.
     for(const float bs:{120.0f,180.0f})for(const float cross:{150.0f,600.0f}) {
-        const WobbleResult r=WobbleCase(Role::strike,0.0f,cross,SortiePass::carpet,false,120.0f,60.0f,nullptr,bs);
+        const WobbleResult r=WobbleCase(Role::strike,0.0f,cross,SortiePass::none,false,120.0f,60.0f,nullptr,bs);
         const bool ok=r.reversals==0 && r.bank<0.09f && r.over<0.1f*cross && r.off<0.05f*cross;
         failures+=!ok;++cases;
         std::printf("wobble bomb run %3.0f m/s, line %4.0f m aside (lead %4.0f m): across it by %5.1f m, settled: bank <= %4.1f deg,"

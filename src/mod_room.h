@@ -81,8 +81,12 @@ namespace crew {
 //      named under that catalog's body; a ground run's line is at least what its jets need to let every ground store go
 //      (sortie_plan.h RunLeast), lengthened by the host. An older build would read such a sortie's variant as none (no
 //      body under its own key) and fly it stock, its line where the host's is not.
+//  25 (2026-11-27): the sorties are their airframes' 「·出击」 (tools/calls.py FLOWN): the catalog reordered so each sits
+//      beside its airframe's guard / follow, the carpet, pop-up, missile hunter and hammer sorties retired (their rows kept
+//      as placeholders), no second waves, SortiePass renumbered (jet.h). An older build would read another catalog id and
+//      pass under each entry.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=24;  // a jet sortie's configured pylons (support_dispatch.cpp HullOf), its line's least length
+constexpr std::int64_t kAllForcesRoomProtocol=25;  // the sorties folded into their airframes' rows: catalog and passes renumbered
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

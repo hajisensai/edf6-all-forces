@@ -551,14 +551,13 @@ struct Heli {
     // are the squad's to fire) it does not leave on its own, only badly damaged.
     bool keep;
     // A sortie (HeliSortie, docs/plan-2026-10-25-strikes.md §1.2; SortieFly): its pass at the mark (sortieLine through it),
-    // begun at sortieAt, the hunter on its station since sortieStation, its missiles (seen by missileAt) and at whom
-    // (counted by holder 2's rounds, sortieMissileLeft last frame; struck: each another), the circle counted (sortieLap, turning
-// sortieTurn); this frame's nose point (sortieFace).
+    // begun at sortieAt, at whom its missiles went (seen by holder 2's rounds, sortieMissileLeft last frame; struck: each
+    // another), the circle counted (sortieLap, turning sortieTurn); this frame's nose point (sortieFace).
     SortiePass sortie;
     sortie::Line sortieLine;
     sortie::Lap sortieLap;
-    ULONGLONG sortieAt,sortieStation;
-    int sortieMissiles,sortieMissileLeft,sortieTurn,struckCount;
+    ULONGLONG sortieAt;
+    int sortieMissileLeft,sortieTurn,struckCount;
     ObjRef struck[8];
     bool sortieFace;
     float sortieFaceAt[3];
@@ -2342,9 +2341,8 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
                     s.v,h.target.obj,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,h.storeAmmo);
             }
         } else {
-            const ULONGLONG gap=h.sortie==SortiePass::heliHunter && !Leaving(h) ? sortie::kHunterGapMs : Cfg().heliMissileMs;
             shot.missile=Cfg().heliMissile && shot.miss<kMissileCone && s.dist>kMissileMin && s.dist<Cfg().heliRange &&
-                         s.ms-h.missileAt>gap;
+                         s.ms-h.missileAt>Cfg().heliMissileMs;
             if(shot.missile)h.missileAt=s.ms;
         }
     } else h.firing=false;
@@ -2435,8 +2433,6 @@ void MirrorStick(unsigned char* v,const Control& c) noexcept;   // online: the i
 // A sortie's flight this frame (HeliSortie; sortie_plan.h): true when it set `w` (Steer then flies it as a hold: no aim
 // dip), with its nose point (sortieFace) where it wants one; false once it leaves (StartLeave), or with none.
 //   heliStrafe  low along its line over the mark (its guns and missiles at what comes before the nose), on past it, away
-//   heliHunter  to its station kHunterStation short of the mark, hovering kHunterAlt up, the nose on each target in turn
-//               for its missiles (one a kHunterGapMs, each at another: struck), until kHunterMissiles or kHunterMs, away
 //   heliCircle  round the mark on kCircleRadius, kCircleAlt up, once (sortie::Lap): the door guns on the middle (a 410
 //               flies nose first, its doors to the sides), a nose-gun 506 sideways with its nose on the middle; away
 bool SortieFly(Heli& h,const Sense& s,Want& w) noexcept {
@@ -2446,7 +2442,6 @@ bool SortieFly(Heli& h,const Sense& s,Want& w) noexcept {
     // held: HoldFire, the weapon not ready).
     const std::int32_t left=s.arms.ammo[2];
     if(left>=0 && h.sortieMissileLeft>=0 && left<h.sortieMissileLeft) {
-        h.sortieMissiles+=h.sortieMissileLeft-left;
         if(h.target && h.struckCount<static_cast<int>(sizeof(h.struck)/sizeof(h.struck[0])))h.struck[h.struckCount++]=h.target;
     }
     h.sortieMissileLeft=left;
@@ -2462,22 +2457,6 @@ bool SortieFly(Heli& h,const Sense& s,Want& w) noexcept {
         std::memcpy(w.vel,d,12);w.height=mark[1]+sortie::kHeliStrafeAlt;
         return true;
     }
-    case SortiePass::heliHunter: {
-        const float station[3]={mark[0]-h.sortieLine.dir[0]*sortie::kHunterStation,mark[1]+sortie::kHunterAlt,
-                                mark[2]-h.sortieLine.dir[2]*sortie::kHunterStation};
-        Arrive(h,s.pos,station,kRest,w.vel);
-        w.off=Dist2(s.pos,station);w.height=station[1];
-        if(!h.sortieStation && w.off<sortie::kHunterNear)h.sortieStation=s.ms;
-        h.sortieFace=true;
-        std::memcpy(h.sortieFaceAt,s.engage ? s.aim : mark,12);
-        if(h.sortieMissiles>=sortie::kHunterMissiles || (h.sortieStation && s.ms-h.sortieStation>sortie::kHunterMs) ||
-           s.ms-h.sortieAt>3*sortie::kHunterMs) {
-            StartLeave(h,s.pos,s.fwd,h.sortieMissiles ? "sortie: its missiles away" : "sortie: nothing to strike");
-            h.sortieFace=false;
-            return false;
-        }
-        return true;
-    }
     case SortiePass::heliCircle: {
         const float d=Dist2(s.pos,mark);
         if(d>sortie::kCircleRadius+150.0f) {   // on its way to the circle: at it at full speed
@@ -2487,7 +2466,7 @@ bool SortieFly(Heli& h,const Sense& s,Want& w) noexcept {
         w.off=std::fabs(d-sortie::kCircleRadius);w.height=mark[1]+sortie::kCircleAlt;
         if(w.off<sortie::kCircleNear)sortie::LapStep(h.sortieLap,mark,s.pos);
         if(s.type->guns==Guns::nose){h.sortieFace=true;std::memcpy(h.sortieFaceAt,mark,12);}
-        if(sortie::LapDone(h.sortieLap) || s.ms-h.sortieAt>3*sortie::kHunterMs) {
+        if(sortie::LapDone(h.sortieLap) || s.ms-h.sortieAt>sortie::kCircleMs) {
             StartLeave(h,s.pos,s.fwd,sortie::LapDone(h.sortieLap) ? "sortie: its circle flown" : "sortie: its circle took too long");
             h.sortieFace=false;
             return false;
@@ -3380,7 +3359,7 @@ void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexce
         if(!h || !h->called){Log("HELI v=%p sortie, but not a called heli flown by the plugin: none",vehicle);return;}
         const float* pos=reinterpret_cast<const float*>(vehicle+kPosition);
         const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
-        h->sortie=pass;h->sortieAt=GameMs();h->sortieStation=0;h->sortieMissiles=0;h->sortieMissileLeft=-1;
+        h->sortie=pass;h->sortieAt=GameMs();h->sortieMissileLeft=-1;
         h->sortieLine=sortie::LineThrough(mark,pos,m+8);h->sortieLap=sortie::Lap{};h->struckCount=0;
         // Round the circle the way it comes in turning (its heading's side of the mark): no turn back onto it.
         const float to[3]={mark[0]-pos[0],0.0f,mark[2]-pos[2]};

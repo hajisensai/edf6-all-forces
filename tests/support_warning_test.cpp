@@ -1,6 +1,5 @@
 // src/support_warning_logic.h offline: every barrage's warned area holds every round it plans with its blast, the ultimate's
-// its whole storm and rings, a flight's route runs from its entry through the point (a sortie's on past it along its pass),
-// the carpet's strip holds the bombs' band.
+// its whole storm and rings, a flight's route runs from its entry through the point (a sortie's on past it along its pass).
 #include "../src/support_warning_logic.h"
 #include <cmath>
 #include <cstdio>
@@ -86,13 +85,6 @@ int main() {
      warning::Route(aside,target,sortie::kPassBeyond,pts);
      Check(Flat(pts[1],target)<=sortie::kMaxOffset+0.5f,"an entry off the line: the pass beside the point, at most kMaxOffset");}
 
-    // The carpet: its corners kCarpetHalf + blast along, kMaxOffset + blast across.
-    {float c[4][3];warning::CarpetStrip(from,target,20.0f,c);
-     const float along=Flat(c[0],c[1]),across=Flat(c[1],c[2]);
-     Check(std::fabs(along-2.0f*(sortie::kCarpetHalf+20.0f))<0.5f && std::fabs(across-2.0f*(sortie::kMaxOffset+20.0f))<0.5f,
-           "the strip's sides");
-     float mid[3]={0,0,0};for(auto& p:c)for(int i=0;i<3;++i)mid[i]+=p[i]*0.25f;
-     Check(Flat(mid,target)<0.5f,"centred on the point");}
     // A deployment's route as its lead flies it (RouteAhead; the user, 2026-11-27: 「飞机进场会有个红线停留在原地」): from the
     // lead on, the points behind it dropped, gone once it has flown the whole route.
     {const float way[3][3]={{-2000.0f,400.0f,0.0f},{0.0f,10.0f,0.0f},{900.0f,10.0f,0.0f}};

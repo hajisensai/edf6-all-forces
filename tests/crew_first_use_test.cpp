@@ -167,7 +167,6 @@ void BarrageTick() noexcept{}   // ...and the barrages' rounds (barrage.cpp, not
 void AndryushaTick() noexcept{}   // ...and the Andryusha's carriers (andryusha.cpp, not linked here)
 void SupportPointsTick() noexcept{}    // ...the map's support pt (support_points.cpp, not linked here)
 void SupportWarningTick() noexcept{}   // ...the supports' warnings (support_warning.cpp, not linked here)
-void SupportFollowUpTick() noexcept{}   // ...and the sorties' second waves (airstrike.cpp, not linked here)
 namespace gravity { void Frame() noexcept{} namespace net { void Frame() noexcept{} } }   // crew.cpp's GravityTick calls these (gravity.cpp, gravitygun.cpp, floatgun.cpp, not linked here)
 void GravityGunTick() noexcept{}
 void MapCommandQueueTick() noexcept{}   // crew.cpp's SharedFrameTick advances the map's queues (mapcmd.cpp, not linked here)
