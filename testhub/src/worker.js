@@ -25,7 +25,7 @@ export const REPORT_STATUSES = ['open', 'doing', 'verify', 'done', 'closed'];
 // And the external review page (/rate.html, src/review.js): anyone reads and scores the published outlines.
 const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css', '/download.html', '/download.js', '/chunked-download.mjs', '/pack-download.mjs',
   '/plan.html', '/plan.js', '/story.html', '/story.js', '/outline.html', '/outline.js', '/groups.js',
-  '/rate.html', '/rate.js']);
+  '/rate.html', '/rate.js', '/ui.js']);
 const SESSION_DAYS = 60;
 
 export default {

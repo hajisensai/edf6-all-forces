@@ -1,19 +1,37 @@
-// Custom story missions are group-owned data, independent of the stock planning outline.
+// The group's missions in campaign order (/story.html, 关卡策划): what each mission is (goal, enemies, story, how it hands
+// over to the next), the stock mission whose map it borrows, and the outline step it plays out (book + step id of the
+// same group's /outline.html). Independent of the stock planning outline (/plan.html) and the game's mission list.
+// Any member of the group edits, moves and deletes any of its missions (as with the outline); every edit names the
+// version it was made from, so two people editing one mission at once cannot overwrite each other (the later one gets a 409).
 import { Plan, anonymous, between, canWrite, clean, int, pick, readable, scope } from './plan.js';
 import { HttpError, body } from './http.js';
 
-const STATUSES = ['planned', 'writing', 'testing', 'done'];
-const MAX_MISSIONS = 1000;
+export const STATUSES = ['planned', 'writing', 'testing', 'done'];
+export const STORY_LIMIT = { missions: 1000, title: 100, body: 10000, goal: 2000, enemies: 2000, handoff: 2000 };
+const STEP = /^[A-Za-z0-9_-]{1,24}$/;
+
+// The outline step a mission plays out: both or neither (an outline number from 1, a step id as in src/outline.js).
+// The step is not checked against the outline: an edited outline may drop it, and the page then says so.
+function link(b) {
+  if (b.book == null || b.book === '' || b.book === 0) return [null, null];
+  const book = int(b.book);
+  if (book < 1) throw new HttpError(400, 'bad outline number');
+  const step = b.step == null || b.step === '' ? null : String(b.step);
+  if (step != null && !STEP.test(step)) throw new HttpError(400, 'bad outline step');
+  return [book, step];
+}
 
 export async function storyRoute(request, env, me, missions, groups, path, url) {
   const plan = new Plan(env, me, missions);
   const db = env.DB;
+  const L = STORY_LIMIT;
   if (path === '/api/story' && request.method === 'GET') {
-    // Readable by anyone (me = null: a visitor), written by the group's members and developers.
+    // Readable by anyone (me = null: a visitor, who does not see who wrote or last changed a mission).
     const shown = await readable(db, me, groups, 'SELECT DISTINCT grp FROM story_missions');
     const group = pick(me, url.searchParams.get('group'), shown, groups);
     const rows = group == null ? { results: [] } : await db.prepare('SELECT * FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all();
-    return { me, group, groups: shown, editable: group != null && canWrite(me, group), rows: anonymous(me, rows.results.map(({ grp, ...row }) => row)) };
+    return { me, group, groups: shown, editable: group != null && canWrite(me, group), limit: L,
+      rows: anonymous(me, rows.results.map(({ grp, ...row }) => row), ['author', 'updated_by']) };
   }
   if (request.method !== 'POST' || !['/api/story/save', '/api/story/move', '/api/story/remove'].includes(path)) return null;
   const b = await body(request);
@@ -22,33 +40,52 @@ export async function storyRoute(request, env, me, missions, groups, path, url) 
   let row = null;
   if (b.id != null) {
     row = await db.prepare('SELECT * FROM story_missions WHERE id = ?1 AND grp = ?2').bind(int(b.id), group).first();
-    if (!row) throw new HttpError(404, '这条剧情关卡不存在，请刷新');
+    if (!row) throw new HttpError(404, '这一关已经被删掉了，请刷新');
   }
   if (path === '/api/story/save') {
-    if (row && row.author !== me.user && !plan.dev) throw new HttpError(403, '只能编辑自己创建的关卡');
-    const title = clean(b.title, 100);
-    const text = clean(b.body, 10000);
+    const title = clean(b.title, L.title);
     if (!title) throw new HttpError(400, '关卡名不能为空');
     if (!STATUSES.includes(b.status)) throw new HttpError(400, '关卡状态无效');
     const mission = b.mission ? plan.mission(b.mission) : null;
+    const [book, step] = link(b);
+    const fields = [title, clean(b.body, L.body), clean(b.goal, L.goal), clean(b.enemies, L.enemies), clean(b.handoff, L.handoff), mission, b.status, book, step];
+    const version = row ? int(b.version) : null;
     await plan.charge();
     const now = Date.now();
     if (row) {
-      await db.prepare('UPDATE story_missions SET title = ?2, body = ?3, mission = ?4, status = ?5, updated_at = ?6 WHERE id = ?1')
-        .bind(row.id, title, text, mission, b.status, now).run();
-      return { id: row.id };
+      // Compare-and-set on the version the editor started from.
+      const saved = await db.prepare(`UPDATE story_missions SET title = ?3, body = ?4, goal = ?5, enemies = ?6, handoff = ?7, mission = ?8,
+        status = ?9, book = ?10, step = ?11, updated_at = ?12, updated_by = ?13, version = version + 1
+        WHERE id = ?1 AND version = ?2 RETURNING version`).bind(row.id, version, ...fields, now, me.user).first();
+      if (!saved) {
+        const cur = await db.prepare('SELECT updated_by, updated_at FROM story_missions WHERE id = ?1').bind(row.id).first();
+        throw new HttpError(409, `这一关刚被 ${cur?.updated_by || '别人'} 改过，你的改动没有存上`);
+      }
+      return { id: row.id, version: saved.version };
+    }
+    // At the end, or right after mission `after` (a mission written between two others).
+    let sort = null;
+    if (b.after != null) {
+      const prev = await db.prepare('SELECT sort FROM story_missions WHERE id = ?1 AND grp = ?2').bind(int(b.after), group).first();
+      if (!prev) throw new HttpError(404, '要插在后面的那一关已经被删掉了，请刷新');
+      const next = await db.prepare('SELECT sort FROM story_missions WHERE grp = ?1 AND sort > ?2 ORDER BY sort LIMIT 1').bind(group, prev.sort).first();
+      sort = between(prev.sort, next ? next.sort : null);
+      if (sort == null) {   // the gap has worn out: renumber, then the gap after it is 1 wide
+        const all = (await db.prepare('SELECT id FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all()).results;
+        await db.batch(all.map((r, i) => db.prepare('UPDATE story_missions SET sort = ?2 WHERE id = ?1').bind(r.id, i)));
+        sort = all.findIndex((r) => r.id === int(b.after)) + 0.5;
+      }
     }
     const added = await db.prepare(
-      `INSERT INTO story_missions (grp, title, body, mission, status, sort, author, created_at, updated_at)
-       SELECT ?1, ?2, ?3, ?4, ?5, COALESCE((SELECT MAX(sort) FROM story_missions WHERE grp = ?1), 0) + 1, ?6, ?7, ?7
-       WHERE (SELECT COUNT(*) FROM story_missions WHERE grp = ?1) < ?8 RETURNING id`,
-    ).bind(group, title, text, mission, b.status, me.user, now, MAX_MISSIONS).first();
-    if (!added) throw new HttpError(409, '这个组的剧情关卡已达上限');
-    return { id: added.id };
+      `INSERT INTO story_missions (grp, title, body, goal, enemies, handoff, mission, status, book, step, sort, author, updated_by, created_at, updated_at, version)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, COALESCE(?11, (SELECT MAX(sort) FROM story_missions WHERE grp = ?1) + 1, 0), ?12, ?12, ?13, ?13, 1
+       WHERE (SELECT COUNT(*) FROM story_missions WHERE grp = ?1) < ?14 RETURNING id, version`,
+    ).bind(group, ...fields, sort, me.user, now, L.missions).first();
+    if (!added) throw new HttpError(409, '这个组的关卡已达上限');
+    return { id: added.id, version: added.version };
   }
   if (!row) throw new HttpError(400, '需要关卡编号');
   if (path === '/api/story/remove') {
-    if (row.author !== me.user && !plan.dev) throw new HttpError(403, '只能删除自己创建的关卡');
     await plan.charge();
     await db.prepare('DELETE FROM story_missions WHERE id = ?1').bind(row.id).run();
     return { ok: true };
