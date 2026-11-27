@@ -7881,9 +7881,9 @@ def air_chase_wired() -> None:
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert srcscan.has(npcai, '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }')
-    assert srcscan.has(npcai, 'HoldFire(h,t->object,eye,known ? a.speed[w]') and srcscan.has(npcai, 'bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }')
+    assert srcscan.has(npcai, 'HoldFireQ(h,t->object,eye,known ? a.speed[w]') and srcscan.has(npcai, 'bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }')
     assert srcscan.has(npcai, 'if(target && HoldFire(v,target))target=nullptr;') and srcscan.has(npcai, 'if(p.best && HoldFire(v,p.best))')
-    assert srcscan.has(npcai, 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]') and srcscan.has(npcai, 'p.fire=!hold && ShotOk(')
+    assert srcscan.has(npcai, 'HoldFireQ(h,t.e->object,eye,armed ? a.speed[p.arm]') and srcscan.has(npcai, 'p.fire=!hold && ShotOk(')
     # A cached plan is the same weapon's (its round's speed and gravity are in the plans' key) and the same muzzle's.
     wasted = src('src/wastedfire.cpp')
     assert 'speed==o.speed && gravity==o.gravity' in wasted and srcscan.has(wasted, 'const PlanKey key{shooter,target,speed,gravity};')
