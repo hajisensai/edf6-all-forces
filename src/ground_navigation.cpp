@@ -46,12 +46,10 @@ public:
 
 private:
     bool Capture(const GroundBox& box) noexcept {
-        GroundBodyRays found;
         ++probeStats.bodyListQueries;
-        if(!found.Capture(box.lower,box.upper))return false;
+        if(!body.Capture(box.lower,box.upper))return false;
         ++probeStats.bodyLists;
         ready=true;
-        body=found;
         bounds=box;
         return true;
     }

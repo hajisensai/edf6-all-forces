@@ -4181,14 +4181,26 @@ namespace {
 constexpr std::size_t kWorldBodyBox=0xE4D480,kShapeRayResolved=0x11A77C0;
 constexpr std::size_t kSimdBroadPhase=0x1C21450,kGroupCollisionFilter=0x18BBFC0,kShapeTagCodec=0x1AE3388;
 constexpr std::size_t kBodyIdAllocator=0x1F826E0,kReleaseBodyIds=0x97B150;
+constexpr std::size_t kScratchInit=0x1607D70,kScratchCall=0x11A7812,kScratchRelease=0x978FB0;
+constexpr std::size_t kScratchTriangleTable=0x18BBB98,kScratchOwnershipBytes=0x40;
+bool groundBodyCompatible=false,scratchInstalled=false;
+
+struct NativeRayScratch {
+    const void* dispatcher;
+    void* triangles[2];
+    std::uint32_t reserved;
+    std::uint32_t borrowed;
+};
+static_assert(sizeof(NativeRayScratch)==0x20 && offsetof(NativeRayScratch,borrowed)==0x1C);
+
+bool GroundRayCodeMatches(std::size_t first,std::size_t end,std::uint64_t expected) noexcept {
+    if(!Readable(image+first,end-first))return false;
+    std::uint64_t fingerprint=14695981039346656037ull;
+    for(auto i=first;i<end;++i)fingerprint=(fingerprint^image[i])*1099511628211ull;
+    return fingerprint==expected;
+}
 
 bool GroundBodyRayProfile() noexcept {
-    const auto exact=[](std::size_t first,std::size_t end,std::uint64_t expected) noexcept {
-        if(!Readable(image+first,end-first))return false;
-        std::uint64_t fingerprint=14695981039346656037ull;
-        for(auto i=first;i<end;++i)fingerprint=(fingerprint^image[i])*1099511628211ull;
-        return fingerprint==expected;
-    };
     // The bodies query and the full ray must select the same broad-phase trees and body layers.
     constexpr unsigned char allowTree[]{0xB0,0x01,0xC3};
     constexpr unsigned char release[]{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x44,0x89,0x4C,0x24,0x20,0x44};
@@ -4199,23 +4211,75 @@ bool GroundBodyRayProfile() noexcept {
         Readable(image+kGroupCollisionFilter,0x40) && At<const void*>(image+kGroupCollisionFilter,0x30)==image+0xD93700 &&
         At<const void*>(image+kGroupCollisionFilter,0x38)==image+0xD93770 &&
         Matches(0xD93770,allowTree,sizeof(allowTree)) && Matches(kReleaseBodyIds,release,sizeof(release)) &&
-        exact(kWorldBodyBox,0xE4D5D0,0x943F82F7424EC158ull) &&
-        exact(0x16060A0,0x16062F9,0xEBBD70C42BECB389ull) &&
-        exact(kCastRay,0x11A7FF7,0x59A947B3B2974E9Full) &&
-        exact(0x16020B0,0x1602C88,0xC6D552FB2361FD4Full) &&
-        exact(0x1605DC0,0x1605EAD,0x3B228A7C11065113ull) &&
-        exact(0xD93700,0xD93770,0x32C306AEE29CBD97ull) &&
-        exact(kShapeRayResolved,0x11A7ABC,0x81C15323984D56BFull);
+        GroundRayCodeMatches(kWorldBodyBox,0xE4D5D0,0x943F82F7424EC158ull) &&
+        GroundRayCodeMatches(0x16060A0,0x16062F9,0xEBBD70C42BECB389ull) &&
+        GroundRayCodeMatches(kCastRay,0x11A7FF7,0x59A947B3B2974E9Full) &&
+        GroundRayCodeMatches(0x16020B0,0x1602C88,0xC6D552FB2361FD4Full) &&
+        GroundRayCodeMatches(0x1605DC0,0x1605EAD,0x3B228A7C11065113ull) &&
+        GroundRayCodeMatches(0xD93700,0xD93770,0x32C306AEE29CBD97ull) &&
+        GroundRayCodeMatches(kShapeRayResolved,0x11A7ABC,0x81C15323984D56BFull);
 }
 }
 
+thread_local GroundBodyRays::Scratch* GroundBodyRays::pendingScratch=nullptr;
+
+void* GroundBodyRays::InitScratch(void* native) noexcept {
+    const auto init=reinterpret_cast<void*(*)(void*)>(image+kScratchInit);
+    Scratch* const loan=pendingScratch;
+    pendingScratch=nullptr;   // Only the initializer for this cast can consume the loan.
+    if(!loan)return init(native);
+
+    if(loan->release) {
+        for(int i=0;i!=2;++i) {
+            if(std::memcmp(loan->triangles[i],loan->initial[i],kScratchOwnershipBytes)==0)continue;
+            loan->Reset();
+            loan->rejected=true;
+            return init(native);
+        }
+        for(int i=0;i!=2;++i)
+            std::memcpy(static_cast<unsigned char*>(loan->triangles[i])+kScratchOwnershipBytes,
+                        loan->initial[i]+kScratchOwnershipBytes,sizeof(loan->initial[i])-kScratchOwnershipBytes);
+        const NativeRayScratch context{nullptr,{loan->triangles[0],loan->triangles[1]},0,1};
+        std::memcpy(native,&context,sizeof(context));
+        return native;
+    }
+
+    void* const result=init(native);
+    auto& context=*static_cast<NativeRayScratch*>(native);
+    // The triangle destructor can release relative-array elements or allocated capacity.
+    // Borrow only the empty inline form and keep its ownership header out of the payload restore.
+    for(const void* triangle:context.triangles) {
+        if(triangle && At<const void*>(triangle,0)==image+kScratchTriangleTable &&
+           At<const void*>(triangle,8) && At<std::uint64_t>(triangle,0x10)==1 &&
+           At<int>(triangle,0x38)==0 && At<int>(triangle,0x3C)>=0)continue;
+        loan->rejected=true;
+        return result;
+    }
+    if(context.triangles[0]==context.triangles[1]) {
+        loan->rejected=true;
+        return result;
+    }
+    for(int i=0;i!=2;++i) {
+        loan->triangles[i]=context.triangles[i];
+        std::memcpy(loan->initial[i],context.triangles[i],sizeof(loan->initial[i]));
+    }
+    loan->release=reinterpret_cast<Scratch::Release>(image+kScratchRelease);
+    context.borrowed=1;   // The native epilogue leaves borrowed triangles to their owner.
+    return result;
+}
+
+bool GroundBodyRays::InstallScratch() noexcept {
+    if(!GroundRayCodeMatches(kScratchInit,0x1607DE0,0x145E33C301E59F43ull) ||
+       !GroundRayCodeMatches(0xDD1590,0xDD173E,0x7B366385BD0B03F1ull) ||
+       !GroundRayCodeMatches(kScratchRelease,0x978FD2,0x8880055BA60C4951ull))return false;
+    edf::RedirectCall(image+kScratchCall,image+kScratchInit,reinterpret_cast<void*>(&InitScratch),scratchInstalled);
+    return scratchInstalled;
+}
+
 bool GroundBodyRays::Capture(const float* lower,const float* upper) noexcept {
-    body=nullptr;
-    if(!rayOk || !bodyOk)return false;
+    if(!groundBodyCompatible)return false;
     for(int axis=0;axis<3;++axis)
         if(!std::isfinite(lower[axis]) || !std::isfinite(upper[axis]) || lower[axis]>upper[axis])return false;
-    static const bool compatible=GroundBodyRayProfile();
-    if(!compatible)return false;
     auto* const g=RayWorld();
     if(!g)return false;
     auto* const holder=At<unsigned char*>(g,0x68);
@@ -4255,15 +4319,21 @@ bool GroundBodyRays::Capture(const float* lower,const float* upper) noexcept {
             allocator,ids.data,4,static_cast<int>(ids.capacityAndFlags&0x3FFFFFFFu));
     if(id==0xFFFFFFu || BodyKind(id)!=mapfloor::Body::fixed)return false;
     const auto getBody=reinterpret_cast<const void*(*)(void*,std::uint32_t)>(image+kWorldGetBody);
-    body=getBody(world,id);
+    const void* const resolved=getBody(world,id);
+    if(!resolved)return false;
+    body=resolved;
     context={dispatcher,filter,codec};
-    return body!=nullptr;
+    return true;
 }
 
 __forceinline void GroundBodyRays::Cast(const float* from,const float* to,void* collector) const noexcept {
     const RayInput in{{from[0],from[1],from[2],1.0f},{to[0],to[1],to[2],1.0f},kMapLayer,0,0};
-    reinterpret_cast<void(*)(const Context*,void*,const RayInput*,const void* const*,int)>(image+kShapeRayResolved)(
-        &context,collector,&in,&body,1);
+    using CastFn=void(*)(const Context*,void*,const RayInput*,const void* const*,int);
+    const auto cast=reinterpret_cast<CastFn>(image+kShapeRayResolved);
+    Scratch* const previous=pendingScratch;
+    pendingScratch=scratchInstalled && !scratch.rejected ? &scratch : nullptr;
+    cast(&context,collector,&in,&body,1);
+    pendingScratch=previous;
 }
 
 bool GroundBodyRays::Unobstructed(const float* from,const float* to) const noexcept {
@@ -4424,6 +4494,9 @@ bool CheckHeliProfile() noexcept {
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
         bodyOk=rayOk && Readable(image+kWorldVtbl,0x88) && At<const unsigned char*>(image,kWorldVtbl+16*8)==image+kWorldGetBody;
         for(const auto& s:kBodySignatures)bodyOk=bodyOk && Matches(s.rva,s.bytes,s.size);
+        groundBodyCompatible=bodyOk && GroundBodyRayProfile();
+        const bool reuseTriangleScratch=groundBodyCompatible && GroundBodyRays::InstallScratch();
+        Log("MAP ray triangle scratch reuse=%d",reuseTriangleScratch?1:0);
         Log("MAP ray bodies=%d%s",bodyOk,bodyOk ? " (the map view's eye passes moving bodies)" :
             " (unexpected EDF.dll code: the map view's eye stays over every map-layer hit)");
         visitOk=Matches(kVisitFriends,kVisitFriendsSig,sizeof(kVisitFriendsSig));
