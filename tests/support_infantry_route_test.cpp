@@ -41,8 +41,8 @@ std::uint32_t SupportStrikePt(int) noexcept{return 0;}
 bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int) noexcept{return -1;}
 bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t,const float*) noexcept{return false;}
-support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*,const float*) noexcept{return support::Refusal::unsupported;}
-void WarnDeployment(const support_net::Plan&) noexcept{}
+support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*,const float*,float) noexcept{return support::Refusal::unsupported;}
+void WarnDeployment(const support_net::Plan&,const ObjRef&) noexcept{}
 std::int32_t SupportPoints() noexcept{return 1000000;}
 std::int32_t SupportPointsPrice(std::uint32_t) noexcept{return 0;}
 bool SupportPointsHold(std::int32_t) noexcept{return true;}
@@ -88,7 +88,7 @@ bool ResolveSupportSource(std::uint64_t,ObjRef*) noexcept{return false;}
 bool ResolveMarkIdentities(const unsigned char*,const unsigned char*,MarkIdentities*) noexcept{return false;}
 bool SupportCommandRequesterMatches(void*,const char*) noexcept{return false;}
 bool SubmitCarrierDroneNetworkRequest(const unsigned char*,unsigned,unsigned,const float*) noexcept{return false;}
-support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*,const float*) noexcept{return support::Refusal::unsupported;}
+support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*,const float*,float) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}

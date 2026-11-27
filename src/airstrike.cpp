@@ -661,7 +661,7 @@ bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t ca
 }
 namespace {
 support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,const float* observer,const float* heading,
-                             support::Route* route,bool logged) noexcept {
+                             float runHalf,support::Route* route,bool logged) noexcept {
     // A spec that brings an aircraft: a jet row, a heli row, or the paratroop plane (no row of either).
     if(!route || !target || (spec.jet<0 && spec.heli<0 && !spec.transportPlane) || spec.count<1)return support::Refusal::unsupported;
     if(!OpenSky(target))return support::Refusal::noSky;
@@ -701,22 +701,25 @@ support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,con
         }
         return true;
     };
-    const auto refusal=support::AirRoute(area,reach,target,observer,direction,altitude,SupportPassTurn(spec),entry,EntryHeight,*route);
+    // Far enough out for its pass to be flown straight in (sortie_plan.h StraightRunIn; a jet's gun run).
+    const float runIn=SupportRunIn(spec,runHalf);
+    const auto refusal=support::AirRoute(area,reach,target,observer,direction,altitude,SupportPassTurn(spec),entry,EntryHeight,*route,
+                                         runIn);
     if(logged && refusal==support::Refusal::none)
-        Log("SUPPORT air entry (%.0f,%.0f,%.0f): %.0f m from the target, %.0f m from the caller (draws to %.0f m: %s), the physical "
-            "square +-%.0f",route->from[0],route->from[1],route->from[2],support::FlatDistance(route->from,target),
-            observer ? support::FlatDistance(route->from,observer) : -1.0f,reach.draw,route->beyond ? "past it" :
+        Log("SUPPORT air entry (%.0f,%.0f,%.0f): %.0f m from the target (its run in %.0f m), %.0f m from the caller (draws to %.0f m: "
+            "%s), the physical square +-%.0f",route->from[0],route->from[1],route->from[2],support::FlatDistance(route->from,target),
+            runIn,observer ? support::FlatDistance(route->from,observer) : -1.0f,reach.draw,route->beyond ? "past it" :
             "none past it in the square, the farthest taken",reach.half);
     return refusal;
 }
 }  // namespace
 support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
-                                const float* heading) noexcept {
-    return AirRouteFor(spec,target,observer,heading,route,true);
+                                const float* heading,float runHalf) noexcept {
+    return AirRouteFor(spec,target,observer,heading,runHalf,route,true);
 }
 support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
-                                 const float* heading) noexcept {
-    return AirRouteFor(spec,target,observer,heading,route,false);
+                                 const float* heading,float runHalf) noexcept {
+    return AirRouteFor(spec,target,observer,heading,runHalf,route,false);
 }
 
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,

@@ -18,6 +18,8 @@ Sea SeaAt(float,float,float* surface) noexcept {*surface=1;return supportSea;}
 PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},supportMeasured,0,true}; }
 float HavokHalf() noexcept { return 3000.0f; }   // BigWorld off: the stock world
 float SupportPassTurn(const SupportAircraft& spec) noexcept { return spec.transportPlane ? 266.0f : 0.0f; }   // jet_flight.cpp FerryTurn
+float supportRunIn=0;   // jet_spawn.cpp SupportRunIn: the straight run in a jet gun run needs (set by a check)
+float SupportRunIn(const SupportAircraft&,float) noexcept { return supportRunIn; }
 // Ground height under (x, z): flat by default; `supportSlope` m per m rising from the map's centre; `supportStep` a
 // ledge every 30 m outward (no flat ground anywhere). Vertical rays meet that same ground.
 float supportSlope=0,supportStep=0;

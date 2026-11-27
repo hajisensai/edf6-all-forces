@@ -191,11 +191,11 @@ int strikesStarted=0;bool strikeStarts=true;
 bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity,const float*) noexcept {
     ++strikesStarted;if(note && capacity)note[0]=0;return strikeStarts;
 }
-support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route,const float*) noexcept {
+support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route,const float*,float) noexcept {
     *route={{-1400,150,0},{1,0,0}};return support::Refusal::none;
 }
 int warnedDeployments=0;
-void WarnDeployment(const support_net::Plan&) noexcept {++warnedDeployments;}
+void WarnDeployment(const support_net::Plan&,const ObjRef&) noexcept {++warnedDeployments;}
 // The pool (support_points.cpp, not linked here): the real rules (support_points_logic.h) on a fixture's pool.
 support_points::Settings fixturePt{1000000,1000000,1.0f};
 support_points::Pool fixturePool;support_points::Ledger fixtureLedger;
@@ -236,7 +236,7 @@ int plannedAircraft=0,plannedHeli=-2;
 support::Refusal planRefusal=support::Refusal::none;
 int plannedTransports=0;
 // The one air planner (support_aircraft.h PlanAirSupport): every entry's spec, a transport's too (its plane no jet or heli row).
-support::Refusal PlanAirSupport(const SupportAircraft& spec,const float*,const float*,support::Route* route,const float*) noexcept {
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float*,const float*,support::Route* route,const float*,float) noexcept {
     plannedAircraft=spec.count;plannedHeli=spec.heli;
     if(spec.transportPlane || spec.heli==static_cast<int>(HeliBody::transport410))++plannedTransports;
     *route={{-1400,150,0},{1,0,0}};return !terrain ? support::Refusal::noEntry : planRefusal;

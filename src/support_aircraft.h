@@ -39,11 +39,13 @@ bool SupportSubCatalog(int catalog) noexcept;
 // that brings nothing.
 // `heading`: the way in asked for (sortie_plan.h RunSpec: the requester's), flown exactly where its corridor is clear
 // (support_entry.h AirRoute); null: from `observer` toward the target. `observer`: whose draw distance the entry is past.
+// `runHalf`: a marked run's half length (sortie_plan.h RunSpec::half; `target` its centre), 0 for none: how far out a jet's
+// gun run must come in to fly it straight (SupportRunIn).
 support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
-                                const float* heading=nullptr) noexcept;
+                                const float* heading=nullptr,float runHalf=0.0f) noexcept;
 // The same route unlogged: the map's preview of an armed entry (support_warning.cpp), asked a few times a second.
 support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
-                                 const float* heading=nullptr) noexcept;
+                                 const float* heading=nullptr,float runHalf=0.0f) noexcept;
 // One aircraft from the nearest of `spots` (takeoff points: a carrier's deck) it can climb out of to over `target`
 // (support_entry.h TakeoffRoute): route->from on the spot, kTakeoffLift over it. noEntry: none; the caller tries the edge.
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,
@@ -51,6 +53,9 @@ support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* tar
 // m: the turn radius a pass of this aircraft's needs room for past each end of its line (the paratroop plane's ferry:
 // jet_flight.cpp FerryTurn), 0 for one that flies no passes (support_entry.h AirRoute `turn`).
 float SupportPassTurn(const SupportAircraft&) noexcept;
+// m from the target (a marked run's centre) its entry stands at least so its pass is flown straight in, no lap first
+// (sortie_plan.h StraightRunIn by its kind's attack speed and dive start: a jet's gun run, marked or not); 0 for the rest.
+float SupportRunIn(const SupportAircraft&,float runHalf) noexcept;
 // Whether its hull can be made this mission (its SGO installed and preloaded: jet_spawn.cpp PreloadJets).
 bool SupportAircraftReady(const SupportAircraft&) noexcept;
 // Its body's SGO file name (jet_internal.h kBodies `file`), for the log; L"" for an invalid spec.

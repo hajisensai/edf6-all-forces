@@ -611,7 +611,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
                                                     catalog,route.from[0],route.from[1],route.from[2],n);
             else Log("SUPPORT plan catalog=%u: %s; from the map's edge",catalog,n ? "no takeoff point to climb out of" : "no takeoff point");
         }
-        if(refusal!=support::Refusal::none)refusal=PlanAirSupport(spec,target,player.pos,&route,entryHeading);
+        if(refusal!=support::Refusal::none)refusal=PlanAirSupport(spec,target,player.pos,&route,entryHeading,run.half);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，航空支援无法进入");
             else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
@@ -1368,7 +1368,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
     // Its route on every machine's view and map (support_warning.h): a map support, not a carrier's drone or the rescue.
     const bool child=plan.count==1 &&
         (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
-    if(!child && !IsRescue(plan.catalogId))WarnDeployment(plan);
+    if(!child && !IsRescue(plan.catalogId))WarnDeployment(plan,deployed->objects[0]);
     if(IsRescue(plan.catalogId)) {
         // The rescue's own logic (heli.cpp) flies it where it is flown and boards the swimmer on the swimmer's machine;
         // the dispatcher keeps only the deployment's bookkeeping (held crew, cancel, losses), never the arrival order

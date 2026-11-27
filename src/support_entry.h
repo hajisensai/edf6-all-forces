@@ -47,9 +47,12 @@ inline float PassEnd(const PlayArea& area,const Reach& reach,const float* at,flo
 
 // Choose a physically valid off-map entry aligned with the preferred bearing.
 // Validate the aircraft corridor and surface clearance; a pass also needs turning room at both ends.
+// `runIn`: m from the target the entry stands at least, the straight run in its pass needs to be flown without a turn
+// (sortie_plan.h StraightRunIn), as far as the physical square holds on that bearing (`farthest`): an entry nearer than
+// that had the jet past its line's start, or the target inside its turn, as it came in, and it flew a lap first.
 template<class Clear,class Height>
 Refusal AirRoute(const PlayArea& area,const Reach& reach,const float* target,const float* observer,const float* preferred,
-                 float altitude,float turn,Clear clear,Height height,Route& route) noexcept {
+                 float altitude,float turn,Clear clear,Height height,Route& route,float runIn=0.0f) noexcept {
     if(!area.ground || !std::isfinite(target[0]+target[1]+target[2]) ||
        !(area.hi[0]-area.lo[0]>2*kEntryInset && area.hi[1]-area.lo[1]>2*kEntryInset))return Refusal::noArea;
     if(target[0]<area.lo[0] || target[0]>area.hi[0] || target[2]<area.lo[1] || target[2]>area.hi[1])return Refusal::noEntry;
@@ -68,7 +71,9 @@ Refusal AirRoute(const PlayArea& area,const Reach& reach,const float* target,con
         const float closest=ExitAlong(entryLo,entryHi,target[0],target[2],ux,uz),farthest=ExitAlong(plo,phi,target[0],target[2],ux,uz);
         if(farthest<closest || farthest<kMinJourney)continue;
         // Visibility is not an admission condition. Use the nearest physically valid off-map entry.
-        const float t=closest<kMinJourney ? kMinJourney : closest;
+        const float least=closest<kMinJourney ? kMinJourney : closest;
+        const float most=farthest-kEntryInset>least ? farthest-kEntryInset : least;   // inside the square, its slots beside it
+        const float t=runIn>least ? (runIn<most ? runIn : most) : least;
         const float at[3]={target[0]+ux*t,0.0f,target[2]+uz*t};
         const bool beyond=!observer || FlatDistance(at,observer)>=reach.draw;
         const float edge[2]={target[0]+ux*t,target[2]+uz*t};

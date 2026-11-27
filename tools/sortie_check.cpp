@@ -189,6 +189,27 @@ void Strafe() {
     Check(CaptureDistance(200.0f,-0.3f,r)<CaptureDistance(200.0f,0.3f,r),"closing on it takes less than drifting off it");
 }
 
+// The straight run in (StraightRunIn; the user, 2026-11-27: 「还是会进场先转圈」): from an entry that far out on its line a
+// marked strafe (jet_sortie.cpp MarkedRun phase 0) never calls its line missed for want of room, whatever height it
+// comes down from and whatever its lead; it still has a settle on the line before its nose goes down. The jets' kinds'
+// attack speeds (jet_internal.h kKinds: 215-245 m/s) and their guns' close (120-150 m).
+void StraightIn() {
+    bool ok=true;
+    const float attacks[]={215.0f,225.0f,235.0f,245.0f},halves[]={kRunMin*0.5f,300.0f,kRunMax*0.5f};
+    const float overs[]={kStrafeFloor*1.06f,kStrafeLow,450.0f,kStrafeTop};
+    for(float attack:attacks)for(float half:halves)for(float over:overs) {
+            const float settle=attack*kStrafeSettleS,run=half+settle*0.5f;
+            const float lead=StrafeLead(run,over,120.0f*2.6f,kStrafeLeadMost);
+            const float t=StraightRunIn(true,half,attack,1500.0f);
+            const float room=-half-settle-lead+t;   // MarkedRun: along = -t at the entry
+            ok=ok && room>=settle;
+        }
+    Check(ok,"a marked strafe's entry leaves a settle of room on its line before its nose goes down: no miss, no lap");
+    Check(StraightRunIn(true,0.0f,215.0f,1500.0f)>=1500.0f,"an unmarked gun run comes in from past its dive start");
+    Check(StraightRunIn(false,300.0f,215.0f,1500.0f)==0.0f && StraightRunIn(true,300.0f,0.0f,1500.0f)==0.0f,
+          "no run in asked for a pass that is not a jet's gun run");
+}
+
 int main() {
     Lines();
     Strafe();
@@ -199,6 +220,7 @@ int main() {
           "missile rain fires on its first lock");
     Volleys();
     RainHold();
+    StraightIn();
     const unsigned long long burst=static_cast<unsigned long long>(crew::salvo::VolleyFrames(crew::salvo::kRounds))*1000/60;
     Check(SalvoDraining(1000+burst,1000) && !SalvoDraining(1000+kRainBurstMs+1,1000) && !SalvoDraining(1000,0),
           "the jet stays on its pass until the volleys are out");
