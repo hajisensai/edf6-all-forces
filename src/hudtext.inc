@@ -620,6 +620,7 @@ HUDTEXT(barrageNoHook,L"this EDF.dll's rockets cannot be steered",L"此版 EDF.d
 HUDTEXT(barrageNoTarget,L"no caller or target",L"呼叫者或目标无效",L"呼叫者或目標無效",L"呼び出し元または目標が無効です")
 HUDTEXT(barrageNoRounds,L"no round could be planned",L"未能规划任何炮弹",L"未能規劃任何砲彈",L"砲弾を計画できませんでした")
 // A sortie's second wave refused when due (airstrike.cpp SupportFollowUpTick): given up, with the dispatcher's reason.
+HUDTEXT(moduleOff,L"%hs kept faulting: off for this mission (EDF6VehicleCrew.log)",L"%hs 连续出错，本局已停用（见 EDF6VehicleCrew.log）",L"%hs 連續出錯，本局已停用（見 EDF6VehicleCrew.log）",L"%hs でエラーが続いたため、このミッション中は停止しました（EDF6VehicleCrew.log）")
 HUDTEXT(followUpRefused,L"Second wave not called: %ls",L"第二波未能呼叫：%ls",L"第二波未能呼叫：%ls",L"第二波を呼べませんでした：%ls")
 // --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
 HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")

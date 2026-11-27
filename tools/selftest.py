@@ -84,11 +84,81 @@ def src(rel: str) -> str:
     return text
 
 
-def disabled_return_offset(hook: str) -> int:
-    """The early return may first restore native state, such as the vehicle's zoom."""
-    branch = re.search(r'if\(!Cfg\(\)\.enabled\)\s*(?:return;|\{[^}]*\breturn;[^}]*\})', hook)
-    assert branch, 'InputHook keeps a plugin-disabled return (with optional native-state cleanup)'
-    return branch.start()
+def registry(table: str) -> list[tuple[str, str, str, str]]:
+    """The module registry's pass `table` (src/module_table.h kInstalls, kResets, kTicks, kVehicleSteps;
+    docs/module-registry.md): its entries in run order, each (phase, module, what it runs, flags). The load, the mission's
+    start, the frame tick and each vehicle's input run these (plugin.cpp, mission.cpp, crew.cpp list no feature)."""
+    text = re.sub(r'//[^\n]*', '', src('src/module_table.h'))
+    start = text.index(f' {table}[]={{')
+    body = text[text.index('\n', start):text.index('\n};', start)]
+    entries = []
+    for chunk in re.split(r'\n\s*(?=\{(?:IP|RP|TP|VP)::)', body):
+        m = re.match(r'\{(?:IP|RP|TP|VP)::(k\w+),Id::(k\w+),(.*)\},?\s*$', chunk.strip(), re.S)
+        if not m:
+            continue
+        run, flags = m.group(3), ''
+        f = re.search(r',(kNone|kOff)$', run)
+        if f:
+            run, flags = run[:f.start()], f.group(1)
+        entries.append((m.group(1), m.group(2), run, flags))
+    assert entries, f'src/module_table.h {table}: no entries read'
+    return entries
+
+
+def _wrapper_body(name: str) -> str:
+    """A pass's own wrapper in src/module_table.h (GravityTick, ...) or crew_frame.h's step in crew.cpp."""
+    for rel in ('src/module_table.h', 'src/crew.cpp'):
+        m = re.search(rf'void {re.escape(name)}\([^)]*\) noexcept \{{(.*?)\}}\n', src(rel), re.S)
+        if m:
+            return m.group(1)
+    return ''
+
+
+def registry_index(table: str, fn: str) -> int:
+    """The run-order index of the first entry of `table` that runs `fn` (by name, directly, or through a wrapper the
+    entry names: module_table.h's tick wrappers, crew.cpp's frame:: steps); -1: none."""
+    word = re.compile(rf'(?<![\w:]){re.escape(fn)}\b')
+    for i, (_, _, run, _) in enumerate(registry(table)):
+        if word.search(run):
+            return i
+        for name in re.findall(r'&(?:frame::)?(\w+)', run):
+            if word.search(_wrapper_body(name)):
+                return i
+    return -1
+
+
+def installs(fn: str) -> bool:
+    return registry_index('kInstalls', fn) >= 0
+
+
+def resets(fn: str) -> bool:
+    return registry_index('kResets', fn) >= 0
+
+
+def ticks(fn: str) -> bool:
+    return registry_index('kTicks', fn) >= 0
+
+
+def vehicle_step(fn: str) -> bool:
+    return registry_index('kVehicleSteps', fn) >= 0
+
+
+def vehicle_phase(fn: str) -> str:
+    """The VehiclePhase of `fn`'s first vehicle step: kBeforeGears / kBeforeStockInput run before the stock input, the
+    rest after it (crew.cpp InputHook)."""
+    i = registry_index('kVehicleSteps', fn)
+    assert i >= 0, f'{fn}: no vehicle step'
+    return registry('kVehicleSteps')[i][0]
+
+
+def before_stock_input(fn: str) -> bool:
+    return vehicle_phase(fn) in ('kBeforeGears', 'kBeforeStockInput')
+
+
+def runs_when_disabled(fn: str) -> bool:
+    """Every vehicle step of `fn` runs with the plugin off too (ini Enabled=0: the entry's kOff flag)."""
+    steps = [e for e in registry('kVehicleSteps') if re.search(rf'(?<![\w:]){re.escape(fn)}\b', e[2])]
+    return bool(steps) and all(e[3] == 'kOff' for e in steps)
 
 
 # ---------------------------------------------------------------- the code
@@ -861,7 +931,7 @@ def gravity_gun_mark_in_plugin() -> None:
     assert 'kLaserMarkerVtable=0x17E45E8' in plugin and g.weapon == 'eLockonMarkerL01'
     assert cw.template_of(g) == 'eLockonMarkerL01' and g.reload == 0 and g.count == 0
     assert 'gravity::Pick' in plugin and 'gravity::HoldAt' in plugin and 'gravity::Throw' in plugin, 'the gun is the gravity operations\' user'
-    assert 'GravityGunTick' in src('src/crew.cpp'), 'the gun runs from the shared tick'
+    assert ticks('GravityGunTick'), 'the gun runs from the shared tick (src/module_table.h kTicks)'
 
 
 @test
@@ -1937,16 +2007,15 @@ def emc_copies_agree() -> None:
     assert m and float(m.group(1)) + into <= vc.EMC_BREAK_RADIUS, 'two buildings closer than the spacing are both in one blast'
     crew = src('src/crew.cpp')
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    i_in, i_stock, i_frame = hook.find('&EmcInput,'), hook.find('nextInput[I]('), hook.find('&EmcFrame,')
-    assert 0 <= i_in < i_stock < i_frame, 'src/crew.cpp InputHook: EmcInput before the stock input, EmcFrame after'
+    assert before_stock_input('EmcInput') and not before_stock_input('EmcFrame'), \
+        'src/module_table.h kVehicleSteps: EmcInput before the stock input, EmcFrame after'
     # The plugin off mid-charge: the frame and the tick still run (the charge let go, a gone EMC's loop stopped).
-    off = disabled_return_offset(hook)
-    assert i_frame < off and 0 <= hook.find('&EmcTick)') < off, 'EmcFrame / EmcTick run with the plugin off'
+    assert runs_when_disabled('EmcFrame') and runs_when_disabled('EmcTick'), 'EmcFrame / EmcTick run with the plugin off'
     assert 'Cfg().enabled && Cfg().emcBeam' in emc, 'emc.cpp Ready: off with the plugin'
     # The HUD's EMC line is the EMC's own vehicle's (its position), as the Proteus readout is.
     assert 'float pos[3]; };' in src('src/crew.h').split('struct EmcCue', 1)[1].split('\n', 1)[0]
     assert 'std::memcpy(c.pos,v+kPosition,12);' in emc and 'x.emc && vec::Dist(x.emc->pos,r.pos)<2.0f' in src('src/hud.cpp')
-    assert 'ResetEmc();' in src('src/mission.cpp') and 'InstallEmc();' in src('src/plugin.cpp')
+    assert resets('ResetEmc') and installs('InstallEmc')
     inst = src('tools/installer.py')
     assert "('emc', tr(" in inst and 'make_emc.install(game, emc)' in inst and 'make_emc.remove' in inst
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
@@ -1999,7 +2068,7 @@ def ultimate_copies_agree() -> None:
     # Called from the map's bar (2026-10-26): the strike's start, its warning, no stock satellite call caught any more.
     assert 'UltimateStart(caller,target,k.damage,seed)' in airstrike and 'SatFireHook' not in airstrike
     assert 'WarnUltimate(s.at,' in strike
-    assert 'GuardedTick(kStepUltimate,&UltimateTick);' in crew and 'ResetUltimate();' in src('src/mission.cpp')
+    assert ticks('UltimateTick') and resets('ResetUltimate')
     assert 'EmcRound::ultBeam' in strike and 'kSkyBackSec' in strike
     inst = src('tools/installer.py')
     assert "('ultimate', tr(" in inst and 'make_ultimate.install(game, ult)' in inst and 'make_ultimate.remove' in inst
@@ -2035,8 +2104,8 @@ def barrage_copies_agree() -> None:
     # This machine's player's barrage told (tell = IsPlayer(caller)); a peer's played here is never told again.
     assert 'WarnBarrage(kind,setup.target,heading,s.end);' in barrage_cpp and 'if(tell)Tell(' in barrage_cpp and         'IsPlayer(caller));' in barrage_cpp
     assert 'plugin_net::RegisterChannel(BarrageNetChannel());' in src('src/support_net.cpp')
-    assert 'GuardedTick(kStepBarrage,&BarrageTick);' in src('src/crew.cpp') and 'ResetBarrages();' in src('src/mission.cpp')
-    assert 'InstallBarrages();' in src('src/plugin.cpp')
+    assert ticks('BarrageTick') and resets('ResetBarrages')
+    assert installs('InstallBarrages')
     import ledger
     import buildcache
     assert make_barrage.OWNER in ledger.OWNERS and 'barrage' in buildcache.GROUPS
@@ -2083,7 +2152,7 @@ def sortie_copies_agree() -> None:
     assert 'else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0,plan.run);' in dispatch
     assert 'SupportFollowUpQueue(index,target,localRequest.id,run);' in dispatch
     assert 'SupportFollowUpSettle(request,true);' in dispatch and 'SupportFollowUpSettle(request,false);' in dispatch
-    assert 'GuardedTick(kStepFollowUp,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
+    assert ticks('SupportFollowUpTick') and resets('ResetSupportFollowUps')
     heli = src('src/heli.cpp')
     assert 'void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept' in heli and 'SortieFly(h,s,w)' in heli
     # The salvo (pylib/vcobjects.py SALVO_*, docs/missile-re.md §MissileBullet02): locks about 80 deg off the nose and the
@@ -2186,20 +2255,24 @@ def sidecar_copies_agree() -> None:
         assert 'EDF6AutoTurret' not in text and 'EDF6VehicleCrew' in text, (lang, text)
     crew = src('src/crew.cpp')
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    assert '&SidecarFrame,' in hook.split('nextInput[I](', 1)[1], 'SidecarFrame runs after the stock input'
+    assert not before_stock_input('SidecarFrame'), 'SidecarFrame runs after the stock input'
     board = crew.split('unsigned char* __fastcall FindSeatHook(', 1)[1].split('\n}\n', 1)[0]
     assert 0 <= board.find('SidecarBoard(') < board.find('originalFindSeat(vehicle,human)'), 'the sidecar before the stock seat'
     assert 'SidecarHoldsPlayer(vehicle)' in crew.split('void Crew(', 1)[1].split('\n}\n', 1)[0], 'no NPC driver'
-    assert 'ResetSidecars();' in src('src/mission.cpp')
+    assert resets('ResetSidecars')
     phys = src('src/physics.cpp')
     assert 'SidecarLevel(body,spin)' in phys and '&ChassisSetAngVel' in phys and '&FinalAngProbe' not in phys
-    assert 'src/sidecar.cpp' in src('CMakeLists.txt') and 'InstallSidecar();' in src('src/plugin.cpp')
+    assert 'src/sidecar.cpp' in src('CMakeLists.txt') and installs('InstallSidecar')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     # The passengers' rounds pass their own bike by the bullets' hook (jet_hooks.cpp InstallBulletPass): installed on
     # its own, ahead of the heli profile's jets and the sidecar, never from InstallJets (a heli mismatch took it away),
     # and no part of the sidecar's switch.
-    load = plugin.split('EML6_Load(', 1)[1]
-    assert load.index('InstallBulletPass();') < load.index('if(heli)') < load.index('InstallSidecar();'), 'InstallBulletPass'
+    # (src/module_table.h kInstalls: the heli profile's entries are its kHeliProfile phase, skipped on a heli mismatch)
+    ins = registry('kInstalls')
+    bullets, sidecar = registry_index('kInstalls', 'InstallBulletPass'), registry_index('kInstalls', 'InstallSidecar')
+    heli = [i for i, e in enumerate(ins) if e[0] == 'kHeliProfile']
+    assert heli and 0 <= bullets < min(heli) and max(heli) < sidecar, 'InstallBulletPass'
+    assert 'kHeliProfile' not in (ins[bullets][0], ins[sidecar][0]), 'InstallBulletPass / InstallSidecar outside the heli profile'
     jets = src('src/jet_hooks.cpp').split('bool InstallJets() noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'kAddBodySlot' not in jets, 'the bullets hook installed from InstallJets'
     switch = src('src/sidecar.cpp').split('ok=ok && moveOk', 1)[1].split(';', 1)[0]
@@ -2338,11 +2411,11 @@ def sight_zoom_wired() -> None:
         assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
     assert 'kCamVtable=0x1768C10' in code and 'kCamStep=0xF86A0' in code and 'kFovWrite=0xF8906' in code
     assert '0xF86A0' in doc and '0x1768C30' in doc and 'cam+0x24' in doc
-    assert 'ChainVtableSlot' in code and 'InstallSightZoom();' in plugin
+    assert 'ChainVtableSlot' in code and installs('InstallSightZoom')
     assert 'SightZoomFrame(v,kGunnerSeat,true)' in src('src/playerjet_crew.inc')
-    assert '&SightZoomStock,v' in src('src/crew.cpp')
+    assert vehicle_step('SightZoomStock')
     assert 'sightzoom::Rate(' in src('src/turretcam.cpp')
-    assert 'ResetSightZoom();' in src('src/mission.cpp')
+    assert resets('ResetSightZoom')
     assert 'src/sightzoom.cpp' in src('CMakeLists.txt')
     # The magnified sight's picture (src/scopeview.h): drawn first in HudDraw (every mark over it) whenever the sight is
     # magnified, the gunship gunner's a sensor rectangle; its offline check under CTest; the heli gun's ladder.
@@ -2417,7 +2490,7 @@ def turret_cam_wired() -> None:
     assert 'Matches(kLookSite,kLookSiteCode' in code and 'Matches(kAimStep,kAimStepCode' in code
     assert 'src/turretcam.cpp' in cmake and 'tools/turret_cam_check.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/turret_cam_check.cpp' in cmake
     assert '#include "../src/turretcam.h"' in src('tools/turret_cam_check.cpp') and '#include "turretcam.h"' in code
-    assert '&TurretCamFrame,v' in crew and 'ResetTurretCam();' in mission and 'InstallTurretCam();' in plugin
+    assert vehicle_step('TurretCamFrame') and resets('ResetTurretCam') and installs('InstallTurretCam')
 
 
 @test
@@ -2441,7 +2514,7 @@ def gun_stabilizer_wired() -> None:
         assert f'Matches(' in code and f',{sig},sizeof({sig}))' in code, sig
     assert 'StabStep(aim,cmd,nextAim);' in src('src/turretcam.cpp'), 'the AddSe step runs the stabilizer'
     assert 'stab::Remap(' in code, 'the bones include the complete corrected displacement during remapping'
-    assert '&StabFrame,v' in crew and 'ResetStabilizer();' in mission and 'InstallStabilizer();' in plugin
+    assert vehicle_step('StabFrame') and resets('ResetStabilizer') and installs('InstallStabilizer')
     assert 'src/stab.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/stab_check.cpp' in cmake
     assert '#include "../src/stab.h"' in src('tools/stab_check.cpp') and '#include "stab.h"' in code
     tc = src('src/turretcam.cpp')
@@ -2831,7 +2904,7 @@ def turret_aim_wired() -> None:
     assert 'qmark::KeyIsTurretLock(c.npcMarkKey,turret.autoAim && turret.keys,turret.lockKey)' in mark and 'FollowTurretLock(turret.target)' in mark
     # A new mission: auto-aim back to the ini's (off), through EDF6VehicleCrew's MissionStart.
     assert names['kMissionReset'].endswith('V1') and f'void __cdecl {names["kMissionReset"]}(' in src('autoturret/src/designate.cpp')
-    assert 'AutoTurretMissionReset();' in src('src/mission.cpp').split('void MissionStart()', 1)[1]
+    assert resets('AutoTurretMissionReset')
     # Not V (EDF6VehicleCrew's FirstPersonKey in every seat): J.
     assert 'int autoAimKey=0x4A,' in src('autoturret/src/turret.h') and re.search(r'^AutoAimKey=0x4A\s*$', ini, re.M)
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
@@ -3093,7 +3166,8 @@ def andryusha_fuse_online() -> None:
     assert 'object_net::Register(andryusha_net::kMagic,&FuseReceived)' in cpp
     assert 'gate->Admit(s.head,true,SpeaksHere(v),object_net::SeatController(v,0))' in cpp, 'the speaker never applies its own'
     crew = src('src/crew.cpp')
-    assert crew.index('&LauncherFrame,v);') < crew.index('&AndryushaFrame,v);'), 'the switch before its send'
+    assert 0 <= registry_index('kVehicleSteps', 'LauncherFrame') < registry_index('kVehicleSteps', 'AndryushaFrame'), \
+        'the switch before its send'
     assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 10
     handlers = sum(src('src/' + f).count('object_net::Register(') for f in os.listdir(os.path.join(ROOT, 'src'))
                    if f.endswith('.cpp') and f != 'object_net.cpp')
@@ -3888,8 +3962,8 @@ def heli_sight_after_aim_lines() -> None:
     UNIT_KEYS for SupportAircraftCount_); every key a module reads is shipped in the ini, the suffixed ones as an example."""
     crew = src('src/crew.cpp')
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    lines, sight = hook.find('&AimLines,'), hook.find('&HeliSightFrame,')
-    assert 0 <= lines < sight, 'src/crew.cpp InputHook: AimLines must run before HeliSightFrame'
+    lines, sight = registry_index('kVehicleSteps', 'AimLines'), registry_index('kVehicleSteps', 'HeliSightFrame')
+    assert 0 <= lines < sight, 'src/module_table.h kVehicleSteps: AimLines must run before HeliSightFrame'
     aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
     assert 'PlayerHeliOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the heli sight hides the player\'s line'
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
@@ -4076,10 +4150,11 @@ def proteus_wired() -> None:
     assert len(rvas) >= 25, rvas
     for rva in sorted(rvas):
         assert rva.upper().replace('0X', '0x') in doc or rva in doc, f'docs/proteus-re.md does not mention {rva}'
-    assert 'ResetProteus();' in src('src/mission.cpp') and 'InstallProteus();' in plugin
+    assert resets('ResetProteus') and installs('InstallProteus')
     frame = crew.split('void __fastcall InputHook', 1)[1]
-    assert frame.index('&ProteusFrame') < disabled_return_offset(frame), 'the Proteus step must run with the plugin off'
-    assert frame.index('&ProteusFrame') < frame.index('&SeatSwitchFrame'), 'the seats it closes are closed before the seat switch asks'
+    assert runs_when_disabled('ProteusFrame'), 'the Proteus step must run with the plugin off'
+    assert 0 <= registry_index('kVehicleSteps', 'ProteusFrame') < registry_index('kVehicleSteps', 'SeatSwitchFrame'), \
+        'the seats it closes are closed before the seat switch asks'
     step = code.split('void Frame(unsigned char* v)', 1)[1].split('\n}', 1)[0]
     assert step.index('Seats(*u,v,c.proteusTwoSeats,true);') < step.index('Guns(*u,c);') < step.index('BarrierFrame(*u,v);')
     gunner = code.split('bool LocalGunner(', 1)[1].split('\n}\n', 1)[0]
@@ -4168,7 +4243,8 @@ def cockpit_warnings_wired() -> None:
     crew_source = src('src/crew.cpp')
     assert 'void FrameTick() noexcept { SharedFrameTick(); }' in crew_source, 'the public frame entry must use the shared GameFrame guard'
     tick = crew_source.split('void SharedFrameTick()', 1)[1].split('\n}', 1)[0]
-    assert 0 <= tick.find('&WarnTick') < tick.find('&HudPublish'), 'WarnTick must run before HudPublish'
+    assert 'modules::RunTicks();' in tick, 'the shared tick runs the registry\'s ticks'
+    assert 0 <= registry_index('kTicks', 'WarnTick') < registry_index('kTicks', 'HudPublish'), 'WarnTick must run before HudPublish'
     cmake = src('CMakeLists.txt')
     assert 'src/warn.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
     for target in ('warn_check', 'hud_view'):
@@ -4238,11 +4314,14 @@ def vehicle_sound_wired() -> None:
         named = re.search(rf'(\w+)={rva}\b', code)
         assert rva in sigs or (named and (named.group(1) in sigs or f'Matches({named.group(1)},' in code)), f'{rva} is not checked'
     hook = crew.split('void __fastcall InputHook(', 1)[1]
-    assert 0 <= hook.find('&SoundStep,v') < disabled_return_offset(hook), 'VehicleSound before the Enabled test'
+    assert runs_when_disabled('SoundStep'), 'VehicleSound runs with the plugin off too (before the Enabled test)'
     # One "now" for the step and its recording (docs/trace-replay.md): read once at the call, handed to both.
-    assert 'void SoundStep(unsigned char* v) noexcept { VehicleSoundAt(v,soundMs); }' in crew
-    assert 0 <= hook.find('soundMs=GameMs();') < hook.find('&SoundStep,v'), "the step's time read before it"
-    assert 'ResetVehicleSound();' in mission and 'InstallVehicleSound();' in plugin
+    table = src('src/module_table.h')
+    assert 'inline void SoundStep(unsigned char* v,int) noexcept { VehicleSoundAt(v,soundMs); }' in table
+    assert 'TraceVehicleSound(v,soundMs);' in table and vehicle_phase('TraceSoundStep') == vehicle_phase('SoundStep') == 'kSound'
+    assert 0 <= hook.find('modules::SoundNow(GameMs());') < hook.find('modules::RunVehicle(VehiclePhase::kSound,'), \
+        "the step's time read before it"
+    assert resets('ResetVehicleSound') and installs('InstallVehicleSound')
     # The listener is the camera's for the vehicles too: placed whenever VehicleSound is on (not only once a jet sounded),
     # and a stock sound is held only while ours can be heard (the clips made and the listener placed).
     tick = src('src/jetsound.cpp').split('void JetSoundTick()', 1)[1].split('\n}', 1)[0]
@@ -4315,8 +4394,8 @@ def sazabi_sound_wired() -> None:
     crew, mission, code, audio_h, check = (src('src/crew.cpp'), src('src/mission.cpp'), src('src/sazabi_sound.cpp'),
                                            src('src/jetaudio.h'), src('tools/vsound_check.cpp'))
     hook = crew.split('void __fastcall InputHook(', 1)[1]
-    assert 0 <= hook.find('&SazabiSoundTick);') < disabled_return_offset(hook), 'SazabiSoundTick before the Enabled test'
-    assert 'ResetSazabiSound();' in mission and '#include "sazabi_sound.h"' in mission
+    assert runs_when_disabled('SazabiSoundTick'), 'SazabiSoundTick runs with the plugin off too (before the Enabled test)'
+    assert resets('ResetSazabiSound') and '#include "sazabi_sound.h"' in mission
     assert 'constexpr int kSazabiSfxClip[]=' in audio_h and 'constexpr int kSazabiLoopClip[]=' in audio_h
     assert 'static_assert(sizeof(kSazabiSfxClip)' in code and 'kSfxClip[' not in code.replace('kSazabiSfxClip[', '')
     assert 'Cfg().vehicleSound' in code and 'SoundListening()' in code and 'vmix::kSzSfx[' in code and 'vmix::kFarAt' in code
@@ -4652,7 +4731,8 @@ def stock_vehicle_hud_wired() -> None:
     assert 'L"StockVehicleHud"' in plugin and re.search(r'^StockVehicleHud=1', ini, re.M) and 'StockVehicleHud' in readme
     crew = src('src/crew.cpp')
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    assert 0 <= hook.find('&AimLines,') < hook.find('&StockHudFrame,'), 'src/crew.cpp InputHook: AimLines must run before StockHudFrame'
+    assert 0 <= registry_index('kVehicleSteps', 'AimLines') < registry_index('kVehicleSteps', 'StockHudFrame'), \
+        'src/module_table.h kVehicleSteps: AimLines must run before StockHudFrame'
     aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
     assert 'PlayerStockOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the stock HUD hides the player\'s line'
     hud = src('src/hud.cpp')
@@ -4719,7 +4799,7 @@ def stock_gauges_wired() -> None:
     weapon in the stock HUD's arms and is read where the stock FUEL panel was, LOW FUEL its warning."""
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     assert 'L"HideStockGauges"' in plugin and re.search(r'^HideStockGauges=1', ini, re.M) and 'HideStockGauges' in readme
-    assert 'InstallStockGauges();' in plugin.split('EML6_Load(', 1)[1]
+    assert installs('InstallStockGauges')
     cmake = src('CMakeLists.txt')
     assert 'src/stockgauge.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
     gauge = src('src/stockgauge.cpp')
@@ -6149,7 +6229,7 @@ def stock_payload_and_seats_wired() -> None:
     # every stock vehicle's fire goes through the holder pull: payload.cpp takes it over (checked bytes), and the stock
     # classes build their extra holders (stores.cpp kBuilds: one class each of the installer's BUILT_CLASSES but the 506)
     payload, stores = src('src/payload.cpp'), src('src/stores.cpp')
-    assert 'kPull=0x62C000' in payload and 'bool InstallPayload()' in payload and 'InstallPayload();' in plugin
+    assert 'kPull=0x62C000' in payload and 'bool InstallPayload()' in payload and installs('InstallPayload')
     assert 'PullHook' in payload and 'kFireSecondary' not in payload, 'payload.cpp: the pull lands on the store picked'
     builds = re.findall(r'\{0x[0-9A-F]+,0x[0-9A-F]+,"([0-9A-Za-z_]+)"\}', stores.split('const BuildClass kBuilds[]={', 1)[1].split('};', 1)[0])
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
@@ -6157,12 +6237,11 @@ def stock_payload_and_seats_wired() -> None:
     assert sorted(builds) == want, (builds, want)
     assert 'if(store && !(spec && spec->nativeControl))' in payload and 'stores[i]=IsStoreWeapon(ws[i]);' in payload
     assert 'if(playerSeat && IsCoaxSpec(spec))return FreeSecondary(c) ? PayloadFire::secondary : PayloadFire::other;' in payload and 'return StoreOf(w)!=nullptr;' in stores
-    hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    # The disabled branch also calls AimLines to restore native lines. Check the
-    # enabled pipeline's ordering, not that earlier ownership-cleanup call.
-    enabled_hook = hook[hook.index('FrameTick();'):]
-    order = [enabled_hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
-    assert all(x >= 0 for x in order) and order == sorted(order), f'src/crew.cpp InputHook step order: {order}'
+    # The frame steps' order (src/module_table.h kVehicleSteps, all kFrame: after the stock input and the Enabled test).
+    steps = ('Crew', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')
+    order = [registry_index('kVehicleSteps', f) for f in steps]
+    assert all(x >= 0 for x in order) and order == sorted(order), f'src/module_table.h kVehicleSteps step order: {order}'
+    assert all(vehicle_phase(f) == 'kFrame' for f in steps), [vehicle_phase(f) for f in steps]
     assert 'PayloadPicked(v)' in src('src/helisight.cpp')
     assert 'PlayerSeatPrompt(&s.seatPrompt)' in src('src/hud.cpp') and 'void SeatLine(' in src('src/hud.cpp')
     header = src('src/payload.h')
@@ -6664,8 +6743,8 @@ def vehicle_ram_wired() -> None:
     assert '{0x17D98C8,0x60AEC0,"501_FortressRobo",kFindSeat,4}' in crew
     assert 'kExtras' not in c and 'ChainVtableSlot' not in c, 'src/vehicleram.cpp: an own update hook besides crew.cpp'
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    assert '&VehicleRamFrame,' in hook, 'src/crew.cpp InputHook: the ram step'
-    assert 'ResetVehicleRams();' in src('src/mission.cpp') and 'InstallVehicleRam();' in src('src/plugin.cpp')
+    assert vehicle_step('VehicleRamFrame') and not before_stock_input('VehicleRamFrame'), 'src/module_table.h kVehicleSteps: the ram step'
+    assert resets('ResetVehicleRams') and installs('InstallVehicleRam')
     cm = src('CMakeLists.txt')
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)' in cm
     assert re.search(r'add_executable\(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check\.cpp\)', cm)
@@ -6708,7 +6787,7 @@ def map_commands_wired() -> None:
     human_frame = mapc.split('bool __fastcall MapHumanFrame(', 1)[1].split('\n}\n', 1)[0]
     assert 'MapCommandQueueTick();' not in frame and \
         human_frame.index('MapCommandQueueTick();') < human_frame.index('if(!human || !human[kHumanPlayer]'), 'the queue advances on the scene tick'
-    assert 'GuardedTick(kStepMapQueue,&MapCommandQueueTick);' in src('src/crew.cpp')
+    assert ticks('MapCommandQueueTick')
     assert 'crew::AuthorityQueue();' in src('tools/map_command_runtime_check.cpp')
     assert 'NpcSquadSuccessor(' in code and 'AddHandover(Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()});' in src('src/npcai.cpp')
     assert 'crew::RtsGroups();' in src('tools/map_command_runtime_check.cpp')
@@ -6743,8 +6822,8 @@ def play_area_wired() -> None:
     assert 'j.area=WallTurnVelocity(pos,want);' in board, 'a rotor craft\'s velocity is bent off the walls (HoverStep)'
     clear = pj.split('float Clear(const float* p,bool* water) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'area::FloorClear(MapPlayArea()' in clear, 'a void within the walls is floored'
-    assert 'GuardedTick(kStepUnderground,&PlayAreaTick);' in src('src/crew.cpp'), 'measured once a mission'
-    assert 'ResetPlayArea();' in src('src/mission.cpp'), 'measured again each mission'
+    assert ticks('PlayAreaTick'), 'measured once a mission'
+    assert resets('ResetPlayArea'), 'measured again each mission'
     assert 'kWarnArea' in src('src/warn.h') and 'kWarnArea' in src('src/warn.cpp') and 'Tx::warnArea' in src('src/hud.cpp')
     cm = src('CMakeLists.txt')
     assert 'src/playarea.cpp' in cm and 'add_test(NAME play_area_check COMMAND play_area_check)' in cm
@@ -6769,7 +6848,7 @@ def damage_stats_wired() -> None:
     area = [int(v, 16) for v in re.search(r'kAreaCalls\[\]=\{([^}]*)\}', code).group(1).split(',')]
     assert settle == [0x232702, 0x23426F] and area == [0x23250E, 0x5425D6, 0x5427BF], (settle, area)
     assert '0x54A586' not in re.sub(r'//.*', '', code), 'the damage call 0x54A586 must stay stock (subcarrier.cpp DamageCallReaches)'
-    assert 'InstallDamageStats();' in plugin and 'ResetDamageStats();' in mission and 'src/damagestats.cpp' in cmake
+    assert installs('InstallDamageStats') and resets('ResetDamageStats') and 'src/damagestats.cpp' in cmake
     assert 'add_executable(damage_stats_check' in cmake and 'damage_stats_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
     assert 'StatsScenes(dir);' in src('tools/hud_view.cpp') and 'crew::StatsPage();' in src('tools/map_command_runtime_check.cpp')
     import rootcpk
@@ -6801,7 +6880,7 @@ def damage_numbers_wired() -> None:
     consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
     for name in ('kColorStores', 'kColorBack', 'kPlayerNotice'):
         assert f'`{consts[name]:#X}`'.replace('0X', '0x') in doc, name
-    assert 'InstallDamageNumbers();' in plugin and 'src/dmgnum.cpp' in cmake
+    assert installs('InstallDamageNumbers') and 'src/dmgnum.cpp' in cmake
     assert 'add_executable(dmgnum_check' in cmake and 'dmgnum_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
     import rootcpk
     dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
@@ -6982,7 +7061,7 @@ def map_wired() -> None:
     assert 'const ObjRef owner=inputOwner' in own_hold and 'held && owner.Is(human)' in own_hold
     assert 'AcquireSRWLockShared(&lock)' in own_hold and 'ReleaseSRWLockShared(&lock)' in own_hold
     assert 'TvHoldsHumanKeys(human)' in own_hold
-    assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
+    assert installs('InstallMap') and resets('ResetMap') and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
     assert 'MapScene(dir,L"map_mid"' in src('tools/hud_view.cpp')
@@ -7135,7 +7214,7 @@ def split_missile_wired() -> None:
     assert 'RedirectCall(image+kSplitCall,image+kSplitTest' in sm
     assert 'if(!moved)return nextSplit(round,frames);' in sm
     assert 'targetVtbl[kAddHitSlot]=reinterpret_cast<void*>(&TargetAddHit);' in sm
-    assert 'InstallSplitMissiles();' in src('src/plugin.cpp')
+    assert installs('InstallSplitMissiles')
     assert 'bool splitMissileSurface=true;' in src('src/crew.h')
     assert 'SplitMissileSurface=1' in src('EDF6VehicleCrew.ini')
     assert 'src/splitmissile.cpp' in src('CMakeLists.txt')
@@ -7161,7 +7240,7 @@ def stock_guidance_wired() -> None:
     assert 'pn::Lateral(' in src('src/missile.cpp'), 'one PN law'
     stores = src('src/stores.cpp')
     assert '0x691310' not in stores and '0x68FF60' not in stores, "the lock code is lockon.cpp's"
-    assert 'InstallLockon();' in src('src/plugin.cpp') and 'InstallGuidance();' in src('src/plugin.cpp')
+    assert installs('InstallLockon') and installs('InstallGuidance')
     m = src('src/map.cpp')
     human_frame = m.split('bool __fastcall MapHumanFrame(', 1)[1].split('// --- The camera ---', 1)[0]
     tv_hold = 'const bool tv=TvFrame(human,open && game.open,TvRead(human));'
@@ -7279,7 +7358,7 @@ def npc_ai_wired() -> None:
     assert 'npc::Scripted(control) ? Scripted(' in think
     ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
     assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')
-    assert 'ResetNpcAi();' in mission and 'src/npcai.cpp' in cmake
+    assert resets('ResetNpcAi') and 'src/npcai.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/npc_ai_check.cpp' in cmake and 'npc_ai_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
     for key, default in (('CustomNpcAi', '1'), ('NpcFireLane', '1'), ('NpcLaneWidth', '2.5'), ('NpcLaneLength', '150'),
                          ('NpcFlankDeg', '45'), ('NpcWeaponSwitch', '1'), ('NpcEngageShare', '0.85'), ('NpcEvade', '1'),
@@ -7310,7 +7389,7 @@ def npc_ai_wired() -> None:
     # the real driver's authority writes it (that may be a client). Keys stay shipped and documented.
     post = src('src/npcpost.cpp')
     hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
-    assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    assert before_stock_input('NpcPostInput'), 'the post written before the stock input reads seat 0'
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(At<const void*>(v,kRoute)){DropPending(v);Relinquish(v);return;}' in body, \
         'a script route must discard the queued waypoint and relinquish the plugin post'
@@ -7355,7 +7434,7 @@ def npc_ai_wired() -> None:
     stock = post.split('bool StockDriving(unsigned char* v,Family f,const Post& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'p.wrote && c0==p.last[0] && c1==p.last[1]' in stock
     assert 'kBargaWalkSig[]={0x40,0x53,' in post, 'the Barga walk prologue (push rbx with REX)'
-    assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
+    assert resets('ResetNpcPosts') and 'src/npcpost.cpp' in cmake
     # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
     # SetFollow and its replication slot.
     hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
@@ -7426,8 +7505,8 @@ def npc_ai_wired() -> None:
     assert '|| InSession())return' not in who and '|| InSession() ||' not in gun, 'online NPC gunners are enabled'
     assert gun.index('ReleaseGunnerInputs(v)') < gun.index('if(!ok'), 'disable/ownership changes release our previous inputs'
     assert 'Cfg().customNpcAi' in who and 'Cfg().npcBoarding' in who, 'AiGunner: the soldiers still under NpcBoarding'
-    inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
-    assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    assert before_stock_input('NpcGunnersInput') and runs_when_disabled('NpcGunnersInput'), \
+        'the gunners aim before the stock input reads the seats, and with the plugin off release our inputs'
     assert f'L"NpcBoarding"' in plugin and re.search(r'^NpcBoarding=1\s*$', ini, re.M) and 'NpcBoarding' in readme and 'NpcBoarding' in doc
     # A script's squad let go (§4.4): released once by npc::Step after the settle time, recruitable only with
     # ScriptNpcRecruit and never while a dismissal's cooldown keeps +0x540 clear.
@@ -7650,8 +7729,7 @@ def support_arrives_from_off_the_map() -> None:
     assert made < inset < prep.rindex('return vehicle;'), 'the clamp held off as the hull is made, before it is handed back'
     assert prep.index('At<float>(vehicle,kAreaInset)') < inset, 'its own inset kept to give back'
     # The clamp runs in the stock input, before the plugin's frame step: JetFrame's own write came a frame late.
-    step = crew[crew.index('nextInput[I](vehicle,hasInput,a3,a4);'):]
-    assert step.index('nextInput[I](vehicle,hasInput,a3,a4);') < step.index('Guarded(kStepHeli,&HeliStep,v);')
+    assert vehicle_step('HeliFrame') and not before_stock_input('HeliFrame'), 'the heli frame after the stock input'
     frame = heli.split('void HeliFrame(unsigned char* vehicle) noexcept {', 1)[1]
     assert frame.lstrip().startswith('SupportAircraftFrame(vehicle);'), 'every machine, any pilot: before any branch returns'
     arrival = spawn.split('void SupportAircraftFrame(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
@@ -7757,7 +7835,7 @@ def air_chase_wired() -> None:
     assert 'if(HoldFire(p.self,object))return;' in src('src/ground.cpp')
     hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]
     assert 'const Before b=Read(obj);' in hook and 'NoteWasted(obj,gdi,b);' in hook, 'fed whether the statistics are on or not'
-    assert 'ResetWastedFire();' in src('src/mission.cpp')
+    assert resets('ResetWastedFire')
     cm = src('CMakeLists.txt')
     assert 'add_executable(air_chase_check EXCLUDE_FROM_ALL tools/air_chase_check.cpp)' in cm
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)' in cm
@@ -8764,7 +8842,7 @@ def ported_content_unlock_keys() -> None:
     assert 'n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);' in plugin
     assert 'n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);' in plugin
     assert 'bool allWeaponsUnlocked=false;' in crew and 'n.allWeaponsUnlocked=ReadBool(L"AllWeaponsUnlocked",n.allWeaponsUnlocked);' in plugin
-    assert 'InstallPortedMissions();' in plugin
+    assert installs('InstallPortedMissions')
     header = src('src/unlock_ported.h')
     prefixes = set(re.findall(r'L"(EDF6VC_E[0-9]+_)"', header))
     assert prefixes == {g.prefix for g in pw.GAMES}, (prefixes, [g.prefix for g in pw.GAMES])
@@ -10699,7 +10777,7 @@ def edf41_mother_plugin_contract() -> None:
     import edf41_objects as eo
     import make_edf41_objects as m
     cpp, plugin, cmake = src('src/edf41mother.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt')
-    assert 'src/edf41mother.cpp' in cmake and 'InstallEdf41Mother();' in plugin
+    assert 'src/edf41mother.cpp' in cmake and installs('InstallEdf41Mother')
     assert f'L"{m.MOTHER301_ALIAS.cls}"' in cpp, 'the factory must answer with the class name the SGO carries'
     assert m.ROOTS[m.MOTHER301_ROOT] and m.ALIASES[m.MOTHER301_ROOT] is m.MOTHER301_ALIAS
     assert any(o['object'] == 'OBJECT/' + m.MOTHER301_ROOT and o['class'] == m.MOTHER301_ALIAS.cls
@@ -10895,7 +10973,7 @@ def edf41_robo_plugin_contract() -> None:
     import make_edf41_objects as m
     cpp, plugin, cmake, crew = src('src/edf41robo.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt'), src('src/crew.h')
     shared, ini = src('src/edf41classes.cpp'), src('EDF6VehicleCrew.ini')
-    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)' in cmake and 'InstallEdf41Robo();' in plugin
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)' in cmake and installs('InstallEdf41Robo')
     assert 'bool InstallEdf41Robo() noexcept;' in crew and 'bool edf41Robo=true;' in crew and 'ReadBool(L"Edf41Robo"' in plugin
     assert 'if(!Cfg().edf41Robo)' in cpp.split('bool InstallEdf41Robo()', 1)[1].split('BuildClone', 1)[0]
     assert 'AddFactory(L"UfoRobo"' in cpp and 'CloneObject(roboClass,kEaoCtor,kEaoSize,info)' in cpp
@@ -11141,8 +11219,8 @@ def edf41_mother401_plugin_contract() -> None:
     cpp, plugin, cmake, crew, ini = (src(r) for r in ('src/edf41mother401.cpp', 'src/plugin.cpp', 'CMakeLists.txt', 'src/crew.h',
                                                        'EDF6VehicleCrew.ini'))
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)' in cmake
-    assert 'InstallEdf41Mother401();' in plugin and 'bool InstallEdf41Mother401() noexcept;' in crew
-    assert plugin.index('InstallEdf41Mother();') < plugin.index('InstallEdf41Mother401();')
+    assert installs('InstallEdf41Mother401') and 'bool InstallEdf41Mother401() noexcept;' in crew
+    assert 0 <= registry_index('kInstalls', 'InstallEdf41Mother') < registry_index('kInstalls', 'InstallEdf41Mother401')
     assert 'bool edf41Mother401=true;' in crew and 'ReadBool(L"Edf41Mother401"' in plugin
     assert re.search(r'^Edf41Mother401=1$', ini, re.M) and re.search(r'^Edf41Mother401Dev=0$', ini, re.M)
     assert re.search(r'^Edf41Mother401Place=0$', ini, re.M)
@@ -11179,7 +11257,7 @@ def edf41_mother401_plugin_contract() -> None:
     sound = src('src/edf41sound.cpp')
     assert 'kBankRelease=0x7AAC80' in sound and '{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0x51,0x08}' in sound
     assert 'edf41c::AtGameShutdown(&ReleaseWeaponBank);' in sound and 'weaponBankPtr.store(nullptr);' in sound
-    assert 'Edf41Mother401DevTick();' in src('src/map.cpp') and 'Edf41Mother401DevTick();' in src('src/crew.cpp')
+    assert 'Edf41Mother401DevTick();' in src('src/map.cpp') and ticks('Edf41Mother401DevTick')
     assert re.search(r'^Edf41DevShoot=0$', ini, re.M)
 
 
@@ -11870,7 +11948,7 @@ def edf41_outfits_install() -> None:
     assert 'edf41_outfits.remove' in inst.split('def uninstall(game: str)', 1)[1]
     assert '"edf41port", "outfits")}{seps}edf41port/outfits' in rel and '"edf41port", "outfits.json")}{seps}edf41port' in rel
     plugin, mission = src('src/plugin.cpp'), src('src/mission.cpp')
-    assert 'InstallOutfit41()' in plugin and 'Outfit41SessionPreload(sessionOrig,' in mission
+    assert installs('InstallOutfit41') and 'Outfit41SessionPreload(sessionOrig,' in mission
 
 
 @test
@@ -11995,8 +12073,7 @@ def edf41_dlc_insects() -> None:
     assert m.DLC_NEEDLE_BASE == 0.4 and m.DLC_NEPHILA_GRAVITY == 3.0 and m.DLC_NEPHILA_SPREAD == 0.1
     for site in ('0x422830', '0x41B66B', '0x41EBA0', '0x4E3805', '0x27C362', '0x27C3AF', '0x10D0', '0x1764'):
         assert site in cpp, site
-    with open(os.path.join(ROOT, 'src', 'plugin.cpp'), encoding='utf-8') as f:
-        assert 'InstallEdf41Insects();' in f.read()
+    assert installs('InstallEdf41Insects')
     with open(os.path.join(ROOT, 'CMakeLists.txt'), encoding='utf-8') as f:
         assert 'src/edf41insects.cpp' in f.read()
 
@@ -12025,7 +12102,7 @@ def edf41_class_names() -> None:
     assert f'L"{spec.bodies_key}"' in plugin, spec.bodies_key
     assert f'kMostBodies={m.SMALL_DRAGON_MOST_BODIES};' in plugin and f'kLongestName={m.SMALL_DRAGON_LONGEST_BODY};' in plugin
     assert 'kSite=0x33962C;' in plugin and 'kPartialRagdoll=0x4A8570;' in plugin
-    assert re.search(r'^\s*InstallEdf41SmallDragon\(\);', src('src/plugin.cpp'), re.M), 'the hook is not installed'
+    assert installs('InstallEdf41SmallDragon'), 'the hook is not installed'
     assert 'src/edf41smalldragon.cpp' in src('CMakeLists.txt')
     assert 'mune' not in m.SMALL_DRAGON_BODIES and len(m.SMALL_DRAGON_BODIES) <= m.SMALL_DRAGON_MOST_BODIES
     reg = eo.registry()
@@ -15834,7 +15911,7 @@ def edf41_kill_counters_plugin_table() -> None:
     assert 90 + len(names) <= kills.TABLE_ROWS
     assert all(n.endswith('KillCount') and n.startswith(kills.PREFIX) for n in names)
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)' in src('CMakeLists.txt')
-    assert re.search(r'^\s+InstallKillCounters\(\);', src('src/plugin.cpp'), re.M)
+    assert installs('InstallKillCounters')
     assert 'killcount_native_audit.py' in src('CMakeLists.txt')
 
 

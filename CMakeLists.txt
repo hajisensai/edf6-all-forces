@@ -10,7 +10,7 @@ set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only gene
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks (tools/check.py sets it from pylib/gamedir)")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/blastsound.cpp src/sightzoom.cpp src/drivegear.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/modules.cpp src/modules_load.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/blastsound.cpp src/sightzoom.cpp src/drivegear.cpp)
 # The sources the vehicles' sounds are made by (src/trace_rec.cpp records a run of them, tests/vehsound_replay_test.cpp
 # plays it back): their hash in a recording's header and in the replay, which holds a recording made from the same sources
 # to exactly what the game did (docs/trace-replay.md).
@@ -1490,6 +1490,13 @@ target_link_libraries(tvguide_test PRIVATE edf6common)
 target_compile_options(tvguide_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks tvguide_test)
 add_test(NAME tvguide COMMAND tvguide_test)
+
+add_executable(module_registry_test EXCLUDE_FROM_ALL tests/module_registry_test.cpp)
+target_compile_options(module_registry_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks module_registry_test)
+add_test(NAME module_registry COMMAND module_registry_test)
+# plugin.cpp / mission.cpp list no installs / resets of their own; every module keeps the reset rule (src/module_table.h).
+add_test(NAME module_registry_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/module_registry_guard.py")
 
 add_executable(crew_first_use_test EXCLUDE_FROM_ALL tests/crew_first_use_test.cpp)
 target_link_libraries(crew_first_use_test PRIVATE edf6common)

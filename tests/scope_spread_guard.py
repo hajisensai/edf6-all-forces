@@ -76,7 +76,10 @@ heli = read('src/heli.cpp')
 hook = re.search(r'void __fastcall MedicShotHook\(.*?\n\}', heli, re.S).group(0)
 at = [hook.find(s) for s in ('ScopeSpreadShot(weapon,replay,&scope);', 'medicShotNext(', 'ScopeSpreadRestore(scope);')]
 ok(min(at) >= 0 and at == sorted(at), 'MedicShotHook writes, shoots, restores')
-ok('InstallScopeSpread();' in plugin, 'plugin.cpp installs it')
+installs = read('src/module_table.h')
+installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+ok(installs[:installs.index('\n};')].count('Id::kScopeSpread,&Install<&InstallScopeSpread>}') == 1,
+   'the load installs it (module_table.h kInstalls)')
 ok('target_sources(EDF6VehicleCrew PRIVATE src/scope_spread.cpp)' in read('CMakeLists.txt'), 'the plugin builds it')
 
 host = read('src/host_settings_logic.h')

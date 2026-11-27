@@ -385,7 +385,7 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 void ResetSupportNet() noexcept {
     session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastFrame=~0ULL;contextTold=false;ResetWorld();
     senderCheckLogs.store(0);
-    commandHostPeer=0;RegisterPluginChannels();plugin_net::Reset();
+    commandHostPeer=0;RegisterPluginChannels();   // their resets: the mission start's plugin net module (modules.cpp)
 }
 // The transport lost (its generation changed, or the room not ready a moment: EDF6Coop's room lease is 2 s and a link
 // 3 s quiet, so a long frame or a hitch on either side does it): suspended until the room is ready again, then the same

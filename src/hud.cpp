@@ -39,6 +39,7 @@
 #include "map_marks.h"
 #include "hud_cue.h"
 #include "hudtext.h"
+#include "module.h"   // ModuleNotice
 #include "layout.h"
 #include "memory.h"
 #include "player_view.h"
@@ -5762,6 +5763,13 @@ void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* a
     if(!PlayerStrikeCue(line,_countof(line)))return;
     Label(text,lines,at,width*0.5f,height*0.5f+370.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
 }
+// A plugin module taken off for the rest of the mission by its faults (modules.cpp ModuleNotice; docs/module-registry.md):
+// a moment, under the strike calls' line.
+void ModuleBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[160];
+    if(!modules::ModuleNotice(line,_countof(line)))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+410.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+}
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
 // enemy near the aim but not on it: a ring there and the word to aim at it. The key held (kPingCleared): the same ring
@@ -6261,6 +6269,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         SweepBanner(t,width,height,s,lines,&at);
         RescueCueBanner(t,width,height,s,lines,&at);
         StrikeBanner(t,width,height,s,lines,&at);
+        ModuleBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         AuraHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);

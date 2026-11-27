@@ -126,9 +126,17 @@ check(layered == len(LAYERED_OK), "perf_probe.cpp's Chain is layered")
 for rel in ("src/plugin.cpp", "autoturret/src/plugin.cpp"):
     text = read(rel)
     sink = text.find("edf::SetClaimConflictSink(&LogClaimConflict)")
-    first = min(i for i in (text.find("InstallCrashDump();", sink), text.find("HookFlak();", sink)) if i > 0)
+    # the first patch: the module registry's install pass (its first entry the crash dump's), the turret's own list
+    first = min(i for i in (text.find("modules::InstallAll(", sink), text.find("InstallCrashDump();", sink),
+                            text.find("HookFlak();", sink)) if i > 0)
     check(0 < sink < first, f"{rel}: conflicts go to the log from before the first patch")
     check("edf::GetClaimStats()" in text and "PATCH owners:" in text, f"{rel}: the totals logged once loaded")
+
+table = read("src/module_table.h")
+table = table[table.index("constexpr InstallEntry kInstalls[]={"):]
+entries = [line.lstrip() for line in table.split("\n")[1:] if line.lstrip().startswith("{")]
+check(entries[0].startswith("{IP::kCrashDump,Id::kCrashDump,"),
+      "src/module_table.h: the crash dump the load's first install (a crash in any patch after it is dumped)")
 
 CALLS = ("RedirectCall(", "PatchCall(", "RedirectImportCall(")
 

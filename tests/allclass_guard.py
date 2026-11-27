@@ -134,8 +134,11 @@ def main() -> int:
 
     # Installed at load, the option wired.
     plugin = code_only(raw(root, 'src/plugin.cpp'))
-    if 'InstallAllClassesRide();' not in plugin:
-        fail('plugin.cpp: InstallAllClassesRide is not called at load')
+    installs = raw(root, 'src/module_table.h')
+    installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+    installs = installs[:installs.index('\n};')]
+    if installs.count('Id::kAllClassesRide,&Install<&InstallAllClassesRide>}') != 1:
+        fail('module_table.h kInstalls: InstallAllClassesRide is not installed at load (once)')
     if 'n.allClassesRide=ReadBool(L"AllClassesRide",n.allClassesRide);' not in plugin:
         fail('plugin.cpp: AllClassesRide is not read')
     if 'allClassesRide=%d' not in plugin:
