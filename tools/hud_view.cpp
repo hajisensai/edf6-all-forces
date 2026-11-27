@@ -1,4 +1,4 @@
-// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp included whole, its draw run on a
+// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp and its parts included whole, its draw run on a
 // stand-in "EDF.dll" image whose quad and text functions (the RVAs hud.cpp calls) jump to recorders here, for a few
 // scenes of the warnings (warn.h) on a jet (one low on fuel: the fuel readout that replaces the stock FUEL gauge, LOW
 // FUEL lit), a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the drill tank, a Nix, the Proteus
@@ -29,7 +29,12 @@
 //   hud_view [--out DIR] [--lang en|zh-CN|zh-TW|ja]      (default %TEMP%\edf6_hud_view, every language), then:
 //   python tools/hud_view.py DIR
 #include "../src/turretcam.h"
-#include "../src/hud.cpp"
+#include "../src/hud.cpp"   // the HUD whole: hud.cpp and its parts (src/hud_internal.h)
+#include "../src/hud_text.cpp"
+#include "../src/hud_vehicle.cpp"
+#include "../src/hud_air.cpp"
+#include "../src/hud_map.cpp"
+#include "../src/hud_scope.cpp"
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
 #include <array>
