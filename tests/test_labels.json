@@ -4474,6 +4474,18 @@
    ],
    "scripts": []
   },
+  "jet_rain_pass": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "jet_strike_room": {
    "labels": [
     "plugin-air",
@@ -4817,6 +4829,13 @@
     "plugin-enemy",
     "plugin-native",
     "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_signal": {
+   "labels": [
+    "plugin-native",
     "plugin-support"
    ],
    "scripts": []

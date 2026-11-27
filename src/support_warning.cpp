@@ -121,22 +121,14 @@ bool AirSpec(int catalog,SupportAircraft* spec) noexcept {
 bool FlownOutline(const SupportAircraft& spec,const float* from,const float* mark,Kept& route,Kept& ring) noexcept {
     const auto pass=static_cast<SortiePass>(spec.sortie);
     float beyond=0.0f;
-    if(pass==SortiePass::gunRun || pass==SortiePass::missilePass || pass==SortiePass::carpet || pass==SortiePass::popUp ||
-       pass==SortiePass::missileRain)beyond=sortie::kPassBeyond;
+    if(pass==SortiePass::gunRun || pass==SortiePass::missilePass || pass==SortiePass::missileRain)beyond=sortie::kPassBeyond;
     if(pass==SortiePass::heliStrafe)beyond=sortie::kHeliPassBeyond;
     float pts[4][3];
     const int n=warning::Route(from,mark,beyond,pts);
     SetRoute(route.view,pts,n);
     ring.view=WarningView{};
     warning::Circle c;std::memcpy(c.centre,mark,12);
-    if(pass==SortiePass::carpet) {
-        float corners[4][3];
-        warning::CarpetStrip(from,mark,20.0f,corners);
-        SetPolygon(ring.view,corners,4,Look::strike);
-        return true;
-    }
     if(pass==SortiePass::heliCircle){c.radius=sortie::kCircleRadius;SetRing(ring.view,c,Look::strike,true);return true;}
-    if(pass==SortiePass::heliHunter){c.radius=sortie::kHunterStation;SetRing(ring.view,c,Look::orbit,true);return true;}
     if(pass!=SortiePass::none || spec.follow)return false;
     c.radius=spec.heli>=0 && Cfg().heliGuardRadius>0.0f ? Cfg().heliGuardRadius : kMarkRing;
     SetRing(ring.view,c,Look::orbit,true);

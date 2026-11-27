@@ -47,7 +47,6 @@
 #include "seat_turret.h"
 #include "barrel_recoil.h"
 #include "support_variants.h"
-#include "support_aircraft.h"   // ResetSupportFollowUps
 #include "support_firepower.h"
 #include "support_points.h"
 #include "support_warning.h"

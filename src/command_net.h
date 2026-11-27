@@ -31,10 +31,9 @@ void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept;
 // Client: the order the host's `unit` carries out now (`current`) and the points it keeps after it (at most `most`); 0 none.
 unsigned ReadMapCommandWays(const ObjRef& unit,mapcmd::Command* current,float (*at)[3],unsigned most) noexcept;
 // The map's pings (F1-F4, command protocol v11 Kind::ping): `requester`'s ping of `kind` at `at` out to the room (false:
-// not online, or too soon after the last); the ones heard from the other machines, oldest first (false: none left).
+// not online, or too soon after the last). The ones heard from the other machines go to map_signal.h as they come in
+// (ReceiveCommandNetwork).
 bool SendMapPing(const ObjRef& requester,const float* at,unsigned kind) noexcept;
-struct MapPingHeard { const void* player; float at[3]; unsigned kind; };
-bool TakeMapPing(MapPingHeard* out) noexcept;
 
 // Single consumer: support_net owns the only extension poll. All callbacks run
 // synchronously on the game thread and identity strings come from that poll.

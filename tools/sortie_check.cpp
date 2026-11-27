@@ -2,8 +2,7 @@
 // docs/plan-2026-10-25-strikes.md §1.2):
 //  - the pass line: along the heading through the mark, a formation's aircraft keeping their places abreast (at most
 //    kMaxOffset across), along it negative short of the mark;
-//  - the carpet: bombs let go level at kCarpetAlt land where they are reckoned to, the window kCarpetHalf either side, and
-//    the gap spreads a load over it;
+//  - a gun run's line: two ground points or a heading make the request, and the bomb gap spreads a load over the line;
 //  - the lap: a circle counted either way round across the angle's wrap, done after one full turn, not before;
 //  - the circle's velocity: round the centre at its speed on the radius, back onto it from inside and outside;
 //  - the missile rain's hold: it fires only over the target area with its nose settled for kRainHoldMs (RainHoldStep);
@@ -45,19 +44,11 @@ void Lines() {
     Check(Near(d.dir[2],1,1e-4f),"no heading: toward the mark");
 }
 
-void Carpet() {
-    const float mark[3]={0,0,0},heading[3]={1,0,0},from[3]={-3000,kCarpetAlt,0};
-    const Line l=LineThrough(mark,from,heading);
+void RunLine() {
     const float speed=200.0f;
-    // Where each bomb lands is the game's (jet_sortie.cpp SortieFire: StoreLands); the window takes the landing points.
-    int inside=0;float first=0,last=0;
-    for(float x=-3000;x<1000;x+=5.0f) {
-        const float at[3]={x,0.0f,0.0f};
-        if(InCarpet(l,at)){if(!inside)first=at[0];last=at[0];++inside;}
-    }
-    Check(Near(first,-kCarpetHalf,5.1f) && Near(last,kCarpetHalf,5.1f),"the carpet's bombs land within kCarpetHalf of the mark");
-    const unsigned long long gap=CarpetGapMs(6,speed);
-    Check(Near(static_cast<float>(gap)*0.001f*speed*5.0f,2.0f*kCarpetHalf,2.0f),"six bombs a gap apart cover the carpet");
+    const unsigned long long gap=LineBombGapMs(6,speed,150.0f);
+    Check(Near(static_cast<float>(gap)*0.001f*speed*5.0f,300.0f,2.0f),"six bombs a gap apart cover the line");
+    Check(LineBombGapMs(1,speed,150.0f)==250 && LineBombGapMs(6,0.0f,150.0f)==250,"one bomb or no speed: a fixed gap");
     const float start[3]={10.0f,20.0f,40.0f},end[3]={310.0f,20.0f,440.0f};
     RunSpec request;
     float centre[3]{};
@@ -71,7 +62,7 @@ void Carpet() {
           "a heading alone is a valid request, made unit");
     Check(!HasHeading(HeadingRun(0.0f,0.0f)) && RunValid(RunSpec{}) && !RunValid(RunSpec{2.0f,0.0f,0.0f}) &&
           !RunValid(RunSpec{1.0f,0.0f,5.0f}),"no heading is none; a non-unit heading or a too short line is refused");
-    const auto shortGap=CarpetGapMs(6,speed,100.0f),longGap=CarpetGapMs(6,speed,250.0f);
+    const auto shortGap=LineBombGapMs(6,speed,100.0f),longGap=LineBombGapMs(6,speed,250.0f);
     Check(shortGap<longGap && Near(static_cast<float>(longGap)*0.001f*speed*5.0f,500.0f,2.0f),
           "release timing follows the length of the marked attack run");
 }
@@ -316,6 +307,16 @@ void RainTriggerCheck() {
     Check(off>0.8f && RainTrigger(pos,n,110.0f,aim),"rain: the log's open-fire point fires (past the 0.8 rad cone it had)");
     const float air[3]={-544.0f,900.0f,-294.0f},above[3]={-0.40f*0.6f,0.8f,-0.92f*0.6f};
     Check(RainTrigger(pos,above,110.0f,air),"rain: a flier above it, its nose on it, close in: fires");
+    // Its pick on its lane (RainAhead): the 2026-11-27 17:44 log's lane (-1950,-343) -> (113,-176) at 113 m/s, 423 m up;
+    // a target 600 m short of the mark is one to take from 1100 m before it, not from over it or past it.
+    const float from[3]={-1950.0f,0.0f,-343.0f},to2[3]={113.0f,0.0f,-176.0f};
+    float head[3]={to2[0]-from[0],0.0f,to2[2]-from[2]};crew::vec::Normalize(head);
+    const Line lane=LineThrough(to2,from,head);
+    const float under[3]={to2[0]-head[0]*600.0f,35.0f,to2[2]-head[2]*600.0f};
+    const auto at=[&](float before,float* p){for(int i=0;i<3;++i)p[i]=under[i]-head[i]*before;p[1]=423.0f;};
+    float early[3],over[3],past[3];at(1100.0f,early);at(0.0f,over);at(-300.0f,past);
+    Check(RainAhead(lane,early,113.0f,under) && !RainAhead(lane,over,113.0f,under) && !RainAhead(lane,past,113.0f,under),
+          "rain: on its lane a target ahead is one to take, one under it or passed is not (RainAhead)");
 }
 
 // The 2026-11-27 log's missile rain flown again (vc.log.1 15:34:28.670 - vc.log 15:35:08.134): a wing at 110 m/s (its
@@ -389,15 +390,14 @@ void Drag() {
     const auto nearly=[](float a,float b){return std::fabs(a-b)<0.5f;};
     // 12 bombs 150 ms apart at 200 m/s: 330 m; 38 rockets in ripples of 4 a 600 ms: 9 gaps, 1080 m; 6 missiles: a 700 ms
     // lock and 5 gaps, 4.2 s, 840 m; the slowest store sets it.
-    Check(nearly(RunLeast(RunLoad{12,0,0},200.0f,false),330.0f),"bombs: their gaps at its speed");
-    Check(nearly(RunLeast(RunLoad{0,38,0},200.0f,false),1080.0f),"rockets: a ripple of four every 600 ms");
-    Check(nearly(RunLeast(RunLoad{0,0,6},200.0f,false),840.0f),"missiles: the lock, then one a gap");
-    Check(nearly(RunLeast(RunLoad{12,38,6},200.0f,false),1080.0f),"several stores: the slowest to empty");
-    Check(nearly(RunLeast(RunLoad{12,38,6},200.0f,true),330.0f),"a carpet lets go its bombs only");
-    Check(nearly(RunLeast(RunLoad{},215.0f,false),kRunMin) && nearly(RunLeast(RunLoad{1,4,0},215.0f,false),kRunMin),
+    Check(nearly(RunLeast(RunLoad{12,0,0},200.0f),330.0f),"bombs: their gaps at its speed");
+    Check(nearly(RunLeast(RunLoad{0,38,0},200.0f),1080.0f),"rockets: a ripple of four every 600 ms");
+    Check(nearly(RunLeast(RunLoad{0,0,6},200.0f),840.0f),"missiles: the lock, then one a gap");
+    Check(nearly(RunLeast(RunLoad{12,38,6},200.0f),1080.0f),"several stores: the slowest to empty");
+    Check(nearly(RunLeast(RunLoad{},215.0f),kRunMin) && nearly(RunLeast(RunLoad{1,4,0},215.0f),kRunMin),
           "nothing to space out: the shortest line");
-    Check(nearly(RunLeast(RunLoad{200,0,0},300.0f,false),kRunMax),"never past the longest line");
-    Check(nearly(RunLeast(RunLoad{12,0,0},-1.0f,false),kRunMin) && nearly(RunLeast(RunLoad{12,0,0},NAN,false),kRunMin),
+    Check(nearly(RunLeast(RunLoad{200,0,0},300.0f),kRunMax),"never past the longest line");
+    Check(nearly(RunLeast(RunLoad{12,0,0},-1.0f),kRunMin) && nearly(RunLeast(RunLoad{12,0,0},NAN),kRunMin),
           "no speed: the shortest");
     // The drag: its way from the press toward the pointer, as long as dragged within least..kRunMax.
     const float a[3]={100.0f,5.0f,200.0f};
@@ -429,7 +429,7 @@ void Drag() {
 int main() {
     Lines();
     Strafe();
-    Carpet();
+    RunLine();
     Laps();
     Circle();
     Drag();

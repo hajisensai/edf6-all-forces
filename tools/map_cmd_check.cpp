@@ -153,13 +153,35 @@ int main() {
         Check(SquadRank(true,false,false)<SquadRank(false,false,false) && SquadRank(false,false,false)<SquadRank(false,false,true) &&
               SquadRank(false,false,true)<SquadRank(false,true,false) && SquadRank(true,true,true)==SquadRank(false,true,false),
               "the panel's order: the player's, the free, the riding, a script's");
-        const int few[]={0,1,1,2,3,3};
-        Check(SquadRowsShown(few,6,false,16)==3 && SquadRowsShown(few,6,true,16)==6 && SquadRowsShown(few,6,true,4)==4,
-              "folded: the ones on foot that take orders; open: all (up to the rows published)");
-        int many[14];for(int& r:many)r=1;
-        Check(SquadRowsShown(many,14,false,16)==kSquadRowsFolded && SquadRowsShown(many,14,true,16)==14,"folded: at most the number keys' nine");
-        const int none[]={2,3};
-        Check(SquadRowsShown(none,2,false,16)==0,"nothing commandable on foot: folded shows none, all in the summary");
+        Check(RosterListed(0) && RosterListed(1) && !RosterListed(2) && !RosterListed(3),"the roster lists the ones that take orders only");
+    }
+    // The roster (the user, 2026-11-27: 「左上角的小队也可以重新设计吧」): grouped by class, a header each, folded groups
+    // only their header, the lines capped with one line for the rows left out; no text wall for the unlisted.
+    {
+        Check(SquadClass("RANGER")==0 && SquadClass("WING DIVER x3")==1 && SquadClass("FENCER")==2 && SquadClass("AIR RAIDER x1")==3 &&
+              SquadClass("RANGERS")==kRosterGroups-1 && SquadClass(nullptr)==kRosterGroups-1,"a squad's group by its class word");
+        const int cls[]={2,0,-1,2,0,3};   // two fencers, two rangers, one not listed, an air raider
+        RosterLine out[16];int hidden=-1;
+        int n=RosterLines(cls,6,kRosterAllOpen,16,out,&hidden);
+        const RosterLine want[]={{0,kRosterHead},{0,1},{0,4},{2,kRosterHead},{2,0},{2,3},{3,kRosterHead},{3,5}};
+        bool same=n==8 && hidden==0;
+        for(int i=0;same && i<8;++i)same=out[i].group==want[i].group && out[i].row==want[i].row;
+        Check(same,"open: each group's header, then its rows in their order; the groups in class order; the unlisted out");
+        n=RosterLines(cls,6,kRosterAllOpen&~(1u<<2),16,out,&hidden);
+        Check(n==6 && out[3].group==2 && out[3].row==kRosterHead && out[4].group==3 && hidden==0,"a folded group: its header only");
+        n=RosterLines(cls,6,kRosterAllOpen,5,out,&hidden);
+        int heads=0;for(int i=0;i<n;++i)heads+=out[i].row==kRosterHead;
+        Check(n==5 && heads==3 && out[4].row==kRosterMore && hidden==4,"capped: every header kept, one line for the rows left out");
+        int many[40];for(int& v:many)v=1;
+        n=RosterLines(many,40,kRosterAllOpen,kRosterLinesMost,out,&hidden);
+        Check(n==kRosterLinesMost && out[0].row==kRosterHead && out[n-1].row==kRosterMore && hidden==40-(kRosterLinesMost-2),
+              "40 squads of one class: fits the lines, the rest counted");
+        n=RosterLines(many,40,0,kRosterLinesMost,out,&hidden);
+        Check(n==1 && hidden==0,"folded: one header line");
+        Check(RosterLines(cls,0,kRosterAllOpen,16,out,&hidden)==0,"no squads: no lines");
+        const int orders[]={3,1,3,1,1};
+        Check(CommonOrder(orders,5)==1 && CommonOrder(orders,3)==3,"a group's order: the most common, the first of a tie");
+        Check(RosterCode(3,true)!=RosterCode(3,false) && (RosterCode(3,true)&~kRosterFoldBit)==3,"a header's codes: its group, the arrow apart");
     }
     // Shown but not picked (Mark::pick; the user, 2026-10-09: a box of 30 units none of which took the order; a tank's
     // crew squad selected with the tank): the box passes over them, a click on one leaves the selection as it was.

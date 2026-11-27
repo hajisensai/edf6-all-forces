@@ -119,6 +119,19 @@ inline float GridStep(float height) noexcept {
     for(float s:steps)if(std::fabs(s-want)<std::fabs(best-want))best=s;
     return best;
 }
+// The scale bar (the user, 2026-11-27: 「这个比例尺有问题」): the longest round length, 1, 2 or 5 x 10^n m, that spans at
+// most `mostPx` px at `pxPerMetre` (the screen's px a metre across at the focus, measured through the camera's own
+// projection), and the px it spans. {0, 0}: no scale to show.
+struct Scale { float metres,px; };
+inline Scale ScaleFor(float pxPerMetre,float mostPx) noexcept {
+    if(!(pxPerMetre>0.0f) || !(mostPx>0.0f))return {0.0f,0.0f};
+    const float most=mostPx/pxPerMetre*(1.0f+1e-5f);
+    const float base=std::pow(10.0f,std::floor(std::log10(most)));
+    float metres=base;
+    const float steps[]={5.0f,2.0f,1.0f};
+    for(const float k:steps)if(base*k<=most){metres=base*k;break;}
+    return {metres,metres*pxPerMetre};
+}
 // How far out from the focus the grid is drawn, in whole steps: past the ground a view of `height` at `pitch` shows
 // ahead (its top edge kHalfFov over its centre; the cameras' field of view is pi/4, set by their construction 0x118AFC0)
 // and behind, at most kMaxGrid lines either side.

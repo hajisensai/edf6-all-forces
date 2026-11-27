@@ -133,13 +133,11 @@ unsigned ReadMapCommandWays(const ObjRef& unit,Command* current,float (*at)[3],u
     for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=hostWaysAt[i][c];
     return n;
 }
-// Kind::ping (command_net.cpp, F1-F4): what this machine sent; one heard from the room to hand the map.
+// Kind::ping (command_net.cpp, F1-F4): what this machine sent.
 unsigned pingsSent=0,pingKind=99;float pingAt[3]{};
 bool SendMapPing(const ObjRef&,const float* at,unsigned kind) noexcept {
     ++pingsSent;pingKind=kind;for(int c=0;c<3;++c)pingAt[c]=at[c];return true;
 }
-bool pingWaiting=false;MapPingHeard pingHeard{};
-bool TakeMapPing(MapPingHeard* out) noexcept { if(!pingWaiting)return false;*out=pingHeard;pingWaiting=false;return true; }
 // support_dispatch.cpp: WITHDRAW of an aircraft a call brought.
 const void* withdrawn=nullptr;
 bool SupportWithdrawVehicle(const void* v) noexcept { withdrawn=v;return true; }
@@ -208,6 +206,7 @@ unsigned char squad2Obj[0x400]{},squad2Ctrl[0x10]{};
 bool squad2On=false,squadReports=false;
 Command squad2Got{};int squad2Orders=0;
 float squadPos[3]{},squad2Pos[3]{};
+const char* squad2Name="squad x3";   // RosterAndCards: another kind
 ULONGLONG stubFrame=1;
 ULONGLONG GameFrame() noexcept {return stubFrame;}
 ULONGLONG GameMs() noexcept {return stubFrame*16;}   // the paced march's clock (mapcmd.cpp Pace)
@@ -225,7 +224,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
         out[n]=CommandUnit{squadObj,"squad x4",squadReports ? squadGot : Command{},false,{squadPos[0],squadPos[1],squadPos[2]}};
         out[n].locked=squadLocked;out[n].riding=squadRiding;++n;
     }
-    if(squad2On && n<most)out[n++]=CommandUnit{squad2Obj,"squad x3",squadReports ? squad2Got : Command{},false,{squad2Pos[0],squad2Pos[1],squad2Pos[2]}};
+    if(squad2On && n<most)out[n++]=CommandUnit{squad2Obj,squad2Name,squadReports ? squad2Got : Command{},false,{squad2Pos[0],squad2Pos[1],squad2Pos[2]}};
     return n;
 }
 int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
@@ -843,8 +842,10 @@ void PlacePanel() noexcept {
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));ResetMapCommands();
 }
 // Only the units that take orders are picked (the user, 2026-10-09: "总有一些我不能指挥的"; "坦克上的…框选的时候应该去重"):
-// Ctrl+A passes over a script's squad and a riding one, a script's squad's panel row says why instead of selecting it, a
-// riding squad's row still picks it (for its dismount), and the log of a refused order counts why per unit.
+// Ctrl+A passes over a script's squad and a riding one; a script's squad is not selectable at all (the user, 2026-11-27:
+// 「干脆让脚本控制的不能选中得了」): its mark takes no click, its row (one drawn before it turned scripted) picks nothing and
+// says nothing, a selected squad a script takes over leaves the selection; a riding squad's row still picks it (for its
+// dismount), and the log of a refused order counts why per unit.
 void PickOnlyCommandable() noexcept {
     ResetMapCommands();view=View{};config=Config{};
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=true;squadLocked=true;squadRiding=false;
@@ -861,8 +862,12 @@ void PickOnlyCommandable() noexcept {
     const float panel[4]={500,300,900,500},row[4]={600,340,680,380};
     MapCommandUiPanels(panel,1);ObjRef identity=ObjRef::Of(squadObj);MapCommandSquadButtons(row,&identity,1);
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
-    Check(!game.sel.n && std::wcscmp(game.note,CommandFailureText(NpcCommandReason::scripted))==0,
-          "a script's squad's row: not selected, the note says why");
+    Check(!game.sel.n && std::wcscmp(game.note,CommandFailureText(NpcCommandReason::scripted))!=0,
+          "a script's squad's row: not selected, no takeover note");
+    {
+        mapcmd::Mark marks[kCmdUnits];const int n=Marks(game,view,marks);
+        Check(n==1 && !marks[0].on && !marks[0].pick,"a script's squad has no mark to click");
+    }
     squadLocked=false;squadRiding=true;
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
     Check(game.sel.Has(squadObj),"a riding squad's row picks it (its dismount)");
@@ -871,15 +876,9 @@ void PickOnlyCommandable() noexcept {
     Check(!game.sel.n,"Ctrl+A passes over a riding squad (its vehicle is the unit)");
     squadRiding=false;tab();
     Check(game.sel.Has(squadObj),"Ctrl+A picks a squad on foot that takes orders");
-    // The squad panel's summary row: a click opens the panel (published), another folds it.
-    const float foldRow[4]={600,400,680,420};
-    MapCommandUiPanels(panel,1);MapCommandSquadFold(foldRow);
-    in.dx=(640.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(410.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
-    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
-    Check(game.panelOpen && PlayerMapCommands(&r) && r.squadOpen,"the summary row opens the squad panel");
-    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
-    Check(!game.panelOpen,"clicked again: folded");
-    MapCommandSquadFold(nullptr);MapCommandUiPanels(nullptr,0);
+    squadLocked=true;MapCommandFrame(in,centre);
+    Check(!game.sel.n,"a selected squad a script takes over leaves the selection");
+    squadLocked=false;tab();
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;ResetMapCommands();
 }
 // The formation button opens a menu of the shapes (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"; before,
@@ -1361,6 +1360,93 @@ void RtsGroups() noexcept {
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));
     squadOn=squad2On=squadReports=false;groundReady=false;std::memset(squadPos,0,12);std::memset(squad2Pos,0,12);ResetMapCommands();
 }
+// The roster's headers (the user, 2026-11-27: 「左上角的小队也可以重新设计吧」): the body selects every squad of its class
+// that may be selected (Shift adds), the arrow folds the group (published for the draw). The selection's cards
+// (「这个兵牌没办法点怎么，没意义了」): a click keeps the card's kind of the selection, Shift+click drops it, a double
+// click centres the map on them; a card of a unit no longer selected does nothing.
+void RosterAndCards() noexcept {
+    ResetMapCommands();view=View{};config=Config{};groundReady=true;
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    squadOn=squad2On=true;squadLocked=squadRiding=false;squadReports=false;squad2Name="RANGER x3";
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);Put<void*>(squad2Obj,kSelfCtrl,squad2Ctrl);
+    const float p1[3]={-50.0f,0.0f,0.0f},p2[3]={50.0f,0.0f,20.0f};
+    std::memcpy(squadPos,p1,12);std::memcpy(squad2Pos,p2,12);
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;float centre[3]{};
+    const float vp[16]={0.01f,0,0,0, 0,0.01f,0,0, 0,0,1,0, 0,0,0,1};
+    const float k=1080.0f/720.0f;
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    const auto move=[&](float x,float y){in.dx=(x-game.pointer.x)*k;in.dy=(y-game.pointer.y)*k;MapCommandFrame(in,centre);in.dx=in.dy=0.0f;};
+    bool centred=false;
+    const auto click=[&](float x,float y,bool shift){
+        move(x,y);inputstub::keys[VK_SHIFT]=shift;
+        inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;centred=MapCommandFrame(in,centre);
+        inputstub::keys[VK_SHIFT]=false;
+    };
+    const auto pick=[&](bool one,bool two){
+        game.sel.Clear();if(one)game.sel.Add(squadObj);if(two)game.sel.Add(squad2Obj);RememberSelection(game);
+    };
+    const float panel[4]={0,0,400,700};
+    MapCommandUiPanels(panel,1);
+    // The rangers' header (squad2 "RANGER x3": class 0): its arrow at the left, its body the rest.
+    const float heads[8]={10,100,30,120, 30,100,390,120};
+    const int codes[2]={mapcmd::RosterCode(0,true),mapcmd::RosterCode(0,false)};
+    MapCommandRosterButtons(heads,codes,2);
+    click(200.0f,110.0f,false);
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj),"a roster header selects its class's squads (the rangers, not the other)");
+    pick(true,true);
+    click(200.0f,110.0f,false);
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj),"a header click without Shift: only its class");
+    pick(true,false);
+    click(200.0f,110.0f,true);
+    Check(game.sel.n==2,"Shift + a header: its class added");
+    MapCommandReadout r{};
+    click(20.0f,110.0f,false);
+    Check(!(game.rosterOpen&1u) && game.sel.n==2 && PlayerMapCommands(&r) && !(r.rosterOpen&1u) && (r.rosterOpen&2u),
+          "the arrow folds its group (published), the selection as it was");
+    click(20.0f,110.0f,false);
+    Check((game.rosterOpen&1u)!=0,"clicked again: unfolded");
+    squad2Name="squad x3";pick(false,false);
+    click(200.0f,110.0f,false);   // both of class 4 now: none of them a ranger
+    Check(!game.sel.n,"a header passes over the other classes");
+    squadLocked=true;
+    const int otherCodes[2]={mapcmd::RosterCode(mapcmd::kRosterGroups-1,true),mapcmd::RosterCode(mapcmd::kRosterGroups-1,false)};
+    MapCommandRosterButtons(heads,otherCodes,2);
+    click(200.0f,110.0f,false);
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj),"a header passes over a script's squad of its class");
+    squadLocked=false;squad2Name="RANGER x3";
+    MapCommandRosterButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
+    // The cards: one a kind, by its first unit's identity (CmdMark::of).
+    MapCommandFrame(in,centre);
+    std::uint64_t of1=0,of2=0;
+    for(int i=0;i<game.count;++i) {
+        if(game.list[i].u.v==squadObj)of1=reinterpret_cast<std::uintptr_t>(game.list[i].id.obj);
+        if(game.list[i].u.v==squad2Obj)of2=reinterpret_cast<std::uintptr_t>(game.list[i].id.obj);
+    }
+    Check(of1 && of2 && of1!=of2,"the squads' identities as the cards carry them");
+    const float band[4]={0,560,1280,720};
+    const float cards[8]={20,600,200,660, 210,600,390,660};
+    const std::uint64_t of[2]={of1,of2};
+    const auto both=[&]{pick(true,true);game.cardClickOf=0;};
+    MapCommandUiPanels(band,1);MapCommandCardButtons(cards,of,2);
+    both();click(100.0f,630.0f,false);
+    Check(game.sel.n==1 && game.sel.Has(squadObj) && !centred,"a card's click keeps its kind only");
+    both();click(100.0f,630.0f,true);
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj),"Shift + a card: its kind dropped");
+    both();game.cardClickOf=0;click(300.0f,630.0f,false);
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj) && !centred,"the first click of a double click: kept, not centred");
+    click(300.0f,630.0f,false);
+    Check(game.sel.n==1 && centred && std::fabs(centre[0]-50.0f)<0.01f && std::fabs(centre[2]-20.0f)<0.01f,
+          "the second click within the double-click time centres the map on them");
+    pick(false,true);game.cardClickOf=0;
+    click(100.0f,630.0f,false);   // the first card's unit is no longer selected
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj) && !centred,"a card of a unit no longer selected: nothing");
+    {
+        Game::UiHit a;a.kind=Game::UiKind::card;a.token=of1;Game::UiHit b=a;b.token=of2;
+        Check(!SameUi(a,b) && SameUi(a,a),"a card pressed and another let go: no click");
+    }
+    MapCommandCardButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=squad2On=false;squad2Name="squad x3";ResetMapCommands();
+}
 // B1 / B3: a client's Shift reaches the host as a queued point (command protocol v7, command_net.cpp Execute ->
 // MapCommandAuthority): the host keeps it after the point its unit is on its way to, and the scene's tick gives it once
 // the unit is there -- with no map open anywhere. A plain order through the same entry drops the queue; a queued point
@@ -1518,7 +1604,7 @@ int main() {
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
     crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();crew::PvpUiActions();
-    crew::RtsGroups();crew::AuthorityQueue();crew::PacedMarch();
+    crew::RtsGroups();crew::RosterAndCards();crew::AuthorityQueue();crew::PacedMarch();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

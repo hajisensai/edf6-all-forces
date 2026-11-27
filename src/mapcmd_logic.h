@@ -245,14 +245,8 @@ inline bool OffersRecruit(bool ownedByPlayer,bool scripted,bool dismissed,bool r
 // Rows in the order a commander wants them (npcai.cpp SquadRows sorts by it, stable): the player's own squads, the free
 // ones it may command or recruit, the ones riding a vehicle (their vehicles are the map's units), a script's last.
 inline int SquadRank(bool recruited,bool scripted,bool riding) noexcept { return scripted ? 3 : riding ? 2 : recruited ? 0 : 1; }
-inline constexpr int kSquadRowsFolded=9;   // the rows folded (the number keys are the RTS groups' since 2026-10-19)
-// The rows shown (a prefix of the sorted rows `rank`): folded (the default) the ones on foot that take orders (rank
-// 0-1), at most kSquadRowsFolded, the rest summed in one row that opens the panel; open, all of them (up to `most`).
-inline int SquadRowsShown(const int* rank,int n,bool open,int most) noexcept {
-    int k=0;
-    while(k<n && k<most && (open || (rank[k]<=1 && k<kSquadRowsFolded)))++k;
-    return k;
-}
+// The roster lists the ones that take orders (rank 0-1, RosterListed); the riding and a script's are only counted.
+inline bool RosterListed(int rank) noexcept { return rank<=1; }
 
 // --- Where a unit's mark is drawn and clicked ---
 // On its body (the user, 2026-10-09: "这个图标为什么要在npc的竖直顶上。直接在npc身上不好吗"): a soldier's or a ground
@@ -552,6 +546,59 @@ inline bool SameKind(const char* a,const char* b) noexcept {
         if(a[i]!=b[i])return false;
     }
     return true;
+}
+
+// --- The roster (the user, 2026-11-27: 「左上角的小队也可以重新设计吧」; Broken Arrow's unit list) ---
+// The squads grouped by class (a header each: its icon, squads and soldiers, health, the order most of them have; the
+// arrow folds it), their rows under it; no line of text about the ones not listed.
+inline constexpr int kRosterGroups=5;        // RANGER, WING DIVER, FENCER, AIR RAIDER, any other
+inline constexpr int kRosterLinesMost=14;    // the headers and rows drawn at most (the legend keeps its room under it)
+inline constexpr unsigned kRosterAllOpen=(1u<<kRosterGroups)-1;
+// A squad's group by its name (npcai.cpp kClassWords; "RANGER" or "RANGER x4").
+inline int SquadClass(const char* name) noexcept {
+    constexpr const char* kWords[kRosterGroups-1]={"RANGER","WING DIVER","FENCER","AIR RAIDER"};
+    for(int i=0;i<kRosterGroups-1;++i)if(SameKind(name,kWords[i]))return i;
+    return kRosterGroups-1;
+}
+// A roster line: `row` the squad's (its index in the rows given), or its group's header, or the count of the rows left
+// out (the lines ran out: groups folded show them again).
+inline constexpr int kRosterHead=-1,kRosterMore=-2;
+struct RosterLine { int group=-1; int row=kRosterHead; };
+// The lines of the `n` rows of groups `cls` (each 0..kRosterGroups-1; -1 not listed), groups `open` (a bit a group)
+// unfolded: a group's header, its rows if open, in the groups' order and the rows' within each; at most `most`, a
+// header for every group first, and when rows are left out a last line for them (`hidden`: how many, may be null).
+inline int RosterLines(const int* cls,int n,unsigned open,int most,RosterLine* out,int* hidden=nullptr) noexcept {
+    int count[kRosterGroups]{},heads=0;
+    for(int i=0;i<n;++i)if(cls[i]>=0 && cls[i]<kRosterGroups && !count[cls[i]]++)++heads;
+    for(int pass=0;;++pass) {   // the second pass keeps a line for the rows left out
+        int k=0,cut=0,budget=most-heads-pass;
+        for(int g=0;g<kRosterGroups;++g) {
+            if(!count[g])continue;
+            if(k<most)out[k++]=RosterLine{g,kRosterHead};
+            if(!((open>>g)&1u))continue;
+            for(int i=0;i<n;++i)if(cls[i]==g) {
+                if(budget>0 && k<most){out[k++]=RosterLine{g,i};--budget;}
+                else ++cut;
+            }
+        }
+        if(cut==0 || pass>0) {
+            if(cut>0 && k<most)out[k++]=RosterLine{-1,kRosterMore};
+            if(hidden)*hidden=cut;
+            return k;
+        }
+    }
+}
+// A header's hit code (MapCommandRosterButtons): its group, and whether it is the fold arrow.
+inline constexpr int kRosterFoldBit=0x10;
+inline int RosterCode(int group,bool fold) noexcept { return group|(fold ? kRosterFoldBit : 0); }
+// The order most of a group's rows have (the first of the most common; `orders` as Order values).
+inline int CommonOrder(const int* orders,int n) noexcept {
+    int best=0,most=0;
+    for(int i=0;i<n;++i) {
+        int k=0;for(int j=0;j<n;++j)k+=orders[j]==orders[i];
+        if(k>most){most=k;best=orders[i];}
+    }
+    return best;
 }
 // Every unit on the screen of `kind[i]`'s kind as unit `at`'s (and its owner `owner[i]`), into the selection (`add`: added).
 inline int SelectKind(Selection& s,const Mark* m,const char* const* kind,const int* owner,int n,int at,bool add) noexcept {

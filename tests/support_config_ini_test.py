@@ -37,8 +37,8 @@ ground = re.search(r'static const wchar_t\* keys\[\]=\{([^}]*)\}', dispatch).gro
 check(tuple(re.findall(r'L"(\w+)"', ground)) == sc.GROUND_KEYS, 'ground / infantry keys equal SupportCallKey\'s keys[]')
 check('RESCUE' not in sc.GROUND_KEYS and 'L"RESCUE"' not in ground and 'L"RESCUE"' in dispatch,
       "the sea rescue's key is SupportCallKey's own, not in keys[]")
-flown = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.flown)
-check(flown == sc.AIR_KEYS, 'air keys: the flown calls in calls.py order (airstrike.cpp SupportAirCallKey)')
+flown = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.FLOWN)
+check(flown == sc.AIR_KEYS, 'air keys: the flown calls in calls.FLOWN order (airstrike.cpp SupportAirCallKey)')
 strikes = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.brings == 'barrage') + \
     tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.brings == 'ultimate')
 check(sc.STRIKE_KEYS == strikes and strikes[0] == 'BARRAGE_ROCKETS' and strikes[-1] == 'ULTIMATE',
@@ -48,7 +48,7 @@ check(tuple(re.findall(r'\{StrikeKind::\w+,-?\d+,[\d.]+f,\d+u,"[^"]*",L"(\w+)",'
       "src/calls.inc kStrikes' keys are the strike keys, in order")
 check(sc.UNIT_KEYS == sc.AIR_KEYS + sc.GROUND_KEYS + sc.STRIKE_KEYS + ('RESCUE',),
       'the catalog: flown calls, ground / infantry / airdrops, strikes, the sea rescue')
-check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 58 and set(sc.LABELS) == set(sc.UNIT_KEYS),
+check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 54 and set(sc.LABELS) == set(sc.UNIT_KEYS),
       'one label per catalog entry (the sea rescue last)')
 check(all(sc.LABELS[c.id[len(calls.ID_PREFIX):]] == calls.call_name(c, 'SC') for c in calls.STRIKES),
       "the strikes' labels are their SC names (kStrikes')")
@@ -106,7 +106,7 @@ for bad in ('9', '-1', 'two'):
         check(True, '')
 
 # The menu itself, with scripted answers: toggle two units on/off, a weapon, the platoon, a count, an invalid answer.
-answers = iter(['7', '33', '7', 'w', '1', 'shotgun', 'p', 'sniper,flame,rocket', 'c', 'heli_f', '3', 'w', '2', 'laser', ''])
+answers = iter(['7', str(sc.UNIT_KEYS.index('SQUAD') + 1), '7', 'w', '1', 'shotgun', 'p', 'sniper,flame,rocket', 'c', 'heli_f', '3', 'w', '2', 'laser', ''])
 edited = sc.edit(ini, lambda _prompt: next(answers))
 check(sc.disabled(edited) == ['SQUAD'], 'units toggled off and back on')
 check(sc.get(edited, 'SupportSquadWeapon') == 'shotgun' and sc.get(edited, 'SupportSquadLeaderWeapon') == 'rifle',

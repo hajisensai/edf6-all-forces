@@ -107,7 +107,7 @@ void HeliReap(const void* self) noexcept;
 // player and is deleted far from them.
 void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept;
 // A called heli's sortie (after HeliCalled; docs/plan-2026-10-25-strikes.md §1.2): one pass of `pass` at `mark` from where it
-// is (the strafing pass along its heading, the missile hunter's station short of the mark, the circle round it), then it
+// is (the strafing pass along its heading, the circle round it), then it
 // leaves as a called heli does.
 void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept;
 // A called heli's fuel (game thread): seconds until it flies off (0: leaving); false with no limit.

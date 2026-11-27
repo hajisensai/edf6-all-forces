@@ -9,6 +9,7 @@
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "map_signal.h"
 #include "mapcmd_cue.h"
 #include "npc_command.h"
 #include "range_place.h"
@@ -75,7 +76,9 @@ struct SquadRow { const void* leader; char name[24]; char status[16]; int alive;
     ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
     bool riding=false; // its soldiers seated in a vehicle (status RIDING, no recruitment offered)
     int rank=1;        // mapcmd::SquadRank: the panel's order (the rows come sorted by it)
+    float hp=0.0f,hpMax=0.0f;   // its members' health summed (the roster's bars; hpMax 0: unknown)
 };
+constexpr int kMapSquadRows=48;   // the squads' rows published (MapCommandReadout::squad; the roster groups them)
 // Every squad listed, the ones riding and the ones a script drives (the folded panel's summary row).
 struct SquadTally { int total=0,riding=0,scripted=0; };
 // The squads' rows in mapcmd::SquadRank order (stable), at most `most`; how many. `tally` (may be null): all of them.
@@ -112,7 +115,13 @@ void MapCommandLoadoutButtons(const float* rects,const int* codes,int n) noexcep
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
 // Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
 void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
-void MapCommandSquadFold(const float* rect) noexcept; // the panel's summary row (opens / folds it); null: none
+// The roster's group headers as drawn (hud.cpp MapSquadPanel): `codes` each one's mapcmd::RosterCode (its class, and
+// whether the hit is its fold arrow), up to 2 * mapcmd::kRosterGroups.
+void MapCommandRosterButtons(const float* rects,const int* codes,int n) noexcept;
+// The selection's cards as drawn (hud.cpp MapSelectionCards): `of` each card's first unit (CmdMark::of), up to
+// kMapCards (a click keeps that kind, Shift drops it, a double click centres on it).
+constexpr int kMapCards=32;
+void MapCommandCardButtons(const float* rects,const std::uint64_t* of,int n) noexcept;
 // The formation menu's rows as drawn (`entries`: map_buttons.h MenuEntry), up to kMapFormationEntries.
 constexpr int kMapFormationEntries=24;
 void MapCommandFormationButtons(const float* rects,const int* entries,int n) noexcept;
@@ -209,15 +218,15 @@ struct MapCommandReadout {
     wchar_t note[80];          // the last command's result or refusal
     bool noteFresh;
     int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; a click picks one)
-    SquadTally squadTally{};   // every squad, for the folded panel's summary row
-    bool squadOpen=false;      // the panel opened past its commandable rows (its summary row clicked)
+    SquadTally squadTally{};   // every squad, for the roster's footer (riding, a script's: not listed, not selectable)
+    unsigned rosterOpen=0x1F;  // the roster's groups unfolded (bit mapcmd::SquadClass; their headers' arrows)
     // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
     // first one's shape lit) and its march (a selected squad follows the player; `march` lit).
     bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
     bool dismountMenu=false;   // the ALL OUT button's menu open (map_buttons.h kDismountMenu)
-    SquadRow squad[16];
-    bool squadSelected[16];
-    std::uint16_t squadGroups[16]{}; // each row's RTS groups (CmdMark::groups)
+    SquadRow squad[kMapSquadRows];
+    bool squadSelected[kMapSquadRows];
+    std::uint16_t squadGroups[kMapSquadRows]{}; // each row's RTS groups (CmdMark::groups)
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
     Order armed;               // a point order's button (or Z) clicked: the next left click on the ground is its point
     bool armedOrder;           // ...armed (Order::none with it false)
@@ -259,10 +268,11 @@ struct MapCommandReadout {
     // The selection's switches as the card lights them: HOLD FIRE on, flying high (any of the active units), the paced march.
     bool holdFireOn=false,highOn=false,paced=false;
     mapcue::Altitudes altitudes{};   // the active selection's aircraft by altitude (the ALTITUDE button's word and tip)
-    // The pings (F1-F4; command protocol v11 Kind::ping): this machine's and the room's, each shown kPingMs.
-    struct Ping { float at[3]; unsigned kind; std::uint64_t at_ms; bool mine; };
-    static constexpr int kPings=8;
-    static constexpr std::uint64_t kPingMs=6000;
+    // The pings (F1-F4; command protocol v11 Kind::ping): this machine's and the room's, each shown kPingMs
+    // (map_signal.h: the one list the view shows too).
+    using Ping=mapsignal::Signal;
+    static constexpr int kPings=mapsignal::kKept;
+    static constexpr std::uint64_t kPingMs=mapsignal::kShowMs;
     int pings=0;
     Ping ping[kPings]{};
 };

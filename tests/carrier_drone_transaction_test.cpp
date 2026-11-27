@@ -84,6 +84,7 @@ const Config& Cfg() noexcept {return fixture::config;}
 void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept {return 100;}
 float BodyMark(const void*) noexcept {return 0;}
+Burden BurdenOf(float,const Store*,int) noexcept {return Burden{1.0f,0.0f};}   // stores.cpp (not linked here): no stores' burden
 bool IsHelicopter(const void*) noexcept {return false;}
 float MapRay(const float*,const float*,float*) noexcept {++fixture::terrain;return -1;}
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {}
@@ -143,6 +144,8 @@ void ReleaseEntry(Jet& j) noexcept {++fixture::releases;PvpForgetSupportObject(j
 bool SlotFree() noexcept {return fixture::slotOk;}
 bool HooksOk() noexcept {return fixture::hookOk;}
 void JoinFlight(Jet& j,unsigned flight) noexcept {j.flight=flight;}
+Arms ReadArms(unsigned char*) noexcept {Arms a{};a.pick=-1;a.rocket=-1;return a;}   // jet_combat.cpp (not linked here)
+void AirborneStart(Jet& j,const Kind& k,const float* nose) noexcept {for(int i=0;i<3;++i)j.m.vel[i]=nose[i]*k.cruise;}   // jet_flight.cpp (not linked here)
 bool IsJetVehicle(const unsigned char* object,Role* role,Role* drones) noexcept {
     if(object==fixture::parent && !fixture::carrierClass)return false;
     if(role)*role=object==fixture::parent ? Role::carrier : fixture::role;

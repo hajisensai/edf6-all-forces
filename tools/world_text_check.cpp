@@ -13,7 +13,7 @@
 //    the nominal one on the grid whatever the depth;
 //  - the facings cache: at most kFacingSlots, one not asked for in kForgetMs made anew; past its slots in one frame the
 //    rest uncached (none given up and made again every frame), the slot of the oldest frame given up the next;
-//  - a point behind the camera or a viewProj without perspective refused; the glow and the shimmer.
+//  - a point behind the camera or a viewProj without perspective refused; the dark edge and the shimmer.
 //   cmake --build build --target world_text_check && build\world_text_check.exe      (exit code 1 on a failure)
 #include "../src/world_text.h"
 #include <cstdio>
@@ -370,10 +370,13 @@ int main() {
     Check(!FrameAt(ortho,w,h,atRef,&f) && !EyeOf(ortho,e),"an orthographic projection (the HUD's own)");
     const float zero[16]{};
     Check(!FrameAt(zero,w,h,atRef,&f) && !EyeOf(zero,e),"no viewProj");
-    // The glow and the shimmer.
+    // The edge and the shimmer.
     const float amber[4]={1.0f,0.7f,0.15f,0.95f};
-    float g[4];Glow(amber,g);
-    Check(g[0]==1.0f && g[1]>amber[1] && g[2]>amber[2] && std::fabs(g[3]-amber[3]*kGlowAlpha)<1e-6f,"glow: lighter, fainter");
+    float g[4];Edge(amber,g);
+    Check(g[0]<0.1f && g[1]<0.1f && g[2]<0.1f && std::fabs(g[3]-amber[3]*kEdgeAlpha)<1e-6f,"edge: dark, not a lightened glow");
+    Check(kEdgeWidth<=1.7f,"edge: no wider than the plain text's outline",kEdgeWidth);
+    {float back[4];LayerColour(amber,1,8,back);
+     Check(back[0]<amber[0]*0.5f && back[1]<amber[1]*0.5f,"the first layer behind: dark (a side, not a second face)",back[0],back[1]);}
     float least=2.0f,most=-1.0f;
     for(unsigned long long ms=0;ms<3000;ms+=7){const float a=Shimmer(ms,0.3f);least=a<least ? a : least;most=a>most ? a : most;}
     Check(least>=1.0f-kShimmer-1e-4f && most<=1.0f+1e-6f && most-least>kShimmer*0.9f,"shimmer range",least,most);

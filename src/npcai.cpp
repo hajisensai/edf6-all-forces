@@ -1121,6 +1121,8 @@ struct Squad {
     ObjRef top;
     ULONGLONG seen,frame;
     int alive,counting,cls;
+    // Its members' health summed as `alive` is counted (the map roster's bars): the last frame's, and this frame's so far.
+    float hp,hpMax,hpCounting,hpMaxCounting;
     npc::Control control;
     Command cmd;
     npc::Lead cmdLead;         // the lead `cmd` was given under; another lead drops it (npc::LeadOf)
@@ -1202,10 +1204,12 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
         q->top=ObjRef::Of(top);squadIndex.Set(top,static_cast<int>(at));q->cls=cls;
     }
     if(h==top)q->cls=cls;
-    ++q->counting;
+    const float hp=At<float>(h,kHumanHp),hpMax=At<float>(h,kHumanHpMax);
+    ++q->counting;q->hpCounting+=hp;q->hpMaxCounting+=hpMax;
     q->seen=ms;
     if(q->frame!=GameFrame()) {
         q->alive=q->counting-1;q->counting=1;q->frame=GameFrame();
+        q->hp=q->hpCounting-hp;q->hpMax=q->hpMaxCounting-hpMax;q->hpCounting=hp;q->hpMaxCounting=hpMax;
         // Its control from its top's own fields (the top may be another machine's soldier, whose Think does not get here).
         const unsigned char* const root=RootLeader(top);
         q->control=h==top ? control : ControlOf(top,root);
@@ -2958,6 +2962,7 @@ bool Live(const Squad& q,ULONGLONG ms) noexcept {
 }
 struct RemoteSquad {
     ObjRef top{};int cls=0,alive=0;npc::Control control=npc::Control::free;float pos[3]{};
+    float hp=0.0f,hpMax=0.0f;   // its members' health summed (the replica's own fields)
 };
 // The other machines' squads this frame, as many as there are, and their index by top.
 std::vector<RemoteSquad> remoteSquads;int remoteSquadCount=0;ULONGLONG remoteSquadFrame=~ULONGLONG{0};
@@ -2972,10 +2977,13 @@ void __fastcall CommandSquadVisit(CommandSquadVisitor*,unsigned char* human) noe
         if(!top || !Readable(top,kHumanVehicleCtrl+8) || top[kDead] || IsOnlineAuthority(top))return;
         const auto identity=ObjRef::Of(top);
         unsigned char nativeId[32];if(!identity.ctrl || !ReadNativeObjectId(top,nativeId))return;
-        if(const int i=remoteSquadIndex.Find(top);i>=0 && remoteSquads[static_cast<std::size_t>(i)].top.ctrl==identity.ctrl){++remoteSquads[static_cast<std::size_t>(i)].alive;return;}
+        const float hp=At<float>(human,kHumanHp),hpMax=At<float>(human,kHumanHpMax);
+        if(const int i=remoteSquadIndex.Find(top);i>=0 && remoteSquads[static_cast<std::size_t>(i)].top.ctrl==identity.ctrl) {
+            auto& known=remoteSquads[static_cast<std::size_t>(i)];++known.alive;known.hp+=hp;known.hpMax+=hpMax;return;
+        }
         if(static_cast<std::size_t>(remoteSquadCount)>=remoteSquads.size())remoteSquads.resize(remoteSquads.empty() ? 64 : remoteSquads.size()*2);
         remoteSquadIndex.Set(top,remoteSquadCount);
-        auto& row=remoteSquads[static_cast<std::size_t>(remoteSquadCount++)];row={};row.top=identity;row.alive=1;
+        auto& row=remoteSquads[static_cast<std::size_t>(remoteSquadCount++)];row={};row.top=identity;row.alive=1;row.hp=hp;row.hpMax=hpMax;
         const auto vt=At<const unsigned char*>(top,0);
         for(int i=0;i<kClasses;++i)if(vt==image+kSoldiers[i].vtable)row.cls=i;
         row.control=ControlOf(top,RootLeader(top));std::memcpy(row.pos,Pos(top),12);
@@ -3074,11 +3082,12 @@ int SquadRows(SquadRow* out,int most,SquadTally* tally) noexcept {
         r.alive=q.alive>0 ? q.alive : 1;
         r.cooldown=q.dismissed ? static_cast<int>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000) : 0;
         r.now=q.cmd;r.locked=npc::Scripted(q.control) && !JoinOnly(q.control,q.top.obj);r.riding=SquadRiding(q);
+        r.hp=q.hp;r.hpMax=q.hpMax;
         r.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,r.locked,r.riding);
     }
     for(int i=0;i<remoteSquadCount;++i) {
         const auto& q=remoteSquads[static_cast<std::size_t>(i)];auto& row=all[static_cast<std::size_t>(n++)];row={};
-        row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.locked=npc::Scripted(q.control) && !JoinOnly(q.control,q.top.obj);
+        row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.hp=q.hp;row.hpMax=q.hpMax;row.locked=npc::Scripted(q.control) && !JoinOnly(q.control,q.top.obj);
         row.riding=!HumanOnFoot(static_cast<const unsigned char*>(q.top.obj));
         std::snprintf(row.name,sizeof(row.name),"%s",kClassWords[q.cls]);std::snprintf(row.status,sizeof(row.status),"%s",row.locked ? "SCRIPT" : "REMOTE");
         row.rank=mapcmd::SquadRank(q.control==npc::Control::recruited,row.locked,row.riding);

@@ -10,7 +10,7 @@
 // ground north up (Ground: the map's grid labels). An upright plate under the map's look down (30-88 degrees) squashed to
 // a line, and growing it for that stretched it sideways: a plate made square on reads wherever it was made. Its thickness is the same text drawn again in layers
 // behind its face along its normal (real metres apart: the perspective shows their sides), the ones further back darker
-// and fainter, the face last in its own colour with a glow round it. Seen from behind, the face is the side nearest the
+// and fainter, the face last in its own colour with a thin dark edge round it. Seen from behind, the face is the side nearest the
 // camera and the text runs mirrored along the plate, so it still reads left to right (the plate itself never moves).
 //
 // Its size is in metres (the perspective makes it larger near, smaller far): the label's 2D size at `ref` m in the plane
@@ -39,17 +39,20 @@ constexpr float kFarLeast=0.85f,kNearMost=1.8f;
 constexpr float kFlipBand=0.1f;
 // The depth (m) a label is its 2D size at in the player's own view; the map's view uses its camera's distance instead.
 constexpr float kViewRef=30.0f;
-// The glow: the outline in the label's own colour, lightened toward white this much, at this share of its alpha, this wide
-// (the plain HUD text's black outline is 1.7, the name tags' 0x804FB3).
-constexpr float kGlowLighten=0.35f,kGlowAlpha=0.5f,kGlowWidth=2.4f;
+// The edge: a thin dark outline round the face, at this share of its alpha, this wide (the plain HUD text's black outline
+// is 1.7, the name tags' 0x804FB3). The user, 2026-11-27: 「文字描边发光有点看不清」: a glow in the label's own colour,
+// lightened, blurred the glyphs into the plates behind them; a dark edge keeps them crisp on any ground.
+constexpr float kEdgeAlpha=0.9f,kEdgeWidth=1.6f;
+alignas(16) constexpr float kEdgeRgb[3]={0.02f,0.03f,0.04f};
 // The shimmer: the alpha between 1 - kShimmer and 1 over kShimmerMs.
 constexpr float kShimmer=0.12f;
 constexpr unsigned long long kShimmerMs=1400;
 // The thickness: the layers behind the face span this share of the glyph height; at most / least this many layers.
 constexpr float kThickness=0.2f;
 constexpr int kLayersMost=8,kLayersLeast=2;
-// The layers behind the face: the first one's colour this lit and this opaque, the last one's this share of that.
-constexpr float kBackLit=0.6f,kBackAlpha=0.85f,kBackFall=0.5f;
+// The layers behind the face: the first one's colour this lit and this opaque, the last one's this share of that (dark:
+// they read as the plate's side, a shadow, not a second blurred copy of the face).
+constexpr float kBackLit=0.3f,kBackAlpha=0.8f,kBackFall=0.5f;
 // The facings kept (a label's key to its plate's orientation): this many at most, one not asked for this long forgotten.
 constexpr int kFacingSlots=128;
 constexpr unsigned long long kForgetMs=5000;
@@ -294,10 +297,10 @@ inline void Local(const float* m,float x,float y,float* out) noexcept {
     for(int i=0;i<3;++i)out[i]=x*m[i]+y*m[4+i]+m[12+i];
 }
 
-// The glow's colour (the outline): the label's colour lightened, at a share of its alpha.
-inline void Glow(const float* rgba,float* out) noexcept {
-    for(int i=0;i<3;++i)out[i]=rgba[i]+(1.0f-rgba[i])*kGlowLighten;
-    out[3]=rgba[3]*kGlowAlpha;
+// The edge's colour (the face's outline): near black, at a share of the label's alpha.
+inline void Edge(const float* rgba,float* out) noexcept {
+    for(int i=0;i<3;++i)out[i]=kEdgeRgb[i];
+    out[3]=rgba[3]*kEdgeAlpha;
 }
 // The shimmer's alpha factor at wall ms `ms` for a label of phase `phase` (0..1: labels apart do not pulse together).
 inline float Shimmer(unsigned long long ms,float phase) noexcept {

@@ -17,10 +17,10 @@
 
 | 支援（`kLaunchRows` 的 JetRole） | 新机体 | 模型 | 标记 | SGO |
 |---|---|---|---|---|
-| 对地攻击机 strike（含俯冲扫射 / 地毯轰炸 / 打了就跑等出击） | `Body::supStrike` | DN Bomber（27.6 × 22.9 m） | 7061 | `EDF6VC_DN_SUPPORT_STRIKE.SGO` |
-| 制空战斗机 fighter（含狼群） | `Body::supFighter` | DN Fighter（28.9 × 17.7 m） | 7062 | `EDF6VC_DN_SUPPORT_FIGHTER.SGO` |
-| 截击机 interceptor（含天顶导弹雨） | `Body::supInterceptor` | DN Interceptor（17.5 × 30.2 m） | 7063 | `EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO` |
-| 多用途机 multirole（含导弹掠过） | `Body::supMultirole` | DN Defender（30.1 × 18.0 m） | 7064 | `EDF6VC_DN_SUPPORT_MULTIROLE.SGO` |
+| 对地攻击机 strike（含 DN 轰炸机·出击） | `Body::supStrike` | DN Bomber（27.6 × 22.9 m） | 7061 | `EDF6VC_DN_SUPPORT_STRIKE.SGO` |
+| 制空战斗机 fighter（含 DN 战斗机·出击） | `Body::supFighter` | DN Fighter（28.9 × 17.7 m） | 7062 | `EDF6VC_DN_SUPPORT_FIGHTER.SGO` |
+| 截击机 interceptor | `Body::supInterceptor` | DN Interceptor（17.5 × 30.2 m） | 7063 | `EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO` |
+| 多用途机 multirole（含 DN 防御者战斗机·出击） | `Body::supMultirole` | DN Defender（30.1 × 18.0 m） | 7064 | `EDF6VC_DN_SUPPORT_MULTIROLE.SGO` |
 
 - 每架的耐久、挂载、净重与原来的同类机完全一样（`pylib/vcobjects.py` `SUPPORT_JETS`：从 `JETS['edf6tr_jet_<role>_mission']` 取，
   `JET_MASSES` 同值，支援战前配置 `kVehicleBodies` 的载重上限因此不变），飞法按原 `kKinds` 的角色。
@@ -63,7 +63,7 @@
 
 | 支援 | 现在 | 模型 |
 |---|---|---|
-| 炮舰机 gunship（`EDF6VC_CALL_GUNSHIP[_F]`、引导打击 `EDF6VC_CALL_SORTIE_GUIDED`） | **AC-130**：新机体 `Body::c130Gunship`，标记 **7065**，`EDF6VC_C130_GUNSHIP.SGO` | 模型包 `c130/gunship.obj` |
+| 炮舰机 gunship（`EDF6VC_CALL_GUNSHIP[_F]`、C-130 炮艇机·出击 `EDF6VC_CALL_SORTIE_GUIDED`） | **AC-130**：新机体 `Body::c130Gunship`，标记 **7065**，`EDF6VC_C130_GUNSHIP.SGO` | 模型包 `c130/gunship.obj` |
 | 伞兵运输机 transportPlane | **C-130**：`Body::transportPlane` 改用 `EDF6VC_C130_TRANSPORT.SGO`，标记由 7001 改为 **7066** | 模型包 `c130/transport.obj` |
 | 空中航母 carrier / 自爆 / 人偶无人机母舰 | **Helicarrier**：新机体 `Body::supCarrier` / `supBlastCarrier` / `supDollCarrier`，标记 **7067 / 7068 / 7069**，`EDF6VC_HELICARRIER[_BLAST\|_DOLL].SGO` | 模型包 `helicarrier/helicarrier.obj`，见 6.4 |
 

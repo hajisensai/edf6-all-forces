@@ -418,6 +418,7 @@ HUDTEXT(cmdSubAll,L"SUB-SELECTION: ALL SELECTED",L"子选择：全部选中单�
 HUDTEXT(cmdSubKind,L"SUB-SELECTION: %hs (%d)",L"子选择：%hs（%d）",L"子選擇：%hs（%d）",L"サブ選択：%hs（%d）")
 HUDTEXT(cmdSubShown,L"ORDERS TO: %ls",L"指令对象：%ls",L"指令對象：%ls",L"命令対象：%ls")
 HUDTEXT(cmdPing,L"PING %d",L"信号 %d",L"信號 %d",L"ピン %d")
+HUDTEXT(cmdPingRange,L"PING %d  %.0f m",L"信号 %d  %.0f m",L"信號 %d  %.0f m",L"ピン %d  %.0f m")
 HUDTEXT(legendPaths,L"ORDER PATHS:",L"指令路线：",L"指令路線：",L"命令の経路：")
 // The transports (transport.cpp; mapcmd_logic.h Order::withdraw).
 HUDTEXT(orderWithdraw,L"SEND TRANSPORT AWAY",L"载具撤离",L"載具撤離",L"輸送車両撤収")
@@ -527,10 +528,12 @@ HUDTEXT(sweepOn,L"FETCHING BOXES: %d LEFT, %d IN   [%ls] call back",L"拾取箱�
 HUDTEXT(sweepDone,L"BOXES FETCHED: %d",L"拾取结束：捡到 %d 个",L"拾取結束：撿到 %d 個",L"回収終了：%d 個")
 HUDTEXT(formationCue,L"FORMATION: %ls   [%ls]",L"编队：%ls   [%ls]",L"編隊：%ls   [%ls]",L"隊形：%ls   [%ls]")
 HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒")
-// The squad panel's summary row (hud.cpp MapSquadPanel; the user, 2026-10-09: "小队太多了吧…感觉看不过来"): folded, the
-// squads not listed (how many of them ride a vehicle, how many a script drives); open, the row that folds it again.
-HUDTEXT(squadMore,L"+%d MORE (%d riding, %d scripted): click to list",L"另有 %d 支（乘车 %d，脚本 %d）：点击展开",
-        L"另有 %d 支（乘車 %d，腳本 %d）：點擊展開",L"他 %d 部隊（搭乗 %d、指示中 %d）：クリックで表示")
+// The roster (hud.cpp MapSquadPanel; the user, 2026-11-27: 「左上角的小队也可以重新设计吧」): a group header's count (squads,
+// soldiers), the rows the lines ran out for, a script's squads (not listed, not selectable), a group of no class word.
+HUDTEXT(rosterCount,L"%d SQ  %d MEN",L"%d 支 %d 人",L"%d 支 %d 人",L"%d 隊 %d 人")
+HUDTEXT(rosterMore,L"+%d more",L"+%d 支",L"+%d 支",L"+%d 隊")
+HUDTEXT(rosterScripted,L"%d scripted (not selectable)",L"脚本 %d 支（不可选）",L"腳本 %d 支（不可選）",L"スクリプト %d 隊（選択不可）")
+HUDTEXT(rosterOther,L"OTHER",L"其他",L"其他",L"その他")
 // The ALL OUT button's menu (hud.cpp MapDismountMenu, map_buttons.h kDismountMenu): who gets out of the vehicle.
 HUDTEXT(dismountEveryone,L"EVERYONE OUT",L"全体下车",L"全體下車",L"全員降車")
 HUDTEXT(dismountKeepDriver,L"ALL BUT THE DRIVER",L"全体下车（留司机）",L"全體下車（留駕駛）",L"運転手以外降車")
@@ -539,8 +542,6 @@ HUDTEXT(dismountClass,L"%ls OUT",L"%ls下车",L"%ls下車",L"%ls降車")
 // the ones on a guard point.
 HUDTEXT(menuMarch,L"MARCH",L"行军",L"行軍",L"行軍")
 HUDTEXT(menuDefence,L"DEFENCE",L"守点",L"守點",L"防衛")
-HUDTEXT(squadFold,L"Click to fold: only the squads that take orders",L"点击收起：只列可指挥的小队",L"點擊收起：只列可指揮的小隊",
-        L"クリックでたたむ：指揮できる分隊のみ")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
 HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
 HUDTEXT(qmarkPlayer,L"P%d %.0f m",L"玩家%d %.0f m",L"玩家%d %.0f m",L"プレイヤー%d %.0f m")
@@ -663,9 +664,7 @@ HUDTEXT(barrageFull,L"too many barrages at once",L"同时进行的炮击已达�
 HUDTEXT(barrageNoHook,L"this EDF.dll's rockets cannot be steered",L"此版 EDF.dll 无法接管炮弹飞行",L"此版 EDF.dll 無法接管砲彈飛行",L"この EDF.dll では砲弾の弾道を制御できません")
 HUDTEXT(barrageNoTarget,L"no caller or target",L"呼叫者或目标无效",L"呼叫者或目標無效",L"呼び出し元または目標が無効です")
 HUDTEXT(barrageNoRounds,L"no round could be planned",L"未能规划任何炮弹",L"未能規劃任何砲彈",L"砲弾を計画できませんでした")
-// A sortie's second wave refused when due (airstrike.cpp SupportFollowUpTick): given up, with the dispatcher's reason.
 HUDTEXT(moduleOff,L"%hs kept faulting: off for this mission (EDF6VehicleCrew.log)",L"%hs 连续出错，本局已停用（见 EDF6VehicleCrew.log）",L"%hs 連續出錯，本局已停用（見 EDF6VehicleCrew.log）",L"%hs でエラーが続いたため、このミッション中は停止しました（EDF6VehicleCrew.log）")
-HUDTEXT(followUpRefused,L"Second wave not called: %ls",L"第二波未能呼叫：%ls",L"第二波未能呼叫：%ls",L"第二波を呼べませんでした：%ls")
 // --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
 HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")
 HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")

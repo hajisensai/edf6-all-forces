@@ -770,6 +770,10 @@ inline airbound::Box JetHeldBox(const Jet& j) noexcept { return j.m.arriving ? j
 float TightSpeed(const Kind& k,float half) noexcept;
 // m: its turn's radius at `speed` with its stores' `mass` (the g its thrust holds, kTurnWide).
 float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept;
+// m/s: the most of `speed` it holds with its stores' drag (drag ~ v^2: the root of 1 + their share; JetSteer).
+inline float HeldSpeed(const Burden& b,float speed) noexcept { return speed/std::sqrt(1.0f+(b.drag>0.0f ? b.drag : 0.0f)); }
+// A call's jet made in the air: flying along `nose` (unit) at its kind's cruise as its stores (j.burden) let it hold.
+void AirborneStart(Jet& j,const Kind& k,const float* nose) noexcept;
 // The anchor it works round, put inside its soft box less its patrol circle (`room` holds the copy when it moved).
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest=0.0f) noexcept;

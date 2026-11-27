@@ -18,13 +18,7 @@ constexpr float kPi=3.14159265358979f;
 constexpr float kMaxOffset=80.0f;         // m: a formation's aircraft at most this far across their line from the mark
 constexpr float kPassBeyond=900.0f;       // m past the mark along its line a level pass ends (it withdraws)
 constexpr float kMissilePassAlt=320.0f;   // m over the mark: the missile pass
-constexpr float kCarpetAlt=260.0f;        // m over the mark: the carpet bombers' level
-constexpr float kCarpetHalf=150.0f;       // m: their bombs land within this of the mark along their line
-constexpr float kPopAlt=110.0f;           // m over the mark: the hit and run's run in
-constexpr float kPopDrop=45.0f;           // m: its bombs go when they would land this near the mark
-constexpr int kPopBombs=2;
-constexpr float kPopClimb=1.6f;           // its climb away: up this much for each 1 along
-constexpr unsigned long long kPopClimbMs=4500;
+constexpr float kBombLeastAlt=66.0f;      // m over the mark: lower, a bomb's own blast reaches the jet (none let go)
 // The rain flies level at kRainAlt over the mark (RainWant: its nose never down at a ground target) and opens fire only
 // once its height over the target is at least kRainSlope of its distance out (RainSteep). Its rounds leave in a
 // kSalvoFan fan and split in a kSalvoSplitCone cone, and PN (N = 3) brings a round started off the line of sight back
@@ -123,7 +117,7 @@ static_assert(kRainAlt/kRainSlope<kRainOpen && kRainAlt/kRainSlope>kRainTo+kRain
 constexpr unsigned long long kSearchMs=45000;   // a pass that found nothing to strike this long after it came gives up
 constexpr float kRunMin=100.0f,kRunMax=2400.0f;
 // A call's way in (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」): (x, z) the unit heading it flies in on, or
-// none (0, 0: from the requester toward the target); `half` > 0 only with a gun run's or a carpet's line on the map (its
+// none (0, 0: from the requester toward the target); `half` > 0 only with a gun run's line on the map (its
 // half length, the target its centre). An aircraft comes in on that heading exactly (support_entry.h AirRoute).
 struct RunSpec { float x=0.0f,z=0.0f,half=0.0f; };
 inline bool HasHeading(const RunSpec& r) noexcept { return r.x!=0.0f || r.z!=0.0f; }
@@ -145,24 +139,22 @@ inline bool RunFromPoints(const float* a,const float* b,RunSpec* out,float* cent
     for(int i=0;i<3;++i)centre[i]=a[i]+(b[i]-a[i])*0.5f;
     return true;
 }
-// What one aircraft of a ground run (a gun run's or a carpet's line) lets go along it: its bombs, its rockets (rounds),
-// its air-to-ground missiles. Its stores' rates on the line: a bomb every kBombGapMs (the hit and run's pair too; the
-// store's own ripple is 8 frames, pylib/vcobjects.py Bomb.interval), a rocket ripple of kRocketRipple every kRocketGapMs
+// What one aircraft of a ground run (a gun run's line) lets go along it: its bombs, its rockets (rounds), its
+// air-to-ground missiles. Its stores' rates on the line: a bomb every kBombGapMs (the store's own ripple is 8 frames,
+// pylib/vcobjects.py Bomb.interval), a rocket ripple of kRocketRipple every kRocketGapMs
 // (jet_combat.cpp Fire; vcobjects.py RKT burst), a missile after the lock's kLockMs and one every kMissileGapMs.
 struct RunLoad { int bombs=0,rockets=0,missiles=0; };
 constexpr unsigned long long kBombGapMs=150,kRocketGapMs=600;
 constexpr int kRocketRipple=4;
 // The shortest line it all goes down on (the user, 2026-11-27: the length "最短也得是能投完这架飞机所有对地挂载的距离"):
-// the time its slowest store takes to empty at `speed` m/s (a carpet lets go only its bombs), within kRunMin..kRunMax.
-inline float RunLeast(const RunLoad& l,float speed,bool carpet) noexcept {
+// the time its slowest store takes to empty at `speed` m/s, within kRunMin..kRunMax.
+inline float RunLeast(const RunLoad& l,float speed) noexcept {
     float seconds=0.0f;
     if(l.bombs>1)seconds=static_cast<float>(l.bombs-1)*static_cast<float>(kBombGapMs)*0.001f;
-    if(!carpet) {
-        const int ripples=(l.rockets+kRocketRipple-1)/kRocketRipple;
-        if(ripples>1)seconds=std::fmax(seconds,static_cast<float>(ripples-1)*static_cast<float>(kRocketGapMs)*0.001f);
-        if(l.missiles>0)
-            seconds=std::fmax(seconds,(static_cast<float>(kLockMs)+static_cast<float>(l.missiles-1)*static_cast<float>(kMissileGapMs))*0.001f);
-    }
+    const int ripples=(l.rockets+kRocketRipple-1)/kRocketRipple;
+    if(ripples>1)seconds=std::fmax(seconds,static_cast<float>(ripples-1)*static_cast<float>(kRocketGapMs)*0.001f);
+    if(l.missiles>0)
+        seconds=std::fmax(seconds,(static_cast<float>(kLockMs)+static_cast<float>(l.missiles-1)*static_cast<float>(kMissileGapMs))*0.001f);
     const float length=(speed>0.0f && std::isfinite(speed) ? speed : 0.0f)*seconds;
     return length<kRunMin ? kRunMin : length>kRunMax ? kRunMax : length;
 }
@@ -265,10 +257,8 @@ inline float CaptureDistance(float cross,float angle,float radius) noexcept {
 
 // Helicopters
 constexpr float kHeliStrafeAlt=35.0f,kHeliStrafeLead=200.0f,kHeliPassBeyond=450.0f;
-constexpr float kHunterStation=300.0f,kHunterAlt=90.0f,kHunterNear=60.0f;   // m from the mark, over it, how near is there
-constexpr int kHunterMissiles=8;
-constexpr unsigned long long kHunterMs=40000,kHunterGapMs=1200;
 constexpr float kCircleRadius=110.0f,kCircleAlt=40.0f,kCircleSpeed=16.0f,kCircleGain=0.5f,kCircleNear=40.0f;
+constexpr unsigned long long kCircleMs=120000;   // a circle not flown this long after the call: away all the same
 
 inline float Dot2(const float* a,const float* b) noexcept { return a[0]*b[0]+a[2]*b[2]; }
 
@@ -302,10 +292,15 @@ inline void Ahead(const Line& l,const float* p,float lead,float* out) noexcept {
     for(int i=0;i<3;++i)out[i]=l.at[i]+l.dir[i]*a;
 }
 
-// The carpet's window: a bomb landing within kCarpetHalf of the mark along the line.
-inline bool InCarpet(const Line& l,const float* impact) noexcept { return std::fabs(Along(l,impact))<=kCarpetHalf; }
-// The gap between bombs that spreads `bombs` over the carpet at `speed` m/s (ms).
-inline unsigned long long CarpetGapMs(int bombs,float speed,float half=kCarpetHalf) noexcept {
+// The rain flies its lane level (jet_sortie.cpp): a target it can still let its burst go at from it, its nose along the
+// line (RainTrigger with that nose). One it has passed, or is too near to for the burst's run, scores kRainPassedScore
+// farther in its pick (jet_combat.cpp VisitTarget), so a target ahead on the lane is taken before it.
+constexpr float kRainPassedScore=2000.0f;
+inline bool RainAhead(const Line& l,const float* pos,float speed,const float* aim) noexcept {
+    return RainTrigger(pos,l.dir,speed,aim);
+}
+// The gap between bombs that spreads `bombs` over a gun run's line `half` m either side of its centre at `speed` m/s (ms).
+inline unsigned long long LineBombGapMs(int bombs,float speed,float half) noexcept {
     if(bombs<2 || !(speed>1.0f))return 250;
     const float s=2.0f*half/speed/static_cast<float>(bombs-1);
     return static_cast<unsigned long long>(s*1000.0f);

@@ -10,6 +10,7 @@
 #include "heli.h"
 #include "netprobe.h"
 #include "mapcmd.h"
+#include "map_signal.h"
 namespace crew {
 namespace {
 command_net::Session commands;
@@ -88,6 +89,9 @@ bool ReceiveCommandNetwork(std::uint32_t peer,const char* puid,const void* bytes
     if(!command_net::Owned(bytes,size))return false;
     command_net::Message message;
     if(command_net::Decode(bytes,size,message))commands.Receive(peer,puid,message,now);
+    // A member's map signal (Kind::ping) kept as it is heard, the map open or not: the map and the view show it
+    // (map_signal.h) its whole time from now.
+    for(command_net::Ping heard;commands.TakePing(&heard);)AddMapSignal(heard.at,heard.kind,false);
     return true; // malformed or newer command versions never leak to the support parser
 }
 bool MapCommandNetworkReady() noexcept {SupportNetTick();return commands.Ready();}
@@ -121,15 +125,6 @@ bool SendMapPing(const ObjRef& requester,const float* at,unsigned kind) noexcept
     if(!at || !commands.Ready())return false;
     command_net::Ping p;p.kind=kind;std::memcpy(p.at,at,12);
     return PlayerRequesterOf(requester,p.requester) && commands.SendPing(p,GetTickCount64());
-}
-bool TakeMapPing(MapPingHeard* out) noexcept {
-    if(!out)return false;
-    command_net::Ping p;
-    if(!commands.TakePing(&p))return false;
-    MarkIdentities who;const unsigned char none[32]{};
-    out->player=ResolveMarkIdentities(p.requester,none,&who) ? who.player.obj : nullptr;
-    std::memcpy(out->at,p.at,12);out->kind=p.kind;
-    return true;
 }
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {
     if(!out)return false;*out=commands.Result();return out->request!=0;
