@@ -30,6 +30,7 @@ enum class Shape : std::uint8_t {
     diamond,        // left, right, behind, ahead: an all-round march
     bounding,       // bounding overwatch: the halves leapfrog in a wedge
     perimeter,      // defence: a ring round the point, all round
+    follow,         // the default march: a loose cluster trailing the point (2026-11-27, appended: the ini values stay)
     count
 };
 constexpr int kShapes=static_cast<int>(Shape::count);
@@ -39,9 +40,11 @@ constexpr std::uint64_t kStuckMs=3000,kRestMs=6000;
 constexpr float kArrive=1.5f;              // m from its slot that is there
 constexpr float kHeadwayMin=0.5f;          // m nearer its slot within kStuckMs that is headway
 
-// The shapes a key cycles through: on the move all the marching ones; on a guard point the defensive ones (and the
-// marching shapes that make sense facing a threat: the line and the wedge).
-constexpr Shape kMarch[]={Shape::stock,Shape::column,Shape::staggered,Shape::wedge,Shape::vee,Shape::line,Shape::echelonLeft,
+// The shapes a key cycles through: on the move all the marching ones, the default follow first and the stock follow
+// next (the user, 2026-11-27: 「新的跟随逻辑设为默认」, the stock one kept as a choice); on a guard point the defensive
+// ones (and the marching shapes that make sense facing a threat: the line and the wedge).
+constexpr Shape kMarchDefault=Shape::follow;
+constexpr Shape kMarch[]={Shape::follow,Shape::stock,Shape::column,Shape::staggered,Shape::wedge,Shape::vee,Shape::line,Shape::echelonLeft,
                           Shape::echelonRight,Shape::diamond,Shape::bounding};
 constexpr Shape kGuard[]={Shape::stock,Shape::perimeter,Shape::line,Shape::wedge};
 template<int N> constexpr Shape NextOf(const Shape (&list)[N],Shape s) noexcept {
@@ -53,6 +56,8 @@ constexpr Shape Next(Shape s,bool guard) noexcept { return guard ? NextOf(kGuard
 constexpr bool GuardShape(Shape s) noexcept { for(Shape g:kGuard)if(g==s)return true; return false; }
 constexpr bool MarchShape(Shape s) noexcept { for(Shape g:kMarch)if(g==s)return true; return false; }
 constexpr Shape FromInt(int v) noexcept { return v>=0 && v<kShapes ? static_cast<Shape>(v) : Shape::stock; }
+// The march an ini value (NpcFormation) starts at: its shape when that is a march, else the default (kMarchDefault).
+constexpr Shape MarchFromInt(int v) noexcept { return MarchShape(FromInt(v)) && static_cast<int>(FromInt(v))==v ? FromInt(v) : kMarchDefault; }
 
 inline const char* Name(Shape s) noexcept {
     switch(s) {
@@ -66,6 +71,7 @@ inline const char* Name(Shape s) noexcept {
     case Shape::diamond: return "diamond";
     case Shape::bounding: return "bounding overwatch";
     case Shape::perimeter: return "perimeter";
+    case Shape::follow: return "follow";
     default: return "stock";
     }
 }
@@ -92,6 +98,20 @@ inline bool Offset(Shape s,int k,int n,float spacing,float* x,float* z) noexcept
         case 2: *x=0.0f;*z=-r;break;   // behind
         default: *x=0.0f;*z=r;break;   // ahead
         }
+        return true;
+    }
+    case Shape::follow: {
+        // A loose cluster behind the point, not a drill: rows of 1, 2, 3, 2, 3... (the first right behind; a row of
+        // three centre, left, right; of two left, right), each 0.8 x spacing farther back, the rows of two between
+        // the threes' places; each soldier nudged up to 0.06 x spacing by its place (a fixed pattern, so its slot
+        // does not wander), at least 0.7 x spacing from any other. The Keep logic below (lead, ease, re-send, catch
+        // up, the rest's scatter) is what makes it a follow.
+        int row=0,first=0,size=1;
+        while(k>=first+size){first+=size;++row;size=row%2 ? 2 : 3;}
+        const int col=k-first;
+        const float across=size==1 ? 0.0f : size==2 ? (col==0 ? -0.6f : 0.6f) : (col==0 ? 0.0f : col==1 ? -1.1f : 1.1f);
+        const float jx=0.02f*static_cast<float>((k*37)%7-3),jz=0.02f*static_cast<float>((k*53)%7-3);
+        *x=spacing*(across+jx);*z=-spacing*(0.9f+0.8f*static_cast<float>(row)+jz);
         return true;
     }
     case Shape::perimeter: {
@@ -261,9 +281,13 @@ inline bool Scatter(int k,float spacing,float* x,float* z) noexcept {
 // A soldier's own keeping up: its eased slot, the goal its route was last given.
 struct Keep { Goal goal; Sent sent; };
 
-static_assert(Next(Shape::stock,false)==Shape::column && Next(Shape::bounding,false)==Shape::stock,"the march cycle");
+static_assert(Next(Shape::follow,false)==Shape::stock && Next(Shape::stock,false)==Shape::column &&
+              Next(Shape::bounding,false)==Shape::follow,"the march cycle: the default follow first, the stock follow next");
+static_assert(MarchFromInt(static_cast<int>(Shape::follow))==Shape::follow && MarchFromInt(0)==Shape::stock &&
+              MarchFromInt(static_cast<int>(Shape::perimeter))==kMarchDefault && MarchFromInt(-1)==kMarchDefault,"the ini's march");
 static_assert(Next(Shape::stock,true)==Shape::perimeter && Next(Shape::wedge,true)==Shape::stock,"the guard cycle");
-static_assert(Next(Shape::perimeter,false)==Shape::stock && Next(Shape::column,true)==Shape::stock,"a shape of the other list starts over");
-static_assert(GuardShape(Shape::perimeter) && !MarchShape(Shape::perimeter) && !GuardShape(Shape::column),"the lists");
+static_assert(Next(Shape::perimeter,false)==Shape::follow && Next(Shape::column,true)==Shape::stock,"a shape of the other list starts over");
+static_assert(GuardShape(Shape::perimeter) && !MarchShape(Shape::perimeter) && !GuardShape(Shape::column) &&
+              MarchShape(Shape::follow) && !GuardShape(Shape::follow),"the lists");
 }  // namespace formation
 }  // namespace npc

@@ -2641,7 +2641,7 @@ int Scenes(const std::wstring& dir) {
         bool named=false,apart=true;
         for(std::size_t i=0;i<drew.size();++i) {
             const Drew& p=drew[i];
-            if(p.text.find(FormationText(sceneFormation))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
+            if(p.text.find(FormationText(sceneFormation,false))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
                 named=p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f;
             for(std::size_t k=i+1;k<drew.size();++k) {
                 const Drew& q=drew[k];

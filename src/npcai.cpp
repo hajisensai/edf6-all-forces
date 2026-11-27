@@ -484,11 +484,7 @@ constexpr int kPeerMarches=8;
 PeerMarch peerMarches[kPeerMarches]{};
 
 npc::formation::Shape MarchShape() noexcept {
-    if(!march.shapeSet) {
-        const npc::formation::Shape s=npc::formation::FromInt(Cfg().npcFormation);
-        march.shape=npc::formation::MarchShape(s) ? s : npc::formation::Shape::stock;
-        march.shapeSet=true;
-    }
+    if(!march.shapeSet){march.shape=npc::formation::MarchFromInt(Cfg().npcFormation);march.shapeSet=true;}
     return march.shape;
 }
 bool PeerLive(const ObjRef& p) noexcept {
@@ -509,10 +505,7 @@ March* MarchOf(const unsigned char* root,bool make) noexcept {
 }
 npc::formation::Shape ShapeOf(March& m) noexcept {
     if(&m==&march)return MarchShape();
-    if(!m.shapeSet) {
-        const npc::formation::Shape s=npc::formation::FromInt(Cfg().npcFormation);
-        m.shape=npc::formation::MarchShape(s) ? s : npc::formation::Shape::stock;m.shapeSet=true;
-    }
+    if(!m.shapeSet){m.shape=npc::formation::MarchFromInt(Cfg().npcFormation);m.shapeSet=true;}
     return m.shape;
 }
 void SetMarchShape(npc::formation::Shape s,const char* by) noexcept;

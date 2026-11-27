@@ -2,12 +2,14 @@
 //  - every shape, for 1 to 16 soldiers: nobody on the anchor or on another soldier (at least `spacing` x 0.7 apart),
 //    and each shape where it says it is: the column behind the point, the wedge back and out at 45 degrees, the vee
 //    forward, the line abreast, the echelons back to their side, the diamond round the point, the perimeter a ring of
-//    soldiers `spacing` apart (never tighter than `spacing` from the centre);
+//    soldiers `spacing` apart (never tighter than `spacing` from the centre), the follow a loose cluster behind (the
+//    first right behind, none wider than 1.2 x spacing either side, back in rows; the same slot each time asked);
 //  - the world slot: turning the heading turns the slots with it (distances kept), and the right is the game's right;
 //  - the heading follows the anchor's walk, not its standing turns;
 //  - bounding overwatch swaps its halves when the movers are all there, or after kBoundMost, never with no movers;
 //  - a soldier with no headway gives its slot up for kRestMs, then tries again;
-//  - the key's cycles go round both lists and back to stock;
+//  - the key's cycles go round both lists and back to stock, the march's starting at the default follow; the ini's
+//    march (MarchFromInt): a march as it is, anything else the default;
 //  - the march keeps up: the anchor's speed measured and led, the slot eased, the goal re-sent sparingly, the walk's
 //    least ease, the rest's scatter (the front open), the view cone, the straggler's stretch and its places behind.
 //   cmake --build build --target formation_check && build\formation_check.exe      (exit code 1 on a failure)
@@ -45,6 +47,14 @@ void Shapes() {
                 case Shape::line: Check(z[k]==0.0f && x[k]!=0.0f,"the line abreast",k,x[k]);break;
                 case Shape::echelonLeft: Check(x[k]<0.0f && z[k]<0.0f,"echelon left back left",k,x[k]);break;
                 case Shape::echelonRight: Check(x[k]>0.0f && z[k]<0.0f,"echelon right back right",k,x[k]);break;
+                case Shape::follow: {
+                    Check(z[k]<=-sp*0.8f && std::fabs(x[k])<=sp*1.2f,"the follow behind, not wide",k,x[k]);
+                    float x2,z2;
+                    Check(Offset(s,k,n,sp,&x2,&z2) && x2==x[k] && z2==z[k] && Offset(s,k,n+5,sp,&x2,&z2) && x2==x[k] && z2==z[k],
+                          "the follow's slot fixed (by its place, not the count)",k,n);
+                    if(k>=1)Check(z[k]<=z[k-1]+sp*0.2f,"the follow's later places no nearer",k,z[k]);
+                    break;
+                }
                 case Shape::perimeter: {
                     const float r=std::sqrt(x[k]*x[k]+z[k]*z[k]),r0=std::sqrt(x[0]*x[0]+z[0]*z[0]);
                     Check(Near(r,r0,1e-3f) && r>=sp-1e-3f,"the perimeter one ring",k,r);
@@ -58,6 +68,11 @@ void Shapes() {
             // The line and the wedge take both sides, the first left (x < 0).
             if(n>=2 && (s==Shape::line || s==Shape::wedge))Check(x[0]<0.0f && x[1]>0.0f,"left then right",si,n);
             if(s==Shape::perimeter)Check(Near(x[0],0.0f,1e-4f) && z[0]>0.0f,"the perimeter's first ahead (the threat)",x[0],z[0]);
+            if(s==Shape::follow) {
+                Check(std::fabs(x[0])<=sp*0.1f && z[0]<0.0f,"the follow's first right behind",x[0],z[0]);
+                if(n>=3)Check(x[1]*x[2]<0.0f,"the follow's next two either side",x[1],x[2]);
+                if(n==16)Check(z[15]>=-sp*6.0f,"sixteen within six places back (a cluster, not a file)",z[15]);
+            }
         }
     }
     float x,z;
@@ -131,6 +146,14 @@ void Cycles() {
     do{s=Next(s,true);++n;}while(s!=Shape::stock && n<50);
     Check(n==static_cast<int>(sizeof(kGuard)/sizeof(kGuard[0])),"the guard cycle goes round",n);
     Check(FromInt(-1)==Shape::stock && FromInt(kShapes)==Shape::stock && FromInt(3)==Shape::wedge,"ini values");
+    // The default follow first in the march, the stock follow right after it (one key press back to the game's own).
+    Check(kMarch[0]==Shape::follow && kMarch[1]==Shape::stock && kMarchDefault==Shape::follow,"the march's order");
+    Check(MarchShape(Shape::follow) && !GuardShape(Shape::follow) && Next(Shape::follow,true)==Shape::stock,"the follow is a march");
+    Check(MarchFromInt(static_cast<int>(Shape::follow))==Shape::follow && MarchFromInt(0)==Shape::stock && MarchFromInt(9)==Shape::bounding &&
+          MarchFromInt(static_cast<int>(Shape::perimeter))==Shape::follow && MarchFromInt(kShapes)==Shape::follow && MarchFromInt(-1)==Shape::follow,
+          "the ini's march: a march as it is, else the default follow");
+    Check(static_cast<int>(Shape::follow)==11 && static_cast<int>(Shape::perimeter)==10 && static_cast<int>(Shape::bounding)==9,
+          "the ini's numbers kept (the follow appended)");
 }
 // The keeping up (formation.h Observe / Lead / Ease / Resend / EaseLeast / Resting / Scatter):
 // the anchor walked at a steady speed, turned about, stood still, warped.

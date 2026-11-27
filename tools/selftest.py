@@ -7320,16 +7320,22 @@ def npc_formation_wired() -> None:
     form = drive.index('if(!t.e && FormationMove(')
     for before in ('Evade(s,h,c,pos,ms,&p.move)', 'Board(s,h,pos,ms)', 'FallBack(s,h,pos,served,ms)', 'npc::LaneEscape('):
         assert drive.index(before) < form, before
-    for key, default in (('NpcFormation', '0'), ('NpcFormationCycleKey', '85'), ('NpcFormationSpacing', '5'), ('NpcGuardFormation', '0')):
+    # The default march is the plugin's follow (formation.h Shape::follow; the user, 2026-11-27: 「新的跟随逻辑设为默认」):
+    # the ini, the Config default and the range check all agree on its number, the last of the enum.
+    for key, default in (('NpcFormation', '11'), ('NpcFormationCycleKey', '85'), ('NpcFormationSpacing', '5'), ('NpcGuardFormation', '0')):
         assert f'L"{key}"' in plugin and (f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin), key
         assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
         assert key in readme and key in doc, key
     assert 'FormationTick();' in code and 'k.formation=Down(\'T\')' in src('src/mapcmd.cpp')
     table = src('src/hudtext.inc')
     shapes = re.findall(r'^\s*(\w+),\s*//', src('src/formation.h').split('enum class Shape', 1)[1].split('};', 1)[0], re.M)
-    assert len(shapes) == 11, shapes
+    assert len(shapes) == 12 and shapes[-1] == 'follow', shapes
     for s in shapes:
         assert f'HUDTEXT(form{s[0].upper()}{s[1:]},' in table, s
+    assert re.search(r'^HUDTEXT\(formStockFollow,[^\n]*原版跟随', table, re.M), 'the stock march is named 原版跟随'
+    follow = str(shapes.index('follow'))
+    assert re.search(r'int npcFormation=' + follow + r';', src('src/crew.h')), 'the Config default is the follow'
+    assert f'FixInt("NpcFormation",n.npcFormation,0,{len(shapes) - 1})' in plugin, 'the range takes every shape'
     assert 'EXCLUDE_FROM_ALL tools/formation_check.cpp' in cmake and 'formation_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
 
 

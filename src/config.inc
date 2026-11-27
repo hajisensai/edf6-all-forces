@@ -438,7 +438,7 @@
     float qmarkPointSec=15.0f;      // the Q mark on the ground (no enemy aimed at) stays this many s (qmark.cpp)
     float qmarkVolume=0.8f;         // the Q mark's cues (marked / a teammate marked / let go), 0: silent
     bool vanillaSpot=false;         // the stock spot (原版 Q, SpotEffect): false = the local players' is not cast (turretaim.cpp)
-    int npcFormation=0;             // the recruited squads' march round the player (formation.h Shape: 0 stock, 1 column...)
+    int npcFormation=11;            // the recruited squads' march round the player (formation.h Shape: 11 follow, 0 stock, 1 column...)
     int npcFormationKey=85;         // ...on foot: cycles it ('U', ini NpcFormationCycleKey: T is the stock Shotcut, plan §3.3; 0: off;
                                     // the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers
@@ -1277,7 +1277,7 @@
     Fix("NpcMarkCone",n.npcMarkCone,1.0f,45.0f);
     Fix("QMarkPointSec",n.qmarkPointSec,1.0f,600.0f);
     Fix("QMarkVolume",n.qmarkVolume,0.0f,2.0f);
-    n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,10));
+    n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,11));
     n.npcFormationKey=static_cast<int>(FixInt("NpcFormationCycleKey",n.npcFormationKey,0,254));
     Fix("NpcFormationSpacing",n.npcFormationSpacing,2.0f,30.0f);
     n.npcGuardFormation=static_cast<int>(FixInt("NpcGuardFormation",n.npcGuardFormation,0,10));
