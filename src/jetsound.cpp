@@ -78,6 +78,7 @@ struct Sound {
     bool mixed=false,ranked=false;           // through Mix once; among the loudest heard (jetmix::Rank)
     float presence=0.0f;                     // jetmix::Step: 0 unheard .. 1 at its level
     float loud=0.0f;                         // its layers' sum as heard now, before its presence (the ranking's)
+    float distance=0.0f;                     // m from the camera, as heard (Mix): the farthest not heard gives way
 };
 Sound sounds[kSounds]{};
 // Each sound's past (sounds[i]'s), 46 KB each: on the heap from the first jet heard, not in the image (1.5 MB of
@@ -139,14 +140,19 @@ void Silence(Sound& s) noexcept {
     s=Sound{};
 }
 
-// The jet's entry: a free one, else the quietest that is not heard (ranked out, faded to nothing: taking it is silent);
-// nullptr with every one heard or still fading. Not first come, first served: a jet newly near takes the place of a
-// far one the ranking has let go of.
-Sound* EntryFor(const unsigned char* v) noexcept {
+// The jet's entry (`pos`: where it is now): a free one, else that of the farthest not heard (ranked out, faded to
+// nothing: taking it is silent) if `pos` is nearer by the ranking's margin; nullptr otherwise. Not first come, first
+// served: a jet newly near takes the place of a far one the ranking has let go of. The margin: no two jets out of the
+// ranking taking each other's entry frame by frame (each one's trail started over every time).
+Sound* EntryFor(const unsigned char* v,const float* pos) noexcept {
     Sound* free=nullptr;
-    for(auto& s:sounds) {
-        if(!s.ref){free=&s;break;}
-        if(s.mixed && !s.ranked && !(s.presence>0.0f) && (!free || s.loud<free->loud))free=&s;
+    for(auto& s:sounds)if(!s.ref){free=&s;break;}
+    if(!free && hasListener) {
+        float d2=0.0f;
+        for(int i=0;i<3;++i)d2+=(pos[i]-listener[i])*(pos[i]-listener[i]);
+        const float d=std::sqrt(d2)*jetmix::kKeepMargin;
+        for(auto& s:sounds)
+            if(s.mixed && !s.ranked && !(s.presence>0.0f) && s.distance>d && (!free || s.distance>free->distance))free=&s;
     }
     if(!free)return nullptr;
     Silence(*free);
@@ -256,7 +262,7 @@ void Step(unsigned char* v) noexcept {
         return;
     }
     if(!trails.Allocate("jet engine sound"))return;   // no heap for the trails: the engines stay silent (logged once)
-    Sound* const s=known ? known : EntryFor(v);
+    Sound* const s=known ? known : EntryFor(v,reinterpret_cast<const float*>(v+kPosition));
     if(!s)return;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     float dt=10.0f;   // a jet first heard: its engine already where its power is
@@ -345,7 +351,7 @@ void Mix() noexcept {
         if(in[i]!=s.ranked && s.mixed && Cfg().debug)
             Log("SOUND jet %s at %.0f m %s (level %.4f)",s.own ? "own" : "ai",h.p.distance,
                 in[i] ? "ranked in" : "ranked out, fading",loud[i]);
-        s.loud=loud[i];s.ranked=in[i];s.mixed=true;
+        s.loud=loud[i];s.distance=h.p.distance;s.ranked=in[i];s.mixed=true;
         s.presence=jetmix::Step(s.presence,in[i] && !s.caught,m.fadeIn,s.dead ? jetmix::kDeadFade : m.fadeOut,dt);
         if(s.caught && !(s.presence>0.0f)){Silence(s);continue;}   // heard out: its entry free
         const float gain=s.level*h.farGain*jetmix::Gain(s.presence);
