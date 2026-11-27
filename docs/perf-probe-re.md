@@ -99,3 +99,9 @@ System::update 在 `0x1198FA4` 先调一次绘制录制 `0x11978D0`，然后跑 
 
 - 「本帧采样到 Present」：M001 约 2.8 ms；
 - 「步进它的那次采样到 Present」：M001 约 36 ms。
+
+## 5. 基准场景 bench 的敌人（2026-11-28）
+
+`tools/perfrun.py bench:E[:S[:ENEMY]]`（`testrange/gen.py` 的 `BENCH`）要把存活敌人数钉在 E。最初的做法是敌人整组无敌，实机发现这不代表真实战斗：插件的 WastedFire 把所有敌人判成「打不动」，士兵选目标退化成全扫，NPC 并行决策命中率变 0。
+
+现在敌人不无敌，而是等级放大 `BENCH_ENEMY_LEVEL`（1000 倍）：`CreateEnemyGroup` 的 level 经 `SetLevel 0x54E740` 写入 `+0x49C`，敌人耐久 = SGO 耐久 × `+0x49C` / 10（见 `docs/edf41-classes.md` 第 3 节），血量与等级成正比，所以 1000 倍血量在整个测量窗口内打不死。士兵不受敌伤并自动复活、玩家无敌不变；补位循环仍补到 E（死的也补）。

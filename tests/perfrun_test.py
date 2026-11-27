@@ -179,7 +179,7 @@ def scenarios() -> None:
 
 
 def bench_scenario() -> None:
-    """bench:E[:S[:ENEMY]]: the pinned population (gen.BENCH) -- its plan, its script (nothing dies, the refill to E),
+    """bench:E[:S[:ENEMY]]: the pinned population (gen.BENCH) -- its plan, its script (mortal 1000x-HP enemies, the refill to E),
     its warm-up counted from E reached, and the readiness rule (E reached, or a count that stopped rising)."""
     import re
     import rmpa
@@ -217,9 +217,11 @@ def bench_scenario() -> None:
           'bench script: its squads take no damage from the enemy and come back')
     check('SetObjectInvincible(GetPlayerObject(0), true);' in text, 'bench script: the player invincible')
     groups = re.findall(r'CreateEnemyGroup\([^;]*;', text)
-    check(len(groups) == 1 and groups[0].endswith('.SetInvincible(true);') and '"app:/object/giantant01.sgo"' in groups[0]
-          and f', {gen.BENCH_SPREAD:.0f}, ' in groups[0],
-          'bench script: one refill call, its groups invincible, spread BENCH_SPREAD')
+    check(len(groups) == 1 and 'SetInvincible' not in text and '"app:/object/giantant01.sgo"' in groups[0]
+          and f', {gen.BENCH_SPREAD:.0f}, ' in groups[0]
+          and f', {gen.BENCH_ENEMY_LEVEL:.2f}, true);' in groups[0] and gen.BENCH_ENEMY_LEVEL >= 100.0,
+          'bench script: one refill call, its groups mortal but BENCH_ENEMY_LEVEL tough, spread BENCH_SPREAD')
+    check(plan.waves.level == gen.BENCH_ENEMY_LEVEL, 'bench plan: the enemies at BENCH_ENEMY_LEVEL')
     check('int slots = 3000 - int(GetTeamObjectCount(TEAM_ID_ENEMY));' in text
           and f'slots < {gen.BENCH_BATCH} ? slots : {gen.BENCH_BATCH}' in text and 'CreateFriend(' not in text
           and 'CreateVehicle2(' not in text, 'bench script: the refill tops up to E, BENCH_BATCH a call, no vehicles')

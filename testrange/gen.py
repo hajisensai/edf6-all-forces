@@ -329,13 +329,18 @@ GRAND_SKY_SPAWNS = 2
 
 # A benchmark population (tools/perfrun.py bench:E[:S[:ENEMY]]; the user, 2026-11-27: stress:N held 2541 enemies one run
 # and 3332 the next, the noise swamping any A/B): the same E enemies and S soldiers every run, a count that stays put.
-# Nothing dies: every enemy group invincible (as the stock M003_5D's), every soldier squad taking no damage from the
-# enemy (SetTeamDamageAdjust_Squad 0; the stock M017 uses 2) and coming back should one fall anyway (the stock M045's
-# SetAutoResurrectionSquad), the player invincible: the fight goes on at full strength, never one-sided, and once the
-# E are out nothing more is spawned (the spawning's own cost is the fill, before the window). The refill loop still
-# tops the enemies up to E (one fallen out of the world): BENCH_BATCH a call, BENCH_GAP s apart, the enemy spots in a
-# fixed order. No vehicles: no shelling, no wrecks.
+# The enemies are mortal but all but unkillable: NOT invincible (an invincible one made the plugin's WastedFire call
+# every enemy 'cannot be hurt', so the soldiers' target choice fell back to a full scan and the NPC parallel think hit
+# nothing -- not a real fight). Their level is BENCH_ENEMY_LEVEL times the mission's: an enemy's HP is its SGO durability
+# x level / 10 (SetLevel 0x54E740 -> +0x49C, docs/edf41-classes.md section 3), so 1000x the stock HP outlasts the
+# window (a few hundred soldiers' fire over minutes does not get through it; one that dies anyway is refilled). Every
+# soldier squad takes no damage from the enemy (SetTeamDamageAdjust_Squad 0; the stock M017 uses 2) and comes back
+# should one fall anyway (the stock M045's SetAutoResurrectionSquad), the player invincible: the fight goes on at full
+# strength, never one-sided. The refill loop tops the enemies up to E (one dead or fallen out of the world):
+# BENCH_BATCH a call, BENCH_GAP s apart, the enemy spots in a fixed order; once the E are out it spawns nothing more
+# (the spawning's own cost is the fill, before the window). No vehicles: no shelling, no wrecks.
 BENCH = 'bench'
+BENCH_ENEMY_LEVEL = 1000.0
 BENCH_BATCH, BENCH_GAP, BENCH_SPREAD = 100, 0.25, 40.0
 
 
@@ -824,8 +829,8 @@ def script(plan: Plan, lay: Layout) -> str:
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
         lines += [
             '',
-            f'\t// BENCH: the enemies topped up to {int(w.max_alive)}, {BENCH_BATCH} a call, the spots in a fixed order; all',
-            '\t// invincible, so once they are out the count stays put and nothing more is made.',
+            f'\t// BENCH: the enemies topped up to {int(w.max_alive)}, {BENCH_BATCH} a call, the spots in a fixed order; they',
+            '\t// are mortal but BENCH_ENEMY_LEVEL tough, so once out the count stays put (a dead one is made up).',
             f'\tarray<string> spots = {{ {pts} }};',
             '\tuint next = 0;',
             f'\tWait({w.first_delay:.1f});',
@@ -834,7 +839,7 @@ def script(plan: Plan, lay: Layout) -> str:
             '\t\tif( slots > 0 ) {',
             f'\t\t\tint count = slots < {BENCH_BATCH} ? slots : {BENCH_BATCH};',
             f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], {BENCH_SPREAD:.0f}, '
-            f'{_q("app:/object/" + w.enemy + ".sgo")}, count, {w.level:.2f}, true).SetInvincible(true);',
+            f'{_q("app:/object/" + w.enemy + ".sgo")}, count, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             f'\t\t\tWait({BENCH_GAP:.2f});',
             '\t\t} else {',

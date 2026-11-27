@@ -19,10 +19,12 @@ SCENARIO
   bench:E[:S[:ENEMY]]                a pinned population for A/B and scaling (the user, 2026-11-27: stress:N held 2541
                                      enemies one run, 3332 the next): E enemies of ENEMY (default giantant01) on the
                                      range's enemy spots in a fixed order, S soldiers (default BENCH_SOLDIERS = 120,
-                                     rounded up to squads of six) by the player, no vehicles. Nothing dies (gen.BENCH:
-                                     the enemies invincible, the soldiers taking no damage from them, the player
-                                     invincible) and a refill loop tops the enemies up to E, so the count stays at E
-                                     and nothing is spawned in the window. Its warm-up waits for the PERF OBJECTS
+                                     rounded up to squads of six) by the player, no vehicles. The enemies are mortal
+                                     but gen.BENCH_ENEMY_LEVEL (1000) x the stock HP, so none dies in the window
+                                     (invincible ones made the plugin's WastedFire skip every target); the soldiers
+                                     take no damage from them and come back, the player is invincible, and a refill
+                                     loop tops the enemies up to E (a dead one too), so the count stays at E and next
+                                     to nothing is spawned in the window. Its warm-up waits for the PERF OBJECTS
                                      enemies to reach E (or stop rising for BENCH_PLATEAU s: the report then says it
                                      fell short), then BENCH_SETTLE s for the fight to close in. Several sizes in one
                                      launch: perfrun.py bench:500 bench:1000 bench:2000 bench:4000; summary.md's
@@ -156,7 +158,8 @@ def plan_for(scenario: str):
         plan.scenario = gen.BENCH
         plan.squads = -(-soldiers // 6)
         plan.waves = gen.Waves(enabled=True, enemy=rest[2] if len(rest) > 2 and rest[2] else 'giantant01',
-                               per_wave=gen.BENCH_BATCH, max_alive=e, first_delay=3.0, interval=gen.BENCH_GAP, level=1.0)
+                               per_wave=gen.BENCH_BATCH, max_alive=e, first_delay=3.0, interval=gen.BENCH_GAP,
+                               level=gen.BENCH_ENEMY_LEVEL)
         return plan
     if kind == 'grand':
         return gen.grand_battle(gen.Plan())
