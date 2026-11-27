@@ -26,6 +26,7 @@
 #include "online_authority.h"
 #include "layout.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cmath>
 #include <cstring>
 
@@ -80,7 +81,7 @@ struct Rope { ObjRef obj,heli; float off[2]; ULONGLONG used; bool on; };
 struct Drop { ObjRef plane; float target[3]; int jumped; ULONGLONG lastJump; ObjRef tops[kDropTops]; int topCount;
               float seen[3]; ULONGLONG seenAt; };
 Pair pairs[kPairs]{};
-Trip trips[kTrips]{};
+LazyRows<Trip,kTrips> trips;   // heap from the first trip (plugin_image_size_guard: no image table)
 Drop drops[kDrops]{};
 Jumper jumpers[kJumpers]{};
 Rope ropes[kRopes]{};
@@ -348,6 +349,7 @@ bool StartOrJoin(unsigned char* v,const void* top,const mapcmd::Command& after,b
         Log("TRANSPORT v=%p squad %p joins its trip (%s)",v,top,transport::kPhaseNames[static_cast<int>(t->t.phase)]);
         return true;
     }
+    if(!trips.Allocate("TRANSPORT trips"))return false;
     Trip* t=nullptr;
     for(auto& row:trips)if(row.count==0){t=&row;break;}
     if(!t){Log("TRANSPORT trips full (%d): squad %p walks",kTrips,top);return false;}

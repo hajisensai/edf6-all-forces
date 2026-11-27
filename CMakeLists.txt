@@ -189,7 +189,10 @@ add_dependencies(EDF6VehicleCrew edf6_build_id)
 target_include_directories(EDF6VehicleCrew PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(EDF6VehicleCrew PRIVATE xaudio2 sapi ole32)
 target_compile_options(EDF6VehicleCrew PRIVATE /W4 /WX /utf-8 /permissive-)
-target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6VehicleCrew.pdb)
+# /MAP: build/EDF6VehicleCrew.map, outside Mods/Plugins (never shipped): plugin_image_size_guard reads it to name the
+# biggest objects in .data.
+target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6VehicleCrew.pdb
+    "/MAP:${CMAKE_BINARY_DIR}/EDF6VehicleCrew.map")
 # Build output, never tracked: build/Mods/Plugins holds both plugins and their ini files, laid out as they go
 # into the game (tools/installer.py and tools/build_release.py take them from there).
 set_target_properties(EDF6VehicleCrew PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Mods/Plugins")
@@ -1331,8 +1334,10 @@ set_tests_properties(sound_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")
 set_tests_properties(debug_spawn_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The plugin's writable data section stays small: big per-session tables are crew::LazyRows (mem-4,
-# tests/plugin_image_size_guard.py reads the built DLL's PE header).
-add_test(NAME plugin_image_size_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/plugin_image_size_guard.py" "$<TARGET_FILE:EDF6VehicleCrew>")
+# tests/plugin_image_size_guard.py reads the built DLL's PE header; near the limit it names the biggest objects from
+# the linker map the plugin's link writes, /MAP above).
+add_test(NAME plugin_image_size_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/plugin_image_size_guard.py"
+    "$<TARGET_FILE:EDF6VehicleCrew>" "${CMAKE_BINARY_DIR}/EDF6VehicleCrew.map")
 # An empty vehicle it makes is CreateVehicle2's (0x633280), never SetLevel's: off the native AI list, so the player in
 # it drives and fires; with EDF6_NATIVE_DLL its signatures are compared with the DLL.
 add_test(NAME debug_spawn_vehicle_level_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_vehicle_level_guard.py")

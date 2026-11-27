@@ -5,6 +5,7 @@
 #include "enemy_control.h"
 #include "enemy_control_pvp_tree.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include "team_native_logic.h"
 #include <cmath>
 #include <cstring>
@@ -54,7 +55,7 @@ bool installed=false,globalUnsafe=false;unsigned char installedCall[5]{};std::ui
 struct Root {ObjRef ref{};bool unsafe=false;std::uint64_t token=0;unsigned wave=0,total=0,next=0;};
 struct Meteor {ObjRef root{},ref{};int team=-1,last=-1;bool adopted=false;};
 struct Binding {ObjRef root{},part{};const unsigned char* launcher=nullptr;const void* context=nullptr;const void* maker=nullptr;std::uint64_t serial=0;};
-Root roots[kRootLimit]{};Meteor meteors[kMeteorLimit]{};Binding bindings[kBindingLimit]{};
+Root roots[kRootLimit]{};Meteor meteors[kMeteorLimit]{};LazyRows<Binding,kBindingLimit> bindings;   // heap from the first Bind (plugin_image_size_guard)
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
 bool Team(int v) noexcept {return team_native::TeamOrClosing(v);}
 bool Cache(EmitterKind kind) noexcept {return kind==EmitterKind::ownerTeamCache || kind==EmitterKind::ownerLastTeamCache;}
@@ -148,7 +149,7 @@ bool PartRoot(const ObjRef& part,ObjRef* out) noexcept {
 }
 Binding* Bind(const ObjRef& root,const ObjRef& part,const unsigned char* launcher,const void* context,const void* maker) noexcept {
     for(auto& b:bindings)if(b.serial && Same(b.root,root) && Same(b.part,part) && b.launcher==launcher && b.context==context && b.maker==maker)return &b;
-    if(serial==UINT64_MAX)return nullptr;
+    if(serial==UINT64_MAX || !bindings.Allocate("PVP boss bullet bindings"))return nullptr;
     for(auto& b:bindings)if(!b.serial) {
         if(!Pin(root))return nullptr;
         if(!Pin(part)){auto copy=root;Drop(copy);return nullptr;}

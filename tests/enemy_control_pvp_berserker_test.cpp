@@ -197,6 +197,7 @@ void TailAndCapacity(){
 
 }
 namespace crew {
+void Log(const char*,...) noexcept {}   // LazyRows (src/lazy_rows.h) logs a refused allocation
 unsigned char* image=nullptr;
 bool EnemyControlOwnsTargetSelector(const void* root,const void* function) noexcept{return root==selectorRoot && function==selectorFunction;}
 void* EnemyBerserkerTestFunction(unsigned at) noexcept {if(at==kSetTeam)return reinterpret_cast<void*>(&SetTeam);if(at==kDelete)return reinterpret_cast<void*>(&Delete);if(at==kShoot)return reinterpret_cast<void*>(&NativeShoot);if(at==kRocketCtor)return reinterpret_cast<void*>(&NativeRocket);if(at==kBombCtor)return reinterpret_cast<void*>(&NativeBomb);if(at==0x11945E0)return reinterpret_cast<void*>(&NativeCreateScene);if(at==0x353290 || at==0x353420)return reinterpret_cast<void*>(&NativeBind);if(at==kFactory)return reinterpret_cast<void*>(&NativeFactory);if(at==kDefaultFactory)return reinterpret_cast<void*>(&NativeDefault);if(at==0x1195A20)return reinterpret_cast<void*>(&NativePublish);if(at==0x1197050)return reinterpret_cast<void*>(&NativeActivate);return nullptr;}

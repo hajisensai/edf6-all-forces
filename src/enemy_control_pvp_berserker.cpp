@@ -5,6 +5,7 @@
 #include "enemy_control_gun_factory.h"
 #include "enemy_control_walking_parts.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include "edf/patch.h"
 #include "team_native_logic.h"
 #include <cstring>
@@ -74,7 +75,7 @@ struct Notification {ObjRef object{};void* callback=nullptr;void* function=nullp
 struct ShotChild {ObjRef ref{},bullet{};void* manager=nullptr;bool complete=false,activate=false;Notification notice{};};
 struct Shot {ObjRef root{};std::uint64_t token=0;unsigned expected=0,created=0,tracked=0;bool owned=false,failed=false;ObjRef denied{};ShotChild children[controlled_pvp::kMaxMembers]{};};
 struct Construction {void* memory=nullptr;void* result=nullptr;bool entered=false,completed=false,rejected=false,creatingDamage=false;};
-Root roots[kRootLimit]{};Born born[kBornLimit]{};Binding bindings[kBindingLimit]{};
+Root roots[kRootLimit]{};LazyRows<Born,kBornLimit> born;LazyRows<Binding,kBindingLimit> bindings;   // heap from the first record (plugin_image_size_guard)
 unsigned char bulletPublicationCode[28]{};const unsigned char* bulletPublicationRelay=nullptr;unsigned char bulletPublicationAfter[13]{};bool bulletPublicationChanged=false;
 unsigned char publicationCode[24]{};const unsigned char* publicationRelay=nullptr;const void* constructingRocket=nullptr;Construction* construction=nullptr;Shot* active=nullptr;BombBirth* activeBomb=nullptr;ObjRef pendingDenied{};unsigned char publicationAfter[9]{};bool publicationChanged=false;bool installed=false,attempted=false,globalUnsafe=false;unsigned char* admittedImage=nullptr;std::uint64_t serial=0;
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
@@ -202,11 +203,11 @@ bool Sweep() noexcept {
  }
  return true;
 }
-unsigned Room() noexcept {if(!Sweep())return 0;unsigned n=0;for(const auto& b:born)n+=b.child ? 0u : 1u;return n;}
+unsigned Room() noexcept {if(!born.Allocate("PVP berserker births") || !Sweep())return 0;unsigned n=0;for(const auto& b:born)n+=b.child ? 0u : 1u;return n;}
 bool Record(const ObjRef& parent,const ObjRef& child,int bodyTeam,int bodyLast,int parentTeam,int parentLast,bool controlled) noexcept {
  if(Identity(parent)!=Life::live || Identity(child)!=Life::live || Same(parent,child) || !Team(bodyTeam) || !Team(bodyLast) || !Team(parentTeam) || !Team(parentLast))return false;
  if(auto* b=Recorded(child))return Same(b->parent,parent);
- if(!Sweep())return false;Born* free=nullptr;
+ if(!born.Allocate("PVP berserker births") || !Sweep())return false;Born* free=nullptr;
  for(auto& b:born){if(b.child.obj==child.obj && b.child.ctrl!=child.ctrl)return false;if(!b.child && !free)free=&b;}
  if(!free || !Hold(parent))return false;if(!Hold(child)){ObjRef copy=parent;Drop(copy);return false;}
  *free={parent,child,bodyTeam,bodyLast,parentTeam,parentLast,false,controlled,false};return true;
@@ -251,6 +252,7 @@ Binding* Bind(const ObjRef& owner,const ObjRef& holder,const ObjRef& bullet,cons
   int team=-1,last=-1;if(!Original(owner,&team,&last))return nullptr;filter=damage=lastSource ? last : team;
  }
  if(!Team(filter) || !Team(damage))return nullptr;
+ if(!bindings.Allocate("PVP berserker bullet bindings"))return nullptr;
  Binding* target=nullptr;for(auto& b:bindings)if(!b.serial){target=&b;break;}if(!target)return nullptr;
  if(!Hold(owner))return nullptr;if(!Hold(holder)){ObjRef r=owner;Drop(r);return nullptr;}
  if(!Hold(bullet)){ObjRef a=owner,z=holder;Drop(a);Drop(z);return nullptr;}
