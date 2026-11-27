@@ -7872,7 +7872,13 @@ def air_chase_wired() -> None:
     grid = src('src/npc_grid.h')
     pick = grid.split('int PickTarget(const Grid& g,', 1)[1].split('\n}\n', 1)[0]
     assert 'return npc::PickTarget(n,aimOf,isCurrent,usable,eye,anchor,scope,reach);' in pick and 'g.Odd()' in pick
-    assert 'TargetScore(std::sqrt(squared),reach,current)' in pick and 'if(Horiz(anchor,aim)>scope)return;' in pick
+    assert 'TargetScore(std::sqrt(squared),reach,current)' in pick and 'if(Horiz(anchor,aim)>scope)return false;' in pick
+    # A pick's noes are bounded (mostRejects, kPickRejects from npcai.cpp), and the targets wasted on every shooter (the
+    # invincible flag) are left out of the picks' grid once a frame in Gather (bench:4000, 2026-11-28).
+    assert 'if(!usable(i))return ++rejects>=mostRejects;' in pick
+    assert srcscan.has(npcai, 'constexpr int kPickRejects=') and srcscan.has(npcai, 'eye,anchor,scope,reach,kPickRejects);')
+    assert srcscan.has(npcai, 'IndexPicks(w,[&w](int k) noexcept { return WastedOnEveryShooter(')
+    assert srcscan.has(npcai, 'npc::grid::PickTarget(world.pickGrid,world.picks,')
     assert 'squared>distanceLimit[current]' in pick and 'TargetDistanceLimitSquared(bestScore,reach,kKeepTarget)' in pick
     assert '(score==bestScore && i<best)' in pick, 'a tie: the lower index, as the scan'
     assert srcscan.has(npcai, 'w.enemyGrid.Build(w.enemies,') and srcscan.has(npcai, 'w.friendGrid.Build(w.friends,'), 'the grids built with the lists in Gather'

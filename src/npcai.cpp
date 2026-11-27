@@ -956,7 +956,7 @@ int PickRow(int held,const float* eye,const float* anchor,float scope,float reac
     if(world.pickAll)
         return npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
                                      [held](int k) noexcept { return k==held; },usable,eye,anchor,scope,reach,kPickRejects);
-    const int* const rows=world.pickRow.data();
+    const int* const rows=&world.pickRow[0];   // (never empty: kFirstEnemies rows at least)
     const int j=npc::grid::PickTarget(world.pickGrid,world.picks,[rows](int i) noexcept { return world.enemy[rows[i]].aim; },
                                       [rows,held](int i) noexcept { return rows[i]==held; },
                                       [rows,&usable](int i) noexcept { return usable(rows[i]); },eye,anchor,scope,reach,kPickRejects);
