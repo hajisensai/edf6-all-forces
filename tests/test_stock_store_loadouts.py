@@ -304,7 +304,10 @@ class WithGameTests(unittest.TestCase):
                     self.assertEqual(tuple(got['AmmoColor']), vc.AP_TRACER)
                 elif tracer == 'he':
                     self.assertGreater(got['AmmoExplosion'], 0.0)
-                    self.assertEqual(got['Ammo_CustomParameter'][2], 0.0, 'no smoke trail: a tracer')
+                    # The flame a tracer; the smoke the stock's, so it stays and fades after the burst (vc.wt_tracer).
+                    self.assertEqual(got['Ammo_CustomParameter'][1], vc.SHELL_TRACER_CP[1])
+                    self.assertEqual(got['Ammo_CustomParameter'][2], stock['Ammo_CustomParameter'][2])
+                    self.assertGreater(got['Ammo_CustomParameter'][2], 0.0, 'a smoke trail that outlives the round')
 
     def test_flak_templates_preserve_native_fuse_and_penetration(self) -> None:
         rows = stores._read_any(self.game.read('OBJECT', 'V603_FLAK.SGO'))['vehicle_weapon_setting']

@@ -218,21 +218,27 @@ class Bomb:
 
 
 ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
-# War Thunder's gun rounds (the user, 2026-11-26: 「抄抄战雷」; docs/feature-projectile-look.md): a bright tracer, no smoke
-# trail. A RocketBullet01 round (the stock bursting tank and autocannon shells) trails white smoke, CP[2] frames a node
-# (the stock 105 mm's 100; white whatever AmmoColor, 0x17A3B60), behind a flame CP[1] frames long in AmmoColor
-# (docs/missile-re.md, RocketBullet01): the smoke off, the flame a short hot streak, its tracer. A SolidBullet01 round's
-# tracer is a 12-point streak of AmmoColor as long as its frame's travel (0x28B6A0): AP_TRACER over the stock's blue.
-SHELL_TRACER_CP = {1: 14.0, 2: 0.0}
+# War Thunder's gun rounds (the user, 2026-11-26: 「抄抄战雷」; docs/feature-projectile-look.md): a bright tracer. A
+# RocketBullet01 round (the stock bursting tank and autocannon shells) trails white smoke, CP[2] frames a node (the stock
+# 105 mm's 100; white whatever AmmoColor), behind a flame CP[1] frames long in AmmoColor (docs/missile-re.md,
+# RocketBullet01): the flame made a short hot streak, its tracer; the smoke kept as the stock's. The smoke is what stays
+# after the burst (the user, 2026-11-27: 「炮弹爆炸以后尾烟会秒消失」): a dead round is kept until both rings are empty
+# (0x287E40: +0x10A0 and +0x1290 before 0x118A1B0) and its nodes fade on their own life, so with the smoke off (CP[2] 0,
+# the emitter never made: the ctor's enable is CP[2] != 0) the only trail left was the 14-frame flame, gone a quarter
+# second after the burst. A SolidBullet01 round's tracer is a 12-point streak of AmmoColor as long as its frame's travel
+# (0x28B6A0): AP_TRACER over the stock's blue.
+SHELL_TRACER_CP = {1: 14.0}
 AP_TRACER = (3.6, 1.4, 0.5, 1.0)
 
 
 def wt_tracer(r: dsgo.Node, where: str) -> None:
-    """A RocketBullet01 round's smoke trail off and its flame a tracer (SHELL_TRACER_CP), in place; ValueError when `r`
-    is not one of the stock four-entry RocketBullet01 rounds."""
+    """A RocketBullet01 round's flame made a tracer (SHELL_TRACER_CP), its smoke trail the stock's, in place; ValueError
+    when `r` is not one of the stock four-entry RocketBullet01 rounds or has no smoke trail to keep (CP[2] 0)."""
     cp = r.get('Ammo_CustomParameter')
     if r.get('AmmoClass') != 'RocketBullet01' or not isinstance(cp, dsgo.Node) or len(cp.items) != 4:
         raise ValueError(f'{where} 不是四项 CP 的 RocketBullet01 弹')
+    if not cp.items[2] > 0:
+        raise ValueError(f'{where} 的 CP[2]（尾烟寿命）不是正数：{cp.items[2]!r}')
     for i, value in SHELL_TRACER_CP.items():
         cp.items[i] = value
 
