@@ -62,6 +62,7 @@ import make_edf5_campaign as e5c  # noqa: E402
 import make_jets  # noqa: E402
 import make_katyusha  # noqa: E402
 import modfiles  # noqa: E402
+import srcscan  # noqa: E402
 import vcobjects as vc  # noqa: E402
 import xm_units  # noqa: E402
 
@@ -88,7 +89,7 @@ def registry(table: str) -> list[tuple[str, str, str, str]]:
     """The module registry's pass `table` (src/module_table.h kInstalls, kResets, kTicks, kVehicleSteps;
     docs/module-registry.md): its entries in run order, each (phase, module, what it runs, flags). The load, the mission's
     start, the frame tick and each vehicle's input run these (plugin.cpp, mission.cpp, crew.cpp list no feature)."""
-    text = re.sub(r'//[^\n]*', '', src('src/module_table.h'))
+    text = srcscan.code(src('src/module_table.h'))
     start = text.index(f' {table}[]={{')
     body = text[text.index('\n', start):text.index('\n};', start)]
     entries = []
@@ -4310,7 +4311,7 @@ def vehicle_sound_wired() -> None:
         assert rva in doc, f'docs/sound-re.md: {rva}'
     # Every RVA the file names (a code address: 0x5..../0x6..../0x7....) is in its signature table or checked by name.
     sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
-    for rva in set(re.findall(r'\b0x[5-7][0-9A-F]{5}\b', re.sub(r'//[^\n]*', '', code))):
+    for rva in set(re.findall(r'\b0x[5-7][0-9A-F]{5}\b', srcscan.code(code))):
         named = re.search(rf'(\w+)={rva}\b', code)
         assert rva in sigs or (named and (named.group(1) in sigs or f'Matches({named.group(1)},' in code)), f'{rva} is not checked'
     hook = crew.split('void __fastcall InputHook(', 1)[1]
@@ -6360,7 +6361,7 @@ def edf41_clone_destructor_slot() -> None:
     build = shared.split('bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'DtorShaped(c.rvas[kSlotDtor])' in build and build.index('DtorShaped(') < build.index('c.block[1+kSlotDtor]=')
     for rel in ('src/edf41mother.cpp', 'src/edf41mother401.cpp', 'src/edf41robo.cpp'):
-        code = re.sub(r'//[^\n]*', '', src(rel))
+        code = srcscan.code(src(rel))
         assert 'orig[kSlotDtor]' in code and 'orig[0]' not in code, rel
         # block[1] is the address of the clone's first virtual entry. Read-only
         # identity comparisons are valid; assigning this slot would corrupt slot 0.
@@ -6853,7 +6854,7 @@ def damage_stats_wired() -> None:
     settle = [int(v, 16) for v in re.search(r'kSettleCalls\[\]=\{([^}]*)\}', code).group(1).split(',')]
     area = [int(v, 16) for v in re.search(r'kAreaCalls\[\]=\{([^}]*)\}', code).group(1).split(',')]
     assert settle == [0x232702, 0x23426F] and area == [0x23250E, 0x5425D6, 0x5427BF], (settle, area)
-    assert '0x54A586' not in re.sub(r'//.*', '', code), 'the damage call 0x54A586 must stay stock (subcarrier.cpp DamageCallReaches)'
+    assert '0x54A586' not in srcscan.code(code), 'the damage call 0x54A586 must stay stock (subcarrier.cpp DamageCallReaches)'
     assert installs('InstallDamageStats') and resets('ResetDamageStats') and 'src/damagestats.cpp' in cmake
     assert 'add_executable(damage_stats_check' in cmake and 'damage_stats_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
     assert 'StatsScenes(dir);' in src('tools/hud_view.cpp') and 'crew::StatsPage();' in src('tools/map_command_runtime_check.cpp')
@@ -6910,7 +6911,7 @@ def damage_numbers_wired() -> None:
             except ValueError:
                 continue
             assert not lo <= to < hi, f'{ins.address:#x} jumps into the patched span'
-    stub_src = re.sub(r'//[^\n]*', '', re.search(r'kStub\[\]=\{(.*?)\};', header, re.S).group(1))
+    stub_src = srcscan.code(re.search(r'kStub\[\]=\{(.*?)\};', header, re.S).group(1))
     stub = bytes(int(b, 0) for b in re.findall(r'0x[0-9A-F]+|\b0\b', stub_src))
     asm = [(i.mnemonic, i.op_str) for i in edfre.md.disasm(stub, 0)]
     assert asm[:8] == [('push', 'rcx'), ('sub', 'rsp, 0x38'), ('mov', 'qword ptr [rsp + 0x20], rcx'),
@@ -7620,7 +7621,7 @@ def hud_literal_words(text: str) -> list[tuple[int, str]]:
 
 def hudtext_entries() -> list[tuple[str, list[str]]]:
     """src/hudtext.inc's texts: (key, [en, zh-CN, zh-TW, ja])."""
-    table = re.sub(r'//[^\n]*', '', src('src/hudtext.inc'))
+    table = srcscan.code(src('src/hudtext.inc'))
     out = []
     for m in re.finditer(r'HUDTEXT\((\w+),(.*?)\)\s*(?=HUDTEXT\(|\Z)', table, re.S):
         texts = [t.encode('utf-8').decode('unicode_escape').encode('latin-1').decode('utf-8')
@@ -8579,7 +8580,7 @@ def edf5_campaign_plugin_sites() -> None:
     every call to it."""
     import rootcpk
     code = src('src/edf5campaign.cpp')
-    body = re.sub(r'//[^\n]*', '', code.split('kSites[]=', 1)[1].split('}', 1)[0])
+    body = srcscan.code(code.split('kSites[]=', 1)[1].split('}', 1)[0])
     sites = [int(x, 16) for x in re.findall(r'0x([0-9A-Fa-f]+)', body)]
     assert sorted(sites) == sorted(_E5C_OWNED_SITES), [hex(x) for x in sites]
     if not _e5c_have_game():
@@ -10819,7 +10820,7 @@ def edf41_mother_plugin_contract() -> None:
     assert 'AllowAnyTeam(partClass);' in cpp and 'SetSlot(c,22,image+kAnyTeam)' in shared
     assert 'SetSlot(hullClass,kSlotAccept,' in cpp and 'kSlotAccept=16' in cpp
     # The DSGO accessors (0xD7480 ...) fault on a plain SGO such as this object's (EDF+0xD74D9, 2026-10-13): never called here.
-    code = re.sub(r'//[^\n]*', '', cpp + shared)   # comments may name the accessors; the code must not call them
+    code = srcscan.code(cpp + shared)   # comments may name the accessors; the code must not call them
     assert not re.search(r'0xD7480|kChildByName|0x53060|0x52DE0|0x52F30|0x551E0', code)
     assert m.MOTHER301_ALIAS.template == 'E508_CARRIER.SGO' and 'UfoCarrier508' in cpp
     # The clone is the stock class: built from the file's table, not the live one this plugin patches (carrierlaser.cpp
@@ -10865,7 +10866,7 @@ def edf41_mother301_finish_contract() -> None:
     with open(os.path.join(base, 'UFOMOTHER301.SGO'), 'rb') as f:
         hull = sgo.load(data=f.read())
     table = {e[0] for e in hull['edf41_se']}
-    code = re.sub(r'//[^\n]*', '', cpp)
+    code = srcscan.code(cpp)
     names = set(re.findall(r'L"(母船UFO[^"]+)"', code))   # every 4.1 preset name the class plays or hands a bullet
     assert len(names) >= 30 and not (names - table), sorted(names - table)
     with open(os.path.join(base, 'UFOMOTHER301.CAS'), 'rb') as f:
@@ -11029,7 +11030,7 @@ def edf41_robo_plugin_contract() -> None:
         assert name in cpp or name.startswith('muzzle_'), name   # the muzzles come from the SGO's settings
     for rva in ('kStateByName', 'kPlayStateIndex', 'kCastRay', 'kHitReset', 'kGroundAdd', 'kAddLockTarget', 'kWind', 'kQuake'):
         assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
-    code = re.sub(r'//[^\n]*', '', cpp)
+    code = srcscan.code(cpp)
     assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30', code), 'a DSGO accessor on a classic SGO'
     assert 'std::min(' not in code and 'std::max(' not in code   # windows.h macros
 
@@ -11073,8 +11074,8 @@ def edf41_net_contract() -> None:
     for name in rvas:
         assert re.search(rf'\{{{name},\{{0x', net), f'{name} has no fingerprint'
     called = re.findall(r'^\s*\{(k\w+),\{0x', transport, re.M)
-    assert len(called) + len(rvas) >= 12 and 'kObjectReceive' not in called and '0x54D770' not in re.sub(r'//[^\n]*', '', transport), called
-    code = re.sub(r'//[^\n]*', '', net)
+    assert len(called) + len(rvas) >= 12 and 'kObjectReceive' not in called and '0x54D770' not in srcscan.code(transport), called
+    code = srcscan.code(net)
     assert not re.search(r'0x7748F0|0x784210|0x630F90|0x630DF0', code), 'session / host / operator asked outside online_authority'
     assert 'OnlineRunsHere(object)' in code and 'InSession()' in code
     # the classes
@@ -11085,7 +11086,7 @@ def edf41_net_contract() -> None:
     assert 'if(r.player.Active())PlayerTick(r);' in decision and 'else AiTick(r);' in decision
     assert '!NetFollows(r) && --g.autoCount<=0' in robo and 'NetBody(r);' in robo.split('void BodySet(', 1)[1].split('\n}\n', 1)[0]
     assert 'NetMirrorMake(self);' in robo and 'CreateFromPath(m,L"app:/object/UfoRobo401.sgo")' in robo
-    assert 'OnlineRunsHere(self)' not in re.sub(r'//[^\n]*', '', m401), 'the 401 runs on every machine'
+    assert 'OnlineRunsHere(self)' not in srcscan.code(m401), 'the 401 runs on every machine'
     for case in ('case sBcIdle:', 'case sFcIdle:', 'case sGbIdle: {'):
         assert 'NetDecides(' in m401.split(case, 1)[1].split('case ', 1)[0], case
     assert 'NetPanel(h,*p);' in m401 and 'NetBattery(p,*b,i);' in m401 and 'NetSpawn(p,o);' in m401 and 'edf41net::Pump(self);' in m401
@@ -11093,7 +11094,7 @@ def edf41_net_contract() -> None:
     assert 'if((p.manualLease && !p.attack) || !NetDecides(obj))break;' in m301.split('case kCanWait:', 1)[1].split('case ', 1)[0]
     assert 'NetPart(hullObj,part,group,h.parts.size()-1);' in m301 and 'NetSpawn(p,enemy);' in m301 and 'edf41net::Pump(self);' in m301
     for cpp in (robo, m401, m301):   # windows.h macros: the 4.1 class files use (std::min) / (std::max)
-        assert 'far' not in re.findall(r'\b(?:float|int|bool|auto)\s+(\w+)', re.sub(r'//[^\n]*', '', cpp))
+        assert 'far' not in re.findall(r'\b(?:float|int|bool|auto)\s+(\w+)', srcscan.code(cpp))
 
 
 @test
@@ -11130,7 +11131,7 @@ def edf41_robo_finish() -> None:
     assert on.index('(kRagdollLayer)(rag,6)') < on.index('(kRagdollOn)(rag)'), on
     # the stomp's circle: scale x the kind-0 locator's own radius (record +0x10), at the ground under it
     assert 'std::memcpy(&size,rec+0x10,4);' in cpp and 'GroundHit(from,to,c,' in cpp
-    code = re.sub(r'//[^\n]*', '', cpp)
+    code = srcscan.code(cpp)
     assert 'Blast(' not in code, 'the stomp still lets off the grenade stand-in'
     assert 'bool FireSe(void* owner,const float* matrix,const Bullet& b,const void* seTable,const wchar_t* hitSe) noexcept;' in header
     assert 'c.hitSe=hitSe;' in shared and 'FillRawCue(param+0x100,b.hitCue' in shared and 'FireSe(r.obj,mm,g.bullet,r.obj,g.hitSe)' in cpp
@@ -11259,7 +11260,7 @@ def edf41_mother401_plugin_contract() -> None:
                 'kBodyByName', 'kCueLookup', 'kPresetPlay', 'kFlame', 'kExplosionBig', 'kDifficulty'):
         assert re.search(rf'\{{{rva},\{{0x', shared), f'{rva} has no fingerprint'
     assert 'kMaxDurabilityAt=0x2F4' in src('src/edf41classes.h')
-    code = re.sub(r'//[^\n]*', '', cpp)
+    code = srcscan.code(cpp)
     assert not re.search(r'0xD7480|0x53060|0x52DE0|0x52F30|0x551E0', code)   # the DSGO accessors fault on a plain SGO
     # online every machine runs it (edf41net; a guest's ObjectAction must not reach EventAnimationObject's OnMessage): edf41_net_contract
     assert 'OnlineRunsHere(self)' not in code and 'edf41net::Pump(self);' in cpp
@@ -11292,7 +11293,7 @@ def edf41_mother401_parts_collision_layer() -> None:
     is_keyframe_ragdoll and moves through the shared, fingerprinted layer code only when the live table agrees; the shipped data keeps
     the key on the core alone; the choice recomputed from the header's pairs; and, with the games installed, the pair lists and the
     4.1 layer code byte for byte."""
-    cpp = re.sub(r'//[^\n]*', '', src('src/edf41mother401.cpp'))
+    cpp = srcscan.code(src('src/edf41mother401.cpp'))
     hdr = src('src/edf41_hitlayer.h')
     fn = cpp.split('bool PartLayer(Part& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'Key(p.obj,L"is_keyframe_ragdoll")' in fn and '!battery &&' in fn, 'the core / panel split is the SGO key (4.1 0x26FAB0)'
@@ -11424,7 +11425,7 @@ def edf41_mother401_parts_take_the_hull_level() -> None:
     on Inferno a 16000 core had 16000 HP where 4.1 gives 260 000-450 000. The plugin records the hull's EDF6 level (+0x49C) on
     each panel and battery and sizes both from it. With EDF4.1 installed the 4.1 path is checked byte for byte; with EDF6 too,
     the claim the fix rests on: EDF6's story difficulty ranges put the Earth Eater missions' s within 10 % of 4.1's."""
-    cpp = re.sub(r'//[^\n]*', '', src('src/edf41mother401.cpp'))
+    cpp = srcscan.code(src('src/edf41mother401.cpp'))
     assert 'float level=10.0f;' in cpp, 'Part has no level'
     make_panel = cpp.split('void* MakePanel(Part& h,Cell& c,', 1)[1].split('\n}\n', 1)[0]
     assert 'p->level=LevelS(h.obj)*10.0f;' in make_panel, 'a panel must take the hull\'s level (4.1 0x25fbb6)'

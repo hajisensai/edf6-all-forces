@@ -25,6 +25,8 @@ import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 DECISION_RVAS = ('0x7748F0', '0x784210', '0x630F90', '0x630DF0')
 ALLOWED_RVA_FILES = {'src/online_authority.cpp', 'src/netprobe.cpp'}
@@ -36,43 +38,14 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    """The text with // comments cut (enough for this code base: no // inside its string literals the checks read)."""
-    return '\n'.join(re.sub(r'//.*', '', line) for line in text.splitlines())
+code_only = srcscan.code
+body = srcscan.body
+before = srcscan.precedes
 
 
 def read(root: str, rel: str) -> str:
     with open(os.path.join(root, rel), encoding='utf-8') as f:
         return f.read()
-
-
-def body(text: str, signature: str) -> str:
-    """The braces-balanced body of the first definition starting with `signature` ('' when not found): a
-    declaration (a ; before its {) is passed over."""
-    at = text.find(signature)
-    while at >= 0:
-        open_at = text.find('{', at)
-        if open_at < 0:
-            return ''
-        if ';' not in text[at:open_at]:
-            break
-        at = text.find(signature, at + 1)
-    if at < 0:
-        return ''
-    depth = 0
-    for i in range(open_at, len(text)):
-        if text[i] == '{':
-            depth += 1
-        elif text[i] == '}':
-            depth -= 1
-            if depth == 0:
-                return text[open_at:i + 1]
-    return ''
-
-
-def before(text: str, first: str, then: str) -> bool:
-    a, b = text.find(first), text.find(then)
-    return a >= 0 and b >= 0 and a < b
 
 
 def sources(root: str) -> list[str]:

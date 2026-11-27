@@ -22,9 +22,12 @@ add it to the list. Source only, no game.
 Usage: python frame_rate_net_guard.py [repository root]   (default: the parent of this file's directory)"""
 from __future__ import annotations
 
+import functools
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 checks = 0
@@ -42,28 +45,8 @@ def read(*parts: str) -> str:
     return open(os.path.join(ROOT, *parts), encoding='utf-8').read()
 
 
-def code(text: str) -> str:
-    text = re.sub(r'/\*.*?\*/', '', text, flags=re.S)
-    return re.sub(r'//[^\n]*', '', text)   # comments may name anything
-
-
-def body(text: str, head: str) -> str:
-    """The braces' content of the first definition whose text starts with `head` (a regex)."""
-    m = re.search(head, text)
-    if not m:
-        return ''
-    i = text.find('{', m.end() - 1)
-    if i < 0:
-        return ''
-    depth = 0
-    for j in range(i, len(text)):
-        if text[j] == '{':
-            depth += 1
-        elif text[j] == '}':
-            depth -= 1
-            if depth == 0:
-                return text[i + 1:j]
-    return ''
+code = srcscan.code
+body = functools.partial(srcscan.body, regex=True, braces=False)
 
 
 src_dir = os.path.join(ROOT, 'src')

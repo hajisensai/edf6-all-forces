@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(ROOT, 'src', 'frame_pacing.cpp'), encoding='utf-8').read()
@@ -21,9 +23,8 @@ def check(ok: object, why: str) -> None:
         sys.exit(1)
 
 
-m = re.search(r'bool InstallFramePacing\(\) noexcept \{\n(.*?)\n\}\n', src, re.S)
-check(m, 'InstallFramePacing found')
-body = re.sub(r'//[^\n]*', '', m.group(1))   # comments may name anything
+body = srcscan.body(src, 'bool InstallFramePacing() noexcept', braces=False).strip('\n')   # comments out: they may name anything
+check(body, 'InstallFramePacing found')
 pump = body.find('reinterpret_cast<void*>(&PumpWait)')
 tick = body.find('reinterpret_cast<void*>(&TickWait)')
 check(pump >= 0 and tick >= 0, 'both waits redirected in InstallFramePacing')
@@ -45,26 +46,24 @@ check(foreign >= 0, 'InstallFramePacing asks ForeignTickWait (with EdfVrInstalle
 check(re.search(r'foreign==pacing::Foreign::kVr\)\s*Log\(', before_tick[foreign:]) and
       re.search(r'else if\(foreign!=pacing::Foreign::kNone\)\s*Log\(', before_tick[foreign:]),
       'EDF6VR and a foreign patch each log a line and leave the wait')
-vr = re.search(r'bool EdfVrInstalled\(\) noexcept \{\n(.*?)\n\}\n', src, re.S)
-check(vr and 'GetModuleHandleW(L"EDF6VR.dll")' in vr.group(1) and vr.group(1).count('L"EDF6VR.dll"') == 2
-      and 'GetFileAttributesW' in vr.group(1), 'EdfVrInstalled: loaded already, or its DLL beside this one (it loads after)')
+vr = srcscan.body(src, 'bool EdfVrInstalled() noexcept', braces=False).strip('\n')
+check('GetModuleHandleW(L"EDF6VR.dll")' in vr and vr.count('L"EDF6VR.dll"') == 2
+      and 'GetFileAttributesW' in vr, 'EdfVrInstalled: loaded already, or its DLL beside this one (it loads after)')
 # The frame rate (frame_rate.cpp): with the wait not ours, nothing of it goes in (no input move, guards, sync or Present
 # leaf without the gate): GateSitesAsRead, which asks FramePacingTickWaitInstalled, before the first install.
 rate = open(os.path.join(ROOT, 'src', 'frame_rate.cpp'), encoding='utf-8').read()
-gs = re.search(r'bool GateSitesAsRead\(\) noexcept \{\n(.*?)\n\}\n', rate, re.S)
-check(gs and gs.group(1).find('FramePacingTickWaitInstalled()') >= 0, 'GateSitesAsRead asks whose the wait is')
-fr = re.search(r'void InstallFrameRate\(\) noexcept \{\n(.*?)\n\}\n', rate, re.S)
-check(fr, 'InstallFrameRate found')
-frb = re.sub(r'//[^\n]*', '', fr.group(1))
+gs = srcscan.body(rate, 'bool GateSitesAsRead() noexcept', braces=False).strip('\n')
+check(srcscan.calls(gs, 'FramePacingTickWaitInstalled'), 'GateSitesAsRead asks whose the wait is')
+frb = srcscan.body(rate, 'void InstallFrameRate() noexcept', braces=False).strip('\n')
+check(frb, 'InstallFrameRate found')
 first = min(i for i in (frb.find('InstallInputMove()'), frb.find('InstallSwapFlip('), frb.find('InstallGuards()')) if i >= 0)
 check(0 <= frb.find('if(!GateSitesAsRead())return;') < first, 'InstallFrameRate asks GateSitesAsRead before it installs anything')
 for name in ('kTickArg', 'kTickCountSig', 'tickPeriod'):
     check(re.search(rf'\b{name}\b', before_tick[pump:]), f'TickWait is gated by {name}')
 
 # InstallRenderFence: the fence wait redirected only after the loop and its poll match (another hook leaves it).
-m = re.search(r'bool InstallRenderFence\(\) noexcept \{\n(.*?)\n\}\n', src, re.S)
-check(m, 'InstallRenderFence found')
-fence = re.sub(r'//[^\n]*', '', m.group(1))
+fence = srcscan.body(src, 'bool InstallRenderFence() noexcept', braces=False).strip('\n')
+check(fence, 'InstallRenderFence found')
 redirect = fence.find('RedirectCall(image+kFenceCall,image+kFencePoll,reinterpret_cast<void*>(&FenceWait)')
 check(redirect >= 0, 'the fence poll redirected to FenceWait')
 check(re.search(r'if\(!edf::Matches\(image,kFenceLoop,kFenceLoopSig,sizeof\(kFenceLoopSig\)\) \|\|\s*!edf::Matches\(image,kFencePoll,kFencePollSig,sizeof\(kFencePollSig\)\)\)',
@@ -72,13 +71,12 @@ check(re.search(r'if\(!edf::Matches\(image,kFenceLoop,kFenceLoopSig,sizeof\(kFen
 check(fence.startswith('    if(!image)return false;'), 'no image: nothing')
 
 # InstallFrameLatency: MaxFrameLatency=0 installs nothing; the device init call is redirected only there.
-m = re.search(r'bool InstallFrameLatency\(\) noexcept \{\n(.*?)\n\}\n', src, re.S)
-check(m, 'InstallFrameLatency found')
-lat = re.sub(r'//[^\n]*', '', m.group(1))
+lat = srcscan.body(src, 'bool InstallFrameLatency() noexcept', braces=False).strip('\n')
+check(lat, 'InstallFrameLatency found')
 redirect = lat.find('RedirectCall(image+kDeviceInitCall,image+kDeviceInit,reinterpret_cast<void*>(&DeviceInitHook)')
 check(redirect >= 0, 'the device init redirected to DeviceInitHook')
 check(re.search(r'if\(!Cfg\(\)\.maxFrameLatency\)\{[^}]*return false;\}', lat[:redirect]), 'MaxFrameLatency=0 returns before the redirect')
-check(len(re.findall(r'\bRedirect(?:Import)?Call\(|\bPatchCode\(|\bPatchVtableSlot\(', src)) == 4, 'frame_pacing.cpp patches only its four sites')
+check(sum(len(re.findall(rf'(?<![\w]){n}\s*\(', srcscan.masked(src))) for n in ('RedirectCall', 'RedirectImportCall', 'PatchCode', 'PatchVtableSlot')) == 4, 'frame_pacing.cpp patches only its four sites')
 
 # Both are installed at load, before the application's init (the fence loop and the device init run in it).
 # The load's installs are the module registry's table (src/module_table.h kInstalls), run in its order.

@@ -12,6 +12,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import gen_config  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 checks = 0
 
@@ -29,8 +31,7 @@ def read(*parts: str) -> str:
     return gen_config.expand(open(os.path.join(ROOT, *parts), encoding='utf-8').read())
 
 
-def code(text: str) -> str:
-    return re.sub(r'//[^\n]*', '', text)   # comments may name anything
+code = srcscan.code
 
 
 ini = read('EDF6VehicleCrew.ini')

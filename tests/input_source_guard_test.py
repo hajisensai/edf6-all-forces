@@ -9,16 +9,15 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader)
 DIRS = ('src', 'autoturret/src', 'common')
 ALLOWED = {os.path.normpath('common/edf/input_source.h')}
 CALL = re.compile(r'(?<![\w:"])(GetAsyncKeyState|GetForegroundWindow|XInputGetState)\s*\(')
 
 
-def code_of(text: str) -> str:
-    """`text` without its comments and string literals (kept as blanks: the line numbers stay)."""
-    out = re.sub(r'//[^\n]*', '', text)
-    out = re.sub(r'/\*.*?\*/', lambda m: re.sub(r'[^\n]', ' ', m.group(0)), out, flags=re.S)
-    return re.sub(r'"(?:\.|[^"\\n])*"', '""', out)
+# `text` without its comments, its literals blanked (the line numbers stay): srcscan.masked.
+code_of = srcscan.masked
 
 
 def offenders() -> list[str]:

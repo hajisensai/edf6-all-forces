@@ -2,12 +2,14 @@
 first, a job after its DEPENDS and fixtures, no more at once than asked, and ctest's tests run as ctest runs them."""
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
@@ -60,27 +62,36 @@ class Schedule(unittest.TestCase):
         self.assertIn(testpool.NOT_RUN, {out['x'].status, out['y'].status})
 
     def test_width_and_caps(self) -> None:
-        lock = threading.Lock()
+        """Deterministic (no live thread timing): every job waits at a gate until `width` jobs run at once, so the widest
+        the pool reaches is what the scheduler allows, however slow the machine starts its threads; the machine's core
+        slots (checklock.core, shared with every other run on the machine) are out of it: the pool's width is tested."""
+        cv = threading.Condition()
         now = {'all': 0, 'selftest': 0}
         most = {'all': 0, 'selftest': 0}
+        opened = [False]
 
         def counted(name: str, part: str) -> testpool.Job:
             def run() -> tuple[str, str]:
-                with lock:
+                with cv:
                     for k in ('all', part):
                         if k in now:
                             now[k] += 1
                             most[k] = max(most[k], now[k])
-                time.sleep(0.05)
-                with lock:
+                    if now['all'] == 4:
+                        opened[0] = True
+                        cv.notify_all()
+                    # held until four run at once; a pool that never gets there fails by the timeout, not by luck
+                    self.assertTrue(cv.wait_for(lambda: opened[0], timeout=30), 'the pool never ran 4 at once')
                     for k in ('all', part):
                         if k in now:
                             now[k] -= 1
                 return testpool.PASSED, ''
             return testpool.Job(name, part, 1.0, run)
         jobs = [counted(f's{i}', 'selftest') for i in range(8)] + [counted(f'c{i}', 'ctest') for i in range(8)]
-        out = testpool.schedule(jobs, 4, {'selftest': 2})
+        with mock.patch.object(testpool.checklock, 'core', contextlib.nullcontext):
+            out = testpool.schedule(jobs, 4, {'selftest': 2})
         self.assertEqual(len(out), 16)
+        self.assertTrue(all(r.status == testpool.PASSED for r in out.values()), {n: r.text for n, r in out.items()})
         self.assertLessEqual(most['all'], 4)
         self.assertLessEqual(most['selftest'], 2)
         self.assertEqual(most['all'], 4)   # the cap leaves the others' share to ctest

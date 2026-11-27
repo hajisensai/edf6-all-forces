@@ -7,7 +7,13 @@
 //
 // Not an answer for an object deleted later in the same step (after it was handed over): no worse than Readable, which
 // answers yes for that one too, and every reader is under its __try (a fault costs the frame's AI, as before).
+#include <cstdint>
+
 namespace liveset {
 void Add(const void* object) noexcept;   // handed over this step
 bool Has(const void* object) noexcept;   // handed over this step (an object of an earlier step is not)
+// The same at the wall clock's `nowMs` (GetTickCount64's): Add / Has pass the real one; tests/live_set_test.cpp its own,
+// so a stalled step's kStallMs is checked without waiting it out (no wall-clock sleep the machine's load can stretch).
+void AddAt(const void* object,std::uint64_t nowMs) noexcept;
+bool HasAt(const void* object,std::uint64_t nowMs) noexcept;
 }  // namespace liveset

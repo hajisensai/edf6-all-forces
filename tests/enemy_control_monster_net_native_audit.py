@@ -15,6 +15,8 @@ import sys
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader)
 parser = argparse.ArgumentParser()
 parser.add_argument('--dll', default='')
 parser.add_argument('--game', default='')
@@ -66,8 +68,7 @@ def address(at, target):
           f'{at:#x}: local address {target:#x}')
 
 
-def without_comments(text):
-    return re.sub(r'//[^\n]*|/\*.*?\*/', '', text, flags=re.S)
+without_comments = srcscan.code
 
 
 def compact(text):

@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 checks = 0
@@ -25,28 +27,20 @@ def read(*parts: str) -> str:
     return open(os.path.join(ROOT, *parts), encoding='utf-8').read()
 
 
-def code(text: str) -> str:
-    return re.sub(r'//[^\n]*', '', text)   # comments may name anything
+code = srcscan.code
+
+
+def body(text: str, signature: str) -> str:
+    """The function's body (srcscan.body); a guard on a missing function fails here."""
+    found = srcscan.body(text, signature)
+    if not found:
+        raise AssertionError(signature)
+    return found
 
 
 def table(text: str, name: str) -> str:
     start = text.index(f'constexpr {name}[]={{')
     return text[start:text.index('\n};', start)]
-
-
-def body(text: str, signature: str) -> str:
-    """The function's body (braces counted) after its signature."""
-    start = text.index(signature)
-    at = text.index('{', start)
-    depth = 0
-    for i in range(at, len(text)):
-        if text[i] == '{':
-            depth += 1
-        elif text[i] == '}':
-            depth -= 1
-            if depth == 0:
-                return text[at:i + 1]
-    raise AssertionError(signature)
 
 
 src = code(read('src', 'module_table.h'))
