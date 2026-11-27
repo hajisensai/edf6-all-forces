@@ -375,6 +375,7 @@ def probe_parsing() -> None:
         havok = c_format('src/perf_probe.cpp', 'PERF HAVOK %sbuild')
         collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE construct')
         npcmt = c_format('src/npcai.cpp', 'PERF NPCMT')
+        groupx = c_format('src/group_expand.cpp', 'PERF GROUPEXPAND')
         graph = c_format('src/perf_probe.cpp', 'PERF COLLIDE GRAPH %u')
         node = c_format('src/perf_probe.cpp', 'PERF COLLIDE NODE')
         contact = c_format('src/perf_probe.cpp', 'PERF COLLIDE CONTACT')
@@ -402,6 +403,9 @@ def probe_parsing() -> None:
             f.write('[13:00:20.000] ' + npcmt % ('on', 9, 40.0, 1, 0.7, 2.0, 2.0, 6.0, 1.5, 1100, 50, 5, 20, 1, 34,
                                              20, 10, 6, 2, 2, 3, 2, 2, 5, 9, 7, 0, 0, 0, 0, 0, 0) + '\n')
             f.write('[13:00:40.000] ' + npcmt % (('off', 1, 0.0, 0, 9.0, 9.0, 9.0, 9.0, 9.0) + (0,) * 23) + '\n')
+            f.write('[13:00:15.000] ' + groupx % (300, 900, 3.0, 6.0, 0.02, 100, 4000, 1000, 400, 10000, 5.0, 50, 5, 0, 7, 0) + '\n')
+            f.write('[13:00:20.000] ' + groupx % (100, 600, 6.0, 3.0, 0.03, 200, 8000, 2000, 300, 6000, 2.5, 20, 2, 1, 4, 1) + '\n')
+            f.write('[13:00:40.000] ' + groupx % (9, 9, 1.0, 9.0, 1.0, 9, 9, 9, 9, 9, 2.0, 9, 9, 9, 9, 9) + '\n')
             f.write('[13:00:20.000] ' + graph % (1, 2, 2, 0, 1, 3.0) + '\n')
             f.write('[13:00:20.000] ' + graph % (2, 1, 2, 0, 0, 1.0) + '\n')
             f.write('[13:00:40.000] ' + graph % (3, 1, 1, 0, 0, 9.0) + '\n')
@@ -453,6 +457,13 @@ def probe_parsing() -> None:
               mt['by cause'] == {'no answer': 5, 'other object': 5, 'weapon': 3, 'held': 9, 'drift': 15, 'plan': 11,
                                  'line': 0} and
               mt['unused'] == {'pick': 7, 'hold': 6, 'close': 5, 'ray': 4, 'clear': 3}, "PERF NPCMT: the soldiers' Think split, its counters summed in the clean window")
+        ge = perf_report.read_group_expand(log, w)
+        check(ge.get('rows') == 2 and ge['frames'] == 400 and ge['casts'] == 1500 and ge['walks'] == 300 and
+              ge['nodes'] == 12000 and ge['walked ids'] == 3000 and ge['copies'] == 700 and ge['copied ids'] == 16000 and
+              ge['outside'] == 70 and ge['filtered'] == 7 and ge['full'] == 1 and ge['shadowed'] == 11 and
+              ge['mismatches'] == 1 and abs(ge['ms a frame'] - 9.0 / 400) < 1e-9 and
+              abs(ge['expansions a walk'] - 1000 / 300) < 1e-9,
+              'PERF GROUPEXPAND: the bullet casts\' group expansion, its counters summed in the clean window')
         c = perf_report.read_collide(log, w)
         check(c == {'construct': (250, 130.0), 'dispatch': (210, 210.0), 'sleep': (20, 10.0), 'mode0': 180},
               'collision timing keeps empty graphs, non-mode-0 dispatches and waits distinct')

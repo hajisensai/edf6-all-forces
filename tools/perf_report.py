@@ -474,6 +474,30 @@ def read_npc_parallel(log: str, window: tuple[float, float]) -> dict:
     return out
 
 
+GROUP_EXPAND = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF GROUPEXPAND (\d+) frames: (\d+) casts '
+                          r'\([\d.]+ a frame, ([\d.]+) ms, [\d.]+ a frame\); (\d+) walks \((\d+) nodes, (\d+) ids\), '
+                          r'(\d+) copies \((\d+) ids\), [\d.]+ expansions a walk; (\d+) outside casts \((\d+) filtered\); '
+                          r'(\d+) full; shadow (\d+) checked (\d+) mismatched')
+GROUP_EXPAND_COUNTS = ('frames', 'casts', 'walks', 'nodes', 'walked ids', 'copies', 'copied ids', 'outside', 'filtered',
+                       'full', 'shadowed', 'mismatches')
+
+
+def read_group_expand(log: str, window: tuple[float, float]) -> dict:
+    """The bullet casts' group expansion (src/group_expand.cpp ReportGroupExpand, PerfProbe=1): the counters summed,
+    the casts' ms a frame (their total over the frames), the expansions a walk ((walks + copies) / walks: how many
+    times stock would have walked each group a cast walks)."""
+    rows = _rows(log, GROUP_EXPAND, window)
+    if not rows:
+        return {}
+    out: dict = {'rows': len(rows)}
+    out.update({key: sum(int(m[i]) for m in rows) for i, key in zip((4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
+                                                                   GROUP_EXPAND_COUNTS)})
+    ms = sum(float(m[6]) for m in rows)
+    out['ms a frame'] = ms / out['frames'] if out['frames'] else 0.0
+    out['expansions a walk'] = (out['walks'] + out['copies']) / out['walks'] if out['walks'] else 0.0
+    return out
+
+
 def read_collide(log: str, window: tuple[float, float]) -> dict:
     """Totals from the first Havok build; mode-0 sleep is included in dispatch."""
     rows = _rows(log, COLLIDE_TIME, window)
@@ -1181,6 +1205,13 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 '', 'Asked again at apply by ask: ' + ', '.join(f'{k} {v:,}' for k, v in mt['by ask'].items()) +
                 '; by cause: ' + ', '.join(f'{k} {v:,}' for k, v in mt['by cause'].items()) +
                 '; kept answers unused: ' + ', '.join(f'{k} {v:,}' for k, v in mt['unused'].items()) + '.']
+    ge = read_group_expand(log, cw)
+    if ge:
+        out += ['', '## Bullet casts: group expansion (GroupExpandMemo)', '',
+                f"{ge['casts']:,} casts, {ge['ms a frame']:.3f} ms a frame; {ge['walks']:,} walks ({ge['walked ids']:,} ids), "
+                f"{ge['copies']:,} copies ({ge['copied ids']:,} ids), {ge['expansions a walk']:.2f} expansions a walk; "
+                f"{ge['outside']:,} outside casts ({ge['filtered']:,} filtered); {ge['full']:,} full; "
+                f"shadow {ge['mismatches']:,} mismatched of {ge['shadowed']:,}."]
     collide = read_collide(log, cw)
     if collide:
         n, construct_ms = collide['construct']

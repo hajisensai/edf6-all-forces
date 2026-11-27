@@ -3827,6 +3827,14 @@
    ],
    "scripts": []
   },
+  "group_expand": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "gun_camera_sweep_guard": {
    "labels": [
     "autoturret-tools",
