@@ -57,8 +57,8 @@ void Builds() {
     Check(!edf::BuildRedirect(site,4,site+0x20,edf::Branch::kCall,out),"under 5 bytes: not written");
     Check(!edf::BuildRedirect(site,edf::kMostRedirectBytes+1,site+0x20,edf::Branch::kCall,out),"over the most: not written");
     Check(!edf::BuildRedirect(site,5,nullptr,edf::Branch::kCall,out),"no thunk: not written");
-    const auto* far=reinterpret_cast<const unsigned char*>(site)+0x80000000ull+0x100;
-    Check(!edf::BuildRedirect(site,5,far,edf::Branch::kCall,out),"a thunk 2 GB on: out of reach");
+    const auto* distant=reinterpret_cast<const unsigned char*>(site)+0x80000000ull+0x100;
+    Check(!edf::BuildRedirect(site,5,distant,edf::Branch::kCall,out),"a thunk 2 GB on: out of reach");
 }
 
 void ToThunk() {
@@ -72,8 +72,8 @@ void ToThunk() {
     Check(!edf::RedirectToThunk(page,wrong,sizeof(kStock),thunk,edf::Branch::kCall,written,edf::Claim::kSole,"src/a.cpp") &&
           !std::memcmp(page,kStock,sizeof(kStock)),"other bytes expected: refused, the site untouched");
     Check(edf::CodeOwner(page+8) && !std::strcmp(edf::CodeOwner(page+8),"a.cpp"),"a refused redirect is claimed too");
-    const auto* far=page+0x80000000ull;
-    Check(!edf::RedirectToThunk(page,kStock,sizeof(kStock),far,edf::Branch::kCall,written,edf::Claim::kSole,"src/a.cpp") &&
+    const auto* distant=page+0x100000000ull;
+    Check(!edf::RedirectToThunk(page,kStock,sizeof(kStock),distant,edf::Branch::kCall,written,edf::Claim::kSole,"src/a.cpp") &&
           !std::memcmp(page,kStock,sizeof(kStock)),"a thunk out of reach: refused, the site untouched");
     Check(edf::RedirectToThunk(page,kStock,sizeof(kStock),thunk,edf::Branch::kCall,written,edf::Claim::kSole,"src/a.cpp"),
           "the stock bytes: redirected");
@@ -82,9 +82,13 @@ void ToThunk() {
     Check(page[sizeof(kStock)]==0xC3,"the byte after the site untouched");
     Check(Protection(page)==PAGE_EXECUTE_READ && !edf::ProtectRestoreFailures(),"the page's protection put back");
     Check(edf::GetClaimStats().conflicts==0,"one file: no conflict");
-    // Another file over the written site: refused by the bytes, the conflict told.
-    Check(!edf::RedirectToThunk(page,kStock,sizeof(kStock),thunk,edf::Branch::kCall,nullptr,edf::Claim::kSole,"src/b.cpp") &&
-          edf::GetClaimStats().conflicts==1,"a second file: refused and a conflict");
+    // The same redirect again: already there, true, nothing claimed twice.
+    Check(edf::RedirectToThunk(page,kStock,sizeof(kStock),thunk,edf::Branch::kCall,nullptr,edf::Claim::kSole,"src/a.cpp") &&
+          edf::GetClaimStats().claims==1,"the same redirect again: already written, one claim");
+    // Another file to its own thunk over the written site: refused by the bytes, the conflict told once.
+    Check(!edf::RedirectToThunk(page,kStock,sizeof(kStock),page+0x900,edf::Branch::kCall,nullptr,edf::Claim::kSole,
+                                "src/b.cpp") && edf::GetClaimStats().conflicts==1 && Landing(page)==thunk,
+          "a second file: refused, one conflict, the first redirect kept");
     VirtualFree(page,0,MEM_RELEASE);
 }
 

@@ -18,10 +18,6 @@ void RestoreProtection(void* at,std::size_t size,DWORD previous) noexcept {
 
 unsigned ProtectRestoreFailures() noexcept { return restoreFailures.load(std::memory_order_relaxed); }
 
-bool Matches(const unsigned char* image,std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept {
-    return image && std::memcmp(image+rva,bytes,size)==0;
-}
-
 bool PatchVtableSlot(void** slot,void* expected,void* replacement,Claim kind,const char* owner) noexcept {
     ClaimCode(slot,sizeof(void*),kind,owner);
     DWORD old=0;
