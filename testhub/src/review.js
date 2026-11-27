@@ -5,8 +5,9 @@
 // same text and a later edit to the outline does not change what was scored. Publishing again replaces the shown set;
 // an outline published at a new version is a new item (its old scores stay with the old version in the results).
 // Shown blind: no group, author or editor. A reviewer is a random token their browser keeps (only its SHA-256 is
-// stored): one score + comment per reviewer and outline, which they can change or take back. The average and the
-// other reviewers' comments show to a reviewer only after they have scored that outline themselves.
+// stored): one score + comment per reviewer and outline, which they can change or take back. The average shows to a
+// reviewer only after they have scored that outline themselves; other reviewers' comments are shown to no visitor
+// (developers read them with GET /api/review/results).
 // Visitors' writes are rate limited per IP (only a keyed hash of it is stored); the text is cleaned like the plan's
 // and the page puts it into text nodes only.
 import { clean } from './plan.js';
@@ -51,8 +52,8 @@ async function charge(db, env, request) {
   await db.prepare('DELETE FROM review_log WHERE at < ?1').bind(now - 2 * 864e5).run();
 }
 
-// The shown set for one reviewer: each item's three texts; their own entry; and, for the items they scored,
-// the average and everyone's comments (score, name, text, language, when — never who).
+// The shown set for one reviewer: each item's three texts; their own entry; and, for the items they scored, the
+// average and how many scored it. Other reviewers' comments and names are never sent (only the results show them).
 async function shown(db, me) {
   const items = (await db.prepare('SELECT id, data FROM review_items WHERE active = 1 ORDER BY id').all()).results
     .map((r) => ({ id: r.id, ...JSON.parse(r.data) }));
@@ -63,19 +64,13 @@ async function shown(db, me) {
   }
   const open = Object.keys(mine).map(Number);
   const stats = {};
-  const comments = {};
   if (open.length) {
-    const list = JSON.stringify(open);
     for (const r of (await db.prepare(`SELECT item, COUNT(score) AS n, AVG(score) AS avg FROM review_scores
-      WHERE item IN (SELECT value FROM json_each(?1)) GROUP BY item`).bind(list).all()).results) {
+      WHERE item IN (SELECT value FROM json_each(?1)) GROUP BY item`).bind(JSON.stringify(open)).all()).results) {
       stats[r.item] = { n: r.n, avg: r.avg == null ? null : Math.round(r.avg * 10) / 10 };
     }
-    for (const r of (await db.prepare(`SELECT item, score, name, body, lang, at, rater = ?2 AS own FROM review_scores
-      WHERE item IN (SELECT value FROM json_each(?1)) AND body != '' ORDER BY at DESC`).bind(list, me).all()).results) {
-      (comments[r.item] ||= []).push({ score: r.score, name: r.name, body: r.body, lang: r.lang, at: r.at, own: !!r.own });
-    }
   }
-  return { langs: LANGS, items, mine, stats, comments };
+  return { langs: LANGS, items, mine, stats };
 }
 
 // The developer's view: every item ever published (shown or not), its scores per language and all comments.

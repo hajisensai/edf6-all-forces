@@ -1,9 +1,10 @@
 'use strict';
 // The external review page (/api/review, src/review.js): the published story outlines, one at a time in an order
 // shuffled for each visitor, in Chinese, English or Japanese; anyone scores (1..5) and comments, no account needed.
-// The outlines and the comments are people's text: they only ever go into text nodes (h() below), never markup.
+// The outlines and the reviewer's own comment are people's text: they only ever go into text nodes (h() below), never markup.
 // The browser keeps a random reviewer token (localStorage) so a reviewer can change or take back their own entry;
-// others' comments and the average show only after the reviewer has scored that outline (so they do not sway the score).
+// the average shows only after the reviewer has scored that outline (so it does not sway the score); other reviewers'
+// comments are never shown here (the server does not send them).
 
 const $ = (id) => document.getElementById(id);
 const LANGS = { zh: '中文', en: 'English', ja: '日本語' };
@@ -13,44 +14,44 @@ const T = {
   zh: {
     h1: 'EDF 全军出击 · 剧情大纲评分',
     intro: '「EDF 全军出击」是一个把《地球防卫军 4.1 / 5 / 6》的剧情串在一起的玩家自制 MOD。下面是几份候选的剧情大纲，按随机顺序展示，不标作者。'
-      + '请读完一份后打 1–5 分（5 = 很想玩到这个剧情），也可以写几句评论。不用注册；同一台设备可以随时改或删掉自己的评分。打完分后能看到平均分和别人的评论。',
+      + '请读完一份后打 1–5 分（5 = 很想玩到这个剧情），也可以写几句评论。不用注册；同一台设备可以随时改或删掉自己的评分。评论只有开发者看得到；打完分后能看到这份的平均分。',
     count: (i, n) => `第 ${i} / ${n} 份`, prev: '‹ 上一份', next: '下一份 ›', none: '现在没有待评分的大纲。',
     orig: '', tr: '',
     steps: (n) => `${n} 步`, merge: (names) => `${names} 汇入`, sep: ' ＋ ',
     formTitle: '你的评分', scores: ['1 很差', '2 一般偏下', '3 一般', '4 不错', '5 很棒'],
-    nameLabel: '昵称（可空，会和评论一起显示）', bodyLabel: '评论（可空）',
+    nameLabel: '昵称（可空，只有开发者看得到）', bodyLabel: '评论（可空，只有开发者看得到）',
     submit: '提交', update: '更新我的评分', remove: '删掉我的评分', saved: '已保存，谢谢！', removed: '已删除',
     needOne: '请打分或写评论', othersTitle: '大家的评分', stats: (avg, n) => (avg == null ? `${n} 人参与` : `平均 ★ ${avg.toFixed(1)} · ${n} 人评分`),
-    noComments: '还没有人写评论。', anon: '匿名', mine: '（我）', noScore: '未打分', rated: '已评',
+    rated: '已评',
     loadFail: '暂时无法加载，请刷新重试。', busy: '提交太频繁了，请过一会儿再试', gone: '这份大纲已经下架了，请刷新页面',
   },
   en: {
     h1: 'EDF All Forces · Story Outline Review',
     intro: '"EDF All Forces" is a fan-made mod that ties together the stories of Earth Defense Force 4.1, 5 and 6. Below are several candidate story outlines, '
       + 'shown in a random order without their authors. After reading one, please score it from 1 to 5 (5 = I really want to play this story) and, if you like, leave a comment. '
-      + 'No sign-up needed; on this device you can change or delete your own entry at any time. Once you have scored an outline you can see its average and the other comments.',
+      + 'No sign-up needed; on this device you can change or delete your own entry at any time. Comments are read only by the developers; once you have scored an outline you can see its average.',
     count: (i, n) => `Outline ${i} of ${n}`, prev: '‹ Previous', next: 'Next ›', none: 'There are no outlines to review right now.',
     orig: 'Original in Chinese', tr: 'English translation of the Chinese original.',
     steps: (n) => `${n} step${n === 1 ? '' : 's'}`, merge: (names) => `${names} merge here`, sep: ' + ',
     formTitle: 'Your score', scores: ['1 Poor', '2 Below average', '3 Average', '4 Good', '5 Excellent'],
-    nameLabel: 'Nickname (optional, shown with your comment)', bodyLabel: 'Comment (optional)',
+    nameLabel: 'Nickname (optional, seen only by the developers)', bodyLabel: 'Comment (optional, seen only by the developers)',
     submit: 'Submit', update: 'Update my entry', remove: 'Delete my entry', saved: 'Saved, thank you!', removed: 'Deleted',
     needOne: 'Give a score or write a comment', othersTitle: 'Everyone\'s scores', stats: (avg, n) => (avg == null ? `${n} taking part` : `Average ★ ${avg.toFixed(1)} · ${n} score${n === 1 ? '' : 's'}`),
-    noComments: 'No comments yet.', anon: 'Anonymous', mine: ' (me)', noScore: 'no score', rated: 'scored',
+    rated: 'scored',
     loadFail: 'Could not load the page, please reload.', busy: 'Too many submissions, please try again later', gone: 'This outline is no longer shown, please reload the page',
   },
   ja: {
     h1: 'EDF 全軍出撃 · ストーリー構成案の評価',
     intro: '「EDF 全軍出撃」は『地球防衛軍4.1／5／6』のストーリーをつなぐファンメイドMODです。以下はストーリー構成案の候補で、ランダムな順番・作者名なしで表示しています。'
-      + '一つ読み終えたら 1〜5 で評価してください（5 = このストーリーをぜひ遊びたい）。コメントも歓迎です。登録は不要で、この端末からならいつでも自分の評価を変更・削除できます。評価すると平均点とほかの人のコメントが見られます。',
+      + '一つ読み終えたら 1〜5 で評価してください（5 = このストーリーをぜひ遊びたい）。コメントも歓迎です。登録は不要で、この端末からならいつでも自分の評価を変更・削除できます。コメントは開発者だけが読みます。評価すると平均点が見られます。',
     count: (i, n) => `${n} 件中 ${i} 件目`, prev: '‹ 前へ', next: '次へ ›', none: '現在、評価できる構成案はありません。',
     orig: '原文は中国語', tr: '中国語の原文を日本語に翻訳したものです。',
     steps: (n) => `${n} ステップ`, merge: (names) => `${names} が合流`, sep: '＋',
     formTitle: 'あなたの評価', scores: ['1 よくない', '2 いまひとつ', '3 ふつう', '4 よい', '5 とてもよい'],
-    nameLabel: 'ニックネーム（任意・コメントと一緒に表示）', bodyLabel: 'コメント（任意）',
+    nameLabel: 'ニックネーム（任意・開発者だけが見られます）', bodyLabel: 'コメント（任意・開発者だけが読みます）',
     submit: '送信', update: '評価を更新', remove: '自分の評価を削除', saved: '保存しました。ありがとうございます！', removed: '削除しました',
     needOne: '評価するかコメントを書いてください', othersTitle: 'みんなの評価', stats: (avg, n) => (avg == null ? `${n} 人が参加` : `平均 ★ ${avg.toFixed(1)}・${n} 人が評価`),
-    noComments: 'まだコメントはありません。', anon: '匿名', mine: '（自分）', noScore: '評価なし', rated: '評価済み',
+    rated: '評価済み',
     loadFail: '読み込めませんでした。再読み込みしてください。', busy: '送信が多すぎます。しばらくしてからお試しください', gone: 'この構成案は公開終了しました。ページを再読み込みしてください',
   },
 };
@@ -247,11 +248,6 @@ function renderOthers(it, mine) {
   if (!mine) return;
   const s = state.stats[it.id] || { n: 0, avg: null };
   $('stats').textContent = t().stats(s.avg, s.n);
-  const list = state.comments[it.id] || [];
-  $('comments').replaceChildren(list.length ? h('div', {}, list.map((c) => h('div', { class: 'report' },
-    h('div', { class: 'muted' }, (c.score ? '★ ' + c.score : t().noScore), ' · ', c.name || t().anon, c.own ? t().mine : '', ' · ', LANGS[c.lang] || c.lang,
-      ' · ', new Date(c.at).toLocaleString(HTML_LANG[lang], { hour12: false })),
-    h('p', { class: 'reviewBody' }, c.body)))) : h('p', { class: 'muted' }, t().noComments));
 }
 
 function go(i) {
