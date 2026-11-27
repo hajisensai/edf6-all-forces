@@ -608,6 +608,67 @@ bool FlatRosterCases() {
     return valid;
 }
 
+bool BasisArithmeticCases() {
+    const auto previousNormalize=[](__m128& v) {
+        v=KeepW(v,_mm_set1_ps(1.0f));
+        const auto squared=_mm_mul_ps(v,v);
+        const auto xy=_mm_add_ss(_mm_shuffle_ps(squared,squared,0x55),squared);
+        const auto total=_mm_add_ss(xy,_mm_shuffle_ps(squared,squared,0xAA));
+        if((_mm_movemask_ps(_mm_cmple_ss(total,_mm_set_ss(FLT_MAX)))&1)==0)return false;
+        if(_mm_cvtss_f32(total)!=0.0f) {
+            const auto len=_mm_sqrt_ss(total);
+            v=_mm_div_ps(v,_mm_shuffle_ps(len,len,0));
+        }
+        return true;
+    };
+    const auto previousCross=[](__m128 a,__m128 b) {
+        const auto mask=XyzMask();
+        a=_mm_and_ps(a,mask);b=_mm_and_ps(b,mask);
+        const auto ayzx=_mm_shuffle_ps(a,a,0xC9),azxy=_mm_shuffle_ps(a,a,0xD2);
+        const auto byzx=_mm_shuffle_ps(b,b,0xC9),bzxy=_mm_shuffle_ps(b,b,0xD2);
+        return _mm_sub_ps(_mm_mul_ps(ayzx,bzxy),_mm_mul_ps(azxy,byzx));
+    };
+    const auto same=[](__m128 a,__m128 b) {
+        return _mm_movemask_epi8(_mm_cmpeq_epi32(_mm_castps_si128(a),_mm_castps_si128(b)))==0xFFFF;
+    };
+    const auto saved=_mm_getcsr();
+    std::mt19937 rng(271126);
+    constexpr std::uint32_t edge[]{0,0x80000000,1,0x007FFFFF,0x00800000,0x3F800000,0xBF800000,
+                                  0x7F7FFFFF,0x7F800000,0xFF800000,0x7FC00042,0x7F800069};
+    const auto operand=[&](unsigned sample) {
+        std::uint32_t bits[4];
+        for(auto& u:bits)u=(sample&1) ? static_cast<std::uint32_t>(rng()) : edge[rng()%std::size(edge)];
+        return _mm_castsi128_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(bits)));
+    };
+    for(unsigned csr:{0x1F80u,0x3F80u,0x5F80u,0x7F80u,0x9F80u,0x9FC0u}) {
+        for(unsigned i=0;i<4096;++i) {
+            const auto a=operand(i),b=operand(i+1);
+            auto old=a,fast=a;
+            _mm_setcsr(csr);
+            const bool oldOk=previousNormalize(old);
+            const unsigned oldStatus=_mm_getcsr();
+            _mm_setcsr(csr);
+            const bool fastOk=Normalize3(fast);
+            if(oldOk!=fastOk || !same(old,fast) || oldStatus!=_mm_getcsr()) {
+                _mm_setcsr(saved);
+                return false;
+            }
+            _mm_setcsr(csr);
+            const auto oldCross=previousCross(a,b);
+            const auto crossStatus=_mm_getcsr();
+            _mm_setcsr(csr);
+            const auto fastCross=Cross3(a,b);
+            if(!same(oldCross,fastCross) || crossStatus!=_mm_getcsr()) {
+                _mm_setcsr(saved);
+                return false;
+            }
+        }
+    }
+    _mm_setcsr(saved);
+    std::puts("native basis arithmetic: 24576 identical vector operations and floating-point status pairs");
+    return true;
+}
+
 bool ProxyPosePrefetchCases() {
     using Setter=void(__fastcall*)(void*,void*,const float*);
     const auto stock=reinterpret_cast<Setter>(image+kPoseSetter);
@@ -1561,6 +1622,10 @@ int main(int argc,char** argv) {
        std::memcmp(packedProxies.data(),newProxies.data(),sizeof(packedProxies))!=0 ||
        std::memcmp(oldMatrices.data(),newMatrices.data(),sizeof(oldMatrices))!=0) {
         std::puts("FAIL: repeated updates changed the outputs");return 1;
+    }
+    if(!BasisArithmeticCases()) {
+        std::puts("FAIL: basis arithmetic changed a vector or floating-point status");
+        return 1;
     }
     if(!ProxyPosePrefetchCases()) {
         std::puts("FAIL: early proxy prefetch changed pose publication");

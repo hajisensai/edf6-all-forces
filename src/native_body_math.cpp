@@ -1424,20 +1424,24 @@ inline bool Normalize3(__m128& v) noexcept {
     const auto squared=_mm_mul_ps(v,v);
     const auto xy=_mm_add_ss(_mm_shuffle_ps(squared,squared,0x55),squared);
     const auto total=_mm_add_ss(xy,_mm_shuffle_ps(squared,squared,0xAA));
-    if((_mm_movemask_ps(_mm_cmple_ss(total,_mm_set_ss(FLT_MAX)))&1)==0)return false;
-    if(_mm_cvtss_f32(total)!=0.0f) {
-        const auto len=_mm_sqrt_ss(total);
-        v=_mm_div_ps(v,_mm_shuffle_ps(len,len,0));
+    const auto bits=static_cast<std::uint32_t>(_mm_cvtsi128_si32(_mm_castps_si128(total)));
+    // A positive normal already satisfies the native ordered and nonzero comparisons.
+    if(bits-0x00800000u>0x7EFFFFFFu) {
+        if((_mm_movemask_ps(_mm_cmple_ss(total,_mm_set_ss(FLT_MAX)))&1)==0)return false;
+        if(_mm_cvtss_f32(total)==0.0f)return true;
     }
+    const auto len=_mm_sqrt_ss(total);
+    v=_mm_div_ps(v,_mm_shuffle_ps(len,len,0));
     return true;
 }
 
 inline __m128 Cross3(__m128 a,__m128 b) noexcept {
     const auto mask=XyzMask();
     a=_mm_and_ps(a,mask);b=_mm_and_ps(b,mask);
-    const auto ayzx=_mm_shuffle_ps(a,a,_MM_SHUFFLE(3,0,2,1)),azxy=_mm_shuffle_ps(a,a,_MM_SHUFFLE(3,1,0,2));
-    const auto byzx=_mm_shuffle_ps(b,b,_MM_SHUFFLE(3,0,2,1)),bzxy=_mm_shuffle_ps(b,b,_MM_SHUFFLE(3,1,0,2));
-    return _mm_sub_ps(_mm_mul_ps(ayzx,bzxy),_mm_mul_ps(azxy,byzx));
+    const auto ayzx=_mm_shuffle_ps(a,a,_MM_SHUFFLE(3,0,2,1));
+    const auto byzx=_mm_shuffle_ps(b,b,_MM_SHUFFLE(3,0,2,1));
+    const auto rotated=_mm_sub_ps(_mm_mul_ps(a,byzx),_mm_mul_ps(ayzx,b));
+    return _mm_shuffle_ps(rotated,rotated,_MM_SHUFFLE(3,0,2,1));
 }
 
 void __fastcall NormalizeAttachedBasis(float* matrix) noexcept {
