@@ -531,14 +531,16 @@ Debug=1 时，每 32 个存的答案抽 1 个在游戏线程上重问一遍做�
 
 PerfProbe=1 且 Debug=1 时，每个 PerfTick 周期打一行 `PERF NPCMT on|off, N threads: …`，内容有：每步 gather、decide（fork 总时间）、stock think、apply（Think 的其余部分）、apply 里当场询问花的时间，以及 kept / 当场问 / 无 intent / stale / mismatch 的计数。`tools/perf_report.py read_npc_parallel` 读这一行，生成「Soldiers' Think」一节。
 
-**实机对照（待测）**：`python tools/perfrun.py stress:30 --ini NpcParallelThink=0` 和 `--ini NpcParallelThink=1` 各跑一次，stress:100 同样各跑一次。基线是单线程 stress:30 约 11 ms/步、stress:100 约 17.8 ms/步（2026-11-24）。结果填进下表。
+**实机对照（2026-11-27，`perfrun.py stress:30 stress:100`，Debug=1 PerfProbe=1）**：`python tools/perfrun.py stress:30 --ini NpcParallelThink=0` 和 `--ini NpcParallelThink=1` 各跑一次，stress:100 同样各跑一次。基线是单线程 stress:30 约 11 ms/步、stress:100 约 17.8 ms/步（2026-11-24）。结果填进下表。
 
 | 场景 | NpcParallelThink | 每步 Think 合计 | decide | apply | kept / 当场问 |
 |---|---|---|---|---|---|
-| stress:30 | 0 | 待测 | — | 待测 | — |
-| stress:30 | 1 | 待测 | 待测 | 待测 | 待测 |
-| stress:100 | 0 | 待测 | — | 待测 | — |
-| stress:100 | 1 | 待测 | 待测 | 待测 | 待测 |
+| stress:30（2541 敌） | 0 | 3.65 ms | — | 2.17 ms | — |
+| stress:30（3332 敌） | 1 | 5.37 ms | 0.68 ms | 2.18 ms | 730,531 / 367,637 |
+| stress:100（3551 敌） | 0 | 13.85 ms | — | 7.30 ms | — |
+| stress:100（3707 敌） | 1 | 13.18 ms | 1.55 ms | 5.53 ms | 1,178,140 / 756,929 |
+
+每步 Think 合计 = gather + decide + stock think + apply（PERF NPCMT 的每步均值）。stress 场景每次刷出的敌人数不同，两档的敌人数已写在表里，同档前后不能逐毫秒对比。stress:100 的 apply 从 7.30 降到 5.53 ms，但 decide 多花 1.55 ms，合计只省约 0.7 ms/步（约 5%）。影子核对 0 次不一致，0 次 fault，没有崩溃。收益小的原因是命中率：约 39% 的询问在 apply 时输入已经变了（士兵或目标在 fork 之后移动），只能当场再问一次，decide 为这部分做的计算就白费了。要提高收益，需要让 fork 时的输入与 apply 时一致，比如在移动之后、或按本帧已定的位置 fork。
 
 **剩余风险**：
 
