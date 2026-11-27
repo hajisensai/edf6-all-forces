@@ -20,7 +20,7 @@ const T = {
     steps: (n) => `${n} 步`, merge: (names) => `${names} 汇入`, sep: ' ＋ ',
     formTitle: '你的评分', scores: ['1 很差', '2 一般偏下', '3 一般', '4 不错', '5 很棒'],
     nameLabel: '昵称（可空，只有开发者看得到）', bodyLabel: '评论（可空，只有开发者看得到）',
-    submit: '提交', update: '更新我的评分', remove: '删掉我的评分', saved: '已保存，谢谢！', removed: '已删除',
+    submit: '提交', update: '更新我的评分', remove: '删掉我的评分', saved: '已保存，谢谢！', savedNext: '上一份已保存，谢谢！这是下一份。', allDone: '已保存。全部大纲都评过了，谢谢！', removed: '已删除',
     needOne: '请打分或写评论', othersTitle: '大家的评分', stats: (avg, n) => (avg == null ? `${n} 人参与` : `平均 ★ ${avg.toFixed(1)} · ${n} 人评分`),
     rated: '已评',
     loadFail: '暂时无法加载，请刷新重试。', busy: '提交太频繁了，请过一会儿再试', gone: '这份大纲已经下架了，请刷新页面',
@@ -35,7 +35,7 @@ const T = {
     steps: (n) => `${n} step${n === 1 ? '' : 's'}`, merge: (names) => `${names} merge here`, sep: ' + ',
     formTitle: 'Your score', scores: ['1 Poor', '2 Below average', '3 Average', '4 Good', '5 Excellent'],
     nameLabel: 'Nickname (optional, seen only by the developers)', bodyLabel: 'Comment (optional, seen only by the developers)',
-    submit: 'Submit', update: 'Update my entry', remove: 'Delete my entry', saved: 'Saved, thank you!', removed: 'Deleted',
+    submit: 'Submit', update: 'Update my entry', remove: 'Delete my entry', saved: 'Saved, thank you!', savedNext: 'Saved, thank you! Here is the next one.', allDone: 'Saved. You have reviewed every outline, thank you!', removed: 'Deleted',
     needOne: 'Give a score or write a comment', othersTitle: 'Everyone\'s scores', stats: (avg, n) => (avg == null ? `${n} taking part` : `Average ★ ${avg.toFixed(1)} · ${n} score${n === 1 ? '' : 's'}`),
     rated: 'scored',
     loadFail: 'Could not load the page, please reload.', busy: 'Too many submissions, please try again later', gone: 'This outline is no longer shown, please reload the page',
@@ -49,7 +49,7 @@ const T = {
     steps: (n) => `${n} ステップ`, merge: (names) => `${names} が合流`, sep: '＋',
     formTitle: 'あなたの評価', scores: ['1 よくない', '2 いまひとつ', '3 ふつう', '4 よい', '5 とてもよい'],
     nameLabel: 'ニックネーム（任意・開発者だけが見られます）', bodyLabel: 'コメント（任意・開発者だけが読みます）',
-    submit: '送信', update: '評価を更新', remove: '自分の評価を削除', saved: '保存しました。ありがとうございます！', removed: '削除しました',
+    submit: '送信', update: '評価を更新', remove: '自分の評価を削除', saved: '保存しました。ありがとうございます！', savedNext: '保存しました。ありがとうございます！次の大綱です。', allDone: '保存しました。すべての大綱を評価していただきました。ありがとうございます！', removed: '削除しました',
     needOne: '評価するかコメントを書いてください', othersTitle: 'みんなの評価', stats: (avg, n) => (avg == null ? `${n} 人が参加` : `平均 ★ ${avg.toFixed(1)}・${n} 人が評価`),
     rated: '評価済み',
     loadFail: '読み込めませんでした。再読み込みしてください。', busy: '送信が多すぎます。しばらくしてからお試しください', gone: 'この構成案は公開終了しました。ページを再読み込みしてください',
@@ -284,10 +284,17 @@ $('form').addEventListener('submit', async (e) => {
   $('formError').textContent = '';
   const id = order[at];
   if (await send('/api/review/rate', { token: myToken(), item: id, score, name, body: text, lang })) {
+    // On to the next outline this visitor has not reviewed yet (after this one, wrapping round); none left: stay.
+    const next = [...order.slice(at + 1), ...order.slice(0, at)].find((x) => !state.mine[x]);
     formFor = null;
-    render();
-    $('savedNote').textContent = t().saved;
-    $('others').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (next != null && order.includes(id)) {
+      go(order.indexOf(next));
+      $('savedNote').textContent = t().savedNext;
+    } else {
+      render();
+      $('savedNote').textContent = next == null ? t().allDone : t().saved;
+      $('others').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   }
 });
 $('remove').addEventListener('click', async () => {
