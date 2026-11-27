@@ -1475,6 +1475,7 @@ add_test(NAME jet_extend_flip COMMAND jet_obstacle_sim --extend-flip-suite --out
 # A wing flown level holds its wings level once on its heading or its pass line (jet_obstacle_sim --wobble-suite; the
 # user, 2026-11-27: 「飞机会左右摇摆，即便是在平飞的时候」: JetSteer's acos snap, the gunship's roll-out).
 add_test(NAME jet_wobble COMMAND jet_obstacle_sim --wobble-suite)
+add_test(NAME jet_rain_pass COMMAND jet_obstacle_sim --rain-suite)
 # The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
 # offline (tools/play_area_check.cpp). Not part of the plugin build:
 # cmake --build build --target play_area_check && build\play_area_check.exe

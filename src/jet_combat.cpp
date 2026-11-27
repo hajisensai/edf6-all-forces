@@ -152,6 +152,11 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     // A sortie strikes the ground (jet_sortie.cpp), each missile at another target (SortieStruck).
     const Prefer prefer=k.j->sortie.pass!=SortiePass::none ? Prefer::ground : k.j->loadSet ? k.j->loadPrefer : KindOf(*k.j).prefer;
     if(SortieStruck(*k.j,object))score+=4000.0f;
+    // The rain flies its lane and does not turn after a target (jet_sortie.cpp): one passed or too near counts farther.
+    const Sortie& s=k.j->sortie;
+    if(s.pass==SortiePass::missileRain && !s.done &&
+       !sortie::RainAhead(s.line,k.pos,std::sqrt(k.j->m.vel[0]*k.j->m.vel[0]+k.j->m.vel[2]*k.j->m.vel[2]),p))
+        score+=sortie::kRainPassedScore;
     // One a flight-mate is on counts farther (flight_spread.h): each its own while there are others to go round.
     int mates=0;
     for(int i=0;i<k.claims;++i)if(k.claimed[i]==object)++mates;

@@ -13,6 +13,7 @@
 //   jet_obstacle_sim --withdraw-suite (withdrawing jets leave the map and are reaped: WithdrawSuite; withdraw_suite.log here)
 //   jet_obstacle_sim --player-rotor-suite (real Hover: player/hail goals in the NPC band remain reachable)
 //   jet_obstacle_sim --ground-settle-suite (real HoldOffGround: a craft standing on the ground is not thrown up)
+//   jet_obstacle_sim --rain-suite (real PickTarget / SortieGuide / Wing / Fire: the missile rain flies its lane, fires in its window)
 //   jet_obstacle_sim --wobble-suite [--out DIR] (real Wing / SortieGuide flown level: no bank left swinging; DIR: CSVs)
 //
 //   a   level 60 m over the ground at cruise, heading +z, a 150 m tall 60x60 building 1500 m ahead
@@ -1609,13 +1610,133 @@ int ExtendFlipSuite(const char* outDir) {
 }
 }  // namespace
 
+// --rain-suite (the user, 2026-11-27: 「这个天顶飞机 飞行有问题吧」): the zenith interceptor's missile rain (jet_sortie.cpp
+// SortiePass::missileRain) flown through the production PickTarget / SortieGuide / Wing / Fire, as in the 2026-11-27
+// 17:44:07 log (heights over this world's ground, the log's less 23 m): in from (-1950, 203, -343) on its lane through the
+// mark (113, 0, -176), its magazine's burden holding it at 113 m/s, one enemy on the ground under its way in `back` m
+// short of the mark (`under` m beside the lane, + to its right) and, with `cluster`, five round the mark; `ground` > 0
+// the map's ground that half size (the log's stock map: walls +-1600 m, soft box +-960, made past it: arriving). It flew level after that one (the
+// nearest), went over it inside its turn and S-turned at 70-80 deg of bank round it for 15 s, its window on it gone. Its
+// lane flown: the burst let go inside the window at a target ahead of it, its heading and bank held till then.
+struct RainResult {
+    float fireAt=-1.0f,fireFrom=0.0f;   // s after it came / m from the mark (level) where the burst went (-1: none)
+    float targetAhead=0.0f;             // m its target lay ahead of it along its lane, firing
+    float turned=0.0f,bank=0.0f;        // rad its heading swung through and its largest bank, till it fired (or left)
+    float pass=0.0f;                    // rad its heading swung through over the whole pass, till it withdrew
+    bool done=false;
+};
+RainResult RainCase(float back,float under,bool cluster,float ground) {
+    boxes.clear();
+    groundHalf=ground;
+    ResetWalls();
+    const Role role=Role::interceptor;
+    const Kind& k=KindOf(role);
+    const float mark[3]={113.0f,0.0f,-176.0f},at[3]={-1950.0f,203.0f,-343.0f};
+    float dir[3]={mark[0]-at[0],0.0f,mark[2]-at[2]};Normalize(dir);
+    const float side[3]={dir[2],0.0f,-dir[0]};
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    Place(j,v,ctrl.data(),role,at,dir,k.cruise,0.0f);
+    j.launched=true;j.burden=Burden{1.02f,0.88f};   // 155 / sqrt(1.88) = 113 m/s, the log's
+    AirborneStart(j,k,dir);   // made in the air as a call's is (jet_spawn.cpp ActivateSupportAircraft)
+    std::memcpy(j.anchor,mark,12);
+    Arms arms{};arms.pick=-1;arms.rocket=-1;arms.hasMissile=true;arms.missiles=256;arms.locked=26;arms.missileRange=4200.0f;
+    SortieBegin(j,SortiePass::missileRain,mark,at,dir,nowMs);
+    // The enemies: bodies with a control block, on this world's ground (y 2).
+    std::vector<std::vector<unsigned char>> bodies(6,std::vector<unsigned char>(0x400,0)),ctrls(6,std::vector<unsigned char>(16,0));
+    for(int i=0;i<6;++i)Put<const void*>(bodies[i].data(),kSelfCtrl,ctrls[i].data());
+    simEnemies.clear();
+    simEnemies.push_back(SimEnemy{bodies[0].data(),{mark[0]-dir[0]*back+side[0]*under,2.0f,mark[2]-dir[2]*back+side[2]*under}});
+    if(cluster) {
+        const float offs[5][2]={{0.0f,0.0f},{150.0f,80.0f},{-120.0f,140.0f},{90.0f,-160.0f},{-60.0f,-90.0f}};
+        for(int i=0;i<5;++i)simEnemies.push_back(SimEnemy{bodies[1+i].data(),{mark[0]+offs[i][0],2.0f,mark[2]+offs[i][1]}});
+    }
+    const ULONGLONG born=nowMs;
+    RainResult r;
+    ULONGLONG missileSeen=j.t.missileAt;
+    float lastYaw=std::atan2(dir[0],dir[2]);
+    for(int f=0;f<60*60 && !j.sortie.done;++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        j.m.groundSeen=true;j.m.groundY=0.0f;
+        PickTarget(j,v,pos,j.anchor,k.range,kDt,nowMs);   // TargetRange (jet_bay.cpp): k.range for a gun jet
+        const float clear=GroundClearance(pos);
+        float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
+        bool gunsOk=false,missileOk=false;
+        SortieGuide(j,k,arms,pos,nose,j.t.aim,mark[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
+        Wing(j,k,v,pos,clear,nose,want,speed,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        if(j.phase!=jetphase::Phase::withdraw)Fire(j,v,pos,nose,j.t.aim,gunsOk,missileOk,arms,nowMs);
+        else v[kFireGun]=v[kFireMissile]=0;
+        const bool missile=j.t.missileAt!=missileSeen;
+        missileSeen=j.t.missileAt;
+        if(missile && r.fireAt<0.0f) {
+            r.fireAt=static_cast<float>(nowMs-born)*0.001f;
+            const float off[3]={pos[0]-mark[0],0.0f,pos[2]-mark[2]};
+            r.fireFrom=Len(off);
+            r.targetAhead=sortie::Along(j.sortie.line,j.t.aim)-sortie::Along(j.sortie.line,pos);
+            arms.missiles=0;arms.locked=0;   // the burst takes the whole magazine (src/lockon.cpp SalvoVolley)
+        }
+        const float yaw=std::atan2(j.m.vel[0],j.m.vel[2]);
+        float d=yaw-lastYaw;
+        while(d>kPi)d-=2.0f*kPi;
+        while(d< -kPi)d+=2.0f*kPi;
+        lastYaw=yaw;
+        if(j.phase!=jetphase::Phase::withdraw)r.pass+=std::fabs(d);
+        if(r.fireAt<0.0f){r.turned+=std::fabs(d);r.bank=std::fmax(r.bank,std::fabs(BankOf(v)));}
+        Move(j,v);
+    }
+    r.done=j.sortie.done;
+    simEnemies.clear();
+    groundHalf=0.0f;
+    ResetWalls();
+    return r;
+}
+int RainSuite() {
+    config=Config{};config.jetPilot=true;
+    config.bigWorld=20000.0f;   // no edge but the stock map's ground (RainCase `ground`)
+    int failures=0,cases=0;
+    const struct { const char* name;float back,under;bool cluster; } cs[]={
+        {"the log's: one 600 m short, 170 m left of its lane, five at the mark",600.0f,-170.0f,true},
+        {"one 600 m short right under its lane, five at the mark",600.0f,0.0f,true},
+        {"one 600 m short, 400 m right of its lane, five at the mark",600.0f,400.0f,true},
+        {"only the one 600 m short, 170 m left of its lane",600.0f,-170.0f,false},
+        {"one 900 m short, 170 m left of its lane (the log's flight circled it 23 s), five at the mark",900.0f,-170.0f,true},
+        {"one 1800 m short (passed before its hold opens), five at the mark",1800.0f,-170.0f,true}};
+    for(const float ground:{0.0f,1600.0f+area::kVoidMargin})for(const auto& c:cs) {
+        const RainResult r=RainCase(c.back,c.under,c.cluster,ground);
+        const float turnedDeg=r.turned*180.0f/kPi,bankDeg=r.bank*180.0f/kPi;
+        // Fired inside its window (kRainOpen to kRainTo of the mark) at a target ahead of it on its lane, flown straight
+        // there and on to its withdrawal: its heading swung under 20 deg all told and its bank under 30 deg (the log's:
+        // over 200 deg and 80 deg). On the stock map too: made 1000 m past the soft box at the cruise its stores hold
+        // (AirborneStart), held in its arrival box, it flies in along its lane (the log's banked 50-85 deg off it, made
+        // at 220 m/s, its turn wider than the ground, and turned by the soft edge's corner rule: airbound.h KeepIn).
+        const bool fired=r.fireAt>=0.0f && r.fireFrom<sortie::kRainOpen && r.fireFrom>sortie::kRainTo && r.targetAhead>0.0f;
+        const float passDeg=r.pass*180.0f/kPi;
+        const bool straight=turnedDeg<20.0f && bankDeg<30.0f && passDeg<20.0f;
+        const bool ok=fired && straight && r.done;
+        failures+=!ok;++cases;
+        std::printf("rain %s %-66s fired %5.1f s %5.0f m out, target %5.0f m ahead; turned %5.1f deg (pass %5.1f), bank %4.1f deg%s (%s)\n",
+                    ground>0.0f ? "stock map" : "no edge  ",c.name,r.fireAt,r.fireFrom,r.targetAhead,turnedDeg,passDeg,bankDeg,r.done ? "" : ", not done",ok ? "ok" : "FAIL");
+    }
+    std::printf("rain suite: %d of %d cases failed\n",failures,cases);
+    return failures ? 1 : 0;
+}
+
 int main(int argc,char** argv) {
     const char* scenario="a";
     const char* kindName="strike";
     const char* outDir=".";
     std::string tag;
     float seconds=0.0f;
-    bool selftest=false,playerRotors=false,strikeRoom=false,extendFlip=false,wobble=false;
+    bool selftest=false,playerRotors=false,strikeRoom=false,extendFlip=false,wobble=false,rain=false;
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--withdraw-suite"))return WithdrawSuite();
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--entry-suite"))return EntrySuite();
@@ -1628,6 +1749,7 @@ int main(int argc,char** argv) {
         else if(!std::strcmp(argv[a],"--selftest"))selftest=true;
         else if(!std::strcmp(argv[a],"--ground-settle-suite"))return GroundSettleSuite();
         else if(!std::strcmp(argv[a],"--wobble-suite"))wobble=true;
+        else if(!std::strcmp(argv[a],"--rain-suite"))rain=true;
         else if(!std::strcmp(argv[a],"--player-rotor-suite"))playerRotors=true;
         else if(!std::strcmp(argv[a],"--strike-room-suite"))strikeRoom=true;
         else if(!std::strcmp(argv[a],"--extend-flip-suite"))extendFlip=true;
@@ -1642,6 +1764,7 @@ int main(int argc,char** argv) {
     if(strikeRoom)return StrikeRoomSuite(outDir);
     if(extendFlip)return ExtendFlipSuite(outDir);
     if(wobble)return WobbleSuite(outDir);
+    if(rain)return RainSuite();
     if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     const std::string csvPath=std::string(outDir)+"/"+tag+".csv",logPath=std::string(outDir)+"/"+tag+".log";
     logFile=std::fopen(logPath.c_str(),"w");
