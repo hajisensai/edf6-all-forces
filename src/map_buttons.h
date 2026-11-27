@@ -73,16 +73,21 @@ inline bool Arms(Id b) noexcept { return IsOrder(b) && !OpensMenu(b) && mapcmd::
 // --- Each button's state for the selection (the user, 2026-11-27: 「各种按钮只在能操作的时候点亮。车上都是满人怎么上车」) ---
 // The card's summary of the selection (mapcmd.cpp Publish): its counts and the orders any of it takes (`takes`: Order
 // bits, mapcmd.cpp Takes). `boardRoom`: the seats its squads on foot could take now (npcai.cpp NpcBoardRoom) -- in the
-// selected vehicles when any is selected (BOARD goes into those), else in the one BOARD would pick.
+// selected carriers when any is selected (BOARD goes into those), else in the one BOARD would pick. `carriers`: the
+// selected vehicles squads get into at all (mapcmd.cpp Carrier: not a jet; `vehicles` counts every non-squad unit).
+// `boardOff`: a squad of this machine's selected while its squads do not board (npcai.h NpcBoardingOn).
 struct CardSelection {
     int units=0,squads=0,onFoot=0,riding=0,scripted=0,vehicles=0,aircraft=0,jets=0;
     int boardRoom=0;
     std::uint32_t takes=0;
+    int carriers=0;
+    bool boardOff=false;
 };
 // Why a button cannot be used now (none: it can; hidden: not on the card for this selection). Its hover text
 // (hudtext.inc whyCannot...).
 enum class Why : std::uint8_t { none, hidden, cannot, scripted, allRiding, noneRiding, noRoom, noRoomSelected, noDecoys, noWithdraw,
-                                noRoomThat };   // noRoomThat: the vehicle the right button was let go on is full (mapcmd.cpp)
+                                noRoomThat,     // noRoomThat: the vehicle the right button was let go on is full (mapcmd.cpp)
+                                boardOff };     // squads do not board here (NpcBoarding=0, or the native ride not as read)
 inline bool TakesAny(const CardSelection& c,mapcmd::Order o) noexcept { return (c.takes>>static_cast<unsigned>(o))&1u; }
 // A button's state: shown or not by what is selected (a kind's own only with that kind), then whether it works (drawn
 // greyed with its reason when not; its click and key do nothing but say why, map_refuse). With nothing selected only
@@ -104,7 +109,7 @@ inline Why StateOf(Id b,const CardSelection& c) noexcept {
         if(allScripted)return Why::scripted;
         if(c.onFoot<=0)return Why::allRiding;
         if(!TakesAny(c,Order::board))return Why::cannot;
-        return c.boardRoom>0 ? Why::none : c.vehicles>0 ? Why::noRoomSelected : Why::noRoom;
+        return c.boardRoom>0 ? Why::none : c.boardOff ? Why::boardOff : c.carriers>0 ? Why::noRoomSelected : Why::noRoom;
     case Id::dismount:
         if(c.squads<=0 && c.vehicles<=0)return Why::hidden;
         if(TakesAny(c,Order::dismountAll) || TakesAny(c,Order::unloadAt) || TakesAny(c,Order::dismount))return Why::none;

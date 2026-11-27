@@ -50,6 +50,7 @@ struct CommandUnit { const void* v; const char* name; Command now; bool air; flo
     // Fencer's dashes unrested, a Ranger's / Air Raider's walk rolled, npcai.cpp Mobility; a jet's afterburner),
     // `decoys` it has decoys left (DECOY: a jet's flares). SMOKE retired (no unit has smoke of its own).
     bool holdFire=false,high=false,sprints=false,decoys=false;
+    bool boards=false;      // a vehicle squads get into at all (npcai.h NpcBoardable; never a jet): BOARD's (mapcmd.cpp Carrier)
     bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field; a
                             // squad paired with a support vehicle (transport.cpp TransportWithdrawable): WITHDRAW sends that
 };

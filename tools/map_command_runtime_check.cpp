@@ -190,7 +190,11 @@ float MapFloorRay(const float*,const float*,float*) noexcept { return -1.0f; }
 bool groundReady=false;
 bool MapGroundNear(float,float,float level,float* out,bool) noexcept {*out=level;return groundReady;}
 int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
-int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
+const void* stubJetUnit=nullptr;   // a fighter the jets list (BoardCarriers)
+int JetCommandUnits(CommandUnit* out,int max) noexcept {
+    if(!stubJetUnit || max<1)return 0;
+    out[0]=CommandUnit{stubJetUnit,"jet",{},false,{}};return 1;
+}
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool JetCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
@@ -227,7 +231,11 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     if(squad2On && n<most)out[n++]=CommandUnit{squad2Obj,squad2Name,squadReports ? squad2Got : Command{},false,{squad2Pos[0],squad2Pos[1],squad2Pos[2]}};
     return n;
 }
-int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
+const void* stubTankUnit=nullptr;  // a tank the tanks list (BoardCarriers)
+int TankCommandUnits(CommandUnit* out,int max) noexcept {
+    if(!stubTankUnit || max<1)return 0;
+    out[0]=CommandUnit{stubTankUnit,"tank",{},false,{}};return 1;
+}
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept {if(tally)*tally=SquadTally{};return 0;}
 bool SquadCommand(const void* leader,const Command& c) noexcept {
     if(leader==squad2Obj){squad2Got=c;++squad2Orders;return true;}
@@ -286,6 +294,10 @@ const void* marked=nullptr;int markCalls=0;
 bool NpcMarked() noexcept {return marked!=nullptr;}
 int stubBoardRoom=4;   // npcai.cpp NpcBoardRoom: the seats a squad could take (the card's BOARD)
 int NpcBoardRoom(const void*,const void*) noexcept {return stubBoardRoom;}
+const void* stubJet=nullptr;   // npcai.cpp NpcBoardable: every unit but this one (a fighter) is a vehicle squads get into
+bool NpcBoardable(const void* v) noexcept {return v!=stubJet;}
+bool stubBoardingOn=true;      // npcai.cpp NpcBoardingOn: NpcBoarding=1 and the native ride as read
+bool NpcBoardingOn() noexcept {return stubBoardingOn;}
 bool NpcMarkEnemy(const void* object,const float*,bool toggle) noexcept {
     ++markCalls;
     if(toggle && marked==object){marked=nullptr;return false;}
@@ -1249,6 +1261,48 @@ void SelectionCapabilityMask() noexcept {
 // clicked unit's kind, a group follows a squad through its leader's death, Shift + right click queues the moves that
 // go on frame by frame with the map shut, the HOLD button holds each unit where it stands, the right button on the
 // player follows, H holds their fire.
+// BOARD's vehicles (review 2026-11-27): a jet boxed with a squad is no vehicle to board -- BOARD neither greys as "that
+// vehicle full" nor names it, the nearest with room decides; a remote squad gets no seat in it either; boarding off says so.
+void BoardCarriers() noexcept {
+    ResetMapCommands();stubBoardRoom=4;stubBoardingOn=true;
+    static unsigned char jet[0x400]{},jetCtrl[0x10]{},tank[0x400]{},tankCtrl[0x10]{};
+    Put<void*>(jet,kSelfCtrl,jetCtrl);Put<void*>(tank,kSelfCtrl,tankCtrl);Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    const auto boards=[](const void* v){
+        static Entry listed[kCmdUnits];const int n=ListUnits(listed);
+        for(int i=0;i<n;++i)if(listed[i].u.v==v)return listed[i].u.boards;
+        return false;
+    };
+    stubJetUnit=jet;stubTankUnit=tank;stubJet=nullptr;
+    Check(!boards(jet) && boards(tank),"ListUnits: a jet is never BOARD's vehicle, a tank is");
+    stubJet=tank;Check(!boards(tank),"ListUnits: a vehicle no squad gets into (NpcBoardable) is none either");
+    stubJet=nullptr;stubJetUnit=stubTankUnit=nullptr;
+    static Game g;g=kNewGame;g.count=2;
+    g.list[0]=Entry{CommandUnit{squadObj,"squad",{},false,{}},Owner::squad,ObjRef::Of(squadObj)};
+    g.list[1]=Entry{CommandUnit{jet,"jet",{},false,{}},Owner::jet,ObjRef::Of(jet)};
+    g.sel.Add(squadObj);g.sel.Add(jet);
+    mapbtn::CardSelection c=CardOf(g);
+    Check(c.vehicles==1 && !c.carriers && c.boardRoom==4 && mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::none &&
+          !BoardFocus(g,g.list[0]).obj,"squad + jet: BOARD lit by the nearest vehicle's seats and names none");
+    stubBoardRoom=0;c=CardOf(g);
+    Check(mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::noRoom,"squad + jet, every vehicle full: no room (not the jet full)");
+    g.count=3;g.list[2]=Entry{CommandUnit{tank,"tank",{},false,{}},Owner::tank,ObjRef::Of(tank)};g.list[2].u.boards=true;g.sel.Add(tank);
+    c=CardOf(g);
+    Check(c.carriers==1 && mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::noRoomSelected && BoardFocus(g,g.list[0]).obj==tank,
+          "squad + jet + full tank: the tank is BOARD's (greyed, that vehicle full; it is named, not the jet)");
+    stubBoardRoom=4;c=CardOf(g);
+    Check(c.boardRoom==4 && BoardFocus(g,g.list[0]).obj==tank,"squad + jet + tank with seats: BOARD into the tank");
+    remoteAuthority=squadObj;
+    Check(SquadBoardRoom(g.list[0],&g.list[1])==0 && SquadBoardRoom(g.list[0],&g.list[2])==1 && SquadBoardRoom(g.list[0],nullptr)==1,
+          "a remote squad: no seat in a jet, its authority judges a carrier and the nearest");
+    g.count=2;g.sel.Clear();g.sel.Add(squadObj);g.sel.Add(jet);c=CardOf(g);
+    Check(c.boardRoom==1 && !c.carriers && !BoardFocus(g,g.list[0]).obj,"a remote squad + jet: lit, sent to the nearest");
+    stubBoardingOn=false;c=CardOf(g);
+    Check(!c.boardOff,"boarding off here says nothing of another machine's squad");
+    remoteAuthority=nullptr;stubBoardRoom=0;c=CardOf(g);
+    Check(c.boardOff && mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::boardOff &&
+          mapbtn::OrderState(Order::board,c)==mapbtn::Why::boardOff,"NpcBoarding=0: BOARD greyed with boarding off as why");
+    stubBoardingOn=true;stubBoardRoom=4;ResetMapCommands();
+}
 void RtsGroups() noexcept {
     ResetMapCommands();view=View{};config=Config{};groundReady=true;
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));
@@ -1619,7 +1673,7 @@ int main() {
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
-    crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();crew::PvpUiActions();
+    crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::BoardCarriers();crew::PlacePanel();crew::PvpUiActions();
     crew::RtsGroups();crew::RosterAndCards();crew::AuthorityQueue();crew::PacedMarch();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;

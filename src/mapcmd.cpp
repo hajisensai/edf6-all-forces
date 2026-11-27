@@ -263,7 +263,11 @@ int ListUnits(Entry* list) noexcept {
         if(q.owner!=Owner::squad || q.u.locked || !q.u.riding || !q.u.vehicle)continue;
         for(int k=0;k<count;++k)if(list[k].owner!=Owner::squad && list[k].u.v==q.u.vehicle)list[k].u.carries=true;
     }
-    for(int i=0;i<count;++i)list[i].u.holdFire=UnitHoldFire(list[i].u.v);
+    for(int i=0;i<count;++i) {
+        list[i].u.holdFire=UnitHoldFire(list[i].u.v);
+        // BOARD's vehicles (Carrier): a unit squads get into at all; a jet never (its pilot's alone).
+        list[i].u.boards=list[i].owner!=Owner::squad && list[i].owner!=Owner::jet && NpcBoardable(list[i].u.v);
+    }
     std::sort(list,list+count,[](const Entry& a,const Entry& b){ return std::less<const void*>()(a.u.v,b.u.v); });
     return count;
 }
@@ -568,26 +572,30 @@ bool AnyTakes(const Game& g,Order o) noexcept {
     for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],o))return true;
     return false;
 }
+// A unit squads get into (ListUnits: `boards`, npcai.h NpcBoardable): BOARD names, counts and right-clicks only these.
+// A fighter, a thing with no seat a soldier fits, is no vehicle to BOARD (it would take the order from the vehicles
+// that are: squads boxed with a jet were refused, the jet named).
+bool Carrier(const Entry& e) noexcept { return e.owner!=Owner::squad && e.u.boards; }
 // The seats squad `e` (on foot) could take now in vehicle `v` (npcai.cpp NpcBoardRoom; null: the one BOARD would pick).
-// Another machine's squad: its authority knows its members and refuses a full vehicle itself (command_net Execute), so it
-// counts as having room here.
-int SquadBoardRoom(const Entry& e,const void* v) noexcept {
-    if(e.owner!=Owner::squad || e.u.locked || e.u.riding)return 0;
+// None in a unit that is no carrier. Another machine's squad: its authority knows its members and refuses a full vehicle
+// itself (command_net Execute), so a carrier counts as having room here.
+int SquadBoardRoom(const Entry& e,const Entry* v) noexcept {
+    if(e.owner!=Owner::squad || e.u.locked || e.u.riding || (v && !Carrier(*v)))return 0;
     if(!IsOnlineAuthority(e.u.v))return 1;
-    return NpcBoardRoom(e.u.v,v);
+    return NpcBoardRoom(e.u.v,v ? v->u.v : nullptr);
 }
 // The vehicle BOARD sends squad `e` into (command protocol v12: the request's focus; npcai.cpp BoardTarget's `named`):
-// the one the right button was let go on; else the first selected vehicle with room for it (BOARD with vehicles selected
-// goes into those: the first of them when none has room, which its authority refuses as full); else none (the nearest
-// with room, as BoardTarget picks).
+// the one the right button was let go on; else the first selected carrier with room for it (BOARD with carriers
+// selected goes into those: the first of them when none has room, which its authority refuses as full); else none
+// (no carrier selected -- only a jet with them, say: the nearest with room, as BoardTarget picks).
 ObjRef BoardFocus(const Game& g,const Entry& e) noexcept {
     if(g.boardInto.obj)return g.boardInto;
     ObjRef first{};
     for(int i=0;i<g.count;++i) {
         const Entry& v=g.list[i];
-        if(!Active(g,v) || v.owner==Owner::squad)continue;
+        if(!Active(g,v) || !Carrier(v))continue;
         if(!first.obj)first=v.id;
-        if(SquadBoardRoom(e,v.u.v)>0)return v.id;
+        if(SquadBoardRoom(e,&v)>0)return v.id;
     }
     return first;
 }
@@ -604,6 +612,7 @@ mapbtn::CardSelection CardOf(const Game& g) noexcept {
         if(e.u.locked || (squad && e.u.joinOnly))++c.scripted;
         if(squad){++c.squads;++(e.u.riding ? c.riding : c.onFoot);}
         else ++c.vehicles;
+        if(Carrier(e))++c.carriers;
         if(e.owner==Owner::heli || e.owner==Owner::jet)++c.aircraft;
         if(e.owner==Owner::jet)++c.jets;
         for(unsigned o=0;o<=static_cast<unsigned>(mapcmd::kLastOrder);++o)
@@ -611,15 +620,16 @@ mapbtn::CardSelection CardOf(const Game& g) noexcept {
     }
     // FOCUS FIRE with an enemy marked (Q, or the right button on one: that gives the order itself).
     if(!NpcMarked())c.takes&=~(std::uint32_t{1}<<static_cast<unsigned>(Order::focus));
-    // BOARD's seats: with vehicles selected those in them, else in the vehicle each squad would pick; the most any squad
-    // on foot has (StateOf only asks whether there are any).
+    // BOARD's seats: with carriers selected those in them (BoardFocus names one), else in the vehicle each squad would
+    // pick; the most any squad on foot has (StateOf only asks whether there are any). A selected jet or other unit no
+    // squad gets into is not counted (BOARD goes to the nearest then). This machine's squads with boarding off: why.
     if(c.squads>0 && c.onFoot>0)for(int i=0;i<g.count;++i) {
         const Entry& e=g.list[i];
         if(!Active(g,e) || e.owner!=Owner::squad || e.u.riding || e.u.locked)continue;
+        if(IsOnlineAuthority(e.u.v) && !NpcBoardingOn())c.boardOff=true;
         int room=0;
-        if(c.vehicles>0) {
-            for(int k=0;k<g.count;++k)
-                if(Active(g,g.list[k]) && g.list[k].owner!=Owner::squad)room+=SquadBoardRoom(e,g.list[k].u.v);
+        if(c.carriers>0) {
+            for(int k=0;k<g.count;++k)if(Active(g,g.list[k]) && Carrier(g.list[k]))room+=SquadBoardRoom(e,&g.list[k]);
         } else room=SquadBoardRoom(e,nullptr);
         if(room>c.boardRoom)c.boardRoom=room;
     }
@@ -1590,7 +1600,7 @@ int VehicleUnder(const Game& g,const View& v) noexcept {
     mapcmd::Mark marks[kCmdUnits];
     const int n=Marks(g,v,marks);
     const int i=mapcmd::Nearest(marks,n,g.pointer.x,g.pointer.y,kClickRadius*v.h/1080.0f);
-    return i>=0 && g.list[i].owner!=Owner::squad && !Active(g,g.list[i]) ? i : -1;
+    return i>=0 && Carrier(g.list[i]) && !Active(g,g.list[i]) ? i : -1;   // a jet's mark: the right button moves there
 }
 
 // Y / the sweep button: the selected squads (none: the player's recruited squads) out for the boxes, or called back.
@@ -2084,7 +2094,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(right.issue && right.order==Order::board) {
         // Into that vehicle (BoardFocus); full for every squad on foot selected: refused here (「车上都是满人怎么上车」).
         int room=0;
-        for(int i=0;i<g.count;++i)if(Active(g,g.list[i]))room+=SquadBoardRoom(g.list[i],g.list[rightVehicle].u.v);
+        for(int i=0;i<g.count;++i)if(Active(g,g.list[i]))room+=SquadBoardRoom(g.list[i],&g.list[rightVehicle]);
         if(room>0){p.board=true;g.boardInto=g.list[rightVehicle].id;}
         else Refuse(g,OrderText(Order::board),mapbtn::Why::noRoomThat);
     }

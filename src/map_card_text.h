@@ -23,6 +23,7 @@ inline const wchar_t* CardWhyText(mapbtn::Why why) noexcept {
     case Why::noRoom: return hudtext::Tr(Tx::whyNoRoom);
     case Why::noRoomSelected: return hudtext::Tr(Tx::whyNoRoomSelected);
     case Why::noRoomThat: return hudtext::Tr(Tx::whyNoRoomThat);
+    case Why::boardOff: return hudtext::Tr(Tx::whyBoardOff);
     case Why::noDecoys: return hudtext::Tr(Tx::whyNoDecoys);
     case Why::noWithdraw: return hudtext::Tr(Tx::whyNoWithdraw);
     default: return hudtext::Tr(Tx::whyCannot);

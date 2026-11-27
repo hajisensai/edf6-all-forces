@@ -422,10 +422,12 @@ HUDTEXT(whyNoneRiding,L"none of the selected units is aboard",L"选中的单位�
 HUDTEXT(whyNoRoom,L"no vehicle near with a free seat",L"附近没有空位的载具",L"附近沒有空位的載具",L"近くに空席のある車両がない")
 HUDTEXT(whyNoRoomSelected,L"the selected vehicles have no free seat",L"选中的载具没有空位",L"選中的載具沒有空位",L"選択中の車両に空席がない")
 HUDTEXT(whyNoRoomThat,L"that vehicle has no free seat",L"这辆载具没有空位",L"這輛載具沒有空位",L"その車両に空席がない")
+HUDTEXT(whyBoardOff,L"NPC boarding is off (NpcBoarding=0) or unavailable",L"NPC 上车已关闭（NpcBoarding=0）或不可用",
+        L"NPC 上車已關閉（NpcBoarding=0）或不可用",L"NPC の搭乗がオフ（NpcBoarding=0）か利用できない")
 HUDTEXT(whyNoDecoys,L"no decoys left",L"诱饵弹已用完",L"誘餌彈已用完",L"フレアが残っていない")
-HUDTEXT(whyNoWithdraw,L"nothing to send off (a support's aircraft, a squad's transport or a recruited squad)",
-        L"没有可撤离的（支援飞机、小队的运输载具或已招募的小队）",L"沒有可撤離的（支援飛機、小隊的運輸載具或已招募的小隊）",
-        L"撤収できるものがない（支援機・分隊の輸送車両・加入済みの分隊）")
+HUDTEXT(whyNoWithdraw,L"nothing to send off (a support's aircraft or transport, or a recruited squad)",
+        L"没有可撤离的（支援飞机、支援运输载具或已招募的小队）",L"沒有可撤離的（支援飛機、支援運輸載具或已招募的小隊）",
+        L"撤収できるものがない（支援機・支援輸送車両・加入済みの分隊）")
 HUDTEXT(cmdSubAll,L"SUB-SELECTION: ALL SELECTED",L"子选择：全部选中单位",L"子選擇：全部選中單位",L"サブ選択：選択中の全ユニット")
 HUDTEXT(cmdSubKind,L"SUB-SELECTION: %hs (%d)",L"子选择：%hs（%d）",L"子選擇：%hs（%d）",L"サブ選択：%hs（%d）")
 HUDTEXT(cmdSubShown,L"ORDERS TO: %ls",L"指令对象：%ls",L"指令對象：%ls",L"命令対象：%ls")

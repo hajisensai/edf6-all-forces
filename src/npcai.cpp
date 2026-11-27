@@ -79,6 +79,7 @@
 
 namespace crew {
 bool InstallVehicleTargetSearch() noexcept;   // vehicle_target.cpp
+bool IsJet(const void* vehicle) noexcept;      // jet.cpp: a fighter (BOARD never seats a squad in one: Boardable)
 namespace {
 void ResetGunnerInputs() noexcept;
 bool InstallDriverPayload() noexcept;
@@ -3559,21 +3560,48 @@ bool FriendlyVehicle(const unsigned char* v,const unsigned char* member) noexcep
     const int team=At<int>(v,kTeam),soldier=At<int>(member,kTeam);
     return team==soldier || ((soldier==0 || soldier==kTeamFriend) && (team==0 || team==kTeamFriend || team==kTeamVehicle));
 }
-float BoardDistance(unsigned char* v,unsigned char* const* members,int count,ULONGLONG ms) noexcept {
-    if(!v || !Readable(v,kSeatCount+8) || v[kDead] || !OnlineMaySeatNpc(v))return -1;
-    float nearest=kBoardFar+1;
-    for(int m=0;m<count;++m) {
-        auto* h=members[m];
-        if(!HumanOnFoot(h) || SupportSoldierHeld(h) || !IsOnlineAuthority(h) ||
-           npc::Scripted(ControlOf(h,RootLeader(h))) || !FriendlyVehicle(v,h))continue;
-        for(unsigned seat=0;seat<SeatCount(v);++seat) {
-            if(!SeatTakes(v,seat,h) || Reserved(v,seat,ms,h))continue;
-            float point[3],reach;
-            if(!SeatPoint(v,seat,point,&reach) || !std::isfinite(reach) || reach<=0)continue;
-            const float distance=npc::Dist(Pos(h),point);if(distance<nearest)nearest=distance;
+// Whether `v` is a vehicle a squad gets into at all (BOARD's, the map card's and this machine's pick alike: npcai.h
+// NpcBoardable): one the plugin knows (crew.cpp KnownVehicle), alive, not a fighter (jet.cpp IsJet: its pilot's alone),
+// with a seat some soldier's class fits. Not whether a seat is free now, nor whether this machine seats NPCs in it.
+bool Boardable(const unsigned char* v) noexcept {
+    if(!v || !Readable(v,kSeatCount+8) || v[kDead] || !KnownVehicle(v) || IsJet(v))return false;
+    auto* const seats=const_cast<unsigned char*>(v);
+    for(unsigned seat=0;seat<SeatCount(seats) && seat<edf::kMaxSeats;++seat)
+        if((At<std::uint32_t>(SeatAt(seats,seat),kSeatClass)&At<std::uint32_t>(SeatAt(seats,seat),kSeatEnable))!=0)return true;
+    return false;
+}
+// A member BOARD seats in `v` (the same test for the card's count and the authority's pick): on foot, this machine's to
+// seat, not a script's, not a support soldier held for its delivery, `v` friendly to it.
+bool BoardsInto(const unsigned char* v,const unsigned char* h) noexcept {
+    return HumanOnFoot(h) && !SupportSoldierHeld(h) && IsOnlineAuthority(h) && !npc::Scripted(ControlOf(h,RootLeader(h))) &&
+           FriendlyVehicle(v,h);
+}
+// The seats of `v` the squad of `members` could take now: free, its class's, not walked to by another, the seat's
+// riding point within kBoardFar of a member who boards (BoardsInto). `nearest`: that member's distance to the nearest.
+// One predicate for both: the card greys BOARD by it (NpcBoardRoom) and BoardTarget picks by it.
+int OpenSeats(unsigned char* v,unsigned char* const* members,int count,ULONGLONG ms,float* nearest=nullptr) noexcept {
+    if(nearest)*nearest=kBoardFar+1;
+    if(!Boardable(v) || !OnlineMaySeatNpc(v))return 0;
+    int room=0;
+    for(unsigned seat=0;seat<SeatCount(v) && seat<edf::kMaxSeats;++seat) {
+        float point[3],reach;
+        if(!SeatPoint(v,seat,point,&reach) || !std::isfinite(reach) || reach<=0)continue;
+        bool open=false;
+        for(int m=0;m<count;++m) {
+            auto* h=members[m];
+            if(!BoardsInto(v,h) || !SeatTakes(v,seat,h) || Reserved(v,seat,ms,h))continue;
+            const float distance=npc::Dist(Pos(h),point);
+            if(distance>kBoardFar)continue;
+            open=true;
+            if(nearest && distance<*nearest)*nearest=distance;
         }
+        room+=open ? 1 : 0;
     }
-    return nearest<=kBoardFar ? nearest : -1;
+    return room;
+}
+float BoardDistance(unsigned char* v,unsigned char* const* members,int count,ULONGLONG ms) noexcept {
+    float nearest=kBoardFar+1;
+    return OpenSeats(v,members,count,ms,&nearest)>0 ? nearest : -1;
 }
 // `named`: the vehicle the player picked (BOARD's focus, command protocol v12: a selected vehicle with room, the one
 // right clicked): that one alone, none when it has no seat for them (not another one nearby instead).
@@ -3582,7 +3610,7 @@ unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULO
     unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
     if(sawVehicle)*sawVehicle=false;
     if(named) {
-        if(!Readable(named,kSeatCount+8) || !KnownVehicle(named) || named[kDead])return nullptr;
+        if(!Boardable(named))return nullptr;   // a fighter, a thing with no seat: no vehicle to get into
         if(sawVehicle)*sawVehicle=true;
         return BoardDistance(named,members,count,ms)>=0 ? named : nullptr;
     }
@@ -3596,7 +3624,7 @@ unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULO
     unsigned char* best=nullptr;float bestD=kBoardFar+1;
     const auto consider=[&](const void* candidate) {
         auto* object=static_cast<unsigned char*>(const_cast<void*>(candidate));
-        if(!object || !Readable(object,kSeatCount+8) || !KnownVehicle(object) || object[kDead])return;
+        if(!Boardable(object))return;
         if(sawVehicle)*sawVehicle=true;
         const float distance=BoardDistance(object,members,count,ms);
         if(distance>=0 && distance<bestD){best=object;bestD=distance;}
@@ -3708,22 +3736,6 @@ bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=n
     return given>0;
 }
 
-// The seats of `v` a member of the squad of `members` on foot could take now (free, its class's, not walked to by
-// another), `v` within kBoardFar of `at`. No authority asked: the map's card counts another machine's squads as well
-// (their host seats them, BoardTarget).
-int BoardRoomIn(unsigned char* v,unsigned char* const* members,int count,const float* at,ULONGLONG ms) noexcept {
-    if(!v || !Readable(v,kSeatCount+8) || !KnownVehicle(v) || v[kDead] || !OnlineMaySeatNpc(v) || npc::Horiz(at,Pos(v))>kBoardFar)return 0;
-    int room=0;
-    for(unsigned seat=0;seat<SeatCount(v);++seat) {
-        bool takes=false;
-        for(int m=0;m<count && !takes;++m) {
-            unsigned char* h=members[m];
-            takes=HumanOnFoot(h) && FriendlyVehicle(v,h) && SeatTakes(v,seat,h) && !Reserved(v,seat,ms,h);
-        }
-        room+=takes ? 1 : 0;
-    }
-    return room;
-}
 
 // The riding members off (SeatKick: the get-off message, a real soldier lands and walks on; a dummy rider would die,
 // so only soldiers are kicked): `all` every one (DISMOUNT ALL), else those on passenger seats (DISMOUNT: the driver and
@@ -4007,22 +4019,25 @@ bool NpcSweepToggle(const void* const* tops,int n) noexcept {
     return sweep.on;
 }
 bool NpcSweepOn() noexcept { return sweep.on; }
+bool NpcBoardingOn() noexcept { return ok && Cfg().customNpcAi && Cfg().npcBoarding && rideOk; }
+bool NpcBoardable(const void* vehicle) noexcept {
+    __try {return Boardable(static_cast<const unsigned char*>(vehicle));} __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 int NpcBoardRoom(const void* leader,const void* vehicle) noexcept {
-    if(!ok || !Cfg().customNpcAi || !Cfg().npcBoarding || !rideOk || !leader)return 0;
+    if(!NpcBoardingOn() || !leader)return 0;
     __try {
         auto* top=static_cast<unsigned char*>(const_cast<void*>(leader));
         if(!Readable(top,kDead+1) || !Readable(top,kPosition+12) || top[kDead])return 0;
         unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
         const ULONGLONG ms=GameMs();
-        const float* at=Pos(top);
-        if(vehicle)return BoardRoomIn(static_cast<unsigned char*>(const_cast<void*>(vehicle)),members,count,at,ms);
-        // As BoardTarget picks: the player's ride, else any friendly or empty vehicle near.
+        if(vehicle)return OpenSeats(static_cast<unsigned char*>(const_cast<void*>(vehicle)),members,count,ms);
+        // As BoardTarget picks (the same seats: OpenSeats): the player's ride, else any friendly or empty vehicle near.
         int most=0;
-        if(const unsigned char* me=PlayerHuman(); me && !HumanOnFoot(me))most=BoardRoomIn(At<unsigned char*>(me,kHumanRiding),members,count,at,ms);
+        if(const unsigned char* me=PlayerHuman(); me && !HumanOnFoot(me))most=OpenSeats(At<unsigned char*>(me,kHumanRiding),members,count,ms);
         for(int i=0;i<world.friends && !most;++i)
-            most=BoardRoomIn(static_cast<unsigned char*>(const_cast<void*>(world.frObject[i])),members,count,at,ms);
+            most=OpenSeats(static_cast<unsigned char*>(const_cast<void*>(world.frObject[i])),members,count,ms);
         for(int i=0;i<world.nobodys && !most;++i)
-            most=BoardRoomIn(static_cast<unsigned char*>(const_cast<void*>(world.nobody[i])),members,count,at,ms);
+            most=OpenSeats(static_cast<unsigned char*>(const_cast<void*>(world.nobody[i])),members,count,ms);
         return most;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }

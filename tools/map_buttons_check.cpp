@@ -120,7 +120,14 @@ void Card() {
     CardSelection full=squads;full.boardRoom=0;
     Check(StateOf(Id::board,full)==Why::noRoom,"BOARD: no free seat anywhere: greyed, no room");
     full.vehicles=1;full.units=3;
+    Check(StateOf(Id::board,full)==Why::noRoom,"BOARD: a jet (no carrier) selected with them: the nearest's seats decide");
+    full.carriers=1;
     Check(StateOf(Id::board,full)==Why::noRoomSelected,"BOARD: the selected vehicle full: greyed, that vehicle full");
+    CardSelection off=full;off.boardOff=true;
+    Check(StateOf(Id::board,off)==Why::boardOff && OrderState(Order::board,off)==Why::boardOff,
+          "BOARD: squads do not board (NpcBoarding=0): greyed with its own reason");
+    off.boardRoom=1;
+    Check(StateOf(Id::board,off)==Why::none,"BOARD: a seat free (another machine's squad) lights it even so");
     full.boardRoom=1;
     Check(StateOf(Id::board,full)==Why::none,"BOARD: one seat free: lit");
     CardSelection riding{2,2,0,2,0,0,0,0,0,Bits({Order::none,Order::dismount,Order::move,Order::hold})};
@@ -149,7 +156,7 @@ void Card() {
     Check(OrderState(Order::guard,squads)==Why::none && OrderState(Order::guard,jet)==Why::cannot &&
           OrderState(Order::unloadAt,tank)==Why::none && OrderState(Order::dismountAll,squads)==Why::noneRiding &&
           OrderState(Order::board,full)==Why::none && OrderState(Order::board,riding)==Why::allRiding,
-          "the keys: G, U, Shift+N, BOARD by the state");
+          "the keys: G, U (twice: dismount all), BOARD by the state");
     Check(OrderState(Order::reverseMove,squads)==Why::none,"squads on foot: R reverses without its button");
     for(int o=0;o<=static_cast<int>(mapcmd::kLastOrder);++o)
         Check(OrderState(static_cast<Order>(o),none)!=Why::hidden && OrderState(static_cast<Order>(o),squads)!=Why::hidden,

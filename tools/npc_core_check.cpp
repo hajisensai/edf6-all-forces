@@ -210,6 +210,8 @@ bool CameraRay(float* eye,float* dir) noexcept {
 bool HumanOnFoot(const unsigned char* h) noexcept { return !At<void*>(h,kHumanVehicleCtrl); }
 bool MapHoldsKeys() noexcept { return mapHeld; }
 bool KnownVehicle(const void* v) noexcept { return v==vehicle; }
+bool vehicleJet=false;   // the stand-in vehicle is a fighter (vehicle.cpp IsJet): no vehicle to BOARD (npcai.cpp Boardable)
+bool IsJet(const void* v) noexcept { return vehicleJet && v==vehicle; }
 bool KnownVehicleVtable(const void* vt) noexcept { return vt && vt==At<const void*>(vehicle,0); }   // the stand-in's class
 bool drivableVehicle=true;   // the stand-in vehicle is a ground one a soldier can drive (npcpost.cpp NpcDrivable)
 bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v==vehicle; }
@@ -717,6 +719,21 @@ int main() {
         Put<unsigned>(seats,kSeatClass,1);Put<unsigned>(seats,kSeatEnable,1);Put<int>(vehicle,kTeam,0);
         Put<float>(vehicle,kPosition,1000);world.friends=1;IndexFixture();world.frObject[0]=vehicle;
         SeeSquad(human,human,0,npc::Control::free,now);sessionOn=true;
+        // The card's seats and the authority's BOARD read one test (npcai.cpp OpenSeats; review 2026-11-27: BoardRoomIn and
+        // BoardDistance differed): a fighter is no vehicle to board, with boarding off no squad has a seat anywhere.
+        Expect(NpcBoardingOn() && NpcBoardable(vehicle) && NpcBoardRoom(human,vehicle)>0 &&
+               NpcBoardRoom(human,nullptr)==NpcBoardRoom(human,vehicle),
+            "the card counts the seats the member fits (named, and as BOARD picks: the same vehicle)");
+        vehicleJet=true;
+        Expect(!NpcBoardable(vehicle) && NpcBoardRoom(human,vehicle)==0 && NpcBoardRoom(human,nullptr)==0,
+            "a jet: no carrier, no seat counted");
+        Expect(!NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),ObjRef::Of(vehicle)).Accepted() &&
+               !NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{}).Accepted() && transportPairs==0,
+            "a jet: BOARD named into it or to the nearest is refused, as the card greys it (no pairing)");
+        vehicleJet=false;config.npcBoarding=false;
+        Expect(!NpcBoardingOn() && NpcBoardRoom(human,vehicle)==0 && NpcBoardable(vehicle),
+            "NpcBoarding=0: no seat for any squad (the card says boarding is off), the vehicle still a carrier");
+        config.npcBoarding=true;
         auto result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::board,{}},ObjRef::Of(other),{});
         auto* child=Entry(dead,now);
         Expect(result.Accepted() && result.affected==1 && child->boardV.Is(vehicle) && child->boardSeat==0,
