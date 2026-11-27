@@ -1,9 +1,13 @@
 #include "native_body_math.h"
 #include "crew.h"
 #include "perf_probe.h"
+#include "team_native_logic.h"
 #include "edf/memory.h"
 #include "edf/patch.h"
+#include <array>
 #include <atomic>
+#include <new>
+#include <vector>
 #include <cfloat>
 #include <cstring>
 #include <emmintrin.h>
@@ -232,6 +236,246 @@ bool InstallHostileVisit() noexcept {
        !edf::Matches(image,kHostileAdapter,kHostileAdapterStock,sizeof(kHostileAdapterStock)))return false;
     // The stock adapter only loads the original visitor and tail-calls its slot. RDX still holds the candidate.
     return edf::PatchCode(image+kHostileVisit,kHostileVisitStock,kHostileVisitDirect,sizeof(kHostileVisitStock));
+}
+
+constexpr unsigned kRosterCapacity=team_native::kTeamCapacity;
+constexpr unsigned kNearestRosterSite=0x54C506,kSoldierRosterSite=0x59777B;
+constexpr unsigned kNearestRosterVtable=0x17C2948,kSoldierRosterVtable=0x17D24C0,kSoldierRosterVisitor=0x598C50;
+constexpr unsigned kRosterInsert=0x5E2350,kRosterErase=0x5E2A70,kRosterConstruct=0x5E03C0;
+std::atomic<std::uint64_t> rosterEpoch{1};
+std::atomic<bool> rosterReady{false};
+thread_local unsigned rosterMutationDepth=0;
+
+struct RosterNode {
+    const RosterNode *left,*parent,*right;
+    unsigned char color,nil;
+    const void* actor;
+};
+static_assert(offsetof(RosterNode,nil)==0x19 && offsetof(RosterNode,actor)==0x20);
+struct RosterRow {
+    const RosterNode* head;
+    std::size_t size,reserved;
+    const int* relations;
+    std::size_t reservedCount,relationCount,tail;
+};
+static_assert(sizeof(RosterRow)==team_native::kRowStride && offsetof(RosterRow,relationCount)==team_native::kRelSize);
+using RosterVisitor=void(__fastcall*)(void*,const void*);
+using RosterWalk=void(__fastcall*)(void*,int,void*);
+
+struct RosterSnapshot {
+    const RosterNode* head{};
+    std::uint64_t epoch{};
+    std::vector<const void*> actors;
+};
+struct RosterScratch {
+    const void* manager{};
+    const RosterRow* rows{};
+    std::array<RosterSnapshot,kRosterCapacity> teams;
+    bool busy=false;
+};
+struct RosterScope {
+    CRITICAL_SECTION* lock;
+    bool& busy;
+    RosterScope(void* manager,bool& inUse) noexcept:
+        lock(reinterpret_cast<CRITICAL_SECTION*>(static_cast<unsigned char*>(manager)+team_native::kLock)),busy(inUse) {
+        EnterCriticalSection(lock);
+        busy=true;
+    }
+    ~RosterScope() noexcept {
+        busy=false;
+        LeaveCriticalSection(lock);
+    }
+};
+struct RosterMutation {
+    RosterMutation() noexcept {++rosterMutationDepth;}
+    ~RosterMutation() noexcept {
+        rosterEpoch.fetch_add(1,std::memory_order_relaxed);
+        --rosterMutationDepth;
+    }
+};
+
+const RosterNode* NextRosterNode(const RosterNode* node) noexcept {
+    if(!node->right->nil) {
+        node=node->right;
+        while(!node->left->nil)node=node->left;
+        return node;
+    }
+    auto* parent=node->parent;
+    while(!parent->nil && node==parent->right){node=parent;parent=parent->parent;}
+    return parent;
+}
+
+const RosterNode* AfterRosterActor(const RosterNode* head,const void* actor) noexcept {
+    const auto key=reinterpret_cast<std::uintptr_t>(actor);
+    auto* bound=head;
+    for(auto* node=head->parent;!node->nil;) {
+        if(key<reinterpret_cast<std::uintptr_t>(node->actor)) {bound=node;node=node->left;}
+        else node=node->right;
+    }
+    return bound;
+}
+
+bool RosterTargetable(const void* actor) noexcept {
+    return !edf::At<unsigned char>(actor,0x2E8) && !(edf::At<unsigned char>(actor,0x380)&0x80);
+}
+
+__forceinline void VisitRosterActor(void* callback,const void* actor) {
+    const auto* const table=edf::At<const void* const*>(callback,0);
+    reinterpret_cast<RosterVisitor>(table[1])(callback,actor);
+}
+
+void VisitLiveRoster(const RosterRow& row,const RosterNode* node,void* callback) {
+    while(node!=row.head) {
+        const void* const actor=node->actor;
+        if(RosterTargetable(actor)) {
+            const auto epoch=rosterEpoch.load(std::memory_order_relaxed);
+            VisitRosterActor(callback,actor);
+            if(rosterEpoch.load(std::memory_order_relaxed)!=epoch) {
+                node=AfterRosterActor(row.head,actor);
+                continue;
+            }
+        }
+        node=NextRosterNode(node);
+    }
+}
+
+bool SnapshotRoster(const RosterRow& row,RosterSnapshot& list,std::uint64_t epoch) noexcept {
+    if(list.epoch==epoch && list.head==row.head && list.actors.size()==row.size)return true;
+    list.epoch=0;
+    if(row.size>0x20000)return false;
+    try {list.actors.resize(row.size);}
+    catch(const std::bad_alloc&) {return false;}
+    auto* node=row.head->left;
+    for(auto& actor:list.actors) {
+        if(node==row.head || node->nil)return false;
+        actor=node->actor;
+        node=NextRosterNode(node);
+    }
+    if(node!=row.head)return false;
+    list.head=row.head;
+    list.epoch=epoch;
+    return true;
+}
+
+void VisitRosterRow(const RosterRow& row,RosterSnapshot& list,void* callback) {
+    if(!row.size)return;
+    const auto epoch=rosterEpoch.load(std::memory_order_relaxed);
+    if(!SnapshotRoster(row,list,epoch)) {
+        VisitLiveRoster(row,row.head->left,callback);
+        return;
+    }
+    for(const void* actor:list.actors) {
+        if(!RosterTargetable(actor))continue;
+        VisitRosterActor(callback,actor);
+        if(rosterEpoch.load(std::memory_order_relaxed)!=epoch) {
+            // A re-entrant visitor can change registration. Continue with the next key in the live tree.
+            VisitLiveRoster(row,AfterRosterActor(row.head,actor),callback);
+            return;
+        }
+    }
+}
+
+bool TryVisitRoster(void* manager,int observer,void* callback) {
+    if(!manager || observer<0 || rosterMutationDepth)return false;
+    static thread_local RosterScratch scratch;
+    if(scratch.busy)return false;
+    RosterScope scope(manager,scratch.busy);
+    const auto count=edf::At<std::size_t>(manager,team_native::kRowCount);
+    const auto* const rows=edf::At<const RosterRow*>(manager,team_native::kRows);
+    if(!rows || count>kRosterCapacity || static_cast<unsigned>(observer)>=count ||
+       rows[observer].relationCount!=count || !rows[observer].relations)return false;
+    for(unsigned i=0;i<count;++i)
+        if(!rows[i].head)return false;
+    if(scratch.manager!=manager || scratch.rows!=rows) {
+        for(auto& team:scratch.teams)team.epoch=0;
+        scratch.manager=manager;
+        scratch.rows=rows;
+    }
+    for(unsigned i=0;i<count;++i) {
+        if(rows[observer].relations[i]==team_native::kEnemy)VisitRosterRow(rows[i],scratch.teams[i],callback);
+    }
+    return true;
+}
+
+void __fastcall WalkSelectedRoster(void* manager,int observer,void* callback) {
+    if(rosterReady.load(std::memory_order_acquire) && callback &&
+       manager==edf::At<const void*>(image,team_native::kManager)) {
+        const auto* const table=edf::At<const unsigned char*>(callback,0);
+        if((table==image+kNearestRosterVtable || table==image+kSoldierRosterVtable) &&
+           TryVisitRoster(manager,observer,callback))return;
+    }
+    reinterpret_cast<RosterWalk>(image+kHostileWalk)(manager,observer,callback);
+}
+
+void* __fastcall InsertRosterMember(void* row,const void* position,void* node) {
+    RosterMutation mutation;
+    return reinterpret_cast<void*(__fastcall*)(void*,const void*,void*)>(image+kRosterInsert)(row,position,node);
+}
+std::size_t __fastcall EraseRosterMember(void* row,const void* key) {
+    RosterMutation mutation;
+    return reinterpret_cast<std::size_t(__fastcall*)(void*,const void*)>(image+kRosterErase)(row,key);
+}
+void* __fastcall ConstructRoster(void* manager) {
+    RosterMutation mutation;
+    return reinterpret_cast<void*(__fastcall*)(void*)>(image+kRosterConstruct)(manager);
+}
+
+struct RosterRedirect {
+    unsigned site,original;
+    void* replacement;
+    void* thunk{};
+    unsigned char stock[5]{0xE8},call[5]{0xE8};
+};
+
+bool InstallRosterRedirects(bool nearestReady) noexcept {
+    if(!nearestReady ||
+       !NativeCodeMatches(0x5E0B70,0x5E0C72,0xE976DC69F86D8A89ull) ||
+       !NativeCodeMatches(0x5E1C60,0x5E1CF2,0x1C44C065D87FF4E4ull) ||
+       !NativeCodeMatches(0x5E03C0,0x5E03FC,0xA1740DAB80082318ull) ||
+       !NativeCodeMatches(0x54C4B0,0x54C516,0x1023F8BA55E2B94Eull) ||
+       !NativeCodeMatches(0x59773A,0x597780,0x33EAA4C410AA11ABull) ||
+       !NativeCodeMatches(kSoldierRosterVisitor,0x598D07,0xC398307F9149D408ull))return false;
+    RosterRedirect redirects[]{
+        {0x5E0C52,kRosterInsert,reinterpret_cast<void*>(&InsertRosterMember)},
+        {0x5E1CD8,kRosterErase,reinterpret_cast<void*>(&EraseRosterMember)},
+        {0x2988B9,kRosterConstruct,reinterpret_cast<void*>(&ConstructRoster)},
+        {0x70149F,kRosterConstruct,reinterpret_cast<void*>(&ConstructRoster)},
+        {kNearestRosterSite,kHostileWalk,reinterpret_cast<void*>(&WalkSelectedRoster)},
+        {kSoldierRosterSite,kHostileWalk,reinterpret_cast<void*>(&WalkSelectedRoster)},
+    };
+    bool ready=true;
+    for(auto& r:redirects) {
+        const auto stock=static_cast<std::int32_t>(r.original)-static_cast<std::int32_t>(r.site+5);
+        std::memcpy(r.stock+1,&stock,sizeof(stock));
+        auto* const site=image+r.site;
+        if(!edf::Readable(site,sizeof(r.stock)) || std::memcmp(site,r.stock,sizeof(r.stock))!=0) {ready=false;break;}
+        r.thunk=edf::AllocateNearThunk(site,r.replacement);
+        if(!r.thunk) {ready=false;break;}
+        const auto delta=reinterpret_cast<std::intptr_t>(r.thunk)-reinterpret_cast<std::intptr_t>(site+5);
+        if(delta<INT32_MIN || delta>INT32_MAX) {ready=false;break;}
+        const auto rel32=static_cast<std::int32_t>(delta);
+        std::memcpy(r.call+1,&rel32,sizeof(rel32));
+    }
+    std::size_t installed=0;
+    if(ready) {
+        for(auto& r:redirects) {
+            if(!edf::PatchCode(image+r.site,r.stock,r.call,sizeof(r.call)))break;
+            ++installed;
+        }
+    }
+    if(installed==std::size(redirects)) {
+        rosterReady.store(true,std::memory_order_release);
+        return true;
+    }
+    for(std::size_t i=0;i<std::size(redirects);++i) {
+        auto& r=redirects[i];
+        if(i<installed && !edf::PatchCode(image+r.site,r.call,r.stock,sizeof(r.stock))) {
+            Log("AI native hostile roster: rollback failed at %x",r.site);
+            continue;
+        }
+        if(r.thunk)VirtualFree(r.thunk,0,MEM_RELEASE);
+    }
+    return false;
 }
 
 bool InstallAvoidanceOverflow() noexcept {
@@ -1052,6 +1296,10 @@ bool InstallNativeTargetScore() noexcept {
 
 bool InstallNativeHostileVisit() noexcept {
     return image && InstallHostileVisit();
+}
+
+bool InstallNativeHostileRoster(bool nearestReady) noexcept {
+    return image && InstallRosterRedirects(nearestReady);
 }
 
 unsigned InstallNativeBodyMath() noexcept {

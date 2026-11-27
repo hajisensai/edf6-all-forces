@@ -1361,8 +1361,11 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(Cfg().enabled)Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
     if(Cfg().enabled) {
         Log("PHYSICS attachment and collision: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
-        Log("AI native target scoring: %s",InstallNativeTargetScore() ? "optimized" : "stock");
-        Log("AI native hostile visitor: %s",InstallNativeHostileVisit() ? "direct" : "stock");
+        const bool nearestReady=InstallNativeTargetScore();
+        Log("AI native target scoring: %s",nearestReady ? "optimized" : "stock");
+        const bool hostileVisitReady=InstallNativeHostileVisit();
+        Log("AI native hostile visitor: %s",hostileVisitReady ? "direct" : "stock");
+        Log("AI native hostile roster: %s",InstallNativeHostileRoster(nearestReady && hostileVisitReady) ? "cached" : "stock");
     }
     if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
         Log("RENDER pose snapshots installed=%d",renderpose::Install());

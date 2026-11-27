@@ -266,8 +266,10 @@ struct HostileManager {
     CRITICAL_SECTION lock{};
     std::uintptr_t reservedTail{};
     HostileRow* rows{};
+    std::size_t capacity{},count{};
 };
-static_assert(offsetof(HostileManager,lock)==8 && offsetof(HostileManager,rows)==0x38);
+static_assert(offsetof(HostileManager,lock)==team_native::kLock && offsetof(HostileManager,rows)==team_native::kRows &&
+              offsetof(HostileManager,count)==team_native::kRowCount);
 
 HostileNode* LinkHostileTree(HostileNode* nodes,std::size_t count,HostileNode* parent,HostileNode* head) noexcept {
     if(!count)return head;
@@ -418,6 +420,105 @@ bool HostileVisitCases() {
     edf::Put(image,enterSlot,savedEnter);
     DWORD ignored=0;
     return VirtualProtect(imports,importsSize,importProtection,&ignored) && valid;
+}
+
+struct FlatTrace {
+    const void* const* table{};
+    const void* const* changed{};
+    HostileManager* manager{};
+    HostileNode* head{};
+    HostileNode* nodes{};
+    std::array<const void*,8> actors{};
+    unsigned count{},changedCalls{};
+    bool mutate=false,valid=true;
+};
+
+void __fastcall TraceFlatRoster(void* data,const void* actor) {
+    auto& trace=*static_cast<FlatTrace*>(data);
+    if(trace.count>=trace.actors.size()) {trace.valid=false;return;}
+    trace.actors[trace.count++]=actor;
+    trace.valid=trace.valid && trace.manager->lock.RecursionCount==1;
+    trace.table=trace.changed;
+    if(!trace.mutate || trace.count!=1)return;
+    trace.valid=trace.valid && !TryVisitRoster(trace.manager,0,&trace);
+    RosterMutation mutation;
+    // Leave the current actor in the tree. Remove the next key and append a different one at the same size.
+    auto* const root=trace.nodes+2;
+    auto* const first=trace.nodes;
+    auto* const added=trace.nodes+3;
+    trace.head->left=first;trace.head->parent=root;trace.head->right=added;
+    root->parent=trace.head;root->left=first;root->right=added;
+    first->parent=root;first->left=first->right=trace.head;
+    added->parent=root;added->left=added->right=trace.head;
+}
+
+void __fastcall TraceChangedRoster(void* data,const void* actor) {
+    ++static_cast<FlatTrace*>(data)->changedCalls;
+    TraceFlatRoster(data,actor);
+}
+
+bool FlatRosterCases() {
+    HostileManager manager;
+    InitializeCriticalSection(&manager.lock);
+    const bool valid=[&] {
+        HostileRow rows[kRosterCapacity]{};
+        HostileNode heads[kRosterCapacity]{},nodes[4]{};
+        unsigned char actors[4][0x388]{};
+        int relations[kRosterCapacity]{};
+        relations[kRosterCapacity-1]=team_native::kEnemy;
+        const void* const visitor[]{nullptr,reinterpret_cast<const void*>(&TraceFlatRoster)};
+        const void* const changed[]{nullptr,reinterpret_cast<const void*>(&TraceChangedRoster)};
+        for(unsigned i=0;i<4;++i)nodes[i].actor=actors[i];
+        for(unsigned i=0;i<kRosterCapacity;++i) {
+            HostileTree(heads[i],nullptr,0);
+            rows[i].head=&heads[i];
+        }
+        HostileTree(heads[kRosterCapacity-1],nodes,3);
+        const std::size_t memberCount=3;
+        edf::Put(&rows[kRosterCapacity-1],8,memberCount);
+        rows[0].relations=relations;
+        rows[0].relationCount=kRosterCapacity;
+        manager.rows=rows;
+        manager.count=kRosterCapacity;
+
+        const auto collect=[&](std::array<const void*,8> expected,unsigned count,bool mutate=false) {
+            FlatTrace trace{visitor,changed,&manager,&heads[kRosterCapacity-1],nodes};
+            trace.mutate=mutate;
+            return TryVisitRoster(&manager,0,&trace) && trace.valid &&
+                   trace.count==count && trace.changedCalls==count-1 &&
+                   trace.actors==expected && !manager.lock.RecursionCount;
+        };
+        if(!collect({actors[0],actors[1],actors[2]},3))return false;
+        actors[1][0x2E8]=1;
+        actors[2][0x380]=0x80;
+        if(!collect({actors[0]},1))return false;
+        actors[1][0x2E8]=actors[2][0x380]=0;
+        if(!collect({actors[0],actors[2],actors[3]},3,true) ||
+           !collect({actors[0],actors[2],actors[3]},3))return false;
+        {
+            RosterMutation mutation;
+            HostileTree(heads[kRosterCapacity-1],nodes,3);
+        }
+        if(!collect({actors[0],actors[1],actors[2]},3))return false;
+        rows[0].relationCount=0;
+        FlatTrace skipped{visitor,changed,&manager,&heads[kRosterCapacity-1],nodes};
+        if(TryVisitRoster(&manager,0,&skipped) || skipped.count || manager.lock.RecursionCount)
+            return false;
+
+        if(InstallNativeHostileRoster(false) || !InstallNativeHostileRoster(true))return false;
+        using Insert=void*(__fastcall*)(void*,const void*,void*);
+        const auto add=Redirected<Insert>(0x5E0C52);
+        HostileNode empty{},entry{};
+        HostileTree(empty,nullptr,0);
+        HostileRow isolated{};
+        isolated.head=&empty;
+        const void* root=&empty;
+        const auto epoch=rosterEpoch.load(std::memory_order_relaxed);
+        return add(&isolated,&root,&entry)==&entry && edf::At<std::size_t>(&isolated,8)==1 &&
+               rosterEpoch.load(std::memory_order_relaxed)==epoch+1 && !rosterMutationDepth;
+    }();
+    DeleteCriticalSection(&manager.lock);
+    return valid;
 }
 
 bool BoundsValidation() noexcept {
@@ -1252,6 +1353,10 @@ int main(int argc,char** argv) {
     }
     if(!TargetScoreCases()) {
         std::puts("FAIL: native packed target score differs from stock");
+        return 1;
+    }
+    if(!FlatRosterCases()) {
+        std::puts("FAIL: native hostile roster cache changes traversal behavior");
         return 1;
     }
     if(!MotionLibraryCases(false)) {
