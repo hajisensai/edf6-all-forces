@@ -6717,7 +6717,8 @@ def map_commands_wired() -> None:
     assert 'CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor)' in jet
     assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
     cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus)', 1)[1].split('\n}\n', 1)[0]
-    assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
+    # 守卫指令进入守卫值守、解除放回第一次被指挥前的值守（heli_logic.h 转移表，行为由 heli_command_test / heli_phase_test 核对）
+    assert 'Enter(*h,heliphase::Event::guard);' in cmd and 'h->orbitSet=false;' in cmd and 'Enter(*h,heliphase::Event::release);' in cmd and 'heliphase::KeepOwn(h->mission);' in cmd
     for key in ('Ctrl', 'Shift', 'Tab', 'Z', 'H', 'V', 'X', '联机指令', '框选', '编队'):
         assert key in readme, key
     assert '指挥 NPC' in readme
@@ -7599,7 +7600,7 @@ def soft_edge_wired() -> None:
     assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
     # And the paratroop plane on its pass line (ferry_line.h, 2026-10-10): its line's ends stand off the map with room to
     # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made.
-    assert 'const bool line=j.ferry && SoftEdgeHolds(j);' in soft_edge, 'a ferry on its line keeps it'
+    assert 'const bool line=j.phase==jetphase::Phase::ferry;' in soft_edge, 'a ferry on its line keeps it'
     # A withdrawing jet is not held either (the user, 2026-10-26: 「空中支援不会退场」): it leaves the map and is reaped out
     # there (jet_internal.h SoftEdgeHolds; tools/jet_obstacle_sim --withdraw-suite, tests/support_exit_guard.py).
     assert 'const bool leaving=!SoftEdgeHolds(j);' in soft_edge, 'a withdrawal leaves the map'
@@ -7674,7 +7675,9 @@ def support_arrives_from_off_the_map() -> None:
     assert 'transport::StickStarts(along,across,speed,aboard,kChuteBleed)' in drop and 'kDropRadius' not in transport
     assert 'if(!JetFerryDone(plane))JetWithdrawNow(plane,"paratroopers out");' in drop
     jet = src('src/jet.cpp')
-    assert 'if(j->ferryGone)j->reap=true;' in jet
+    # 最后一程飞出地图就删（jet_flight.cpp Ferry 置 reap；tools/jet_obstacle_sim 的运送套件核对它在地图外才删）
+    ferry_fly = src('src/jet_flight.cpp').split('float Ferry(Jet& j,const float* pos,float height,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'j.reap=true;' in ferry_fly and 'ferryGone' not in jet
     cm = src('CMakeLists.txt')
     assert 'add_test(NAME ferry_line COMMAND ferry_line_test)' in cm and 'add_test(NAME support_entry COMMAND support_entry_test)' in cm
 

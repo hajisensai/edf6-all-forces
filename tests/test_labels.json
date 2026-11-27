@@ -3168,6 +3168,15 @@
    ],
    "scripts": []
   },
+  "heli_phase": {
+   "labels": [
+    "edf41",
+    "native-codec",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "heli_physical_sight": {
    "labels": [
     "plugin-native"
@@ -3420,6 +3429,15 @@
   "jet_lever_net": {
    "labels": [
     "plugin-native"
+   ],
+   "scripts": []
+  },
+  "jet_phase": {
+   "labels": [
+    "edf41",
+    "native-codec",
+    "plugin-native",
+    "test-data"
    ],
    "scripts": []
   },

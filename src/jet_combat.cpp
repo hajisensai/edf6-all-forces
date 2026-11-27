@@ -516,8 +516,8 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
 }
 
 bool WeaponsFree(const Jet& j) noexcept {
-    return Cfg().jetPilot && (j.t.target || j.sortie.strafing) && j.mode!=Mode::withdraw &&
-           j.mode!=Mode::recover && j.mode!=Mode::takeoff;
+    return Cfg().jetPilot && (j.t.target || j.sortie.strafing) && !jetphase::Leaving(j.phase) &&
+           j.mode!=Mode::takeoff;
 }
 
 // Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (its fall from here
