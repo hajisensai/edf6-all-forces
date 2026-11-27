@@ -3170,10 +3170,7 @@
   },
   "heli_phase": {
    "labels": [
-    "edf41",
-    "native-codec",
-    "plugin-native",
-    "test-data"
+    "plugin-native"
    ],
    "scripts": []
   },
@@ -3434,10 +3431,7 @@
   },
   "jet_phase": {
    "labels": [
-    "edf41",
-    "native-codec",
-    "plugin-native",
-    "test-data"
+    "plugin-native"
    ],
    "scripts": []
   },
