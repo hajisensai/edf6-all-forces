@@ -20,6 +20,7 @@ const params = new URLSearchParams(location.search);
 let group = params.get('group');
 let state = null;            // GET /api/story
 let catalog = [];            // stock missions (/api/missions)
+let designs = [];            // the group's 设定集 entries (/api/design)
 let byKey = new Map();
 let books = [];              // the group's outlines: [{book, title, lanes: [{id, name, tone, steps: [{id, title, tag}]}]}]
 let stepOf = new Map();      // `${book}/${step}` → {book, bookTitle, lane, step, n}
@@ -63,8 +64,20 @@ function stepText(info, short = false) {
 
 // ---- loading ----
 
+// The 设定集 entries a mission uses (design.html links them to missions), as links; null when none.
+function usedDesigns(id) {
+  const list = designs.filter((d) => d.missions.includes(id));
+  const g = encodeURIComponent(group ?? '');
+  return h('div', { class: 'stField dsUsed' }, h('span', { class: 'lbl' }, '用到的设定'),
+    list.length ? h('ul', { class: 'olMissions' }, list.map((d) => h('li', {}, h('a', { href: `/design.html?group=${g}&id=${d.id}` }, d.name)))) : null,
+    state.editable ? h('a', { class: 'small olWrite', href: `/design.html?group=${g}&new=1&mission=${id}` }, '＋ 新增设定') : null);
+}
+
 async function load() {
-  state = await api('/api/story' + (group == null ? '' : '?group=' + encodeURIComponent(group)));
+  const [answer, design] = await Promise.all([api('/api/story' + (group == null ? '' : '?group=' + encodeURIComponent(group))),
+    api('/api/design' + (group == null ? '' : '?group=' + encodeURIComponent(group))).catch(() => null)]);
+  state = answer;
+  designs = design && design.group === state.group ? design.rows : [];
   group = state.group;
   $('me').textContent = meText(state.me);
   $('auth').textContent = state.me ? '退出' : '登录';
@@ -332,6 +345,7 @@ function reader(r) {
   return h('div', { class: 'stRead', id: `ed-${r.id}` },
     part('goal', r.goal), part('enemies', r.enemies), part('body', r.body), part('handoff', r.handoff),
     !r.goal && !r.enemies && !r.body && !r.handoff ? h('p', { class: 'muted' }, '还没有写内容。') : null,
+    designs.some((d) => d.missions.includes(r.id)) ? usedDesigns(r.id) : null,
     h('p', { class: 'muted' }, info ? [LABEL.link, '：', stepText(info)] : null, info && r.mission ? ' · ' : null, r.mission ? [LABEL.mission, '：', mapLabel(r.mission)] : null),
     r.updated_by ? h('p', { class: 'muted' }, `最后修改：${r.updated_by}`) : null);
 }
@@ -490,7 +504,7 @@ function build(focus) {
     h('button', { type: 'button', class: 'btn ghost small', disabled: n === total, onclick: () => moveTo(e.id, n + 1, { refocus: true }), title: 'Alt+↓' }, '↓ 下移'),
     h('span', { class: 'moveTo' }, '移到第', target, '关', h('button', { type: 'button', class: 'btn ghost small', disabled: total < 2, onclick: goPos }, '移动')),
     h('button', { type: 'button', class: 'btn ghost small', onclick: () => openNew({ book: e.cur.book, step: e.cur.step, after: e.id }) }, '＋ 在后面插一关'),
-    h('button', { type: 'button', class: 'btn ghost small danger', onclick: () => remove(e.id) }, '删除')];
+    state.member ? h('button', { type: 'button', class: 'btn ghost small danger', onclick: () => remove(e.id) }, '删除') : null];
   e.el = h('div', { class: 'stEditor', id: isNew ? 'ed-new' : `ed-${e.id}`,
     onkeydown: (ev) => { if (ev.key === 'Escape' && !ev.target.closest('select')) { ev.preventDefault(); const id = e.id; closeEditor(); if (id != null) $(`m-${id}`)?.querySelector('.stToggle')?.focus(); } } },
   problem,
@@ -498,6 +512,7 @@ function build(focus) {
     h('div', { class: 'stMain' }, field('title', title), field('goal', texts.goal), field('enemies', texts.enemies), field('body', texts.body), field('handoff', texts.handoff)),
     h('div', { class: 'stSide' },
       h('div', { class: 'stField' }, h('span', { class: 'lbl', id: 'l-status' }, LABEL.status), status),
+      isNew ? null : usedDesigns(e.id),
       h('div', { class: 'stField' }, h('label', { for: 'f-link' }, LABEL.link), link, outlineLink),
       h('div', { class: 'stField' }, h('label', { for: 'f-mission' }, LABEL.mission), h('div', { class: 'row tight' }, series, map), mapNote),
       !isNew && edit.id != null && rowOf(e.id)?.updated_by ? h('p', { class: 'muted small' }, `最后修改：${rowOf(e.id).updated_by}`) : null)),

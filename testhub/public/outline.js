@@ -21,6 +21,7 @@ let book = Number(params.get('book')) || null;   // the outline shown; 0 = a new
 let editing = false;
 let busy = false;
 let missions = [];       // the group's missions (/api/story), in campaign order
+let designs = [];        // the group's 设定集 entries (/api/design)
 let openStep = null;     // the step whose form is open (editing)
 let problem = null;      // {kind: 'conflict' | 'error', text}
 let offer = null;        // a draft found for this outline: {data, version, at}
@@ -375,6 +376,14 @@ function renderStep(l, st, i) {
   } else if (editing && !linkable) {
     item.append(h('p', { class: 'muted small olMissions' }, '保存大纲后就能给这一步写关卡'));
   }
+  // The 设定集 entries that appear in this step.
+  const ds = book ? designs.filter((d) => d.book === book && d.steps.includes(st.id)) : [];
+  if (ds.length || (state.editable && linkable)) {
+    const g = encodeURIComponent(group ?? '');
+    item.append(h('p', { class: 'olDesigns small', 'aria-label': `第 ${i + 1} 步的设定` }, ds.length ? h('span', { class: 'muted' }, '设定：') : null,
+      ds.map((d) => h('a', { class: 'tag', href: `/design.html?group=${g}&id=${d.id}` }, d.name)),
+      state.editable && linkable ? h('a', { class: 'olWrite', href: `/design.html?group=${g}&new=1&book=${book}&step=${encodeURIComponent(st.id)}` }, '＋ 设定') : null));
+  }
   if (editing && !open) {
     const grip = item.querySelector('.olGrip');
     grip.addEventListener('dragstart', (e) => {
@@ -571,9 +580,11 @@ async function load() {
   const q = new URLSearchParams();
   if (group != null) q.set('group', group);
   if (book) q.set('book', book);
-  const [answer, story] = await Promise.all([api('/api/outline' + (q.size ? '?' + q : '')),
-    api('/api/story' + (group == null ? '' : '?group=' + encodeURIComponent(group))).catch(() => null)]);
+  const [answer, story, design] = await Promise.all([api('/api/outline' + (q.size ? '?' + q : '')),
+    api('/api/story' + (group == null ? '' : '?group=' + encodeURIComponent(group))).catch(() => null),
+    api('/api/design' + (group == null ? '' : '?group=' + encodeURIComponent(group))).catch(() => null)]);
   state = answer;
+  designs = design && design.group === state.group ? design.rows : [];
   group = state.group;
   if (book !== 0 || !state.member) book = state.book || null;
   if (book === null && state.member && !state.books.length) book = 0;   // nothing yet: the first save makes outline 1

@@ -87,6 +87,27 @@ function bookOf(value) {
 
 const WRITES = new Set(['/api/outline/save', '/api/outline/remove', '/api/outline/rate', '/api/outline/unrate', '/api/outline/settings']);
 
+// The groups listed with the main outline's group first, and the group to show when none is named (the main
+// outline's when listed, else null: pick() then falls back to the reader's own).
+export async function mainFirst(db, shown) {
+  const main = await db.prepare(`SELECT grp FROM story_outlines WHERE main = 1 AND ${FILLED} LIMIT 1`).first();
+  if (!main || !shown.includes(main.grp)) return [shown, null];
+  return [[main.grp, ...shown.filter((g) => g !== main.grp)], main.grp];
+}
+
+// Whether a group's story (its 关卡策划 missions and 设定集 entries) is open to every account: it has an open outline.
+export async function openGroup(db, grp) {
+  return !!(await db.prepare('SELECT 1 AS x FROM story_outlines WHERE grp = ?1 AND open = 1 LIMIT 1').bind(grp).first());
+}
+
+// The group a mission / design write acts on: the one named when it is open to every account, else scope() (own group).
+export async function openScope(db, me, b) {
+  if (me.role !== 'dev' && b.group != null && String(b.group) !== me.group && GROUP.test(String(b.group)) && await openGroup(db, String(b.group))) {
+    return String(b.group);
+  }
+  return scope(me, b.group);
+}
+
 // The group a save acts on: an open outline of another group when that is the one named, else scope() (own group).
 async function saveScope(db, me, b, book) {
   if (book && me.role !== 'dev' && b.group != null && String(b.group) !== me.group && GROUP.test(String(b.group))) {
