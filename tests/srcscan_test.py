@@ -112,9 +112,9 @@ class SrcScan(unittest.TestCase):
         self.assertFalse(srcscan.takes(text, 'kReach', 'pyconst::kReach'))
 
     def test_reads_the_real_sources(self) -> None:
-        text = srcscan.read('src/live_set.cpp')
-        self.assertIn('HasAt', srcscan.functions(text))
-        self.assertTrue(srcscan.calls(srcscan.function(text, 'Has'), 'HasAt'))
+        text = srcscan.read('common/step_objects.cpp')
+        self.assertIn('Lookup', srcscan.functions(text))
+        self.assertTrue(srcscan.calls(srcscan.function(text, 'Trusted'), 'Lookup'))
 
 
 if __name__ == '__main__':

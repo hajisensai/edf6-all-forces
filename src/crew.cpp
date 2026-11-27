@@ -21,6 +21,7 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "keyconfig.h"
 #include "step_fresh.h"
+#include "edf/step_objects.h"
 #include "edf_layout.h"
 #include "config.h"
 #include "plugin_log.h"
@@ -100,7 +101,9 @@ bool CheckPauseFlag() noexcept {
     Log("HOOK pause flag=%d (the plugin's game clock and HUD stop with the pause menu)",pauseOk);
     return pauseOk;
 }
-bool GamePaused() noexcept {
+namespace {
+// The pause bits (the System asked Readable: only here, once a period).
+bool ReadPaused() noexcept {
     if(!pauseOk)return false;
     __try {
         const unsigned char* const system=At<const unsigned char*>(image,kSystem);
@@ -108,6 +111,11 @@ bool GamePaused() noexcept {
         return (At<std::uint32_t>(system,kPauseWhy)&At<std::uint32_t>(system,kPauseCounts))!=0;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+stepobj::PerPeriod<bool> paused;
+}  // namespace
+// Once a frame (stepobj's period): a pause set within a frame is seen from the next one, as the game's own sub-step
+// loop sees it (0x11990C0 tests it once a sub-step).
+bool GamePaused() noexcept { return stepobj::Once(paused,&ReadPaused); }
 // The game clock (game_clock.h): stopped while the game is paused, a gap longer than 250 ms (loading) one 16 ms frame.
 // It starts an hour in: 0 is "never" for the timestamps it fills (crashAt, missileAt, launchAt, ...).
 namespace { gameclock::Clock clock; }

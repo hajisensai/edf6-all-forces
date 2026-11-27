@@ -27,6 +27,7 @@
 #include "shield.h"
 #include "heli.h"
 #include "memory.h"
+#include "edf/step_objects.h"
 #include "online_authority.h"
 #include <cmath>
 
@@ -61,7 +62,10 @@ ULONGLONG gatheredFrame=~0ull;
 bool ok=false;
 
 bool Bearer(const void* object) noexcept {
-    return object && Readable(object,kLayers[1]+kLayerInfo+kInfoTeam+4) && At<const void*>(object,0)==image+kBearerVtable;
+    if(!object)return false;
+    // This frame's scene object: its vtable read (it is allocated), the layers only behind the bearer's own vtable.
+    if(stepobj::Trusted(object))return At<const void*>(object,0)==image+kBearerVtable;
+    return Readable(object,kLayers[1]+kLayerInfo+kInfoTeam+4) && At<const void*>(object,0)==image+kBearerVtable;
 }
 
 // Layer `i`'s body, when the layer is up.

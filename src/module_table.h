@@ -69,6 +69,7 @@
 #include "pvp.h"
 #include "havok_props.h"
 #include "aiworld_capacity.h"
+#include "step_objects_hook.h"
 #include "team_native.h"
 #include "room_pvp.h"
 #include "edf41bike.h"
@@ -135,6 +136,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kTeamCapacity,"team capacity",kLoadOnly) \
     M(kHavokProps,"havok props",kLoadOnly) \
     M(kAiWorldCapacity,"ai world capacity",kLoadOnly) \
+    M(kStepObjects,"step objects",kLoadOnly) \
     M(kModRoom,"mod room",kLoadOnly) \
     M(kSupportSoldiers,"support soldiers","its table is dropped by its own preload at each mission (support_soldier.cpp PreloadSupportSoldiers)") \
     M(kSupportFirepower,"support firepower",nullptr) \
@@ -339,6 +341,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kBeforeAppInit,Id::kTeamCapacity,&Install<&InstallTeamCapacity>}, // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     {IP::kBeforeAppInit,Id::kHavokProps,&Install<&InstallHavokProps>},     // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
     {IP::kBeforeAppInit,Id::kAiWorldCapacity,&Install<&InstallAiWorldCapacity>},   // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024
+    {IP::kBeforeAppInit,Id::kStepObjects,&Install<&InstallStepObjects>},   // before any scene: the System's object lists trusted a frame at a time (step_objects_hook.cpp, edf/step_objects.h)
     {IP::kPhysics,Id::kModRoom,[](const LoadContext&) noexcept {Log("ROOM isolation=%d",InstallModRoom());}},
     {IP::kPhysics,Id::kSupportSoldiers,[](const LoadContext&) noexcept {Log("SUPPORT soldiers=%d",InstallSupportSoldiers());}},
     {IP::kPhysics,Id::kSupportFirepower,[](const LoadContext&) noexcept {Log("SUPPORT firepower=%d",InstallSupportFirepower());}},   // support vehicles' and aircraft's damage by level

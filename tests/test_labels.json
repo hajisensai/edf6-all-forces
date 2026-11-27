@@ -4659,13 +4659,6 @@
     "tests/test_level_list.py"
    ]
   },
-  "live_set": {
-   "labels": [
-    "plugin-core",
-    "plugin-native"
-   ],
-   "scripts": []
-  },
   "loadout_generate": {
    "labels": [
     "autoturret-tools",
@@ -7471,7 +7464,7 @@
   },
   "srcscan": {
    "labels": [
-    "plugin-core",
+    "plugin-native",
     "pylib-model",
     "test-data"
    ],
@@ -7510,6 +7503,24 @@
     "plugin-native"
    ],
    "scripts": []
+  },
+  "step_objects": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "step_objects_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/step_objects_guard.py"
+   ]
   },
   "stock_store_loadouts": {
    "labels": [
