@@ -5,6 +5,7 @@
 //  3. Static body pose commits skip the quaternion that only the dynamic branch reads.
 //  4. Body notifications return early when both listener lists are empty.
 //  5. Collision proxy pose publication prefetches the body ID and world reference.
+//  6. Motion-property deduplication compares only an index of the shared (flag 0) entries.
 #include "native_body_math.h"
 #include "edf_layout.h"
 #include "plugin_log.h"
@@ -13,6 +14,8 @@
 #include "edf/patch.h"
 #include <atomic>
 #include <cstring>
+#include <unordered_map>
+#include <vector>
 
 namespace crew {
 namespace {
@@ -156,6 +159,261 @@ bool InstallMotionIdLimit() noexcept {
         restored=edf::PatchCode(image+call.site,call.code,call.stock,sizeof(call.stock)) && restored;
     }
     if(restored)for(auto* thunk:thunks)VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
+// Shared motion-property index. The stock add 0xE15190 deduplicates a request whose flag word is 0 by scanning every
+// row from ID 0 and comparing all 28 words; flagged (exclusive) rows and the free-list links never match except a
+// free row whose link happens to be 0. Keep, per library, the ascending IDs whose flag word was 0 when last written,
+// and compare only those. The list is a superset: every write that can turn a row's flag word into 0 (the add's copy,
+// the in-place update's copy, the slot release) refreshes the row's membership under the library's lock, and the
+// lookup still checks id<count, the flag word and the whole record, so stale IDs never match.
+constexpr unsigned kMotionSearch=0xE151B5,kMotionSearchMiss=0xE15213,kMotionSearchHit=0xE151F1;
+constexpr unsigned kMotionCopy=0xDCF870,kMotionAllocCopy=0xE1539B,kMotionUpdateCopy=0xE15D64;
+constexpr unsigned kMotionSlotRelease=0xE154F0,kMotionSlotReleaseCall=0xE15714;
+constexpr unsigned kMotionBuild=0xE155D0,kMotionBuildCalls[]{0xDA2637,0x11AD45B};
+constexpr unsigned kMotionSearchCheck=0xE151AC;
+constexpr unsigned char kMotionSearchStock[]{
+    0x45,0x33,0xED,0x44,0x39,0x6D,0x00,0x75,0x5E,0x4C,0x63,0x5B,0x48,0x45,0x8B,0xD5,0x4C,0x8B,0x4B,0x40,0x4D,0x85,
+    0xDB,0x7E,0x4E,0x45,0x8B,0xC5,0x4C,0x2B,0xCD,0x0F,0x1F,0x44,0x00,0x00,0x49,0x8B,0xD5,0x48,0x8B,0xCD,0x8B,0x01,
+    0x41,0x39,0x04,0x09,0x75,0x26,0x48,0xFF,0xC2,0x48,0x83,0xC1,0x04,0x48,0x83,0xFA,0x1C,0x7C,0xEB,0x41,0x83,0xFA,
+    0xFF,0x74,0x22,0x66,0x45,0x89,0x14,0x24,0x49,0x8B,0xC4,0x48,0x83,0xC4,0x28,0x41,0x5D,0x41,0x5C,0x5D,0x5B,0xC3,
+    0x41,0xFF,0xC2,0x49,0xFF,0xC0,0x49,0x83,0xC1,0x70,0x4D,0x3B,0xC3,0x7C,0xBD,
+};
+static_assert(kMotionSearchCheck+sizeof(kMotionSearchStock)==kMotionSearchMiss);
+constexpr unsigned kMotionSearchSkip=kMotionSearch-kMotionSearchCheck;
+// The allocation's copy: rcx = row, rdx = key, rbx = library, di = the new ID.
+constexpr unsigned char kMotionAllocCopyStock[]{
+    0x48,0x8B,0x53,0x40,0x0F,0xB7,0xC7,0x48,0x6B,0xC8,0x70,0x48,0x03,0xCA,0x48,0x8B,0xD5,0xE8,0xD0,0xA4,0xFB,0xFF,
+};
+static_assert(0xE1538A+sizeof(kMotionAllocCopyStock)==kMotionAllocCopy+5);
+using MotionCopyFn=void*(__fastcall*)(unsigned char*,const unsigned char*);
+using MotionSlotReleaseFn=void*(__fastcall*)(unsigned char*,void*,int);
+using MotionBuildFn=void*(__fastcall*)(unsigned char*,float);
+
+struct MotionIndex {
+    SRWLOCK lock=SRWLOCK_INIT;
+    std::vector<std::uint32_t> shared;  // ascending
+    bool complete=true;                 // false after an allocation failure: the lookup scans the table instead
+};
+SRWLOCK motionIndexesLock=SRWLOCK_INIT;
+std::unordered_map<const unsigned char*,MotionIndex*>* motionIndexes=nullptr;  // never freed: no teardown race
+std::atomic<bool> motionIndexFailed{false};
+
+const unsigned char* MotionRow(const unsigned char* library,std::uint32_t id) noexcept {
+    return edf::At<const unsigned char*>(library,0x40)+static_cast<std::size_t>(id)*kMotionEntrySize;
+}
+
+bool SharedMotionRow(const unsigned char* library,std::uint32_t id) noexcept {
+    return static_cast<std::int64_t>(id)<edf::At<int>(library,0x48) && edf::At<std::uint32_t>(MotionRow(library,id),0)==0;
+}
+
+// The stock scan's answer (first equal row), for a library whose index could not be kept.
+int ScanSharedMotion(const unsigned char* library,const unsigned char* key) noexcept {
+    const int count=edf::At<int>(library,0x48);
+    const auto* row=edf::At<const unsigned char*>(library,0x40);
+    for(int id=0;id<count;++id,row+=kMotionEntrySize)
+        if(!std::memcmp(row,key,kMotionEntrySize))return id;
+    return -1;
+}
+
+// Under the index's exclusive lock.
+void RebuildMotionIndex(MotionIndex& index,const unsigned char* library) noexcept {
+    index.shared.clear();
+    index.complete=true;
+    try {
+        const int count=edf::At<int>(library,0x48);
+        for(int id=0;id<count;++id)
+            if(!edf::At<std::uint32_t>(MotionRow(library,static_cast<std::uint32_t>(id)),0))
+                index.shared.push_back(static_cast<std::uint32_t>(id));
+    } catch(...) {
+        index.shared.clear();
+        index.complete=false;
+    }
+}
+
+// Under the index's exclusive lock, after the row was written.
+void RefreshMotionRow(MotionIndex& index,const unsigned char* library,std::uint32_t id) noexcept {
+    if(!index.complete)return;
+    auto& ids=index.shared;
+    const auto at=std::lower_bound(ids.begin(),ids.end(),id);
+    const bool listed=at!=ids.end() && *at==id;
+    if(SharedMotionRow(library,id)==listed)return;
+    if(listed) {
+        ids.erase(at);
+        return;
+    }
+    try {
+        ids.insert(at,id);
+    } catch(...) {
+        ids.clear();
+        index.complete=false;
+    }
+}
+
+// The library's index, made (from the rows as they are) on first use. Null when nothing could be allocated: all
+// libraries then use the stock scan, since an index made later would have missed the unlocked writes.
+MotionIndex* MotionIndexOf(const unsigned char* library) noexcept {
+    if(motionIndexFailed.load(std::memory_order_acquire))return nullptr;
+    MotionIndex* index=nullptr;
+    AcquireSRWLockShared(&motionIndexesLock);
+    if(motionIndexes) {
+        const auto found=motionIndexes->find(library);
+        if(found!=motionIndexes->end())index=found->second;
+    }
+    ReleaseSRWLockShared(&motionIndexesLock);
+    if(index)return index;
+    AcquireSRWLockExclusive(&motionIndexesLock);
+    try {
+        if(!motionIndexes)motionIndexes=new std::unordered_map<const unsigned char*,MotionIndex*>();
+        auto& slot=(*motionIndexes)[library];
+        if(!slot) {
+            auto* const made=new MotionIndex();
+            AcquireSRWLockExclusive(&made->lock);
+            RebuildMotionIndex(*made,library);
+            ReleaseSRWLockExclusive(&made->lock);
+            slot=made;
+        }
+        index=slot;
+    } catch(...) {
+        motionIndexFailed.store(true,std::memory_order_release);
+        index=nullptr;
+    }
+    ReleaseSRWLockExclusive(&motionIndexesLock);
+    return index;
+}
+
+// Replaces the scan at 0xE151B5 (the request's flag word is already known to be 0). The lowest equal ID, or -1.
+int __fastcall FindSharedMotion(const unsigned char* library,const unsigned char* key) noexcept {
+    auto* const index=MotionIndexOf(library);
+    if(!index)return ScanSharedMotion(library,key);
+    AcquireSRWLockShared(&index->lock);
+    int found=-1;
+    if(!index->complete) {
+        found=ScanSharedMotion(library,key);
+    } else {
+        const int count=edf::At<int>(library,0x48);
+        const auto* const rows=edf::At<const unsigned char*>(library,0x40);
+        for(const auto id:index->shared) {
+            if(static_cast<std::int64_t>(id)>=count)break;
+            const auto* const row=rows+static_cast<std::size_t>(id)*kMotionEntrySize;
+            if(!edf::At<std::uint32_t>(row,0) && !std::memcmp(row,key,kMotionEntrySize)) {
+                found=static_cast<int>(id);
+                break;
+            }
+        }
+    }
+    ReleaseSRWLockShared(&index->lock);
+    return found;
+}
+
+// The stock row copy 0xDCF870 at the add (0xE1539B) and in-place update (0xE15D64), with the row's membership.
+void __fastcall CopyMotionRow(unsigned char* row,const unsigned char* key,unsigned char* library,unsigned id) noexcept {
+    const auto copy=reinterpret_cast<MotionCopyFn>(image+kMotionCopy);
+    auto* const index=MotionIndexOf(library);
+    if(!index) {
+        copy(row,key);
+        return;
+    }
+    AcquireSRWLockExclusive(&index->lock);
+    copy(row,key);
+    RefreshMotionRow(*index,library,id);
+    ReleaseSRWLockExclusive(&index->lock);
+}
+
+// 0xE15670's slot release 0xE154F0 (slots = library + 0x40). A freed row's flag word becomes its free-list link,
+// which is 0 when slot 0 heads the list, so the row's membership is read back rather than dropped.
+void* __fastcall ReleaseMotionSlot(unsigned char* slots,void* out,int id) noexcept {
+    const auto release=reinterpret_cast<MotionSlotReleaseFn>(image+kMotionSlotRelease);
+    auto* const library=slots-0x40;
+    auto* const index=MotionIndexOf(library);
+    if(!index)return release(slots,out,id);
+    AcquireSRWLockExclusive(&index->lock);
+    auto* const result=release(slots,out,id);
+    if(id>=0)RefreshMotionRow(*index,library,static_cast<std::uint32_t>(id));
+    ReleaseSRWLockExclusive(&index->lock);
+    return result;
+}
+
+// The preset build 0xE155D0 right after the library's constructor: drop what a previous library at this address left.
+// Not held across the build, whose adds take the lock themselves.
+void* __fastcall BuildMotionLibrary(unsigned char* library,float scale) noexcept {
+    if(auto* const index=MotionIndexOf(library)) {
+        AcquireSRWLockExclusive(&index->lock);
+        RebuildMotionIndex(*index,library);
+        ReleaseSRWLockExclusive(&index->lock);
+    }
+    return reinterpret_cast<MotionBuildFn>(image+kMotionBuild)(library,scale);
+}
+
+// The copy call sites pass the library and ID the native code keeps in nonvolatile registers.
+bool RedirectMotionCopy(unsigned site,const unsigned char (&load)[7]) noexcept {
+    unsigned char code[7+12]{};
+    std::memcpy(code,load,sizeof(load));
+    code[7]=0x48;
+    code[8]=0xB8;                       // mov rax,CopyMotionRow
+    auto* const target=reinterpret_cast<void*>(&CopyMotionRow);
+    std::memcpy(code+9,&target,sizeof(target));
+    code[17]=0xFF;
+    code[18]=0xE0;                      // jmp rax
+    auto* const thunk=edf::AllocateNearCode(image+site,code,sizeof(code));
+    if(!thunk)return false;
+    bool changed=false;
+    edf::RedirectCall(image+site,image+kMotionCopy,thunk,changed);
+    if(changed)return true;
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
+bool InstallMotionSharedIndex() noexcept {
+    const auto callsTo=[](unsigned site,unsigned target) {
+        return image[site]==0xE8 && static_cast<std::int64_t>(site)+5+edf::At<std::int32_t>(image,site+1)==target;
+    };
+    if(!edf::Matches(image,kMotionSearchCheck,kMotionSearchStock,sizeof(kMotionSearchStock)) ||
+       !edf::Matches(image,0xE1538A,kMotionAllocCopyStock,sizeof(kMotionAllocCopyStock)) ||
+       !NativeCodeMatches(kMotionCopy,0xDCF88D,0xA905479664AE9D65ull) ||
+       !NativeCodeMatches(0xE15CC0,kMotionUpdateCopy,0xBD5D54D22E0B2620ull) ||
+       !callsTo(kMotionUpdateCopy,kMotionCopy) ||
+       !NativeCodeMatches(0xE15670,kMotionSlotReleaseCall,0xB273EE4CE737448Eull) ||
+       !callsTo(kMotionSlotReleaseCall,kMotionSlotRelease) ||
+       !NativeCodeMatches(kMotionSlotRelease,0xE155C2,0xBF8766940690D700ull) ||
+       !NativeCodeMatches(kMotionBuild,0xE15668,0xB6D53C944025361Bull))return false;
+    for(const auto call:kMotionBuildCalls)
+        if(!callsTo(call,kMotionBuild))return false;
+
+    // Every writer first: the lookup may only trust the list once all of them keep it.
+    constexpr unsigned char allocLoad[7]{0x4C,0x8B,0xC3,0x44,0x0F,0xB7,0xCF};   // mov r8,rbx; movzx r9d,di
+    constexpr unsigned char updateLoad[7]{0x4C,0x8B,0xC5,0x44,0x0F,0xB7,0xCB};  // mov r8,rbp; movzx r9d,bx
+    if(!RedirectMotionCopy(kMotionAllocCopy,allocLoad) || !RedirectMotionCopy(kMotionUpdateCopy,updateLoad))return false;
+    bool changed=false;
+    edf::RedirectCall(image+kMotionSlotReleaseCall,image+kMotionSlotRelease,reinterpret_cast<void*>(&ReleaseMotionSlot),
+                      changed);
+    if(!changed)return false;
+    for(const auto call:kMotionBuildCalls) {
+        changed=false;
+        edf::RedirectCall(image+call,image+kMotionBuild,reinterpret_cast<void*>(&BuildMotionLibrary),changed);
+        if(!changed)return false;
+    }
+
+    auto* const site=image+kMotionSearch;
+    auto* const thunk=edf::AllocateNearThunk(site,reinterpret_cast<void*>(&FindSharedMotion));
+    if(!thunk)return false;
+    // mov rcx,rbx; mov rdx,rbp; call FindSharedMotion; test eax,eax; js miss; mov r10d,eax; jmp hit (stores r10w)
+    unsigned char code[kMotionSearchHit-kMotionSearch];   // the stock hit tail at 0xE151F1 stays
+    std::memset(code,0xCC,sizeof(code));
+    constexpr unsigned char head[]{0x48,0x8B,0xCB,0x48,0x8B,0xD5,0xE8,0,0,0,0,0x85,0xC0,0x78,0,0x44,0x8B,0xD0,0xEB,0};
+    std::memcpy(code,head,sizeof(head));
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+11);
+    if(delta<INT32_MIN || delta>INT32_MAX) {
+        VirtualFree(thunk,0,MEM_RELEASE);
+        return false;
+    }
+    const auto rel32=static_cast<std::int32_t>(delta);
+    std::memcpy(code+7,&rel32,sizeof(rel32));
+    code[14]=static_cast<unsigned char>(kMotionSearchMiss-(kMotionSearch+15));
+    code[19]=static_cast<unsigned char>(kMotionSearchHit-(kMotionSearch+20));
+    if(edf::PatchCode(site,kMotionSearchStock+kMotionSearchSkip,code,sizeof(code)))return true;
+    VirtualFree(thunk,0,MEM_RELEASE);
     return false;
 }
 
@@ -337,6 +595,7 @@ unsigned InstallNativeBodyMath() noexcept {
     if(!image)return 0;
     unsigned installed=0;
     installed+=InstallMotionIdLimit();
+    installed+=InstallMotionSharedIndex();
     installed+=InstallBodyCapacityGrowth();
     installed+=InstallStaticBodyQuaternionSkip();
     installed+=InstallEmptyBodySignalGate();
