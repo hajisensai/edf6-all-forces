@@ -243,7 +243,7 @@ bool NpcSweepOn() noexcept { return sweepState; }
 bool NpcPickupHealthToggle() noexcept { ++healthCalls;healthState=!healthState;return healthState; }
 bool NpcPickupHealthOn() noexcept { return healthState; }
 int NpcMarchShape() noexcept { return 0; }
-const wchar_t* FormationText(int) noexcept { return L"SHAPE"; }
+const wchar_t* FormationText(int,bool) noexcept { return L"SHAPE"; }
 struct StubEnemy { const void* object; float aim[3]; };
 StubEnemy stubEnemies[2]{};int stubEnemyCount=0;
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {

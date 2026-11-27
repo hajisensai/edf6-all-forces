@@ -503,7 +503,7 @@ void Validate(Config& n) noexcept {
     Fix("NpcMarkCone",n.npcMarkCone,1.0f,45.0f);
     Fix("QMarkPointSec",n.qmarkPointSec,1.0f,600.0f);
     Fix("QMarkVolume",n.qmarkVolume,0.0f,2.0f);
-    n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,10));
+    n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,11));
     n.npcFormationKey=static_cast<int>(FixInt("NpcFormationCycleKey",n.npcFormationKey,0,254));
     Fix("NpcFormationSpacing",n.npcFormationSpacing,2.0f,30.0f);
     n.npcGuardFormation=static_cast<int>(FixInt("NpcGuardFormation",n.npcGuardFormation,0,10));

@@ -115,7 +115,7 @@ bool NpcSweepOn() noexcept {return false;}
 bool NpcPickupHealthToggle() noexcept {return false;}
 bool NpcPickupHealthOn() noexcept {return false;}
 int NpcMarchShape() noexcept {return 0;}
-const wchar_t* FormationText(int) noexcept {return L"";}
+const wchar_t* FormationText(int,bool) noexcept {return L"";}
 bool NpcMarkEnemy(const void*,const float*,bool) noexcept { return false; }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
 PlayerFix player{};

@@ -475,7 +475,8 @@ HUDTEXT(cmdPaceSlowest,L"MARCH: AT THE SLOWEST UNIT'S PACE [P]",L"配速：以�
 HUDTEXT(cmdPaceFull,L"MARCH: EACH AT FULL SPEED [P]",L"配速：各自全速 [P]",L"配速：各自全速 [P]",L"行軍：各自全速 [P]")
 HUDTEXT(cmdQueued,L"%ls QUEUED (%.0f, %.0f): %d UNIT(S)%ls",L"%ls 已排队（%.0f, %.0f）：%d 个单位%ls",L"%ls 已排隊（%.0f, %.0f）：%d 個單位%ls",
         L"%ls 予約（%.0f, %.0f）：%d ユニット%ls")
-// The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText).
+// The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText). Stock is a guard's
+// own (free within NpcGuardRadius); on the march it is formStockFollow (the game's own follow, below).
 HUDTEXT(formStock,L"DEFAULT",L"默认",L"預設",L"標準")
 HUDTEXT(formColumn,L"COLUMN",L"纵队",L"縱隊",L"縦隊")
 HUDTEXT(formStaggered,L"STAGGERED COLUMN",L"交错纵队",L"交錯縱隊",L"千鳥縦隊")
@@ -487,6 +488,8 @@ HUDTEXT(formEchelonRight,L"ECHELON RIGHT",L"右梯队",L"右梯隊",L"右梯形"
 HUDTEXT(formDiamond,L"DIAMOND",L"菱形",L"菱形",L"菱形")
 HUDTEXT(formBounding,L"BOUNDING OVERWATCH",L"交替掩护",L"交替掩護",L"交互躍進")
 HUDTEXT(formPerimeter,L"PERIMETER",L"环形防御",L"環形防禦",L"全周防御")
+HUDTEXT(formFollow,L"FOLLOW",L"跟随",L"跟隨",L"追従")
+HUDTEXT(formStockFollow,L"STOCK FOLLOW",L"原版跟随",L"原版跟隨",L"標準追従")
 HUDTEXT(cmdFormationResult,L"FORMATION %ls: %d SQUAD(S)",L"编队 %ls：%d 个小队",L"編隊 %ls：%d 個小隊",L"隊形 %ls：%d 分隊")
 HUDTEXT(sweepOn,L"FETCHING BOXES: %d LEFT, %d IN   [%ls] call back",L"拾取箱子：剩 %d 个，已捡 %d   [%ls] 召回",L"拾取箱子：剩 %d 個，已撿 %d   [%ls] 召回",
         L"アイテム回収：残り %d、回収 %d   [%ls] 呼び戻し")

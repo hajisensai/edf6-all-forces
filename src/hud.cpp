@@ -4643,7 +4643,7 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
     wchar_t word[kMapFormationEntries][64];float rowW=120.0f*s;
     for(int i=0;i<count;++i) {
         _snwprintf_s(word[i],_countof(word[i]),_TRUNCATE,L"%ls  %ls",Tr(mapbtn::MenuGuard(entries[i]) ? Tx::menuDefence : Tx::menuMarch),
-                     FormationText(mapbtn::MenuShape(entries[i])));
+                     FormationText(mapbtn::MenuShape(entries[i]),mapbtn::MenuGuard(entries[i])));
         Line probe{};Format(probe,L"%ls",word[i]);probe.scale=scale;
         if(text)MeasureAll(*text,&probe,1);
         const float w=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*pad;
@@ -4719,7 +4719,7 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+(kBtnPad+kBtnIcon+6.0f)*s,q.x1-kBtnPad*s);
         // The tooltip: the full word (the formation's name, the health boxes' state) and how to give it.
         wchar_t full[96];
-        if(b==Id::formation)_snwprintf_s(full,_countof(full),_TRUNCATE,Tr(Tx::btnFormation),FormationText(c.march));
+        if(b==Id::formation)_snwprintf_s(full,_countof(full),_TRUNCATE,Tr(Tx::btnFormation),FormationText(c.march,false));
         else if(b==Id::health)_snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
         else _snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",word[k]);
         if(b==Id::move)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipRightClick),full);
@@ -5723,11 +5723,13 @@ void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float widt
 // The formation's name (formation.h Shape) as the HUD says it (mapcmd.cpp's notes too).
 }  // namespace
 
-const wchar_t* FormationText(int shape) noexcept {
+const wchar_t* FormationText(int shape,bool guard) noexcept {
     using hudtext::Tx;
     static const Tx kNames[]={Tx::formStock,Tx::formColumn,Tx::formStaggered,Tx::formWedge,Tx::formVee,Tx::formLine,
-                              Tx::formEchelonLeft,Tx::formEchelonRight,Tx::formDiamond,Tx::formBounding,Tx::formPerimeter};
+                              Tx::formEchelonLeft,Tx::formEchelonRight,Tx::formDiamond,Tx::formBounding,Tx::formPerimeter,
+                              Tx::formFollow};
     static_assert(sizeof(kNames)/sizeof(kNames[0])==static_cast<std::size_t>(npc::formation::kShapes),"a name a shape");
+    if(shape==static_cast<int>(npc::formation::Shape::stock) && !guard)return hudtext::Tr(Tx::formStockFollow);
     return hudtext::Tr(shape>=0 && shape<npc::formation::kShapes ? kNames[shape] : Tx::formStock);
 }
 namespace {
@@ -5736,7 +5738,7 @@ void FormationBanner(Text* text,float width,float height,float s,Line* lines,int
     if(!PlayerFormationCue(&c))return;
     wchar_t key[24];
     KeyName(c.key,key,_countof(key));
-    Label(text,lines,at,width*0.5f,height*0.5f+190.0f*s,1,kLineScale,kCyan,Tr(Tx::formationCue),FormationText(c.shape),key);
+    Label(text,lines,at,width*0.5f,height*0.5f+190.0f*s,1,kLineScale,kCyan,Tr(Tx::formationCue),FormationText(c.shape,false),key);
 }
 
 // The box sweep (npcai.cpp, the player's NpcPickupKey): the boxes still to fetch and the ones in while it goes, the

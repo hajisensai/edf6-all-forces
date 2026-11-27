@@ -549,7 +549,7 @@ struct Config {
     float qmarkPointSec=15.0f;      // the Q mark on the ground (no enemy aimed at) stays this many s (qmark.cpp)
     float qmarkVolume=0.8f;         // the Q mark's cues (marked / a teammate marked / let go), 0: silent
     bool vanillaSpot=false;         // the stock spot (原版 Q, SpotEffect): false = the local players' is not cast (turretaim.cpp)
-    int npcFormation=0;             // the recruited squads' march round the player (formation.h Shape: 0 stock, 1 column...)
+    int npcFormation=11;            // the recruited squads' march round the player (formation.h Shape: 11 follow, 0 stock, 1 column...)
     int npcFormationKey=0x55;       // ...on foot: cycles it ('U', ini NpcFormationCycleKey: T is the stock Shotcut, plan §3.3; 0: off;
                                     // the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers

@@ -1170,8 +1170,9 @@ void FormationNote(Game& g,int given,int shape) noexcept {
     if(!given){Note(g,L"%ls",g.networkMessage[0] ? g.networkMessage : g.failure!=NpcCommandReason::none ?
                               CommandFailureText(g.failure) : Tr(Tx::cmdNoUnit));return;}
     for(int i=0;i<g.count && shape<0;++i)if(g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad)shape=NpcGuardShape(g.list[i].u.v);
+    const bool guard=shape>=0;
     if(shape<0)shape=NpcMarchShape();
-    Note(g,Tr(Tx::cmdFormationResult),FormationText(shape),given);
+    Note(g,Tr(Tx::cmdFormationResult),FormationText(shape,guard),given);
 }
 // T (the map open): the selected squads' formation. A squad guarding a point cycles its own defence; the others
 // (the player's recruited squads following them) the march, to the one after this machine's march now however many are
