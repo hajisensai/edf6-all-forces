@@ -530,7 +530,7 @@ bool SupportGroundRun(int catalog) noexcept {
     SupportAircraft spec;
     if(!SupportAircraftSpec(catalog,&spec) || spec.heli>=0 || spec.jet<0)return false;
     const auto pass=static_cast<SortiePass>(spec.sortie);
-    return pass==SortiePass::gunRun || pass==SortiePass::carpet;
+    return pass==SortiePass::gunRun;
 }
 
 // ---- The strikes (kStrikes): the map's bar calls them for the local player ----

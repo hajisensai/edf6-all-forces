@@ -111,17 +111,6 @@ inline int RouteAhead(const float (*way)[3],int n,const float* at,float (*out)[3
     return count;
 }
 
-// The carpet bombers' strip (sortie_plan.h: their bombs land within kCarpetHalf of the mark along the line, three jets
-// abreast up to kMaxOffset to a side), widened by `blast` all round: its four corners on the mark's plane, in order.
-inline void CarpetStrip(const float* from,const float* mark,float blast,float (*out)[3]) noexcept {
-    const float heading[3]={mark[0]-from[0],0.0f,mark[2]-from[2]};
-    const sortie::Line l=sortie::LineThrough(mark,mark,heading);   // centred on the mark: the formation spans both sides
-    const float along=sortie::kCarpetHalf+blast,across=sortie::kMaxOffset+blast;
-    const float sa[4]={-1.0f,1.0f,1.0f,-1.0f},sc[4]={-1.0f,-1.0f,1.0f,1.0f};
-    for(int k=0;k<4;++k)for(int i=0;i<3;++i)out[k][i]=mark[i]+l.dir[i]*along*sa[k]+l.side[i]*across*sc[k];
-    for(int k=0;k<4;++k)out[k][1]=mark[1];
-}
-
 // How long a warning shows (ms): a barrage until its last round is down (barrage_plan.h EndFrame, frames at 60 a second),
 // at least a moment.
 inline unsigned long long BarrageMs(int endFrame) noexcept {

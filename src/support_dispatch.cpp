@@ -449,8 +449,8 @@ void PresetHands(std::uint32_t catalog,const SupportLoadout& load,int i,support_
 // The catalog entry whose SupportVehicle_<key> pylons entry `catalog`'s hull flies (the user, 2026-11-27: every air
 // support flies the plane as configured outside the battle, no sortie with a loadout of its own): its own where its key
 // names a body (support_loadout.h kVehicleKeys: the tank's, the strike jet's, ...); a jet sortie's (SORTIE_*, no key of
-// its own) the first guarding call of the same jet role that has one (the dive, the carpet and the hit and run the
-// strike jet's STRIKE, the missile pass MULTIROLE, the wolf pack FIGHTER); -1 none (the helicopters take no pylons, the
+// its own) the first guarding call of the same jet role that has one (the bomber's sortie the strike jet's
+// STRIKE, the defender's MULTIROLE, the fighter's FIGHTER); -1 none (the helicopters take no pylons, the
 // gunship and the Zenith none either). Derived from the call table alone, so the same on every machine of the room.
 int HullOf(int catalog) noexcept {
     if(catalog<0 || catalog>=kSupportConfigUnits)return -1;
@@ -489,7 +489,7 @@ float RunLeastOf(std::uint32_t catalog,std::uint64_t variant) noexcept {
                       LoadoutOfVariant(variant,VehicleBodyOfKey(SupportCallKey(hull)),&l);
     sortie::RunLoad load;float speed=0.0f;
     if(!SupportRunLoad(spec,pylons ? &l : nullptr,&load,&speed))return 0.0f;
-    return sortie::RunLeast(load,speed,static_cast<SortiePass>(spec.sortie)==SortiePass::carpet);
+    return sortie::RunLeast(load,speed);
 }
 // The file of a plan unit's variant (look or pylons; `path`: the CreateObject spelling), or false: none it can be.
 bool VariantFile(const SupportPlan& plan,const support_net::Unit& unit,wchar_t* out,std::size_t capacity,bool path) noexcept {

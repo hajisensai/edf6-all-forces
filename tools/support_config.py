@@ -15,27 +15,26 @@ SECTION = 'VehicleCrew'
 # src/support_config.cpp kWeaponNames (the ini spelling, the label shown).
 WEAPONS = (('rifle', '步枪'), ('flame', '火焰'), ('rocket', '火箭'), ('shotgun', '霰弹'), ('sniper', '狙击'))
 WEAPONS_EN = {'rifle': 'rifle', 'flame': 'flamethrower', 'rocket': 'rocket', 'shotgun': 'shotgun', 'sniper': 'sniper'}
-# The catalog keys in catalog order: tools/calls.py's flown calls (EDF6VC_CALL_* without the prefix; src/airstrike.cpp
-# SupportAirCallKey), then src/support_dispatch.cpp SupportCallKey's own (the infantry, the ground pairs, the transports, the
+# The catalog keys in catalog order: tools/calls.py's flown calls in calls.FLOWN order (EDF6VC_CALL_* without the prefix,
+# each vehicle's sortie right after its guard and follow entries; src/airstrike.cpp SupportAirCallKey), then src/support_dispatch.cpp SupportCallKey's own (the infantry, the ground pairs, the transports, the
 # airdrops: its keys[]), then the strikes (calls.STRIKES: the barrages and the ultimate, src/calls.inc kStrikes), and last
 # the sea rescue (never on the map's bar, a player in the sea asks for it; disabling it here stops the rescue).
-AIR_KEYS = ('INTERCEPTOR', 'INTERCEPTOR_F', 'STRIKE', 'STRIKE_F', 'MULTIROLE', 'MULTIROLE_F', 'FIGHTER', 'FIGHTER_F',
-            'CARRIER', 'CARRIER_F', 'HELI', 'HELI_F', 'BLAST_CARRIER', 'BLAST_CARRIER_F', 'DOLL_CARRIER', 'DOLL_CARRIER_F', 'SUB',
-            'GUNSHIP', 'GUNSHIP_F', 'MEDIC_HELI', 'MEDIC_HELI_F',
-            'SORTIE_HELI_STRAFE', 'SORTIE_HELI_HUNTER', 'SORTIE_HELI_CIRCLE', 'SORTIE_DIVE', 'SORTIE_MISSILE_PASS',
-            'SORTIE_CARPET', 'SORTIE_POPUP', 'SORTIE_MISSILE_RAIN', 'SORTIE_HAMMER', 'SORTIE_WOLFPACK', 'SORTIE_GUIDED')
+AIR_KEYS = ('INTERCEPTOR', 'INTERCEPTOR_F', 'STRIKE', 'STRIKE_F', 'SORTIE_DIVE', 'MULTIROLE', 'MULTIROLE_F',
+            'SORTIE_MISSILE_PASS', 'FIGHTER', 'FIGHTER_F', 'SORTIE_WOLFPACK', 'CARRIER', 'CARRIER_F', 'HELI',
+            'SORTIE_HELI_CIRCLE', 'HELI_F', 'SORTIE_HELI_STRAFE', 'BLAST_CARRIER', 'BLAST_CARRIER_F', 'DOLL_CARRIER',
+            'DOLL_CARRIER_F', 'SUB', 'GUNSHIP', 'GUNSHIP_F', 'SORTIE_GUIDED', 'MEDIC_HELI', 'MEDIC_HELI_F', 'SORTIE_MISSILE_RAIN')
 GROUND_KEYS = ('SQUAD', 'PLATOON', 'TANK_CREWED', 'TANK_DELIVERY', 'TRANSPORT_CREWED', 'TRANSPORT_DELIVERY', 'TRUCK_CREWED',
                'TRUCK_DELIVERY', 'SQUAD_HELI', 'PLATOON_HELI',
                'SQUAD_AIRDROP', 'PLATOON_AIRDROP', 'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP')
 STRIKE_KEYS = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.STRIKES)
 UNIT_KEYS = AIR_KEYS + GROUND_KEYS + STRIKE_KEYS + ('RESCUE',)
 LABELS = dict(zip(AIR_KEYS + GROUND_KEYS, (
-    '截击机·守点', '截击机·跟随', '对地攻击机·守点', '对地攻击机·跟随', '多用途机·守点', '多用途机·跟随', '制空战斗机·守点',
-    '制空战斗机·跟随', '无人机母舰·守点', '无人机母舰·跟随', '直升机·守点', '直升机·跟随', '自爆无人机母舰·守点',
+    '截击机·守点', '截击机·跟随', '对地攻击机·守点', '对地攻击机·跟随', '对地攻击机·出击', '多用途机·守点', '多用途机·跟随',
+    '多用途机·出击', '制空战斗机·守点', '制空战斗机·跟随', '制空战斗机·出击', '无人机母舰·守点', '无人机母舰·跟随',
+    '直升机·守点', '直升机·出击（Brute 410）', '直升机·跟随', '直升机·出击（Eros 506）', '自爆无人机母舰·守点',
     '自爆无人机母舰·跟随', '人偶无人机母舰·守点', '人偶无人机母舰·跟随', '潜水母舰', '炮艇机·守点', '炮艇机·跟随',
-    '医疗直升机·守点', '医疗直升机·跟随',
-    '出击·直升机扫射', '出击·导弹猎手', '出击·死亡回旋', '出击·俯冲扫射', '出击·导弹掠过', '出击·地毯轰炸', '出击·打了就跑',
-    '出击·天顶导弹雨', '出击·锤与砧', '出击·狼群', '出击·引导打击', '步兵小队（4人）', '步兵大队（12人）', '坦克·有人', '坦克·空车交付',
+    '炮艇机·出击', '医疗直升机·守点', '医疗直升机·跟随', '天顶截击机',
+    '步兵小队（4人）', '步兵大队（12人）', '坦克·有人', '坦克·空车交付',
     '装甲运兵车·有人', '装甲运兵车·空车交付', '民用轻卡·有人', '民用轻卡·空车交付',
     '直升机机降·小队（4人）', '直升机机降·大队（12人）', '运输机空降·小队（4人）', '运输机空降·大队（12人）',
     '直升机投送·坦克', '直升机投送·装甲运兵车', '直升机投送·民用轻卡')))
@@ -44,14 +43,13 @@ LABELS['RESCUE'] = 'Brute 410 海上救援型'
 # The same in English, for an English installer (pylib/i18n.py): shown only, LABELS stays the C++ tables' copy.
 LABELS_EN = dict(zip(AIR_KEYS + GROUND_KEYS, (
     'Interceptor (hold)', 'Interceptor (follow)', 'Ground attack jet (hold)', 'Ground attack jet (follow)',
-    'Multirole jet (hold)', 'Multirole jet (follow)', 'Air superiority fighter (hold)', 'Air superiority fighter (follow)',
-    'Drone carrier (hold)', 'Drone carrier (follow)', 'Helicopter (hold)', 'Helicopter (follow)',
-    'Suicide drone carrier (hold)', 'Suicide drone carrier (follow)', 'Doll drone carrier (hold)',
-    'Doll drone carrier (follow)', 'Submarine carrier', 'Gunship (hold)', 'Gunship (follow)',
-    'Medical helicopter (hold)', 'Medical helicopter (follow)',
-    'Sortie: helicopter strafe', 'Sortie: missile hunter', 'Sortie: death circle', 'Sortie: dive strafe',
-    'Sortie: missile pass', 'Sortie: carpet bombing', 'Sortie: hit and run', 'Sortie: zenith missile rain',
-    'Sortie: hammer and anvil', 'Sortie: wolf pack', 'Sortie: guided strike', 'Infantry squad (4)',
+    'Ground attack jet (sortie)', 'Multirole jet (hold)', 'Multirole jet (follow)', 'Multirole jet (sortie)',
+    'Air superiority fighter (hold)', 'Air superiority fighter (follow)', 'Air superiority fighter (sortie)',
+    'Drone carrier (hold)', 'Drone carrier (follow)', 'Helicopter (hold)', 'Helicopter, Brute 410 (sortie)',
+    'Helicopter (follow)', 'Helicopter, Eros 506 (sortie)', 'Suicide drone carrier (hold)', 'Suicide drone carrier (follow)',
+    'Doll drone carrier (hold)', 'Doll drone carrier (follow)', 'Submarine carrier', 'Gunship (hold)', 'Gunship (follow)',
+    'Gunship (sortie)', 'Medical helicopter (hold)', 'Medical helicopter (follow)', 'Zenith interceptor',
+    'Infantry squad (4)',
     'Infantry platoon (12)', 'Tank, crewed', 'Tank, delivered empty', 'APC, crewed', 'APC, delivered empty',
     'Light truck, crewed', 'Light truck, delivered empty', 'Helicopter insertion: squad (4)',
     'Helicopter insertion: platoon (12)', 'Airdrop: squad (4)', 'Airdrop: platoon (12)', 'Helicopter delivery: tank',

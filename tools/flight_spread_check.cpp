@@ -102,10 +102,10 @@ void Lanes() {
           "four gun lanes kLaneGun apart, centred on the line drawn");
     Check(LaneLine(mark,from,heading,kPassGunRun,Place{0,1}).at[0]==0.0f,"one aircraft flies the line itself");
     Check(LaneLine(mark,from,heading,kPassGunshipLap,Place{3,4}).at[0]==0.0f,"the gunship laps the mark itself");
-    const float c0=LaneLine(mark,from,heading,kPassCarpet,Place{1,3}).at[0],c1=LaneLine(mark,from,heading,kPassCarpet,Place{2,3}).at[0];
-    Check(std::fabs(std::fabs(c0-c1)-2.0f*kLaneCarpet)<0.01f,"three carpets lay three bands kLaneCarpet apart");
+    const float c0=LaneLine(mark,from,heading,kPassMissilePass,Place{1,3}).at[0],c1=LaneLine(mark,from,heading,kPassMissilePass,Place{2,3}).at[0];
+    Check(std::fabs(std::fabs(c0-c1)-2.0f*kLaneMissile)<0.01f,"three missile passes fly three lanes kLaneMissile apart");
     const float none[3]={0,0,0},side[3]={500,300,-3000};
-    const sortie::Line l=LaneLine(mark,side,none,kPassCarpet,Place{0,1});
+    const sortie::Line l=LaneLine(mark,side,none,kPassMissilePass,Place{0,1});
     Check(std::fabs(l.at[0])<0.01f && l.dir[2]>0.98f,"no heading: toward the mark, still through it");
     // Where the flight comes in: one aircraft 250 m off flies its own LineThrough (kMaxOffset across, no turn to make); a
     // flight 40 m off has its lanes about its centre's line, 40 m across, each still kLaneGun from the next.

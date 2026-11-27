@@ -10,8 +10,7 @@
 //             it (the aircraft are the owner's; every other machine sees the game's replication of them: no message).
 //   Lanes     a flight's passes side by side across its line, in the order they fly abreast (no two cross on the way
 //             to them): lane k of n is (k - (n - 1) / 2) LaneGap across. A gun run's four lanes 90 m apart strafe a band
-//             270 m wide centred on the line drawn; a carpet's bands are 120 m apart (parallel carpets); one aircraft
-//             flies the line itself.
+//             270 m wide centred on the line drawn; one aircraft flies the line itself.
 //   Break     after its pass each turns out by its lane (kBreakStep a lane, the outer ones farthest): a fan, not four
 //             abreast out along one heading.
 //   Claims    a target a flight-mate is on counts kClaimed m farther: each takes another while there are others, the
@@ -51,12 +50,12 @@ inline float LaneUnits(const Place& p) noexcept {
     return static_cast<float>(Rank(p))-0.5f*static_cast<float>(p.count-1);
 }
 
-// m between neighbouring lanes, by the pass (its stores' swath: a gun run strafes, a carpet lays bands).
-constexpr float kLaneGun=90.0f,kLaneCarpet=120.0f,kLaneMissile=120.0f,kLaneOther=100.0f;
+// m between neighbouring lanes, by the pass (its stores' swath: a gun run strafes, a missile pass picks its own targets).
+constexpr float kLaneGun=90.0f,kLaneMissile=120.0f,kLaneOther=100.0f;
 constexpr float kBreakStep=0.26f;   // rad a lane its way out turns from the line (15 deg)
-constexpr int kPassGunRun=1,kPassMissilePass=2,kPassCarpet=3,kPassGunshipLap=6;   // jet.h SortiePass's values
+constexpr int kPassGunRun=1,kPassMissilePass=2,kPassGunshipLap=4;   // jet.h SortiePass's values
 inline float LaneGap(int pass) noexcept {
-    return pass==kPassGunRun ? kLaneGun : pass==kPassCarpet ? kLaneCarpet : pass==kPassMissilePass ? kLaneMissile : kLaneOther;
+    return pass==kPassGunRun ? kLaneGun : pass==kPassMissilePass ? kLaneMissile : kLaneOther;
 }
 // Its lane's line: the flight's line (LineThrough from the flight's centre: along `heading`, none from there toward the
 // mark, across as far as the centre comes in, kMaxOffset at most) moved across by its lane. One aircraft's is its own

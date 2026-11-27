@@ -7758,7 +7758,7 @@ def soft_edge_wired() -> None:
     # strike flies the ordered height, a sortie's run in takes mapcmd::JetOver (the missile rain's kRainAlt not yet).
     assert 'Level(pos,to,entering && !j.heightOrdered ? pos[1] : height,want);' in combat and 'j->heightOrdered=true;' in jet
     sortie = src('src/jet_sortie.cpp')
-    for alt in ('kMissilePassAlt', 'kCarpetAlt', 'kPopAlt'):
+    for alt in ('kMissilePassAlt',):
         assert f'mark+sortie::{alt}' not in sortie and f'mark+mapcmd::JetOver(sortie::{alt},j.high)' in sortie, alt
     assert 'mark+mapcmd::JetOver(sortie::StrafeHeight(run,preferred),j.high)' in sortie
     assert '#include "../src/airbound.h"' in src('tools/airbound_check.cpp')
