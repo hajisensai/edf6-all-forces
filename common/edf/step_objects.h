@@ -53,4 +53,15 @@ bool Has(const void* object) noexcept;
 // Game-thread counts since the last take (then zeroed): asks found in / missing from the copy, copies, objects copied.
 struct Stats { unsigned long long yes,no,copies,copied; };
 Stats TakeStats() noexcept;
+
+// A fact that holds for a frame (the session, the pause, the host), read once a period: `read()` when no period is open
+// (off the game thread, between scenes) or the period moved since `cache` was filled.
+template<class T> struct PerPeriod { std::uint64_t period=0; T value{}; };
+template<class T,class Read> T Once(PerPeriod<T>& cache,Read read) noexcept {
+    const std::uint64_t p=Period();
+    if(p && p==cache.period)return cache.value;
+    const T now=read();
+    if(p){cache.period=p;cache.value=now;}
+    return now;
+}
 }  // namespace stepobj

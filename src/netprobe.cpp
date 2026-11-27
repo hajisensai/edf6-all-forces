@@ -28,6 +28,7 @@
 #include "gunnerrecoil.h"
 #include "heli.h"
 #include "memory.h"
+#include "edf/step_objects.h"
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -170,7 +171,9 @@ void ReportGround(unsigned char* v,bool host) noexcept {
 // Whether a session is on. An EDF.dll whose session function is not the one read counts as no session (logged once):
 // the plugin then does what it does offline, as it did before the online gates (AutoCrew, its damage, its pilots); an
 // unknown session state never switches them off for a player who is not online at all.
-bool InSession() noexcept {
+namespace {
+// The session's flag, read through the game's mode graph (each link asked Readable: only here, once a period).
+bool ReadSession() noexcept {
     const auto* base=image;
     if(!SessionCodeKnown(base))return false;
     __try {
@@ -200,6 +203,12 @@ bool InSession() noexcept {
         return online;
     } __except(SessionReadFault(GetExceptionCode())) {return false;}
 }
+stepobj::PerPeriod<bool> session;
+}  // namespace
+
+// Once a frame (stepobj's period, edf/step_objects.h): the session does not start or end within one; asked ~100 times a
+// soldier a step it was six Readables each.
+bool InSession() noexcept { return stepobj::Once(session,&ReadSession); }
 
 void NetProbe(unsigned char* v) noexcept {
     if(!Cfg().debug)return;

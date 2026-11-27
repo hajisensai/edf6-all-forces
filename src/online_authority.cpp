@@ -9,6 +9,7 @@
 #include "gunnerrecoil.h"
 #include "memory.h"
 #include "real_driver_native.h"
+#include "edf/step_objects.h"
 
 namespace crew {
 namespace {
@@ -34,7 +35,10 @@ bool Known() noexcept {
     return ok;
 }
 
-bool Host() noexcept { return Known() && reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr); }
+bool ReadHost() noexcept { return Known() && reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr); }
+// Once a frame (stepobj's period, edf/step_objects.h): who hosts does not change within one.
+stepobj::PerPeriod<bool> host;
+bool Host() noexcept { return stepobj::Once(host,&ReadHost); }
 
 // No live registered driver: the host's NPC and the clients' empty copies must choose the SAME authority. The
 // stock last-driver fallback is intentionally not used for plugin work (it would retain a second client authority).
