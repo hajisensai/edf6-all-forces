@@ -4821,6 +4821,13 @@
    ],
    "scripts": []
   },
+  "map_signal": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "march_pace": {
    "labels": [
     "plugin-native",
