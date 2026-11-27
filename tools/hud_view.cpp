@@ -456,8 +456,9 @@ void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n)
 }
 // The support bar's rows and chips as drawn (hud.cpp MapSupportBar).
 float sceneSupportHits[kMapSupports*2][4]{};int sceneSupportEntry[kMapSupports*2]{},sceneSupportHitCount=0;
-void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept {
-    sceneSupportHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
+int sceneSupportTop=0,sceneSupportRows=0,sceneSupportFit=0;
+void MapCommandSupportButtons(const float* r,const int* entries,int n,int top,int rows,int fit) noexcept {
+    sceneSupportHitCount=n;sceneSupportTop=top;sceneSupportRows=rows;sceneSupportFit=fit;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
 }
 // The support composition panel's seats and kinds as drawn (hud.cpp MapComposePanel).
 float sceneComposeHits[mapbtn::kComposeItems][4]{};int sceneComposeCode[mapbtn::kComposeItems]{},sceneComposeHitCount=0;
@@ -807,15 +808,15 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<sceneCmd.supports;++i){sceneCmd.support[i].price=1800+(i*1300)%13200;sceneCmd.support[i].afford=sceneCmd.support[i].price<=sceneCmd.points;}
     sceneCmd.support[sceneCmd.supports-1].price=15000;sceneCmd.support[sceneCmd.supports-1].afford=false;
     sceneWarnings=!pad;
-    // Their tabs (support_call.h SupportTab): the strikes by their icons, the infantry and vehicles on the ground, the
-    // sorties by their names (no "·"), the rest in the air.
+    // Their tabs (support_call.h SupportTab): the strikes by their icons, the infantry and vehicles on the ground, every
+    // flown one in the sortie tab.
     for(int i=0;i<sceneCmd.supports;++i) {
         const SupportIcon ic=sceneCmd.support[i].icon;
         sceneCmd.support[i].tab=ic==SupportIcon::barrage || ic==SupportIcon::satellite ? SupportTab::strike :
             ic==SupportIcon::squad || ic==SupportIcon::platoon || ic==SupportIcon::tank || ic==SupportIcon::apc || ic==SupportIcon::truck ?
-            SupportTab::ground : !mapbtn::VariantOf(sceneCmd.support[i].name) && ic!=SupportIcon::sub ? SupportTab::sortie : SupportTab::air;
+            SupportTab::ground : SupportTab::sortie;
     }
-    sceneCmd.supportTab=static_cast<int>(SupportTab::air);
+    sceneCmd.supportTab=static_cast<int>(SupportTab::sortie);
     sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
     // The payload scenes arm the platoon row and open its composition (map_buttons.h ComposePanel): two squads in, a
     // Wing Diver and a Fencer one, of its twelve seats.
@@ -925,10 +926,23 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 }
             }
         } else if(sceneComposeHitCount){++textFailed;std::printf("FAIL composition clickable with none armed: %d\n",sceneComposeHitCount);}
-        // Every entry of the tab shown reachable, every tab too (support_call.h SupportTab, map_buttons.h SupportTabHit).
-        int reached=0,onTab=0;
-        for(int i=0;i<sceneCmd.supports;++i)if(static_cast<int>(sceneCmd.support[i].tab)==sceneCmd.supportTab){++onTab;reached+=reach[i];}
-        if(reached!=onTab){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,onTab);}
+        // Every entry of the tab's rows in the window shown reachable (map_buttons.h ColumnWindow: the wheel scrolls to
+        // the rest), at least one row in it, and every tab (support_call.h SupportTab, map_buttons.h SupportTabHit).
+        {
+            const wchar_t* tabNames[kMapSupports];int tabIdx[kMapSupports];int onTab=0;
+            for(int i=0;i<sceneCmd.supports;++i)
+                if(static_cast<int>(sceneCmd.support[i].tab)==sceneCmd.supportTab){tabNames[onTab]=sceneCmd.support[i].name;tabIdx[onTab++]=i;}
+            mapbtn::Group tabRows[kMapSupports];
+            const int rows=mapbtn::GroupSupport(tabNames,onTab,tabRows,kMapSupports);
+            int reached=0,windowed=0;
+            for(int k=sceneSupportTop;k<rows && k<sceneSupportTop+sceneSupportFit;++k)
+                for(int e=tabRows[k].first;e<tabRows[k].first+tabRows[k].count;++e){++windowed;reached+=reach[tabIdx[e]];}
+            if(rows!=sceneSupportRows || sceneSupportFit<1 || reached!=windowed || (rows<=sceneSupportFit && windowed!=onTab)) {
+                ++textFailed;
+                std::printf("FAIL support entries clickable: %d of %d in rows %d..%d of %d\n",reached,windowed,sceneSupportTop,
+                            sceneSupportTop+sceneSupportFit,rows);
+            }
+        }
         int tabs=0;for(int i=0;i<sceneSupportHitCount;++i)tabs+=mapbtn::SupportTabOfHit(sceneSupportEntry[i])>=0;
         if(tabs!=kSupportTabs){++textFailed;std::printf("FAIL support tabs clickable: %d\n",tabs);}
         for(int i=0;i<sceneButtons;++i) {

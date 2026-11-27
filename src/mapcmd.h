@@ -101,7 +101,8 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept;
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
 // hud.cpp: the support bar's rows and chips as drawn (`entries` each one's catalog index), for the clicks. Up to
 // kMapSupportHits (a row and a chip an entry).
-void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept;
+// ...and the window of its tab's rows it showed (map_buttons.h ColumnWindow): the first, of how many, how many fit.
+void MapCommandSupportButtons(const float* rects,const int* entries,int n,int top=0,int rows=0,int fit=0) noexcept;
 // hud.cpp: the support composition panel's seats and kinds as drawn (`codes`: map_buttons.h ComposeApply's), for the clicks.
 void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept;
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
@@ -223,6 +224,8 @@ struct MapCommandReadout {
     SupportReadiness supportReady;
     std::int32_t points=0,pointsMost=0;   // the map's support pt (support_points.h): the pool, its most
     int supportTab=0;          // the bar's tab shown (support_call.h SupportTab)
+    int supportTop=0;          // the first of its rows the wheel scrolled to (map_buttons.h ColumnWindow)
+    bool supportReveal=false;  // [ ] picked since: the window moves to show the pick
     wchar_t supportStatus[128];
     // The transports' pairs (transport.cpp TransportLinks): a squad on foot and its vehicle, a thin line between them.
     int links=0;
@@ -255,7 +258,7 @@ constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePag
 constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;
 // `window`: the list's rows drawn (with a pad too, where no click target is published): what a page is (range_place.h).
 void MapCommandPlaceButtons(const float* rects,const int* codes,int n,int window) noexcept;
-// map.cpp Steer, before the wheel zooms: a wheel over the 「摆放」 list scrolls it instead (`delta` WHEEL_DELTA units, +
+// map.cpp Steer, before the wheel zooms: a wheel over the support bar or the 「摆放」 list scrolls it instead (`delta` WHEEL_DELTA units, +
 // away from the user). True when taken. Game thread.
 bool MapCommandWheel(int delta) noexcept;
 // The legend's title row as drawn (hud.cpp MapLegend; null: none, a pad), and whether it is open (a click on it turns

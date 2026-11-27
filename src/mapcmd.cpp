@@ -116,6 +116,8 @@ struct Game {
     bool armedClick=false;
     int supportPick;
     int supportTab=0;          // the bar's tab shown (a click on a tab; [ ] picking into another tab: that tab)
+    int supportTop=0;          // the first of its rows shown (the wheel over the bar; a click on a tab: its top)
+    bool supportReveal=false;  // [ ] picked since the wheel last moved it: the bar shows the pick
     int marchPace=-1;           // the paced march (the card's PACE): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
     bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
@@ -186,6 +188,7 @@ struct View {
     int squads=0,payloads=0,panels=0,supports=0;
     mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kMapUiPanels]{},support[kMapSupportHits]{};
     int supportEntry[kMapSupportHits]{};
+    int supportTop=0,supportRows=0,supportFit=0;   // the window of the tab's rows the bar showed (map_buttons.h ColumnWindow)
     int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
     bool pvpVisible=false;
     int pvps=0;mapbtn::Rect pvp[kMapPvpItems]{};int pvpCode[kMapPvpItems]{};PvpStatus pvpStatus{};
@@ -718,7 +721,7 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         return;
     }
     if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed); one the mission forbids: why
-        if(const int tab=mapbtn::SupportTabOfHit(hit.entry);tab>=0 && tab<kSupportTabs){g.supportTab=tab;return;}   // a tab
+        if(const int tab=mapbtn::SupportTabOfHit(hit.entry);tab>=0 && tab<kSupportTabs){g.supportTab=tab;g.supportTop=0;g.supportReveal=false;return;}   // a tab
         const bool again=g.armedSupport==hit.entry;
         if(const wchar_t* why=again ? nullptr : SupportCallForbidden(hit.entry)){Note(g,L"%ls",why);return;}
         Arm(g,false,Order::none,again ? -1 : hit.entry);
@@ -1497,7 +1500,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         r.support[i].price=SupportCallPrice(i);r.support[i].afford=SupportPoints()>=r.support[i].price;r.support[i].tab=SupportCallTab(i);
     }
     r.supportReady=SupportCallReadiness();
-    r.points=SupportPoints();r.pointsMost=SupportPointsMost();r.supportTab=g.supportTab;
+    r.points=SupportPoints();r.pointsMost=SupportPointsMost();r.supportTab=g.supportTab;r.supportTop=g.supportTop;r.supportReveal=g.supportReveal;
     SupportCallStatus(r.supportStatus,_countof(r.supportStatus));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     r.placeOn=g.placeOn;r.placeOnline=placeOnline;r.placeOpen=g.placeOn && g.place.open;r.placeCategory=g.place.category;
@@ -1629,7 +1632,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         if(previous || following) {
             g.supportPick=(g.supportPick+(previous ? -1 : 1)+supportCount)%supportCount;
             Note(g,hudtext::Tr(hudtext::Tx::cmdSupportPicked),SupportCallName(g.supportPick));
-            g.supportTab=static_cast<int>(SupportCallTab(g.supportPick));   // its tab shown
+            g.supportTab=static_cast<int>(SupportCallTab(g.supportPick));   // its tab shown, scrolled to it
+            g.supportReveal=true;
         }
     }
     Hover(g,in,haveView ? &v : nullptr);
@@ -1976,9 +1980,10 @@ void MapCommandButtons(const float* rects,const int* ids,int n) noexcept {
     ReleaseSRWLockExclusive(&viewLock);
 }
 
-void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept {
+void MapCommandSupportButtons(const float* rects,const int* entries,int n,int top,int rows,int fit) noexcept {
     n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupportHits)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.supports=n;
+    view.supportTop=n ? top : 0;view.supportRows=n ? rows : 0;view.supportFit=n ? fit : 0;
     if(!n)view.composes=0;   // no bar drawn: no composition panel beside it either
     for(int i=0;i<n;++i){view.support[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.supportEntry[i]=entries[i];}
     ReleaseSRWLockExclusive(&viewLock);
@@ -1999,8 +2004,29 @@ void MapCommandLegendButton(const float* rect) noexcept {
     if(rect)view.legendRow={rect[0],rect[1],rect[2],rect[3]};
     ReleaseSRWLockExclusive(&viewLock);
 }
+// The wheel over the support bar (its click targets' bounds): its tab's rows a row a notch, inside the ones it holds.
+static bool SupportWheel(Game& g,int delta) noexcept {
+    static int part=0;
+    if(!delta || !g.pointer.placed){part=0;return false;}
+    AcquireSRWLockShared(&viewLock);
+    const int n=view.supports,top=view.supportTop,rows=view.supportRows,fit=view.supportFit;
+    float x0=1e30f,y0=1e30f,x1=-1e30f,y1=-1e30f;
+    for(int i=0;i<n;++i) {
+        const mapbtn::Rect& q=view.support[i];
+        x0=(std::min)(x0,q.x0);y0=(std::min)(y0,q.y0);x1=(std::max)(x1,q.x1);y1=(std::max)(y1,q.y1);
+    }
+    ReleaseSRWLockShared(&viewLock);
+    const float x=g.pointer.x,y=g.pointer.y;
+    if(!n || x<x0 || x>=x1 || y<y0 || y>=y1){part=0;return false;}
+    part+=delta;
+    const int notches=part/WHEEL_DELTA;
+    part-=notches*WHEEL_DELTA;
+    if(notches){g.supportTop=mapbtn::ColumnWindow(rows,fit,top-notches,-1);g.supportReveal=false;}   // away from the user: up
+    return true;
+}
 bool MapCommandWheel(int delta) noexcept {
     Game& g=game;
+    if(SupportWheel(g,delta))return true;
     static int part=0;   // a fine wheel's part-notches, kept until they make one
     if(!delta || !g.placeOn || !g.place.open || !g.pointer.placed){part=0;return false;}
     // Over the list the HUD drew (its click targets' bounds: the title, the tabs, the rows and the arrows).

@@ -454,7 +454,6 @@ HUDTEXT(supportOff,L"OFF",L"不可用",L"不可用",L"使用不可")
 HUDTEXT(supportTip,L"%ls   %d pt   click, then left-click the map   [ ] pick, C call at the pointer",L"%ls   %d pt   点击后左键点击地图   [ ] 切换，C 在指针处呼叫",
         L"%ls   %d pt   點擊後左鍵點擊地圖   [ ] 切換，C 在指標處呼叫",L"%ls   %d pt   クリック後マップを左クリック   [ ] 切替、C ポインター位置に要請")
 // The map's support pt (support_points.h): the bar's pool, an entry's price, a call refused for want of them.
-HUDTEXT(supportTabAir,L"AIR",L"航空",L"航空",L"航空")
 HUDTEXT(supportTabSortie,L"SORTIE",L"出击",L"出擊",L"出撃")
 HUDTEXT(supportTabStrike,L"STRIKE",L"炮击",L"砲擊",L"砲撃")
 HUDTEXT(supportTabGround,L"GROUND",L"地面",L"地面",L"地上")

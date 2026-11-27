@@ -204,10 +204,11 @@ SupportIcon SupportCallIcon(int index) noexcept;
 // paratroop drop). The container airdrops' (AirdropCatalog): the vehicle the plane drops (the row: the plane).
 enum class SupportVariant : std::uint8_t { none, guard, follow, crewed, empty, squad, platoon, tank, apc, truck };
 SupportVariant SupportCallVariant(int index) noexcept;
-// The bar's tabs (2026-10-26: every support on the bar, more rows than its column holds): the flown supports that stay
-// (guard / follow, the carriers), the sorties, the strikes (barrages, the ultimate), and the ones on the ground or carried
-// there (infantry, vehicles, transports, airdrops). Each entry is in one.
-enum class SupportTab : std::uint8_t { air, sortie, strike, ground, count };
+// The bar's tabs (2026-10-26: every support on the bar, more rows than its column holds): everything flown (2026-11-27: the
+// one 「出击」 tab: the aircraft that stay, guard / follow, the carriers, and the sorties, each flying the airframe the player
+// configured, no separate air tab), the strikes (barrages, the ultimate), and the ones on the ground or carried there
+// (infantry, vehicles, transports, airdrops). Each entry is in one.
+enum class SupportTab : std::uint8_t { sortie, strike, ground, count };
 inline constexpr int kSupportTabs=static_cast<int>(SupportTab::count);
 SupportTab SupportCallTab(int index) noexcept;
 enum class SupportReady : std::uint8_t { ready, planning, cooldown, off };

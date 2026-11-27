@@ -503,11 +503,13 @@ int main() {
     float target[3]={0,0,0};wchar_t note[128];
     airSortie=static_cast<int>(SortiePass::gunRun);
     airJet=static_cast<int>(JetRole::strike);airHeli=-1;
-    check(SupportCallTab(0)==SupportTab::sortie,"ordinary fixed-wing sorties remain in the sortie tab");
+    check(SupportCallTab(0)==SupportTab::sortie,"ordinary fixed-wing sorties are in the sortie tab");
     airSortie=static_cast<int>(SortiePass::missileRain);
     airJet=static_cast<int>(JetRole::salvo);
-    check(SupportCallTab(0)==SupportTab::air && SupportCallIcon(0)==SupportIcon::jet,
-          "the Zenith stays an aircraft and is available in the air support tab");
+    check(SupportCallTab(0)==SupportTab::sortie && SupportCallIcon(0)==SupportIcon::jet,
+          "the Zenith is an aircraft in the one sortie tab (no separate air tab)");
+    airSortie=0;airJet=static_cast<int>(JetRole::interceptor);
+    check(SupportCallTab(0)==SupportTab::sortie,"an aircraft that stays (guard / follow) is in the sortie tab too");
     airSortie=0;airJet=-1;airHeli=static_cast<int>(HeliBody::eros506);
     {
         // The loadout a request plans with: this machine's own for its own (peer 0), the member's published one for a

@@ -1901,12 +1901,7 @@ SupportIcon SupportCallIcon(int index) noexcept {
     return kind==SupportVehicleKind::tank ? SupportIcon::tank : kind==SupportVehicleKind::transport ? SupportIcon::apc : SupportIcon::truck;
 }
 SupportTab SupportCallTab(int index) noexcept {
-    if(index>=0 && index<AirCount()) {
-        SupportAircraft spec;
-        if(SupportAircraftSpec(index,&spec) && spec.sortie && spec.jet!=static_cast<int>(JetRole::salvo))
-            return SupportTab::sortie;
-        return SupportTab::air;
-    }
+    if(index>=0 && index<AirCount())return SupportTab::sortie;   // every flown call (support_call.h SupportTab)
     if(int strike=0;index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportTab::strike;
     return SupportTab::ground;
 }

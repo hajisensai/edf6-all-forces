@@ -151,6 +151,12 @@ void Support() {
     Check(Hit(hits,k,x0+20.0f,row[0].y1+gap*0.5f)<0,"a click in the gap between rows: none");
     // Not enough room: the rows that fit.
     Check(Column(g,rows,x0,x1,top,top+3.0f*(rowH+gap),rowH,gap,inset,row,chip)==3,"a short column: the rows that fit");
+    // A tab longer than its column (2026-11-27: every flown support in one tab): the window the wheel scrolls, kept
+    // inside the rows, moved the least to show the row [ ] picked.
+    Check(ColumnFit(0.0f,29.0f*3.0f,26.0f,3.0f)==3 && ColumnFit(0.0f,25.0f,26.0f,3.0f)==0 && ColumnFit(0.0f,26.0f,26.0f,3.0f)==1,
+          "a column's rows that fit");
+    Check(ColumnWindow(20,6,-3,-1)==0 && ColumnWindow(20,6,99,-1)==14 && ColumnWindow(4,6,2,-1)==0,"the window inside the rows");
+    Check(ColumnWindow(20,6,0,9)==4 && ColumnWindow(20,6,12,9)==9 && ColumnWindow(20,6,5,7)==5,"the window moved the least to show a pick");
     // The bar's tabs in its hit list: codes below every entry and below -1 (none), each tab back from its code.
     Check(SupportTabHit(0)<-1 && SupportTabOfHit(SupportTabHit(3))==3 && SupportTabOfHit(-1)<0 && SupportTabOfHit(5)<0,
           "a tab's hit code, never an entry's or none");
