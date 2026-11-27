@@ -381,6 +381,15 @@ int QMarkViews(QMarkView* to,int max) noexcept {
     FitName(longName,std::wcslen(longName),to[2].name,kQMarkName);
     return 3;
 }
+// The M map's signals in the view (map_signal.h; hud_map.cpp MapSignalHud) with the Q marks: an F2 one by the mark, an
+// F4 one far off to the side (its arrow at the screen's edge).
+int MapSignalViews(mapsignal::Signal* to,int max) noexcept {
+    if(!sceneMarkOn || max<2)return 0;
+    const std::uint64_t now=GetTickCount64();
+    to[0]=mapsignal::Signal{{sceneMark[0]+80.0f,sceneMark[1],sceneMark[2]+20.0f},1,now,false};
+    to[1]=mapsignal::Signal{{sceneMark[0]+6000.0f,sceneMark[1],sceneMark[2]-6000.0f},3,now-4500,true};
+    return 2;
+}
 // The squads' formation banner (npcai.cpp PlayerFormationCue): on in the npc_formation scene.
 int sceneFormation=-1;
 bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return false;o->shape=sceneFormation;o->key=0x54;return true; }
