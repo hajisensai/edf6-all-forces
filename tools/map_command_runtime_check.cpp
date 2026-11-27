@@ -843,8 +843,10 @@ void PlacePanel() noexcept {
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));ResetMapCommands();
 }
 // Only the units that take orders are picked (the user, 2026-10-09: "总有一些我不能指挥的"; "坦克上的…框选的时候应该去重"):
-// Ctrl+A passes over a script's squad and a riding one, a script's squad's panel row says why instead of selecting it, a
-// riding squad's row still picks it (for its dismount), and the log of a refused order counts why per unit.
+// Ctrl+A passes over a script's squad and a riding one; a script's squad is not selectable at all (the user, 2026-11-27:
+// 「干脆让脚本控制的不能选中得了」): its mark takes no click, its row (one drawn before it turned scripted) picks nothing and
+// says nothing, a selected squad a script takes over leaves the selection; a riding squad's row still picks it (for its
+// dismount), and the log of a refused order counts why per unit.
 void PickOnlyCommandable() noexcept {
     ResetMapCommands();view=View{};config=Config{};
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=true;squadLocked=true;squadRiding=false;
@@ -861,8 +863,12 @@ void PickOnlyCommandable() noexcept {
     const float panel[4]={500,300,900,500},row[4]={600,340,680,380};
     MapCommandUiPanels(panel,1);ObjRef identity=ObjRef::Of(squadObj);MapCommandSquadButtons(row,&identity,1);
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
-    Check(!game.sel.n && std::wcscmp(game.note,CommandFailureText(NpcCommandReason::scripted))==0,
-          "a script's squad's row: not selected, the note says why");
+    Check(!game.sel.n && std::wcscmp(game.note,CommandFailureText(NpcCommandReason::scripted))!=0,
+          "a script's squad's row: not selected, no takeover note");
+    {
+        mapcmd::Mark marks[kCmdUnits];const int n=Marks(game,view,marks);
+        Check(n==1 && !marks[0].on && !marks[0].pick,"a script's squad has no mark to click");
+    }
     squadLocked=false;squadRiding=true;
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
     Check(game.sel.Has(squadObj),"a riding squad's row picks it (its dismount)");
@@ -871,6 +877,9 @@ void PickOnlyCommandable() noexcept {
     Check(!game.sel.n,"Ctrl+A passes over a riding squad (its vehicle is the unit)");
     squadRiding=false;tab();
     Check(game.sel.Has(squadObj),"Ctrl+A picks a squad on foot that takes orders");
+    squadLocked=true;MapCommandFrame(in,centre);
+    Check(!game.sel.n,"a selected squad a script takes over leaves the selection");
+    squadLocked=false;tab();
     // The squad panel's summary row: a click opens the panel (published), another folds it.
     const float foldRow[4]={600,400,680,420};
     MapCommandUiPanels(panel,1);MapCommandSquadFold(foldRow);

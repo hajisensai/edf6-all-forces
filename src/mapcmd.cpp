@@ -324,6 +324,7 @@ void KeepSelection(Game& g,const void* const* ids) noexcept {
             for(const auto& old:g.selected)if(old.Is(id)){same=true;break;}
         if(!same)g.sel.Remove(id);
     }
+    for(int i=0;i<g.count;++i)if(g.list[i].u.locked)g.sel.Remove(g.list[i].u.v);   // a script took it over (Picked)
 }
 
 void RememberSelection(Game& g) noexcept {
@@ -564,11 +565,14 @@ bool AnyTakes(const Game& g,Order o) noexcept {
     for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],o))return true;
     return false;
 }
-// Whether the map's box, click and Tab take `e` (mapcmd_logic.h Mark::pick): not a squad a script drives (it takes no
-// order at all), not a squad riding a vehicle (its vehicle is the unit on the map; its row in the panel picks it).
+// Whether the map's box, click and Tab take `e` (mapcmd_logic.h Mark::pick): not a squad a script drives, not a squad
+// riding a vehicle (its vehicle is the unit on the map; its row in the panel picks it).
+//
+// A script's squad (locked: SCRIPT / ESCORT / HOLD; the user, 2026-11-27: 「干脆让脚本控制的不能选中得了」) is not
+// selectable at all: its mark takes no click (Marks: off), no box, double-click, Ctrl+A, Tab, number key or roster row
+// picks it, and one that turns scripted while selected leaves the selection (KeepSelection). The stock walk-up squads a
+// script made (joinOnly: 「跟我来」, the lead-me ones) stay selectable: they take FOLLOW / RECRUIT, as the stock walk-up does.
 bool Picked(const Entry& e) noexcept { return !e.u.locked && !(e.owner==Owner::squad && e.u.riding); }
-// Why `e` is not picked, for the note (CommandFailureText).
-NpcCommandReason NotPicked(const Entry& e) noexcept { return e.u.locked ? NpcCommandReason::scripted : NpcCommandReason::riding; }
 // The units the box, click and Tab take (their identities, in the list's order); how many.
 int PickedIds(const Game& g,const void** out) noexcept {
     int n=0;
@@ -635,7 +639,8 @@ int Marks(const Game& g,const View& v,mapcmd::Mark* out) noexcept {
         const Entry& e=g.list[i];
         float p[3];mapcmd::BodyPoint(e.u.pos,e.u.air,p);
         out[i]=mapcmd::Mark{e.u.v,0.0f,0.0f,false,Picked(e)};
-        out[i].on=mapcmd::Project(v.vp,p,v.w,v.h,&out[i].x,&out[i].y);
+        // A script's squad: no mark to click (a click there is a click on the ground; Picked).
+        out[i].on=!e.u.locked && mapcmd::Project(v.vp,p,v.w,v.h,&out[i].x,&out[i].y);
     }
     return g.count;
 }
@@ -854,8 +859,7 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     // its raw address or reinterpret a row number after sort/recruitment changes the next snapshot.
     for(int i=0;i<g.count;++i)if(g.list[i].owner==Owner::squad && g.list[i].u.v==hit.identity.obj) {
         if(!Readable(hit.identity.obj,kSelfCtrl+sizeof(void*)) || !hit.identity.Is(hit.identity.obj))return;
-        // A script's squad takes no order: its row says why instead of selecting it (a riding one is picked here).
-        if(g.list[i].u.locked){Note(g,L"%ls",CommandFailureText(NpcCommandReason::scripted));return;}
+        if(g.list[i].u.locked)return;   // turned scripted since the row was drawn: not selectable (Picked)
         if(!shift)g.sel.Clear();
         if(shift && g.sel.Has(hit.identity.obj))g.sel.Remove(hit.identity.obj);else g.sel.Add(hit.identity.obj);
         g.rowPicked=g.sel.n==1;return;
@@ -943,7 +947,7 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     else if(click) {
         const void* id=mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
         const Entry* hit=EntryOf(g,id);
-        if(hit && !Picked(*hit))Note(g,L"%ls",CommandFailureText(NotPicked(*hit)));
+        if(hit && !Picked(*hit))Note(g,L"%ls",CommandFailureText(NpcCommandReason::riding));   // a script's has no mark
         else if(hit) {
             // A second click on the same unit within the double-click time, or Ctrl+click: every unit of its kind on the
             // screen (RTS; Shift adds them).
@@ -1428,7 +1432,7 @@ bool GroupAct(Game& g,int n,mapcmd::GroupAct act,const void* const* ids,float* c
     float sum[3]{};int at=0;
     for(int i=0;i<g.groupN[n];++i) {
         const int k=mapcmd::IndexOf(ids,g.count,g.group[n][i].top.obj);
-        if(k<0)continue;   // out of the list now: kept in the group, not selectable this frame
+        if(k<0 || g.list[k].u.locked)continue;   // out of the list now, or a script's: kept in the group, not selected
         g.sel.Add(g.list[k].u.v);
         for(int c=0;c<3;++c)sum[c]+=g.list[k].u.pos[c];
         ++at;
