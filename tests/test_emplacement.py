@@ -42,11 +42,17 @@ class RegistryTests(unittest.TestCase):
     def test_the_plugin_knows_the_marker(self) -> None:
         source = (ROOT / 'src' / 'emplacement.cpp').read_text(encoding='utf-8')
         self.assertIn(f'kMarker[]=L"{em.MARKER}"', source)
-        # cleared last before the stock input reads the seat (crew.cpp InputHook)
+        # cleared last before the stock input reads the seat: the last vehicle step before it (src/module_table.h
+        # kVehicleSteps; crew.cpp InputHook runs kBeforeGears, then kBeforeStockInput, then the stock input)
+        table = re.sub(r'//[^\n]*', '', (ROOT / 'src' / 'module_table.h').read_text(encoding='utf-8'))
+        steps = table[table.index(' kVehicleSteps[]={'):]
+        steps = re.findall(r'\{VP::(k\w+),Id::k\w+,([^\n]*?)\},?\s*\n', steps[:steps.index('\n};')])
+        before = [run for phase, run in steps if phase in ('kBeforeGears', 'kBeforeStockInput')]
+        self.assertTrue(before and before[-1].startswith('&Vehicle<&EmplacementInput>'), before)
         hook = (ROOT / 'src' / 'crew.cpp').read_text(encoding='utf-8')
         body = hook[hook.index('void __fastcall InputHook'):]
         body = body[:body.index('nextInput[I](vehicle,hasInput,a3,a4);')]
-        self.assertTrue(body.rstrip().endswith('Guarded(kStepEmplacement,&EmplacementInput,static_cast<unsigned char*>(vehicle));'))
+        self.assertTrue(body.rstrip().endswith('modules::RunVehicle(VehiclePhase::kBeforeStockInput,v,I,Cfg().enabled);'))
         self.assertIsNotNone(re.search(r'Put<float>\(driver,kSeatSteer,0\.0f\);\s*Put<float>\(driver,kSeatSteer\+4,0\.0f\);', source))
 
 

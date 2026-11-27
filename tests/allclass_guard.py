@@ -17,6 +17,8 @@ import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+import gen_config  # noqa: E402
 
 failures: list[str] = []
 
@@ -30,8 +32,9 @@ def code_only(text: str) -> str:
 
 
 def raw(root: str, rel: str) -> str:
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(root, rel), encoding='utf-8') as f:
-        return f.read()
+        return gen_config.expand(f.read())
 
 
 def body(text: str, signature: str) -> str:
@@ -131,8 +134,11 @@ def main() -> int:
 
     # Installed at load, the option wired.
     plugin = code_only(raw(root, 'src/plugin.cpp'))
-    if 'InstallAllClassesRide();' not in plugin:
-        fail('plugin.cpp: InstallAllClassesRide is not called at load')
+    installs = raw(root, 'src/module_table.h')
+    installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+    installs = installs[:installs.index('\n};')]
+    if installs.count('Id::kAllClassesRide,&Install<&InstallAllClassesRide>}') != 1:
+        fail('module_table.h kInstalls: InstallAllClassesRide is not installed at load (once)')
     if 'n.allClassesRide=ReadBool(L"AllClassesRide",n.allClassesRide);' not in plugin:
         fail('plugin.cpp: AllClassesRide is not read')
     if 'allClassesRide=%d' not in plugin:

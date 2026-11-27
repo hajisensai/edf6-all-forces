@@ -53,7 +53,12 @@ assert 'contribution.source.Is(v)' in field, 'reused source slots must not retai
 transport = code_only((root / 'src/proteus_net.cpp').read_text(encoding='utf-8'))
 receive_hook = body(transport, 'void Received(')
 assert receive_hook.index('ProteusNetReceived(v,state);') < receive_hook.index('ProteusNetIncompatible(v,foreign);')
-assert 'seat_net::Register(proteus_net::kMagic,&Received)' in transport and '0x17DEE98' in transport
+# its kind on the object messages, the BigBegaruta row of their class table chained (slot 17 at 0x17DEE98)
+assert 'object_net::Register(proteus_net::kMagic,&Received)' in transport
+assert 'object_net::ChainClass(object_net::Class::bigBegaruta)' in transport
+import re
+_row = re.search(r'\{Class::bigBegaruta,(0x[0-9A-F]+),kVehicleReceive,', (root / 'src/object_net.h').read_text(encoding='utf-8'))
+assert _row and int(_row.group(1), 16) + 17 * 8 == 0x17DEE98, 'BigBegaruta NetworkObject slot 17 is 0x17DEE98'
 assert 'if(u.net.incompatible)return nullptr;' in body(source, 'Unit* ActiveOf(')
 assert frame.index('u->net.incompatible') < frame.index('NetworkFrame('), 'an incompatible Proteus never runs the rework'
 assert 'kDefenseSilentMs' in frame and 'Incompatible(*u,v,0)' in frame, 'a local driver that hears no owner count goes stock'

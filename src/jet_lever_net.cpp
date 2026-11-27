@@ -11,7 +11,7 @@
 #include "net_object_resolve.h"
 #include "command_identity.h"
 #include "plugin_net.h"
-#include "seat_net.h"
+#include "object_net.h"
 #include <cstring>
 
 namespace crew {
@@ -35,7 +35,7 @@ In ins[kJets]{};
 bool netReady=false;
 unsigned logs=0;
 
-bool Registered(const unsigned char* v) noexcept { return seat_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)); }
+bool Registered(const unsigned char* v) noexcept { return object_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)); }
 
 float Within(float x,float lo,float hi) noexcept { return x<lo ? lo : x>hi ? hi : x; }
 

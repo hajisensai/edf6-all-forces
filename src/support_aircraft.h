@@ -23,7 +23,8 @@ bool SupportGroundRun(int catalog) noexcept;
 // its first wave (`catalog`) went out (the tick: crew.cpp SharedFrameTick); forgotten at a new mission. Queued once the
 // first is out (`request` 0: offline, made), or online under the first's open `request` until SupportFollowUpSettle tells
 // its outcome (`out`: active; else it came to nothing and so does its second wave).
-void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request) noexcept;
+// `run`: the first wave's way in (sortie_plan.h RunSpec), the second's too (its line only where it flies one).
+void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request,const sortie::RunSpec& run={}) noexcept;
 void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept;
 void SupportFollowUpTick() noexcept;
 void ResetSupportFollowUps() noexcept;
@@ -36,9 +37,13 @@ bool SupportSubCatalog(int catalog) noexcept;
 // The same for every entry that brings aircraft: a flown call's (SupportAircraftSpec), a transport's (support_dispatch.cpp
 // TransportSpec: the paratroop plane is transportPlane, no jet or heli row), the rescue's. Refused (unsupported) for a spec
 // that brings nothing.
-support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept;
+// `heading`: the way in asked for (sortie_plan.h RunSpec: the requester's), flown exactly where its corridor is clear
+// (support_entry.h AirRoute); null: from `observer` toward the target. `observer`: whose draw distance the entry is past.
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
+                                const float* heading=nullptr) noexcept;
 // The same route unlogged: the map's preview of an armed entry (support_warning.cpp), asked a few times a second.
-support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept;
+support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
+                                 const float* heading=nullptr) noexcept;
 // One aircraft from the nearest of `spots` (takeoff points: a carrier's deck) it can climb out of to over `target`
 // (support_entry.h TakeoffRoute): route->from on the spot, kTakeoffLift over it. noEntry: none; the caller tries the edge.
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,

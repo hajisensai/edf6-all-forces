@@ -15,8 +15,9 @@
 //    are bound without any spawn message, as long as every machine makes the same children in the same order.
 //  - per-object events travel on the object's own NetworkObject: send slot 16 (+0x80, 0x773DA0, a broadcast of event 7),
 //    receive slot 17 (GameObjectBase 0x54D770 reads a small-int tag and knows 0..3; vehicles 4..5; coop 13 / 14; the
-//    plugin's drill / Proteus / Sazabi 15 on vehicles). This layer uses tag 12 on its own copy of the classes' NetworkObject
-//    vtable (Attach), so no stock table is touched.
+//    plugin's object messages 15, object_net.h). This layer is one kind (magic E41N) of the plugin's object messages: the
+//    object message layer chains the EventAnimationObject and UfoCarrier508 NetworkObject slot 17 (object_net.h kClasses)
+//    and hands this layer's blocks to it by their magic; every other tag and kind goes on as it came.
 //
 // What this layer gives the classes:
 //  - roles: Guest(obj) (online, registered, another machine runs it: show what the host decides) and Decides(obj);
@@ -27,8 +28,10 @@
 //    back on the guest's copy at its next update;
 //  - a development loopback (ini Edf41NetMirror, offline only): one object's events go through the game's own stream writer
 //    and reader into another object's receiver, which then acts as a guest copy (the classes make the mirror).
-// Off (ini Edf41Net=0): nothing is attached, sent or registered; every machine decides for its own copy (the state before).
+// Off (ini Edf41Net=0): no class is chained, nothing sent or registered; every machine decides for its own copy (the state before).
 #pragma once
+#include "object_net.h"
+
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -37,65 +40,45 @@
 namespace crew::edf41net {
 
 // ---- the wire (pure; tests/edf41net_test.cpp) ---------------------------------------------------------------------------
-constexpr std::int8_t kTag=12;                 // free on GameObjectBase's slot 17 (0..3 stock, 13 / 14 coop, 15 the plugin's vehicles)
-constexpr std::uint32_t kMagic=0x4E313445u;    // "E41N"
-constexpr std::uint16_t kVersion=1;
+constexpr std::int8_t kTag=object_net::kTag;    // the plugin's object messages' one tag; this kind is its kMagic
+constexpr std::uint32_t kMagic=0x4E313445u;      // "E41N"
+constexpr std::uint32_t kVersion=2;              // 2: the object message head (version 1 had its own on tag 12)
 constexpr std::size_t kMostPayload=192;
 struct Header {
-    std::uint32_t magic=kMagic;
-    std::uint16_t version=kVersion;
+    object_net::Head head{kMagic,kVersion,0,0,-1};   // the sending process (random, never 0), its count (never 0); no epoch
     std::uint8_t kind=0;
     std::uint8_t size=0;          // payload bytes after the header
-    std::uint64_t sender=0;       // the sending process (random, never 0)
-    std::uint32_t sequence=0;     // the sender's count, never 0
-    std::uint32_t reserved=0;     // 0 on the wire
+    std::uint16_t reserved=0;     // 0 on the wire
+    std::uint32_t reserved2=0;    // 0 on the wire
 };
-static_assert(sizeof(Header)==24,"fixed x64 little-endian wire layout");
+static_assert(sizeof(Header)==32 && offsetof(Header,kind)==sizeof(object_net::Head),"fixed x64 little-endian wire layout");
 constexpr std::size_t kMostMessage=sizeof(Header)+kMostPayload;
 
-// Header + payload into `out` (room bytes); false on a bad size or kind 0.
+// Header + payload into `out` (room bytes); false on a bad size, kind 0 or an unstamped head.
 inline bool Encode(const Header& h,const void* payload,std::size_t size,unsigned char* out,std::size_t room,std::size_t* written) noexcept {
-    if(!out || !written || h.kind==0 || size>kMostPayload || (size && !payload) || room<sizeof(Header)+size || !h.sender || !h.sequence)return false;
+    if(!out || !written || h.kind==0 || size>kMostPayload || (size && !payload) || room<sizeof(Header)+size || !h.head.sender || !h.head.sequence)return false;
     Header w=h;
-    w.magic=kMagic; w.version=kVersion; w.size=static_cast<std::uint8_t>(size); w.reserved=0;
+    w.head.magic=kMagic; w.head.version=kVersion; w.head.controller=-1; w.size=static_cast<std::uint8_t>(size); w.reserved=0; w.reserved2=0;
     std::memcpy(out,&w,sizeof(w));
     if(size)std::memcpy(out+sizeof(w),payload,size);
     *written=sizeof(w)+size;
     return true;
 }
-// A message as it came: the header checked (magic, version, kind, sender, sequence, its size = the bytes there are).
+// A message as it came: the header checked (magic, version, kind, sender, sequence, no epoch, its size = the bytes there are).
 inline bool Decode(const unsigned char* data,std::size_t n,Header* h,const unsigned char** payload) noexcept {
     if(!data || !h || !payload || n<sizeof(Header) || n>kMostMessage)return false;
     Header r;
     std::memcpy(&r,data,sizeof(r));
-    if(r.magic!=kMagic || r.version!=kVersion || r.kind==0 || !r.sender || !r.sequence || r.reserved || sizeof(Header)+r.size!=n)return false;
+    if(!object_net::HeadValid(r.head,kMagic,kVersion) || r.head.controller!=-1 || r.kind==0 || r.reserved || r.reserved2 ||
+       sizeof(Header)+r.size!=n)return false;
     *h=r;
     *payload=data+sizeof(Header);
     return true;
 }
-// Per object: the newest sequence seen from each sender (serial arithmetic, so the sender's wrap is accepted): a repeat or an
-// older message is refused, a new sender is taken (the host's process changes only with a new session). Bounded: a ninth
-// sender is refused rather than an old watermark forgotten.
-struct Gate {
-    struct Seen { std::uint64_t sender=0; std::uint32_t sequence=0; };
-    static constexpr int kSenders=8;
-    Seen seen[kSenders]{};
-    bool Admit(std::uint64_t sender,std::uint32_t sequence) noexcept {
-        if(!sender || !sequence)return false;
-        Seen* empty=nullptr;
-        for(Seen& s:seen) {
-            if(!s.sender) { if(!empty)empty=&s; continue; }
-            if(s.sender!=sender)continue;
-            const std::uint32_t delta=sequence-s.sequence;
-            if(!delta || delta>=0x80000000u)return false;
-            s.sequence=sequence;
-            return true;
-        }
-        if(!empty)return false;
-        *empty=Seen{sender,sequence};
-        return true;
-    }
-};
+// Per object: the newest sequence seen from each sender (object_net.h BasicGate's ordering: serial arithmetic, so the
+// sender's wrap is accepted): a repeat or an older message is refused, a new sender is taken (the host's process changes only
+// with a new session). Bounded: a ninth sender is refused rather than an old watermark forgotten.
+using Gate=object_net::BasicGate<8>;
 // Finite and within the world (a corrupt or hostile float never reaches a matrix).
 inline bool Sane(const float* v,int n,float limit=1.0e7f) noexcept {
     for(int i=0;i<n;++i)if(!std::isfinite(v[i]) || std::fabs(v[i])>limit)return false;
@@ -114,8 +97,9 @@ bool Online() noexcept;                            // a session is on (netprobe.
 bool Registered(const void* object) noexcept;      // it has a network identity (+0x128 bits 0 / 1)
 bool Guest(const void* object) noexcept;           // online, registered, run by another machine (or the mirror test's copy)
 inline bool Decides(const void* object) noexcept { return !Guest(object); }
-// The classes' NetworkObject vtable swapped for this layer's copy (the stock one with slot 17 wrapped): call from the factory.
-void Attach(void* object) noexcept;
+// The layer installed (ini Edf41Net): its kind registered and the classes' NetworkObject slot 17 chained (object_net.h
+// kClasses: EventAnimationObject, UfoCarrier508), once. The factories call it before their object can receive; Enabled().
+bool Install() noexcept;
 // One event of `kind` (1..255) from `object` to its copies on the other machines: online where it Decides and is registered,
 // or through the development loopback. False when nothing was sent.
 bool Send(void* object,std::uint8_t kind,const void* payload,std::size_t size) noexcept;

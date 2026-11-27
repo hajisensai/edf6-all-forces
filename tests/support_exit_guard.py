@@ -84,8 +84,8 @@ def main() -> int:
 
     internal = read(root, 'src/jet_internal.h')
     holds = re.search(r'bool\s+SoftEdgeHolds\s*\(\s*const\s+Jet\s*&\s*j\s*\)\s*noexcept\s*\{([^}]*)\}', internal)
-    if not holds or not re.search(r'j\s*\.\s*mode\s*!=\s*Mode::withdraw', holds.group(1)):
-        fail('jet_internal.h: SoftEdgeHolds is not `j.mode!=Mode::withdraw`')
+    if not holds or not re.search(r'j\s*\.\s*phase\s*!=\s*jetphase::Phase::withdraw', holds.group(1)):
+        fail('jet_internal.h: SoftEdgeHolds is not `j.phase!=jetphase::Phase::withdraw`')
 
     flight = read(root, 'src/jet_flight.cpp')
     edge = body(flight, r'void\s+SoftEdge\s*\(\s*Jet\s*&')
@@ -102,7 +102,7 @@ def main() -> int:
     if re.search(r'^\s*void\s+Away\s*\(', jet, re.M):
         fail('jet.cpp: a second Away (the one in jet_flight.cpp is the one tools/jet_obstacle_sim flies)')
     guide = body(jet, r'void\s+Guide\s*\(\s*Jet\s*&')
-    if not re.search(r'case\s+Mode::withdraw\s*:\s*Away\s*\(', guide):
+    if not re.search(r'if\s*\(\s*j\.phase\s*==\s*jetphase::Phase::withdraw\s*\)\s*\{\s*Away\s*\(', guide):
         fail('jet.cpp Guide: a withdrawing jet is not flown by Away')
 
     for f in failures:

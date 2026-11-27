@@ -77,9 +77,6 @@ void SetLockPoint(void*,const float*) noexcept{}
 void Smoke(const float*,float) noexcept{}
 void AtGameShutdown(void(*)() noexcept) noexcept{}
 const std::uint32_t kEaoSlots[45]={},kCarrierSlots[49]={};
-bool WeakAlive(const WeakRef& w) noexcept{return w.object && !(static_cast<const unsigned char*>(w.object)[kFlagsAt]&4);}
-void WeakSet(WeakRef& w,const void* o) noexcept {w.object=const_cast<void*>(o);w.control=o ? const_cast<void*>(At<const void*>(o,kSelfCtrl)) : nullptr;}
-void WeakReset(WeakRef& w) noexcept {w={};}
 void StopSound(SoundHandle& h,int) noexcept {h={};}
 void MoveSound(SoundHandle&,const float*) noexcept{}
 bool PlaySe(const void*,const wchar_t*,const float*,SoundHandle*) noexcept{return true;}
@@ -124,7 +121,7 @@ bool ReadBaselineForMember(const ObjRef& ref,int* team,int* last) noexcept {
 }
 }
 namespace crew::edf41net {
-void Attach(void*) noexcept{}
+bool Install() noexcept{return true;}
 void Pump(void*) noexcept{}
 bool Enabled() noexcept{return true;}
 bool Online() noexcept{return fixture::online;}
@@ -138,7 +135,7 @@ namespace {
 using namespace crew;using namespace crew::edf41c;
 std::uint64_t NativeMessageFallback(void*,std::uint32_t,void*){return 123;}
 void Check(bool ok,const char* what){++fixture::checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
-struct Object {alignas(16) unsigned char data[0x2000]{};Object(){const void* head=data+0x1880;*reinterpret_cast<const void**>(data+0x550)=head;*reinterpret_cast<const void**>(data+0x1880)=head;*reinterpret_cast<const void**>(data+0x1888)=head;*reinterpret_cast<const void**>(data+kSelfCtrl)=data+0x1800;*reinterpret_cast<LONG*>(data+0x1808)=1;*reinterpret_cast<int*>(data+0x318)=1;float* m=reinterpret_cast<float*>(data+kMatrixAt);m[0]=m[5]=m[10]=m[15]=1;*reinterpret_cast<float*>(data+kDurabilityAt)=1000;}};
+struct Object {alignas(16) unsigned char data[0x2000]{};Object(){const void* head=data+0x1880;*reinterpret_cast<const void**>(data+0x550)=head;*reinterpret_cast<const void**>(data+0x1880)=head;*reinterpret_cast<const void**>(data+0x1888)=head;*reinterpret_cast<const void**>(data+kSelfCtrl)=data+0x1800;*reinterpret_cast<LONG*>(data+0x1808)=1;*reinterpret_cast<LONG*>(data+0x180C)=1;/* uses 1, weaks 1 (the uses' own weak, as MSVC _Ref_count_base) */*reinterpret_cast<int*>(data+0x318)=1;float* m=reinterpret_cast<float*>(data+kMatrixAt);m[0]=m[5]=m[10]=m[15]=1;*reinterpret_cast<float*>(data+kDurabilityAt)=1000;}};
 enemy_control::Input Press(std::uint32_t id,std::uint64_t sequence){enemy_control::Input in{};in.sequence=sequence;in.absoluteAim=true;in.aimYaw=0.02f;in.aimPitch=0;in.seed=12345+sequence;in.active[0]={id,2};return in;}
 bool SpawnCan(void*,const ObjRef&,const wchar_t* resource,unsigned count) noexcept {
     return fixture::spawnSupported && resource && resource[0] && count<=fixture::spawnBudget;

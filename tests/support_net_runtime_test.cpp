@@ -49,6 +49,9 @@ FARPROC WINAPI Proc(HMODULE,LPCSTR);
 #undef GetModuleHandleW
 #undef GetTickCount64
 #undef GetProcAddress
+// The mission start's resets of the support session and of the room's channels, in modules.cpp kResets' order: the
+// support dispatch's ResetSupportNet, then the plugin net module's plugin_net::Reset (every Channel.reset).
+void MissionReset() noexcept { crew::ResetSupportNet();crew::plugin_net::Reset(); }
 namespace crew {
 Config config;
 const Config& Cfg() noexcept { config.enabled=true;return config; }
@@ -148,6 +151,13 @@ bool JetLeverState(const void*,std::size_t) noexcept {return true;}
 plugin_net::Channel JetLeverNetChannel() noexcept {
     plugin_net::Channel c;c.name="jet lever";c.magic=0x4C4A4641u;c.version=1;
     c.minSize=c.maxSize=44;c.receive=&ReceiveJetLever;c.takesState=&JetLeverState;return c;
+}
+// The aura trucks (aura.cpp): AFAU states, not under test here.
+bool ReceiveAura(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+bool AuraState(const void*,std::size_t) noexcept {return true;}
+plugin_net::Channel AuraNetChannel() noexcept {
+    plugin_net::Channel c;c.name="aura vehicles";c.magic=0x55414641u;c.version=1;
+    c.minSize=c.maxSize=409;c.receive=&ReceiveAura;c.takesState=&AuraState;return c;
 }
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
@@ -342,7 +352,7 @@ void WorldParticipants() {
     Check(policy.phase==0,"native phase read failure is unknown, never lobby");
     locationReadable=true;location=4;
     Check(!EDF6AF_GetMissionParticipants(2,sizeof(state),&state),"world snapshot ABI rejects unsupported version");
-    crew::ResetSupportNet();actors=4;expectedActors=4;crew::SupportMissionPlayerAllowed(0);
+    MissionReset();actors=4;expectedActors=4;crew::SupportMissionPlayerAllowed(0);
     NoteCreations();
     tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==3 && state.worldEpoch!=epoch && crew::SupportMissionPlayerAllowed(2),
@@ -350,7 +360,7 @@ void WorldParticipants() {
     crew::SupportMissionReturnedToLobby();location=3;EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy);
     Check(policy.phase==1 && !policy.participantCount && policy.worldEpoch!=state.worldEpoch,
         "only explicit verified lobby notification clears sealed admission policy");
-    crew::ResetSupportNet();
+    MissionReset();
 }
 }
 int main() {
@@ -378,7 +388,7 @@ int main() {
     const unsigned before=destroyCount;
     ready=false;Step();Check(destroyCount==before && crew::SupportTransactionActive(1),"not-ready snapshot preserves delivered actors and activation");
     ready=true;generation++;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"restored link does not silently reopen a changed participant epoch");
-    crew::ResetSupportNet();Check(destroyCount>before,"explicit mission reset owns actor teardown");
+    MissionReset();Check(destroyCount>before,"explicit mission reset owns actor teardown");
     generation++;peerCount=1;stale=true;Step();
     Check(!crew::SubmitSupportRequest(1,at,note,256),"peer roster changed during snapshot fails closed");
     stale=false;generation++;Step();
@@ -464,7 +474,7 @@ int main() {
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();
     online=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"offline never sends multiplayer requests");
-    const unsigned resetsBefore=qmarkResets,pvpResetsBefore=pvpResets,enemyResetsBefore=enemyControlResets,subResetsBefore=subResets,carrierResetsBefore=carrierResets;crew::ResetSupportNet();
+    const unsigned resetsBefore=qmarkResets,pvpResetsBefore=pvpResets,enemyResetsBefore=enemyControlResets,subResetsBefore=subResets,carrierResetsBefore=carrierResets;MissionReset();
     Check(qmarkResets>resetsBefore,"the session reset drops the teammates' marks");
     Check(pvpResets>pvpResetsBefore,"the session reset cancels PVP's network epoch");
     Check(enemyControlResets>enemyResetsBefore && subResets>subResetsBefore && carrierResets>carrierResetsBefore,"session reset invalidates enemy-control, submarine state and carrier request epochs");
@@ -482,7 +492,7 @@ int main() {
     Check(rangePlans==1 && rangeValidations==1 && rangeSpawns==1 && rangeToken && spawnCount==ordinarySpawns,
         "range catalog traverses its plan, validate and native spawn wrappers alone");
     Check(rangeTicks>0 && rangeNotices>0,"range activation/status ticks are supplied by the production bridge");
-    const auto rangeResetBefore=rangeResets;crew::ResetSupportNet();
+    const auto rangeResetBefore=rangeResets;MissionReset();
     Check(rangeDestroys==1 && rangeResets>rangeResetBefore && !rangeToken,"mission reset rolls back range ownership and request identity");
     // Real production wrapper -> actual Session::SubmitPrepared: ordinary mission default must not silently reject child plans.
     online=true;host=true;ready=true;installed=true;peerCount=0;generation++;tick+=1000;pvpTeam=0;
@@ -504,7 +514,7 @@ int main() {
     rejected.units[0].netId[0]=1;Check(!crew::SubmitPreparedSupportPlan(rejected),"prepared wrapper cannot smuggle an existing native child ID");
     rejected.units[0].netId[0]=0;std::memset(rejected.requester,0,32);
     Check(!crew::SubmitPreparedSupportPlan(rejected),"dynamic wrapper refuses missing canonical owner");
-    crew::ResetSupportNet();
+    MissionReset();
     WorldParticipants();
     std::printf("support runtime bridge: %d checks passed\n",checks);
 }

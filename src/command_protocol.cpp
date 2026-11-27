@@ -17,7 +17,15 @@ bool Same(const Request& a,const Request& b) noexcept {
         a.formationTotal==b.formationTotal && !std::memcmp(a.formationSlots,b.formationSlots,sizeof(a.formationSlots));
 }
 bool Valid(const Message& m) noexcept {
-    if(!m.epoch || m.kind<Kind::hello || m.kind>Kind::ways || m.rpc>=Rpc::count)return false;
+    if(!m.epoch || m.kind<Kind::hello || m.kind>Kind::ping || m.rpc>=Rpc::count)return false;
+    if(m.kind==Kind::ping) {   // a player's point and the ping's kind, nothing else
+        const Request& r=m.request;
+        if(m.rpc!=Rpc::none || !m.sequence || r.count || r.flags || r.command.order!=mapcmd::Order::none || r.command.param>=kPingKinds ||
+           !netref::IsPlayer(r.requester) || !Empty(r.focus) || r.formationTotal)return false;
+        for(float f:r.command.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
+        for(unsigned i=0;i<kCommandNetUnits;++i)if(!Empty(r.units[i]) || r.formationSlots[i] || m.results[i].reason || m.results[i].affected)return false;
+        return true;
+    }
     if(m.kind==Kind::ways) {   // one unit's queue, its points finite and bounded
         if(m.rpc!=Rpc::none || !m.sequence || m.request.count!=1 || !CanonicalId(m.request.units[0]) ||
            m.request.flags || m.request.command.param || m.ways.n>kWaysMost)return false;
@@ -57,8 +65,7 @@ bool ValidRequest(const Request& r) noexcept {
        !netref::IsPlayer(r.requester))return false;
     if(r.flags&~kQueued)return false;
     if((r.flags&kQueued) && !mapcmd::PointOrder(r.command.order))return false;   // only a point goes after the others
-    if(r.command.order==mapcmd::Order::formation ? !mapcmd::FormationParamValid(r.command.param) :
-       !mapcmd::DismountParamValid(r.command.order,r.command.param))return false;   // DISMOUNT ALL's choice (v10), else none
+    if(!mapcmd::OrderParamValid(r.command.order,r.command.param))return false;   // the formation's, DISMOUNT ALL's, a line's, a switch's
     for(float f:r.command.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
     if(r.command.order==mapcmd::Order::focus) {if(!netref::Valid(r.focus,false) || !std::memcmp(r.focus,r.requester,32))return false;}
     else if(!Empty(r.focus))return false;
@@ -130,6 +137,31 @@ bool Owned(const void* bytes,std::size_t size) noexcept {
 void Session::Reset() noexcept {
     ready_=false;hostCapable_=false;epoch_=0;nextSequence_=0;lastHello_=0;result_={};peer_.fill(Peer{});
     ways_.fill(WaysEntry{});waysRevision_=0;
+    pings_.fill(Ping{});pingHead_=pingCount_=0;pingSequence_=0;lastPing_=0;
+}
+void Session::Heard(const Ping& p) noexcept {
+    if(pingCount_==kPingsKept){pingHead_=(pingHead_+1)%kPingsKept;--pingCount_;}   // the oldest gives way
+    pings_[(pingHead_+pingCount_)%kPingsKept]=p;++pingCount_;
+}
+bool Session::TakePing(Ping* out) noexcept {
+    if(!out || !pingCount_)return false;
+    *out=pings_[pingHead_];pingHead_=(pingHead_+1)%kPingsKept;--pingCount_;
+    return true;
+}
+void Session::SendPingTo(std::uint32_t peer,const Ping& p) noexcept {
+    if(pingSequence_==UINT32_MAX)return;
+    Message m;m.kind=Kind::ping;m.epoch=epoch_;m.sequence=++pingSequence_;
+    std::memcpy(m.request.requester,p.requester,32);std::memcpy(m.request.command.at,p.at,12);m.request.command.param=p.kind;
+    Send(peer,m);
+}
+bool Session::SendPing(const Ping& p,std::uint64_t now) noexcept {
+    if(!ready_ || !epoch_ || p.kind>=kPingKinds || !netref::IsPlayer(p.requester) || (lastPing_ && now-lastPing_<kPingGapMs))return false;
+    for(float f:p.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
+    lastPing_=now;
+    if(host_)for(std::uint32_t peer=1;peer<=peers_;++peer){if(peer_[peer].capable)SendPingTo(peer,p);}
+    else if(hostCapable_)SendPingTo(hostPeer_,p);
+    else return false;
+    return true;
 }
 Session::WaysEntry* Session::WaysSlot(const unsigned char* unit,bool make) noexcept {
     WaysEntry* free=nullptr;
@@ -244,6 +276,14 @@ void Session::Receive(std::uint32_t peer,const char* puid,const Message& message
             // A new member (or one back): every queue out now, so its map draws them from the start.
             for(const auto& e:ways_)if(e.used)SendWays(peer,e);
         } else if(message.kind==Kind::request)Execute(peer,puid,message,now);
+        else if(message.kind==Kind::ping && identity.capable && (!identity.lastPingAt || now-identity.lastPingAt>=kPingGapMs) &&
+                backend_.speaks && backend_.speaks(backend_.context,puid,message.request.requester)) {
+            identity.lastPingAt=now;
+            Ping p;std::memcpy(p.requester,message.request.requester,32);std::memcpy(p.at,message.request.command.at,12);
+            p.kind=message.request.command.param;
+            Heard(p);
+            for(std::uint32_t other=1;other<=peers_;++other)if(other!=peer && peer_[other].capable)SendPingTo(other,p);
+        }
     } else if(peer==hostPeer_) {
         if(message.kind==Kind::capability) {
             // The host answers a hello with this, then every queue it has out (above): what was kept here is of before
@@ -251,6 +291,11 @@ void Session::Receive(std::uint32_t peer,const char* puid,const Message& message
             // keeps the epoch's state, the clearing was never heard). Forgotten, so only what follows is drawn.
             ways_.fill(WaysEntry{});
             hostCapable_=message.rpc==Rpc::none;
+        }
+        else if(message.kind==Kind::ping) {
+            Ping p;std::memcpy(p.requester,message.request.requester,32);std::memcpy(p.at,message.request.command.at,12);
+            p.kind=message.request.command.param;
+            Heard(p);
         }
         else if(message.kind==Kind::ways) {
             WaysEntry* e=WaysSlot(message.request.units[0],message.ways.n>0);

@@ -33,7 +33,8 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "plugin_net.h"      // RoomGeneration
-#include "seat_net_transport.h"
+#include "object_net_transport.h"
+#include "seat_net.h"
 #include "seat_switch_logic.h"
 #include "edf/patch.h"
 #include "edf/weapon.h"
@@ -80,7 +81,8 @@ struct Carrier {
 constexpr int kMaxCarriers=128;   // 16 a salvo, 25 s at most in the air: a few trucks' worth
 Carrier carriers[kMaxCarriers];
 // Bursts waiting to split (AndryushaTick drains them on the game thread).
-struct Burst { const void* owner; const void* ownerCtrl; Fuse fuse; float at[3]; float damage; };
+// The owner is held (WeakRef) from the round's death to the split: the round's own weak on it goes with the round.
+struct Burst { WeakRef owner; Fuse fuse=Fuse::none; float at[3]{}; float damage=0.0f; };
 constexpr int kMaxBursts=64;
 Burst bursts[kMaxBursts];
 int burstCount=0;
@@ -140,7 +142,7 @@ void After(unsigned char* b) noexcept {
             const bool burst=c->fused || age<life;
             if(burst && burstCount<kMaxBursts) {
                 Burst& q=bursts[burstCount++];
-                q.owner=c->owner;q.ownerCtrl=c->ownerCtrl;q.fuse=c->fused ? Fuse::airburst : Fuse::impact;
+                q.owner=ObjRef{c->owner,c->ownerCtrl};q.fuse=c->fused ? Fuse::airburst : Fuse::impact;
                 std::memcpy(q.at,c->pos,12);q.damage=c->damage;
             } else if(burst && droppedSaid<3) {
                 ++droppedSaid;
@@ -160,10 +162,6 @@ void __fastcall UpdateHook(void* b,void* ctx) {
     __try { After(static_cast<unsigned char*>(b)); } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
-bool OwnerAlive(const void* ctrl) noexcept {
-    return ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,0x8)>0;
-}
-
 float Ground(void*,float x,float z,float y) noexcept {
     const float from[3]={x,y+200.0f,z},to[3]={x,y-300.0f,z};
     float hit[3];
@@ -172,7 +170,8 @@ float Ground(void*,float x,float z,float y) noexcept {
 
 // One burst split into its bomblets (andryusha.h), each fired by the carrier's owner.
 void Split(const Burst& q) noexcept {
-    if(!OwnerAlive(q.ownerCtrl)) {
+    // Still in the scene (a truck destroyed since still splits the rounds it fired, as the round's own owner check did).
+    if(!objref::Exists(q.owner)) {
         if(ownerGoneSaid<3){++ownerGoneSaid;Log("ANDRYUSHA burst at (%.0f,%.0f,%.0f): its truck is gone, no bomblets",q.at[0],q.at[1],q.at[2]);}
         return;
     }
@@ -184,7 +183,7 @@ void Split(const Burst& q) noexcept {
         if(MapRay(q.at,down,below)<0.0f){below[0]=q.at[0];below[1]=q.at[1]-andryusha::kBurstHeight;below[2]=q.at[2];}
         andryusha::AirburstAims(q.at,below,seed,&Ground,nullptr,from,aims);
     } else andryusha::ImpactAims(q.at,seed,&Ground,nullptr,from,aims);
-    const auto by=static_cast<const unsigned char*>(q.owner);
+    const auto by=static_cast<const unsigned char*>(q.owner.obj);
     int fired=0;
     for(auto& aim:aims)if(AndryushaBomblet(by,from,aim,q.damage*andryusha::kBlastShare,q.damage*andryusha::kFireShare))++fired;
     if(!fired && unreadySaid<3) {
@@ -192,7 +191,7 @@ void Split(const Burst& q) noexcept {
         Log("ANDRYUSHA burst: no bomblet fired (EDF6VC_ANDRYUSHA_BLAST / _FIRE.SGO not preloaded this mission: rerun the installer)");
     } else if(Cfg().debug)
         Log("ANDRYUSHA %s burst at (%.0f,%.0f,%.0f) by %p: %d bomblets, %.0f / %.0f damage each",q.fuse==Fuse::airburst ? "airburst" :
-            "impact",q.at[0],q.at[1],q.at[2],q.owner,fired,q.damage*andryusha::kBlastShare,q.damage*andryusha::kFireShare);
+            "impact",q.at[0],q.at[1],q.at[2],q.owner.obj,fired,q.damage*andryusha::kBlastShare,q.damage*andryusha::kFireShare);
 }
 
 bool KeyDown(int vk) noexcept {   // payload.cpp KeyDown
@@ -210,8 +209,8 @@ bool switchHeld=false;
 constexpr int kMostSpeakers=16;
 struct Speaker { ObjRef ref{}; std::uint8_t sent=0; ULONGLONG at=0; };
 Speaker speakers[kMostSpeakers]{};
-// The receivers' watermarks, one stream a vehicle (seat_net.h StreamGates), dropped with the room's members.
-seat_net::StreamGates<kMostSpeakers*2,64> fuseGates;
+// The receivers' watermarks, one stream a vehicle (object_net.h StreamGates), dropped with the room's members.
+object_net::StreamGates<kMostSpeakers*2,64> fuseGates;
 std::uint32_t fuseGatesRoom=0;
 bool netReady=false;
 int fuseSaid=0;
@@ -264,7 +263,7 @@ void FuseReceived(unsigned char* v,const void* block,std::size_t size) noexcept 
         auto* const gate=fuseGates.For({ref.obj,ref.ctrl,0},[](const void* obj,const void* ctrl) noexcept {
             return Readable(obj,kSelfCtrl+8) && ObjRef{obj,ctrl}.Is(obj);
         });
-        if(!gate || !gate->Admit(s.head,true,SpeaksHere(v),seat_net::SeatController(v,0)))return;
+        if(!gate || !gate->Admit(s.head,true,SpeaksHere(v),object_net::SeatController(v,0)))return;
         const Fuse fuse=static_cast<Fuse>(s.fuse);
         std::uint32_t bits;std::memcpy(&bits,w+kWeaponHitAdjust,4);
         if(andryusha::FuseOf(bits)==fuse)return;
@@ -276,11 +275,11 @@ void FuseReceived(unsigned char* v,const void* block,std::size_t size) noexcept 
 }  // namespace
 
 void AndryushaFrame(unsigned char* v) noexcept {
-    if(!netReady || !Cfg().enabled || v[edf::kDead] || !InSession() || !seat_net::Replicated(true,At<std::uint16_t>(v,0x128)))return;
+    if(!netReady || !Cfg().enabled || v[edf::kDead] || !InSession() || !object_net::Replicated(true,At<std::uint16_t>(v,0x128)))return;
     unsigned char* w=nullptr;
     const int holder=FuseHolder(v,&w);
     if(holder<0)return;
-    seat_net::ChainVehicle(v);   // this class hears its copies' fuses too
+    object_net::ChainVehicle(v);   // this class hears its copies' fuses too
     const ULONGLONG now=GameMs();
     Speaker* const slot=SpeakerFor(v,now);
     if(!slot)return;
@@ -289,9 +288,9 @@ void AndryushaFrame(unsigned char* v) noexcept {
     const auto fuse=static_cast<std::uint8_t>(andryusha::FuseOf(bits));
     if(!andryusha_net::Due(fuse,slot->sent,now,slot->sent ? slot->at : 0))return;
     andryusha_net::State m;
-    m.holder=holder;m.fuse=fuse;m.head.controller=seat_net::SeatController(v,0);
-    if(!seat_net::Stamp(&m,sizeof(m)) || !andryusha_net::Valid(m))return;
-    if(seat_net::Send(v,&m,sizeof(m))) {
+    m.holder=holder;m.fuse=fuse;m.head.controller=object_net::SeatController(v,0);
+    if(!object_net::Stamp(&m,sizeof(m)) || !andryusha_net::Valid(m))return;
+    if(object_net::Send(v,&m,sizeof(m))) {
         if(fuse!=slot->sent && fuseSaid<16){++fuseSaid;Log("ANDRYUSHA v=%p fuse sent to its copies: %s",v,fuse==2 ? "airburst" : "impact");}
         slot->sent=fuse;slot->at=now;
     }
@@ -314,7 +313,7 @@ void AndryushaTick() noexcept {
             probes[n++]=Probe{c.bullet,c.ctrl,{c.pos[0],c.pos[1],c.pos[2]},c.vel[1],c.age};
     }
     nb=burstCount;
-    std::memcpy(drained,bursts,sizeof(Burst)*static_cast<std::size_t>(nb));
+    for(int i=0;i<nb;++i)drained[i]=std::move(bursts[i]);
     burstCount=0;
     ReleaseSRWLockExclusive(&lock);
     for(int i=0;i<n;++i) {
@@ -354,6 +353,7 @@ int AndryushaSeat(const unsigned char* v,const unsigned char* seat,unsigned char
 void ResetAndryusha() noexcept {
     AcquireSRWLockExclusive(&lock);
     for(auto& c:carriers)c=Carrier{};
+    for(auto& q:bursts)q=Burst{};
     burstCount=0;
     ReleaseSRWLockExclusive(&lock);
     switchVehicle=nullptr;switchHeld=false;
@@ -371,7 +371,7 @@ bool InstallAndryusha() noexcept {
         const auto slot=reinterpret_cast<void**>(image+kGrenadeVtable)+kUpdateSlot;
         if(*slot!=image+kGrenadeUpdate)Log("ANDRYUSHA grenade update: chaining onto %p (EDF6AutoTurret's fuses)",*slot);
         hooked=edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&UpdateHook),&nextUpdate);
-        netReady=hooked && seat_net::Install() && seat_net::Register(andryusha_net::kMagic,&FuseReceived);
+        netReady=hooked && object_net::Install() && object_net::Register(andryusha_net::kMagic,&FuseReceived);
         Log("HOOK andryusha=%d online=%d (the Andryusha's carriers: fuses and bomblets; its fuse on tag 15 'AFUZ')",hooked,netReady);
         return hooked;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

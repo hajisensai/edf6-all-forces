@@ -176,8 +176,7 @@ int netAskNext=0;
 
 bool NetworkEnemyLive(const NetworkEnemy& e) noexcept {
     // Weak control blocks are retained until transaction teardown: test the strong count before the actor pointer.
-    return e.ref.ctrl && At<LONG>(e.ref.ctrl,8)>0 && e.ref.Is(e.ref.obj) &&
-        !(At<unsigned char>(e.ref.obj,0x18)&4);
+    return objref::Exists(e.ref);
 }
 // A dead actor: the byte the native walks skip one by (kDead, 0x5E0FB6).
 bool NetworkEnemyDead(const NetworkEnemy& e) noexcept {
@@ -469,7 +468,10 @@ int MakeRow(int row,const float* at,const float* heading,const float* look,wchar
         const int catalog=SupportCatalogOf(e.arg);
         wchar_t note[96]{};
         if(catalog<0){why="no such support call in this build's catalog";break;}
-        const bool accepted=SupportCallAt(catalog,at,note,_countof(note));
+        // A direct call comes in the way the player faces (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」).
+        const sortie::RunSpec way=SupportCatalogFlown(catalog) ? sortie::HeadingRun(look[0],look[2]) :
+                                  sortie::RunSpec{};
+        const bool accepted=SupportCallComposedAt(catalog,at,nullptr,note,_countof(note),nullptr,way);
         Say(accepted ? kDebugSpawnRequested : kDebugSpawnRefused,row,note,"%s: support call %ls (catalog %d) to (%.1f,%.1f,%.1f): %s",e.id,
             kSupportCalls[e.arg],catalog,at[0],at[1],at[2],accepted ? "accepted (see SUPPORT lines)" : "refused (see SUPPORT lines)");
         if(noteOut && noteSize)wcsncpy_s(noteOut,noteSize,note,_TRUNCATE);

@@ -6,6 +6,7 @@
 //   cmake --build build --target map_cmd_check && build\map_cmd_check.exe      (exit code 1 on a failure)
 #include "../src/map_cam.h"
 #include "../src/mapcmd_logic.h"
+#include <initializer_list>
 #include "../src/map_floor.h"
 #include <cstdio>
 
@@ -430,7 +431,7 @@ int main() {
         Check(VehicleOrder(Order::move) && VehicleOrder(Order::attackMove) && VehicleCommandOf(Order::move)==Order::guard &&
               VehicleCommandOf(Order::attackMove)==Order::guard && VehicleCommandOf(Order::follow)==Order::follow,
               "a vehicle takes a move / attack-move as its post's guard");
-        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::formation) && static_cast<int>(Order::recruit)==8 &&
+        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::decoy) && static_cast<int>(Order::recruit)==8 &&
               static_cast<int>(Order::attackMove)==10 && static_cast<int>(Order::withdraw)==11 && static_cast<int>(Order::dismountAll)==12,
               "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw, dismount all, hold)");
         Check(!VehicleOrder(Order::withdraw) && !AirOrder(Order::withdraw) && !PointOrder(Order::withdraw),
@@ -540,10 +541,107 @@ int main() {
         Check(hs.issue && hs.cmd.order==Order::hold,"H needs no point under the pointer");
         Check(RightClickOrder(1,false,true,true).order==Order::follow && RightClickOrder(1,true,true,true).order==Order::focus,
               "the right button on the player: follow (an enemy over it still first)");
-        // The formation order (v7): appended (14), no point, no vehicle's; its parameter's two bytes.
-        Check(static_cast<int>(Order::formation)==14 && kLastOrder==Order::formation && !PointOrder(Order::formation) &&
+        // The formation order (v7): appended (14), no point, no vehicle's; its parameter's two bytes. The Broken Arrow
+        // orders (v11) after it.
+        Check(static_cast<int>(Order::formation)==14 && kLastOrder==Order::decoy && !PointOrder(Order::formation) &&
               !PlaceOrder(Order::formation) && !VehicleOrder(Order::formation) && !AirOrder(Order::formation),
               "FORMATION: appended, no point, a squad's alone");
+        Check(static_cast<int>(Order::fastMove)==15 && static_cast<int>(Order::reverseMove)==16 && static_cast<int>(Order::unloadAt)==17 &&
+              static_cast<int>(Order::holdFire)==18 && static_cast<int>(Order::altitude)==19 && static_cast<int>(Order::sprint)==20 &&
+              static_cast<int>(Order::smoke)==21 && static_cast<int>(Order::decoy)==22,
+              "the Broken Arrow orders on the wire after FORMATION (v11): fast, reverse, unload at, hold fire, altitude, sprint, smoke, decoy");
+        // The moves: points, walked to and guarded once there; FAST quiet on the way; the states no place.
+        for(Order o:{Order::fastMove,Order::reverseMove,Order::unloadAt})
+            Check(PointOrder(o) && MoveOrder(o) && PlaceOrder(o) && Arrive(o,1.0f,5.0f)==Order::guard && Arrive(o,9.0f,5.0f)==o &&
+                  PursuitOf(o).forced && !PursuitOf(o).fightFirst,"FAST / REVERSE / UNLOAD AT: a point walked to, a guard once there",
+                  static_cast<int>(o));
+        Check(PursuitOf(Order::fastMove).quiet && !PursuitOf(Order::move).quiet && !PursuitOf(Order::reverseMove).quiet &&
+              !PursuitOf(Order::attackMove).quiet,"only FAST MOVE holds its fire on the way");
+        Check(!MoveOrder(Order::guard) && !MoveOrder(Order::hold) && MoveOrder(Order::move) && MoveOrder(Order::attackMove),
+              "guard and hold are no moves");
+        for(Order o:{Order::holdFire,Order::altitude,Order::sprint,Order::smoke,Order::decoy})
+            Check(!PointOrder(o) && !PlaceOrder(o),"a state order has no place",static_cast<int>(o));
+        Check(StateOrder(Order::holdFire) && VehicleOrder(Order::holdFire) && AirOrder(Order::holdFire) &&
+              !VehicleOrder(Order::altitude) && AirOrder(Order::altitude) && !VehicleOrder(Order::sprint),
+              "HOLD FIRE every unit's; ALTITUDE the aircraft's");
+        Check(VehicleCommandOf(Order::reverseMove)==Order::guard && VehicleCommandOf(Order::reverseMove,true)==Order::reverseMove &&
+              VehicleCommandOf(Order::fastMove,true)==Order::guard && VehicleCommandOf(Order::holdFire)==Order::holdFire,
+              "REVERSE MOVE reaches a module that backs as itself, others as their post's guard");
+        // The states' rules.
+        Check(Hurt(100.0f,90.0f) && !Hurt(100.0f,100.0f) && !Hurt(0.0f,0.0f) && !Hurt(90.0f,100.0f),"hurt: health down since the last look");
+        Check(HoldsFire(true,kReturnFireMs) && !HoldsFire(true,kReturnFireMs-1) && !HoldsFire(false,~0ull),
+              "HOLD FIRE: silent unless hurt within kReturnFireMs");
+        Check(kHeliHighShare>1.0f && kJetHighShare>1.0f && kSprintRestShare<1.0f && kSprintRestShare>0.0f && kAfterburnerSpeed>1.0f &&
+              kSprintMs>0,"ALTITUDE raises, SPRINT shortens the rests and speeds the jets");
+        // The params (command_protocol.cpp ValidRequest).
+        Check(OrderParamValid(Order::holdFire,0) && OrderParamValid(Order::holdFire,1) && !OrderParamValid(Order::holdFire,2) &&
+              OrderParamValid(Order::altitude,kAltitudeHigh) && !OrderParamValid(Order::altitude,7) &&
+              OrderParamValid(Order::sprint,0) && !OrderParamValid(Order::sprint,1) && !OrderParamValid(Order::decoy,1),
+              "the switches' params 0 / 1, none for the rest");
+        // The right drag's line (v11's point param).
+        {
+            const std::uint32_t p=LineParam(1.5707963f,40.0f);
+            Check(IsLine(p) && LineParamValid(p) && std::fabs(LineLength(p)-40.0f)<0.5f && std::fabs(LineHeading(p)-1.5707963f)<1e-3f,
+                  "a line's param: its length and facing");
+            Check(LineParamValid(0) && !LineParamValid(0x1234u) && !LineParamValid(kLineFlag) && OrderParamValid(Order::move,p) &&
+                  OrderParamValid(Order::fastMove,p) && !OrderParamValid(Order::holdFire,p),"a point order takes a line or none");
+            const float la[3]={0,0,0},lb[3]={40,0,0},look[2]={0,1};float mid[3];
+            const std::uint32_t q=LineOf(la,lb,look,mid);
+            float fwd[2];LineFacing(q,fwd);
+            Check(mid[0]==20.0f && mid[2]==0.0f && std::fabs(LineLength(q)-40.0f)<0.5f && fwd[1]>0.99f,
+                  "a drag along x seen down +z: its middle, its units facing away from the eye",fwd[0],fwd[1]);
+            const float lookBack[2]={0,-1};
+            LineFacing(LineOf(la,lb,lookBack,mid),fwd);
+            Check(fwd[1]<-0.99f,"seen from the other side: they face the other way",fwd[0],fwd[1]);
+            float s0[3],s2[3],s1[3];
+            LineSlot(0,3,mid,q,s0);LineSlot(1,3,mid,q,s1);LineSlot(2,3,mid,q,s2);
+            Check(std::fabs(s0[0]-0.0f)<0.5f && std::fabs(s2[0]-40.0f)<0.5f && std::fabs(s1[0]-20.0f)<0.5f &&
+                  std::fabs(s0[2])<0.5f && std::fabs(s2[2])<0.5f,"three on a 40 m line: its ends and middle",s0[0],s2[0]);
+            const std::uint32_t shortLine=LineParam(0.0f,4.0f);
+            LineSlot(0,3,la,shortLine,s0);LineSlot(2,3,la,shortLine,s2);
+            Check(std::fabs(std::fabs(s2[0]-s0[0])-2.0f*kLineLeast)<0.01f,"a short line grows to kLineLeast between units",s0[0],s2[0]);
+            LineSlot(0,1,la,q,s0);
+            Check(s0[0]==0.0f && s0[2]==0.0f,"one unit alone: the line's middle");
+        }
+        // The right button on a friendly vehicle: board it.
+        Check(RightClickOrder(1,false,true,false,true).order==Order::board && RightClickOrder(1,true,true,false,true).order==Order::focus &&
+              RightClickOrder(1,false,true,true,true).order==Order::follow,"the right button on a friendly vehicle: BOARD (an enemy, the player first)");
+        // The keys' presses.
+        {
+            Order o{};
+            Press p{};p.fastMove=true;Check(Wanted(p,&o) && o==Order::fastMove,"F: fast move");
+            p=Press{};p.reverseMove=true;Check(Wanted(p,&o) && o==Order::reverseMove,"R: reverse move");
+            p=Press{};p.unloadAt=true;Check(Wanted(p,&o) && o==Order::unloadAt,"U and a click: unload at");
+            p=Press{};p.unloadNow=true;Check(Wanted(p,&o) && o==Order::dismountAll,"U twice: everyone off where they are");
+            p=Press{};p.back=true;Check(Wanted(p,&o) && o==Order::withdraw,"B: back to base");
+            p=Press{};p.holdFire=true;Check(Wanted(p,&o) && o==Order::holdFire,"H: hold fire");
+            p=Press{};p.altitude=true;Check(Wanted(p,&o) && o==Order::altitude,"V: altitude");
+            p=Press{};p.sprint=true;Check(Wanted(p,&o) && o==Order::sprint,"Z: sprint");
+            p=Press{};p.smoke=true;Check(Wanted(p,&o) && o==Order::smoke,"X: smoke");
+            p=Press{};p.decoy=true;Check(Wanted(p,&o) && o==Order::decoy,"C: decoys");
+            p=Press{};p.guardAt=true;p.attackMove=true;Check(Wanted(p,&o) && o==Order::guard,"the card's GUARD and a click: a guard, not an attack-move");
+        }
+        // Tab's sub-selection: the kinds, stepped through and back to all.
+        {
+            const char* sel[5]={"RANGER x4","RANGER x2","Grape","FENCER x3","Grape"};const char* kindsOut[5];
+            const int k=SubKinds(sel,5,kindsOut,5);
+            Check(k==3 && SameKind(kindsOut[0],"RANGER x1") && SameKind(kindsOut[1],"Grape") && SameKind(kindsOut[2],"FENCER x1"),"the selection's three kinds",k);
+            Check(NextSub(-1,3)==0 && NextSub(0,3)==1 && NextSub(2,3)==-1 && NextSub(-1,1)==-1,"Tab: each kind, then all again; one kind: none to step");
+        }
+        // UNLOAD AT: the move, then DISMOUNT ALL once there, before what was queued after it.
+        {
+            Waypoints uw{};
+            const Command u{Order::unloadAt,{10,0,0}};
+            Replace(uw,u);
+            Check(uw.active && uw.n==1 && uw.next[0].order==Order::dismountAll,"UNLOAD AT: DISMOUNT ALL trails it");
+            const float uFar[3]={0,0,0},uThere[3]={10,0,0};Command uOut{};
+            Check(Advance(uw,Command{Order::guard,{10,0,0}},uFar,3.0f,&uOut)==QueueStep::wait,"on its way: it waits");
+            Check(Advance(uw,Command{Order::guard,{10,0,0}},uThere,3.0f,&uOut)==QueueStep::give && uOut.order==Order::dismountAll,
+                  "there: everyone off");
+            Check(Advance(uw,Command{Order::guard,{10,0,0}},uThere,3.0f,&uOut)==QueueStep::done,"then done");
+            Waypoints uPlain{};Replace(uPlain,Command{Order::move,{1,0,0}});
+            Check(!uPlain.active,"a plain move registers nothing");
+        }
         const std::uint32_t cycle=FormationParam(-2,7),set=FormationParam(3,-1),march=FormationParam(-1,5);
         Check(FormationCycles(cycle) && FormationGuardShape(cycle)==-1 && FormationMarchShape(cycle)==7 && FormationParamValid(cycle),
               "T: the defence cycled, the march set");

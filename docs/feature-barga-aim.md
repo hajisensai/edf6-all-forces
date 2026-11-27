@@ -23,7 +23,7 @@
 ## 代码
 
 - `src/barga_aim.h`：纯函数（离线检查 `tools/barga_aim_check.cpp`）。
-- `src/barga_aim.cpp`：游戏线程读原生状态。入口是 `crew.cpp` InputHook 里 501 的每帧输入（0x60AEC0）上的 `Guarded(kStepBargaAim,&BargaAimFrame,v)`，它在 `StockHudFrame` 之后。
+- `src/barga_aim.cpp`：游戏线程读原生状态。入口是模块登记表 `src/module_table.h` 的 `kBargaAim` 载具条目（`VP::kFrame`，501 的每帧输入 0x60AEC0 上由 `crew.cpp` InputHook 跑），排在 `StockHudFrame` 之后。
 - 读到的结果用 `stepfresh` 发布；`hud.cpp` `HudPublish` 用 `PlayerBargaAim` 取，`BargaAimMarks` 负责画。
 - 换任务时由 `mission.cpp` 调 `ResetBargaAim` 清掉。
 - 攻击表 `src/barga_reach.inc` 由 `tools/gen_barga_reach.py` 在模型动画上离线采样生成，`--check` 在 `tools/check.py` 和 CI 里校验。

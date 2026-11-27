@@ -27,10 +27,8 @@ Deployment deployments[128]{};
 static_assert(sizeof(deployments)/sizeof(deployments[0])*15==crewradar::kMost,"the radar's hidden set holds every soldier");
 bool teamReady=false;
 std::uint64_t nextOffline=0x8000000000000000ULL;
-bool Exists(const ObjRef& r) noexcept {return r.obj && Readable(r.obj,kObjectFlags+4) && r.Is(r.obj);}
-bool Alive(const ObjRef& r) noexcept {
-    return r.obj && Readable(r.obj,kSelfCtrl+8) && r.Is(r.obj) && !At<unsigned char>(r.obj,kDead);
-}
+using objref::Alive;
+using objref::Exists;
 // Each of the deployment's soldiers: quiet while it sits in the deployment's own vehicle, as it was once off it.
 // `release`: the deployment lets them go (rolled back): every quieted one gets its bit back now.
 void QuietCrew(Deployment& d,bool release) noexcept {

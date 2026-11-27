@@ -125,12 +125,8 @@ bool InstallUmbraWatch() noexcept {
     // The import resolved into umbra_sandlot.dll (outside EDF.dll); anything else is not the build this was read from.
     if(!now || (static_cast<unsigned char*>(now)>=image && static_cast<unsigned char*>(now)<image+0x2400000))return false;
     umbraNext=reinterpret_cast<UmbraMatrixFn>(now);
-    edf::ClaimCode(entry,sizeof(void*));   // a write of its own (edf/code_owner.h): EDF.dll's import table
-    DWORD old=0;
-    if(!VirtualProtect(entry,sizeof(void*),PAGE_READWRITE,&old))return false;
-    const bool swapped=InterlockedCompareExchangePointer(entry,reinterpret_cast<void*>(&UmbraObjectMatrix),now)==now;
-    edf::RestoreProtection(entry,sizeof(void*),old);
-    return swapped;
+    // EDF.dll's import table entry swapped as a vtable slot is (claimed, compare-exchanged while it still holds `now`).
+    return edf::PatchVtableSlot(entry,now,reinterpret_cast<void*>(&UmbraObjectMatrix));
 }
 
 void ViewDiagTick() noexcept {

@@ -42,14 +42,43 @@ constexpr float kRainFireCone=0.8f;
 // What its rounds fly at, for the fire-or-hold check (wastedfire HoldFire): the children's launch speed, m/s
 // (SALVO_CHILD_SPEED x 60), with no gravity (the carrier's AmmoGravityFactor acts only in the drop before ignition).
 constexpr float kRainRoundSpeed=660.0f;
+// The rain's hold before it opens fire (the user, 2026-11-26: 「不需要一进场就发射其实，可以稍微等一会」): its nose goes on the
+// target from kRainFrom out, but it fires only once inside kRainOpen of the mark (over the target area) and after its
+// nose has stayed within kRainSteadyCone of its aim for kRainHoldMs on end (a turn or a pull-up starts the count again);
+// once open it stays open for the rest of the pass, so the lock's dwell and the burst are not cut off by a wobble.
+constexpr float kRainOpen=2400.0f;           // m from the mark (level): over the target area
+constexpr float kRainSteadyCone=0.25f;       // rad between the nose and its aim: the nose settled
+constexpr unsigned long long kRainHoldMs=2500;
+static_assert(kRainOpen<kRainFrom && kRainOpen>kRainTo+kRainSpeed*(kRainHoldMs+kRainBurstMs)/1000.0f,
+              "the hold and the burst fit between kRainOpen and the end of the window");
+static_assert(kRainSteadyCone<kRainFireCone,"settled is tighter than the fire cone");
+// One step of the hold. `phase` 0 waiting, 1 settled since `since`, 2 open; true: it may fire now.
+inline bool RainHoldStep(int& phase,unsigned long long& since,float dist,float noseOff,unsigned long long now) noexcept {
+    if(phase==2)return true;
+    if(!(dist<kRainOpen) || !(noseOff<=kRainSteadyCone)){phase=0;return false;}
+    if(phase!=1){phase=1;since=now;}
+    if(now-since<kRainHoldMs)return false;
+    phase=2;
+    return true;
+}
 constexpr unsigned long long kLockMs=700,kMissileGapMs=700;   // a sortie's missiles: the nose held, then one a gap
 constexpr unsigned long long kSearchMs=45000;   // a pass that found nothing to strike this long after it came gives up
 constexpr float kRunMin=100.0f,kRunMax=2400.0f;
+// A call's way in (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」): (x, z) the unit heading it flies in on, or
+// none (0, 0: from the requester toward the target); `half` > 0 only with a gun run's or a carpet's line on the map (its
+// half length, the target its centre). An aircraft comes in on that heading exactly (support_entry.h AirRoute).
 struct RunSpec { float x=0.0f,z=0.0f,half=0.0f; };
+inline bool HasHeading(const RunSpec& r) noexcept { return r.x!=0.0f || r.z!=0.0f; }
 inline bool RunValid(const RunSpec& r) noexcept {
-    if(r.half==0.0f)return r.x==0.0f && r.z==0.0f;
-    return std::isfinite(r.x+r.z+r.half) && std::fabs(r.x*r.x+r.z*r.z-1.0f)<0.001f &&
-           r.half>=kRunMin*0.5f && r.half<=kRunMax*0.5f;
+    if(r.half==0.0f && !HasHeading(r))return true;
+    if(!std::isfinite(r.x+r.z+r.half) || std::fabs(r.x*r.x+r.z*r.z-1.0f)>=0.001f)return false;
+    return r.half==0.0f || (r.half>=kRunMin*0.5f && r.half<=kRunMax*0.5f);
+}
+// The heading alone (no line): (x, z) made unit; none for a zero one.
+inline RunSpec HeadingRun(float x,float z) noexcept {
+    const float n=std::sqrt(x*x+z*z);
+    if(!(n>1e-4f) || !std::isfinite(n))return RunSpec{};
+    return RunSpec{x/n,z/n,0.0f};
 }
 inline bool RunFromPoints(const float* a,const float* b,RunSpec* out,float* centre) noexcept {
     const float x=b[0]-a[0],z=b[2]-a[2],length=std::hypot(x,z);
@@ -58,6 +87,62 @@ inline bool RunFromPoints(const float* a,const float* b,RunSpec* out,float* cent
     for(int i=0;i<3;++i)centre[i]=a[i]+(b[i]-a[i])*0.5f;
     return true;
 }
+// The gun run's strafe along a line (the user, 2026-11-26: 「扫射时间是不是不对」「只有机枪」). The nose (and the path,
+// the guns and rockets along it) on the point `lead` m on along the line: that point walks at the jet's speed, so the
+// whole line from -half to +half is under fire for 2 half / speed s, and the jet comes down as exp(-x / lead) (the slope
+// to the point is its height over its lead). A fixed lead of 260 m from 160 m came down to the old 70 m floor in some
+// 215 m (2.5 s) and fired no more. The lead is chosen so the height it comes in at lasts the whole line down to
+// kStrafeFloor; the height it comes in at so the lead the guns reach (StrafeHeight) does.
+constexpr float kStrafeFloor=45.0f;                      // m over the mark: the run ends with the jet about this low
+constexpr float kStrafeLow=160.0f,kStrafeTop=600.0f;      // m over the mark: the run in's height bounds
+constexpr float kStrafeLeadMost=1100.0f;                  // m: the rockets' reach (jet_combat.cpp kRocketOpen) inside
+constexpr float kStrafeCross=65.0f;                       // m beside its line a jet strafes it from
+constexpr float kStrafeAngle=0.35f;                       // rad off its line a jet strafes it at (20 deg)
+constexpr float kStrafeSettleS=2.0f;                      // s its nose is on the point before the window opens
+inline float StrafeLead(float half,float over,float least,float most) noexcept {
+    const float ratio=over/kStrafeFloor;
+    float lead=ratio>1.05f ? 2.0f*half/std::log(ratio) : most;
+    if(lead>most)lead=most;
+    if(lead<least)lead=least;
+    return lead;
+}
+inline float StrafeHeight(float half,float lead) noexcept {
+    const float h=kStrafeFloor*std::exp(2.0f*half/(lead>1.0f ? lead : 1.0f));
+    return h<kStrafeLow ? kStrafeLow : h>kStrafeTop ? kStrafeTop : h;
+}
+// The aim on the line (along + lead): from -half the window is open, past +half it is over.
+inline bool StrafeOpen(float along,float lead,float half) noexcept { return along+lead>=-half; }
+inline bool StrafeOver(float along,float lead,float half) noexcept { return along+lead>half; }
+// m over the mark after `flown` m with the nose on the point `lead` on (from `over`).
+inline float StrafeDescent(float over,float lead,float flown) noexcept { return over*std::exp(-flown/lead); }
+// s the strafe lasts at `speed` m/s.
+inline float StrafeSeconds(float half,float speed) noexcept { return speed>1.0f ? 2.0f*half/speed : 0.0f; }
+
+// m along its line a jet `cross` m beside it (signed along the line's side) heading `angle` rad off it (signed: toward
+// +side) needs, turning at `radius`, to be on it and along it: turned straight first (its sideways drift with it), then
+// an S of two arcs (or two quarter circles and the rest straight across) onto it; straight on and one arc where it
+// already closes on it at that angle. Heading away (a quarter circle or more off): it cannot, short of a lap (1e9).
+// The gun run's capture (jet_sortie.cpp): onto its line by turns it can make, small misses mended, never a lap.
+inline float CaptureDistance(float cross,float angle,float radius) noexcept {
+    const float a=std::fabs(angle);
+    if(a>=kPi*0.5f)return 1e9f;
+    const float r=radius>1.0f ? radius : 1.0f;
+    const float arc=r*(1.0f-std::cos(a));   // the sideways an arc of `a` covers
+    const float left=std::fabs(cross+(angle>0.0f ? arc : -arc));
+    const float first=r*std::sin(a);
+    float turned;   // turned straight, then the S across what is left
+    if(left>=2.0f*r)turned=first+2.0f*r;
+    else {
+        const float c=1.0f-left/(2.0f*r);
+        turned=first+2.0f*r*std::sin(std::acos(c<-1.0f ? -1.0f : c>1.0f ? 1.0f : c));
+    }
+    if(a>1e-3f && cross*angle<0.0f && std::fabs(cross)>=arc) {   // closing: straight on, then one arc onto it
+        const float closing=(std::fabs(cross)-arc)/std::tan(a)+r*std::sin(a);
+        return closing<turned ? closing : turned;   // a shallow closing angle: steeper by an S instead
+    }
+    return turned;
+}
+
 // Helicopters
 constexpr float kHeliStrafeAlt=35.0f,kHeliStrafeLead=200.0f,kHeliPassBeyond=450.0f;
 constexpr float kHunterStation=300.0f,kHunterAlt=90.0f,kHunterNear=60.0f;   // m from the mark, over it, how near is there

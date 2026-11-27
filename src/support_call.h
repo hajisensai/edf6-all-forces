@@ -138,7 +138,8 @@ const wchar_t* SupportCallKey(int index) noexcept;
 // (only the rescue's own trigger asks for it).
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
 // The same call for no pt: a sortie's second wave (airstrike.cpp, paid with its first), the autopilot's AirdropTest.
-bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// `run`: the first wave's way in, kept (sortie_plan.h RunSpec).
+bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity,const sortie::RunSpec& run={}) noexcept;
 // An entry's pt (tools/calls.py Call.pt for the calls and strikes, support_dispatch.cpp kGroundPt for the rest; the rescue
 // 0) and its price now (times SupportPtScale: support_points.h).
 std::uint32_t SupportCallPt(int index) noexcept;
@@ -147,9 +148,13 @@ std::int32_t SupportCallPrice(int index) noexcept;
 // submarine carrier).
 int SupportCatalogStrike(int index) noexcept;
 bool SupportCatalogAir(int index) noexcept;
+// Whether an entry comes in by air (a flown call, a transport, an airdrop): the ones that take a way in (sortie_plan.h
+// RunSpec's heading; the map's G turns it, mapcmd.cpp).
+bool SupportCatalogFlown(int index) noexcept;
 // The map's preview (support_warning.cpp): where a flown entry would come in for `target` as the planner sees it now
 // from this machine's player (airstrike.cpp PreviewAirRoute: quiet). False: none found (or not a flown entry).
-bool SupportPreviewEntry(int index,const float* target,float* from) noexcept;
+// `heading`: the way in the call would ask for (the map's turned entry; null: from this player toward the target).
+bool SupportPreviewEntry(int index,const float* target,float* from,const float* heading=nullptr) noexcept;
 // airstrike.cpp: the strikes (kStrikes): how many, a strike's ini key, its name on the bar, its pt, its barrage kind
 // (barrage_plan.h Kind; -1: the ultimate), the heading one at `target` comes along (from the local player to it), and the
 // local player's call of one (started here and told to the others; false with why in `note`).

@@ -599,6 +599,128 @@ void SquadSideBySide() {
     Expect(!HasText(base,hudtext::Tr(Tx::spOnlySelected)),"the squad shown: no 'only the selected one' note");
     Expect(base.quads.dropped==0 && base.droppedTexts==0,"nothing dropped");
 }
+
+// A squad that comes with a vehicle (a call with seats whose key is a vehicle's: its vehicle unit has the same key; none
+// of the stock catalog's is, so a menu of its own) shows the vehicle as 载具编成 does, until a soldier is focused in the
+// soldier list or his fields; a squad without one shows its soldiers.
+void SquadVehicle() {
+    namespace rp=crew::roompreview;
+    Fresh(true);
+    static constexpr rm::UnitSpec kSpecs[]={{L"SQUAD",L"squad",12},{L"TANK_CREWED",L"tank and riders",4,true}};
+    loaded=rm::Menu{};
+    rm::Load(loaded,kSpecs,2,&NoIni,nullptr);
+    sp::Bind(model,&loaded);
+    model.env.previewOn=true;
+    sp::SquadPage squads;sp::VehiclePage vehicles;
+    squads.Bind(&model);vehicles.Bind(&model);
+    const int s=RowOf(squads,L"TANK_CREWED"),v=RowOf(vehicles,L"TANK_CREWED"),plain=RowOf(squads,L"SQUAD");
+    Expect(s>=0 && v>=0,"the tank with riders: a squad and a vehicle");
+    Expect(sp::LinkedVehicle(model.menu,UnitOf(squads,s))==vehicles.UnitIndex(v),"linked by the key");
+    Expect(sp::LinkedVehicle(model.menu,UnitOf(squads,plain))<0,"the infantry squad: no vehicle");
+    Expect(sp::LinkedVehicle(model.menu,UnitOf(vehicles,v))<0,"a vehicle unit links nothing");
+    squads.Activate(ar::Pos{0,s,0,0});   // a soldier for the squad
+    Expect(UnitOf(squads,s).squad.count>=1,"the riders have a soldier");
+    rp::PreviewSpec want{},got{},out[rp::kSquadMost]{};
+    skin::Rect hole{};
+    Expect(vehicles.PreviewOf(ar::Pos{0,v,0,0},&want) && want.body!=VehicleBody::none,"the vehicle page shows it");
+    // the unit list focused: the vehicle, no squad, no soldier to pick
+    squads.Relocate(nullptr,0);
+    Expect(squads.VehicleShown(ar::Pos{0,s,0,0})!=nullptr,"the unit list: the vehicle");
+    Expect(squads.PreviewOf(ar::Pos{0,s,0,0},&got) && got.body==want.body && got.load.On()==want.load.On(),
+           "the same model as the vehicle page");
+    Expect(squads.Hole(ar::Pos{0,s,0,0},&hole) && squads.SquadOf(ar::Pos{0,s,0,0},out)==0,"shown alone");
+    // a soldier focused: him
+    squads.Relocate(nullptr,1);
+    Expect(!squads.VehicleShown(ar::Pos{0,s,0,0}) && squads.PreviewOf(ar::Pos{0,s,0,0},&got) &&
+           got.body==VehicleBody::none && got.kind==UnitOf(squads,s).squad.kind[0],"the soldier list: the soldier");
+    squads.Relocate(nullptr,2);
+    Expect(!squads.VehicleShown(ar::Pos{0,s,0,1}),"his fields: the soldier");
+    // the add line in the soldier list: not a soldier, the vehicle
+    const int add=UnitOf(squads,s).squad.count;
+    squads.Relocate(nullptr,1);
+    Expect(squads.VehicleShown(ar::Pos{0,s,add,0}) && squads.PreviewOf(ar::Pos{0,s,add,0},&got) && got.body==want.body,
+           "the add line: the vehicle");
+    // its file not generated: nothing shown, the box says so
+    squads.Relocate(nullptr,0);
+    model.env.fileThere=[](const wchar_t*) noexcept {return false;};
+    Expect(!squads.Hole(ar::Pos{0,s,0,0},&hole) && !squads.PreviewOf(ar::Pos{0,s,0,0},nullptr),"no file: no model");
+    model.env.fileThere=nullptr;
+    // the infantry squad: its soldier in the unit list as before
+    squads.Activate(ar::Pos{0,plain,0,0});
+    Expect(!squads.VehicleShown(ar::Pos{0,plain,0,0}) && squads.PreviewOf(ar::Pos{0,plain,0,0},&got) &&
+           got.body==VehicleBody::none,"no vehicle: the soldier");
+}
+
+// 自由 by hand: a drag from inside the viewport turns it, the wheel over it zooms (and is taken), the stick turns it (and
+// is taken); not on another preset, not without a model, not from the view's buttons; back on 自由 the view as left.
+crew::roompreview::Matrix4 drawnWith;
+void LookRound() {
+    namespace rp=crew::roompreview;
+    Fresh(true);
+    sp::SquadPage squads;
+    squads.Bind(&model);
+    const int s=RowOf(squads,L"SQUAD");
+    squads.Activate(ar::Pos{0,s,0,0});
+    const ar::Pos at{0,s,0,0};
+    // the view drew the model turned 0.5
+    drawnWith=rp::Place(sp::ViewRectOf(),rp::kCameraPresets[1],rp::ModelFrame{},0.f,16.f/9.f);
+    {
+        rp::ViewCamera c=rp::kCameraPresets[1];c.yaw=0.5f;
+        drawnWith=rp::Place(sp::ViewRectOf(),c,rp::ModelFrame{},0.f,16.f/9.f);
+    }
+    model.env.placed=[](rp::Matrix4* m,float* aspect) noexcept {*m=drawnWith;*aspect=16.f/9.f;return true;};
+    Expect(squads.Camera().followStand,"untouched: the free preset");
+    ar::Input in;
+    in.pointer=true;in.x=900;in.y=300;
+    Expect(squads.Look(at,1,in)==0,"hovering: nothing taken");
+    in.held[ar::kMouseLeft]=true;
+    squads.Look(at,1,in);   // pressed inside the view
+    in.x=950;in.y=290;
+    squads.Look(at,1,in);
+    rp::ViewCamera c=squads.Camera();
+    Expect(!c.followStand && std::fabs(c.yaw-(0.5f+50*rp::kLookRadPerUnit))<1e-3f &&
+           std::fabs(c.pitch-(rp::kCameraPresets[0].pitch-10*rp::kLookRadPerUnit))<1e-3f,"dragged: turned from where it was drawn");
+    in.held[ar::kMouseLeft]=false;
+    squads.Look(at,1,in);
+    in.x=1000;
+    squads.Look(at,1,in);
+    Expect(std::fabs(squads.Camera().yaw-c.yaw)<1e-6f,"released: no more turning");
+    // a press on a view button does not drag
+    const skin::Rect b=sp::CamButton(2);
+    in.x=(b.x0+b.x1)/2;in.y=(b.y0+b.y1)/2;in.held[ar::kMouseLeft]=true;
+    squads.Look(at,1,in);
+    in.x-=60;
+    squads.Look(at,1,in);
+    in.held[ar::kMouseLeft]=false;squads.Look(at,1,in);
+    Expect(std::fabs(squads.Camera().yaw-c.yaw)<1e-6f,"from a view button: no drag");
+    // the wheel over the view: zoom, taken; outside: left to the list
+    in.x=900;in.y=300;in.wheel=1;
+    Expect(squads.Look(at,1,in)==ar::kLookWheel && squads.Camera().distance<c.distance,"the wheel over the view zooms");
+    in.x=200;
+    Expect(squads.Look(at,1,in)==0,"the wheel elsewhere: the list's");
+    in.wheel=0;
+    // the stick: turns, taken
+    in.lookX=1.f;in.dt=0.05f;
+    const float before=squads.Camera().yaw;
+    Expect(squads.Look(at,1,in)==ar::kLookStick && std::fabs(squads.Camera().yaw-(before+rp::kLookStickRad*0.05f))<1e-3f,
+           "the stick turns it");
+    in.lookX=0;
+    const rp::ViewCamera left=squads.Camera();
+    // another preset: as it always was, nothing taken; back on 自由 the view as left
+    squads.Cycle(at,1);
+    in.lookX=1.f;in.wheel=1;
+    Expect(squads.Look(at,1,in)==0,"正面: nothing taken");
+    const rp::ViewCamera front=squads.Camera();
+    Expect(front.yaw==rp::kCameraPresets[1].yaw && front.distance==rp::kCameraPresets[1].distance,"正面 as it was");
+    squads.Cycle(at,-1);
+    in.lookX=0;in.wheel=0;
+    Expect(squads.Camera().yaw==left.yaw && squads.Camera().distance==left.distance && !squads.Camera().followStand,
+           "back on 自由: the view left");
+    // no model (the add line): nothing taken
+    in.lookX=1.f;
+    Expect(squads.Look(ar::Pos{0,s,1,0},1,in)==0,"no model: the stick left alone");
+    model.env.placed=nullptr;
+}
 }  // namespace
 
 int main() {
@@ -610,6 +732,8 @@ int main() {
     InBuild();
     Callouts();
     SquadSideBySide();
+    SquadVehicle();
+    LookRound();
     RandomWalk();
     if(failures){std::printf("%d failure(s)\n",failures);return 1;}
     std::printf("support_pages: all passed\n");

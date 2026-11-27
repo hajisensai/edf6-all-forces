@@ -12,8 +12,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(ROOT, 'src', 'room_ui.cpp'), encoding='utf-8').read()
 logic = open(os.path.join(ROOT, 'src', 'room_ui_logic.h'), encoding='utf-8').read()
-plugin = open(os.path.join(ROOT, 'src', 'plugin.cpp'), encoding='utf-8').read()
-crew = open(os.path.join(ROOT, 'src', 'crew.h'), encoding='utf-8').read()
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import gen_config  # noqa: E402
+
+# with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+plugin = gen_config.read_expanded('src/plugin.cpp')
+crew = gen_config.read_expanded('src/crew.h')
 ini = open(os.path.join(ROOT, 'EDF6VehicleCrew.ini'), encoding='utf-8-sig').read()
 checks = 0
 
@@ -95,11 +99,21 @@ check(install.find('armoryui::Install()') > install.find('if(!Cfg().roomLoadout)
 check('roomdialog::Build(' not in src and 'roomdialog::Apply(' not in src and 'OpenMenu' not in src and 'DrawMenu' not in src,
       'the loadout dialog chain and the layout overlay are gone (整备 replaces them)')
 
-follow = body(src, 'void Follow(unsigned char* self,bool room) noexcept')
-check(follow.find('followedGone.exchange(false)') < follow.find('if(self==st.self)return;'),
+follow = body(src, 'bool Follow(unsigned char* self,bool room) noexcept')
+check(0 <= follow.find('followedGone.exchange(false)') < follow.find('TrackScreen(track,st.self,self)'),
       'a followed screen whose destructor ran is forgotten before the pointer is compared')
 check('followed.store(self);' in follow, 'the followed screen published for the destructor hooks')
+# 2026-11-27 (the HQ's pack switch): the old HQ and the new one update together for a while; the replaced object's frames
+# pass straight through (room_ui_logic.h ScreenTrack) instead of alternating "replaced by" and building a button each time.
+check(re.search(r'case Track::Stale:[^}]*?return false;', follow) is not None and 'ClearRetired(track);' in follow,
+      'a retired screen is not followed again (until the followed one ends)')
+follow_at = frame.find('if(!Follow(self,screen.room))return screen.next(self,ctx);')
+check(follow_at >= 0 and all(follow_at < frame.find(c) for c in ('PvpRoomTick();', 'PlanSwitches(', 'EnsureNativeEntry(self);')),
+      "a retired screen's frame chains straight to its own update before anything of the menu")
+check('if(self==st.self)AutoOpenMission(self,ctx,' in hq_hook, 'a retired HQ never opens its mission select')
 gone = body(src, 'void NoteGone(unsigned char* self) noexcept')
+check(gone.find('Unretire(track,self)') < gone.find('followed.load()!=self)return;'),
+      'the destructor forgets a retired screen (a new object at its address is a new screen)')
 check('followed.load()!=self)return;' in gone and 'followedGone.store(true);' in gone,
       'the destructor hook marks the followed screen gone')
 # 2026-10-20 (#218 review): the dialog hangs on the global UI, so the destructor closes it at once, but only on the UI

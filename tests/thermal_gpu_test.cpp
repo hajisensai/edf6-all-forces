@@ -249,6 +249,58 @@ int main() {
     Check(thermal.CaptureIndexed(f.context.Get(),6,3,2),"capture recreates the mask");f.Target();f.FinalTarget();
     Check(thermal.Composite(f.context.Get(),Polarity::whiteHot),"compose after a reset");
     Check(f.Pixel(f.finalColour,4,8)[0]>230,"rebuilt renderer gives the same heat as before the reset");
+
+    // A soldier's night vision: the bound world colour, only the native viewport's pixels, amplified into green; the
+    // pipeline comes back as it was. Needs no thermal view (BeginView / capture) at all.
+    {
+        Renderer night;
+        crew::thermal::NightLook look{};look.gain=6.0f;look.seed=3.0f;
+        f.Setup();
+        Check(!night.NightVision(f.context.Get(),look),"multiple render targets bound: night vision refuses, image untouched");
+        const auto mrt=f.Pixel(f.scene,4,8);Check(mrt[0]>45 && mrt[0]<56 && mrt[2]>146,"the refused target keeps its colour");
+        const float dark[]={.02f,.02f,.02f,1};
+        f.context->ClearRenderTargetView(f.finalColour.rtv.Get(),dark);
+        target=f.finalColour.rtv.Get();f.context->OMSetRenderTargets(1,&target,nullptr);
+        const D3D11_VIEWPORT left={0,0,8,16,0,1};f.context->RSSetViewports(1,&left);
+        const auto before=f.Pixel(f.finalColour,4,8);
+        Check(night.NightVision(f.context.Get(),look),"night vision on the world colour's left viewport");
+        const auto lit=f.Pixel(f.finalColour,4,8),outside=f.Pixel(f.finalColour,12,8),corner=f.Pixel(f.finalColour,0,0);
+        Check(lit[1]>before[1]+15,"the dark scene is amplified");
+        Check(lit[1]>2*lit[0] && lit[1]>2*lit[2],"green phosphor monochrome");
+        Check(lit[3]==255,"alpha kept");
+        Check(outside==before,"pixels outside the native viewport are untouched");
+        Check(corner[1]<lit[1],"the vignette darkens the viewport's corner");
+        UINT n=1;D3D11_VIEWPORT viewport{};f.context->RSGetViewports(&n,&viewport);
+        ID3D11RenderTargetView* bound=nullptr;f.context->OMGetRenderTargets(1,&bound,nullptr);
+        Check(n==1 && viewport.Width==8 && bound==f.finalColour.rtv.Get(),"native viewport and target restored");
+        if(bound)bound->Release();
+        // A bright scene stays below clipping (the soft knee), still green.
+        const float bright[]={.9f,.9f,.9f,1};f.context->ClearRenderTargetView(f.finalColour.rtv.Get(),bright);
+        Check(night.NightVision(f.context.Get(),look),"night vision on a bright scene");
+        const auto day=f.Pixel(f.finalColour,4,8);Check(day[1]>200 && day[0]<120,"a bright scene is bright green, not white");
+        // Another size (the scope lens's own view): its own copy; then the first again.
+        auto lens=f.Colour(8);target=lens.rtv.Get();f.context->OMSetRenderTargets(1,&target,nullptr);
+        const D3D11_VIEWPORT whole={0,0,8,8,0,1};f.context->RSSetViewports(1,&whole);
+        f.context->ClearRenderTargetView(lens.rtv.Get(),dark);
+        Check(night.NightVision(f.context.Get(),look),"night vision on a second target size");
+        Check(f.Pixel(lens,4,4)[1]>before[1]+15,"the second size is amplified too");
+        target=f.finalColour.rtv.Get();f.context->OMSetRenderTargets(1,&target,nullptr);f.context->RSSetViewports(1,&left);
+        f.context->ClearRenderTargetView(f.finalColour.rtv.Get(),dark);
+        Check(night.NightVision(f.context.Get(),look) && f.Pixel(f.finalColour,4,8)[1]>before[1]+15,"back to the first size");
+        night.Reset();
+    }
+    // The thermal renderer that drew night vision still composes thermal (separate copies).
+    f.Setup();Check(thermal.BeginView(f.context.Get(),token++),"begin after night vision");
+    Check(thermal.CaptureIndexed(f.context.Get(),6,3,2),"capture after night vision");f.Target();f.FinalTarget();
+    {
+        crew::thermal::NightLook look{};
+        auto smallTarget=f.Colour(8);ID3D11RenderTargetView* t=smallTarget.rtv.Get();f.context->OMSetRenderTargets(1,&t,nullptr);
+        const D3D11_VIEWPORT whole={0,0,8,8,0,1};f.context->RSSetViewports(1,&whole);
+        Check(thermal.NightVision(f.context.Get(),look),"night vision between a thermal capture and its composite");
+        f.FinalTarget();const D3D11_VIEWPORT full={0,0,16,16,0,1};f.context->RSSetViewports(1,&full);
+    }
+    Check(thermal.Composite(f.context.Get(),Polarity::whiteHot),"compose after night vision on another size");
+    Check(f.Pixel(f.finalColour,4,8)[0]>230,"thermal unaffected by night vision's copies");
     thermal.Reset();
     std::printf("thermal_gpu: %d real WARP shader, depth, polarity, state and lifecycle checks passed\n",checks);
 }

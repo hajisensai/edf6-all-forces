@@ -279,20 +279,20 @@ HUDTEXT(npcPadKeys,L"%ls   X select   Y attack-move (hold: HOLD)   RB follow me 
         L"%ls   X 选择   Y 攻击移动（按住：原地坚守）   RB 跟随我   LB 停止   十字键 编队 1-4（按住：编入）",
         L"%ls   X 選擇   Y 攻擊移動（按住：原地堅守）   RB 跟隨我   LB 停止   十字鍵 編隊 1-4（按住：編入）",
         L"%ls   X 選択   Y 攻撃移動（長押し：その場で死守）   RB 自分に追従   LB 停止   十字キー グループ 1-4（長押し：登録）")
-HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack (Shift: queue)   Z attack-move   H hold   V follow   X stop   Ctrl+1-9 group",
-        L"%ls   右键 移动 / 攻击（Shift 排队）   Z 攻击移动   H 原地坚守   V 跟随我   X 停止   Ctrl+1-9 编队",
-        L"%ls   右鍵 移動 / 攻擊（Shift 排隊）   Z 攻擊移動   H 原地堅守   V 跟隨我   X 停止   Ctrl+1-9 編隊",
-        L"%ls   右クリック 移動 / 攻撃（Shift で予約）   Z 攻撃移動   H 死守   V 追従   X 停止   Ctrl+1-9 グループ")
+HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack / board (drag: line; Shift: queue)   %ls attack-move   %ls fast   %ls reverse   %ls stop   %ls hold fire   %ls sub-group   Ctrl+1-9 group",
+        L"%ls   右键 移动 / 攻击 / 上车（拖动：横队；Shift 排队）   %ls 攻击移动   %ls 快速   %ls 倒车   %ls 停止   %ls 停火   %ls 子选择   Ctrl+1-9 编队",
+        L"%ls   右鍵 移動 / 攻擊 / 上車（拖曳：橫隊；Shift 排隊）   %ls 攻擊移動   %ls 快速   %ls 倒車   %ls 停止   %ls 停火   %ls 子選擇   Ctrl+1-9 編隊",
+        L"%ls   右クリック 移動 / 攻撃 / 乗車（ドラッグ：横隊、Shift で予約）   %ls 攻撃移動   %ls 高速   %ls 後退   %ls 停止   %ls 射撃停止   %ls サブ選択   Ctrl+1-9 グループ")
 HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
 HUDTEXT(mapCommanderView,L"COMMANDER VIEW",L"指挥官视角",L"指揮官視角",L"指揮官視点")
 HUDTEXT(mapCommanderSwitch,L"%ls  Switch view",L"%ls 切换视角",L"%ls 切換視角",L"%ls 視点を切り替え")
 HUDTEXT(mapPadKeys,L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close",
         L"左摇杆 平移   右摇杆 旋转 / 俯仰   RT / LT 缩放   A 居中   B / 地图键 关闭",L"左搖桿 平移   右搖桿 旋轉 / 俯仰   RT / LT 縮放   A 置中   B / 地圖鍵 關閉",
         L"左スティック 移動   右スティック 回転 / 傾き   RT / LT ズーム   A 中央へ   B / マップボタン 閉じる")
-HUDTEXT(mapMouseKeys,L"WASD / middle drag pan (LMB drag with no unit)   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",
-        L"WASD / 中键拖动 平移（没有单位时左键拖动）   右键拖动 / Q E 旋转   R F 俯仰   滚轮 / + - 缩放   空格 居中   %ls / Esc 关闭",
-        L"WASD / 中鍵拖曳 平移（沒有單位時左鍵拖曳）   右鍵拖曳 / Q E 旋轉   R F 俯仰   滾輪 / + - 縮放   空白鍵 置中   %ls / Esc 關閉",
-        L"WASD / 中ドラッグ 移動（ユニットなしは左ドラッグ）   右ドラッグ / Q E 回転   R F 傾き   ホイール / + - ズーム   スペース 中央へ   %ls / Esc 閉じる")
+HUDTEXT(mapMouseKeys,L"WASD pan   middle drag turn / tilt   wheel / + - zoom   Space centre   F1-F4 ping   %ls / Esc close",
+        L"WASD 平移   中键拖动 旋转 / 俯仰   滚轮 / + - 缩放   空格 居中   F1-F4 信号   %ls / Esc 关闭",
+        L"WASD 平移   中鍵拖曳 旋轉 / 俯仰   滾輪 / + - 縮放   空白鍵 置中   F1-F4 信號   %ls / Esc 關閉",
+        L"WASD 移動   中ドラッグ 回転 / 傾き   ホイール / + - ズーム   スペース 中央へ   F1-F4 ピン   %ls / Esc 閉じる")
 HUDTEXT(legendYou,L"YOU",L"你",L"你",L"自分")
 HUDTEXT(legendSquad,L"SQUAD",L"小队",L"小隊",L"分隊")
 HUDTEXT(legendFriendly,L"FRIENDLY",L"友军",L"友軍",L"味方")
@@ -311,7 +311,7 @@ HUDTEXT(legendNearestEnemy,L"NEAREST ENEMY",L"最近的敌人",L"最近的敵人
 HUDTEXT(cmdOfflineOnly,L"COMMANDS: OFFLINE ONLY",L"指挥：仅限离线",L"指揮：僅限離線",L"指揮：オフライン専用")
 HUDTEXT(cmdSelectFirst,L"SELECT UNITS FIRST (%ls)",L"请先选择单位（%ls）",L"請先選擇單位（%ls）",L"先にユニットを選択（%ls）")
 HUDTEXT(cmdNoUnit,L"NO UNIT TO COMMAND",L"没有可指挥的单位",L"沒有可指揮的單位",L"指揮できるユニットなし")
-HUDTEXT(cmdSelectHowMouse,L"DRAG / CLICK / 1-9 / TAB",L"拖动框选 / 点击 / 1-9 / Tab",L"拖曳框選 / 點擊 / 1-9 / Tab",L"ドラッグ / クリック / 1-9 / Tab")
+HUDTEXT(cmdSelectHowMouse,L"DRAG / CLICK / 1-9 / CTRL+A",L"拖动框选 / 点击 / 1-9 / Ctrl+A",L"拖曳框選 / 點擊 / 1-9 / Ctrl+A",L"ドラッグ / クリック / 1-9 / Ctrl+A")
 HUDTEXT(cmdNoGround,L"NO GROUND THERE",L"那里没有地面",L"那裡沒有地面",L"そこに地面がない")
 HUDTEXT(cmdGuardOne,L"%ls (%.0f, %.0f): %d UNIT",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
 HUDTEXT(cmdGuardMany,L"%ls (%.0f, %.0f): %d UNITS",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
@@ -390,7 +390,6 @@ HUDTEXT(orderBoard,L"BOARD",L"上车",L"上車",L"搭乗")
 HUDTEXT(orderDismount,L"DISMOUNT",L"下车",L"下車",L"降車")
 // DISMOUNT ALL (the user, 2026-10-09: "下车是除了驾驶员，炮手等操作席都下车。全体下车是全部人").
 HUDTEXT(orderDismountAll,L"ALL OUT",L"全体下车",L"全體下車",L"全員降車")
-HUDTEXT(keyDismountAll,L"Shift+N",L"Shift+N",L"Shift+N",L"Shift+N")
 HUDTEXT(cmdNpcNoPassengers,L"Nobody on a passenger seat (the driver and gunners stay aboard: use ALL OUT)",
         L"没有乘客座上的人（驾驶员与炮手留在车上：要全部下车请用「全体下车」）",L"沒有乘客座上的人（駕駛員與砲手留在車上：要全部下車請用「全體下車」）",
         L"乗客席に誰もいない（運転手と射手は残る：全員降ろすには「全員降車」）")
@@ -399,6 +398,22 @@ HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
 // The RTS moves (mapcmd_logic.h Order::move / attackMove; hud.cpp MapButtons, mapcmd.cpp).
 HUDTEXT(orderMove,L"MOVE",L"移动",L"移動",L"移動")
 HUDTEXT(orderAttackMove,L"ATTACK-MOVE",L"攻击移动",L"攻擊移動",L"攻撃移動")
+// Broken Arrow's orders (2026-11-27; mapcmd_logic.h Order::fastMove .. decoy, map_keys.h F R U H V Z X C).
+HUDTEXT(orderFastMove,L"FAST MOVE",L"快速移动",L"快速移動",L"高速移動")
+HUDTEXT(orderReverseMove,L"REVERSE",L"倒车",L"倒車",L"後退")
+HUDTEXT(orderUnloadAt,L"UNLOAD AT",L"定点下车",L"定點下車",L"地点で降車")
+HUDTEXT(orderHoldFire,L"HOLD FIRE",L"停火",L"停火",L"射撃停止")
+HUDTEXT(orderAltitude,L"ALTITUDE",L"飞行高度",L"飛行高度",L"飛行高度")
+HUDTEXT(orderSprint,L"SPRINT",L"冲刺",L"衝刺",L"ダッシュ")
+HUDTEXT(orderSmoke,L"SMOKE",L"烟雾",L"煙霧",L"煙幕")
+HUDTEXT(orderDecoy,L"DECOYS",L"诱饵弹",L"誘餌彈",L"フレア")
+HUDTEXT(btnPace,L"PACED MARCH",L"齐步行军",L"齊步行軍",L"歩調を合わせる")
+HUDTEXT(cmdUnavailable,L"%ls: NONE OF THE SELECTED UNITS CAN",L"%ls：选中的单位都无法执行",L"%ls：選中的單位都無法執行",L"%ls：選択中のユニットは実行できない")
+HUDTEXT(cmdSubAll,L"SUB-SELECTION: ALL SELECTED",L"子选择：全部选中单位",L"子選擇：全部選中單位",L"サブ選択：選択中の全ユニット")
+HUDTEXT(cmdSubKind,L"SUB-SELECTION: %hs (%d)",L"子选择：%hs（%d）",L"子選擇：%hs（%d）",L"サブ選択：%hs（%d）")
+HUDTEXT(cmdSubShown,L"ORDERS TO: %ls",L"指令对象：%ls",L"指令對象：%ls",L"命令対象：%ls")
+HUDTEXT(cmdPing,L"PING %d",L"信号 %d",L"信號 %d",L"ピン %d")
+HUDTEXT(legendPaths,L"ORDER PATHS:",L"指令路线：",L"指令路線：",L"命令の経路：")
 // The transports (transport.cpp; mapcmd_logic.h Order::withdraw).
 HUDTEXT(orderWithdraw,L"SEND TRANSPORT AWAY",L"载具撤离",L"載具撤離",L"輸送車両撤収")
 HUDTEXT(cmdNpcNoTransport,L"No transport to withdraw (only a support vehicle leaves; get the squad off a moving one first)",
@@ -414,8 +429,10 @@ HUDTEXT(cmdNpcRiding,L"This squad is aboard a vehicle: command its vehicle (or o
 HUDTEXT(npcRiding,L"RIDING",L"乘车中",L"乘車中",L"搭乗中")
 // The command card's tooltips and its hint with nothing selected (hud.cpp MapButtons).
 HUDTEXT(tipKey,L"%ls   key %ls",L"%ls   按键 %ls",L"%ls   按鍵 %ls",L"%ls   キー %ls")
-HUDTEXT(tipRightClick,L"%ls   RIGHT-CLICK THE MAP (an enemy: attack it; you: follow; Shift: queue)",L"%ls   右键点击地图（点敌人：攻击；点你自己：跟随；Shift：排队）",
-        L"%ls   右鍵點擊地圖（點敵人：攻擊；點你自己：跟隨；Shift：排隊）",L"%ls   マップを右クリック（敵：攻撃、自分：追従、Shift：予約）")
+HUDTEXT(tipRightClick,L"%ls   RIGHT-CLICK THE MAP (an enemy: attack it; you: follow; our vehicle: board; drag: a line; Shift: queue)",
+        L"%ls   右键点击地图（点敌人：攻击；点你自己：跟随；点我方载具：上车；拖动：横队；Shift：排队）",
+        L"%ls   右鍵點擊地圖（點敵人：攻擊；點你自己：跟隨；點我方載具：上車；拖曳：橫隊；Shift：排隊）",
+        L"%ls   マップを右クリック（敵：攻撃、自分：追従、味方車両：乗車、ドラッグ：横隊、Shift：予約）")
 HUDTEXT(tipArms,L"%ls   key %ls; the button: then left-click the map",L"%ls   按键 %ls；点按钮后左键点击地图",L"%ls   按鍵 %ls；點按鈕後左鍵點擊地圖",
         L"%ls   キー %ls、ボタンの後マップを左クリック")
 HUDTEXT(btnFormationShort,L"FORMATION",L"编队",L"編隊",L"隊形")
@@ -439,12 +456,10 @@ HUDTEXT(supportTabGround,L"GROUND",L"地面",L"地面",L"地上")
 HUDTEXT(supportPt,L"%d / %d pt",L"%d / %d 点",L"%d / %d 點",L"%d / %d ポイント")
 HUDTEXT(supportPtShort,L"Not enough pt: %d needed, %d held",L"pt 不足：需要 %d，现有 %d",L"pt 不足：需要 %d，現有 %d",L"pt が足りません：必要 %d、所持 %d")
 HUDTEXT(legendTitle,L"LEGEND",L"图例",L"圖例",L"凡例")
-HUDTEXT(cmdNoMark,L"NO MARK (Q, OR POINT AT AN ENEMY)",L"没有标记（按 Q，或把指针放到敌人上）",L"沒有標記（按 Q，或把指標放到敵人上）",
-        L"マークなし（Q、または敵にポインターを合わせる）")
+HUDTEXT(cmdNoMark,L"NO MARK (RIGHT-CLICK AN ENEMY)",L"没有标记（右键点击敌人）",L"沒有標記（右鍵點擊敵人）",
+        L"マークなし（敵を右クリック）")
 // The enemy under the map's pointer (hud.cpp MapCommands) and what the mark key did with it (mapcmd.cpp).
-HUDTEXT(cmdHoverEnemy,L"RIGHT-CLICK ATTACK   Q MARK",L"右键 攻击   Q 标记",L"右鍵 攻擊   Q 標記",L"右クリック 攻撃   Q マーク")
-HUDTEXT(cmdMarked,L"ENEMY MARKED",L"已标记敌人",L"已標記敵人",L"敵をマーク")
-HUDTEXT(cmdUnmarked,L"MARK CLEARED",L"已取消标记",L"已取消標記",L"マーク解除")
+HUDTEXT(cmdHoverEnemy,L"RIGHT-CLICK: FOCUS FIRE",L"右键：集火",L"右鍵：集火",L"右クリック：集中攻撃")
 // The optional tail of cmdGuardResult / cmdOrderResult (their last %ls, empty when every unit took the order): the separator
 // is the tail's own, so a result without one ends clean (tools/hudtext_check.cpp Tails).
 HUDTEXT(cmdCannot,L", %d CANNOT",L"，%d 个无法执行",L"，%d 個無法執行",L"、%d ユニットは実行不可")
@@ -471,11 +486,12 @@ HUDTEXT(cmdGroupEmpty,L"GROUP %d IS EMPTY (CTRL+%d KEEPS THE SELECTION)",L"编�
         L"編隊 %d 是空的（Ctrl+%d 把目前選擇編入）",L"グループ %d は空（Ctrl+%d で選択中を登録）")
 HUDTEXT(cmdGroupPicked,L"GROUP %d: %d UNIT(S) SELECTED",L"编队 %d：已选 %d 个单位",L"編隊 %d：已選 %d 個單位",L"グループ %d：%d ユニット選択")
 HUDTEXT(cmdSelectedAll,L"SELECTED ALL: %d",L"已全选：%d",L"已全選：%d",L"全選択：%d")
-HUDTEXT(cmdPaceSlowest,L"MARCH: AT THE SLOWEST UNIT'S PACE [P]",L"配速：以最慢单位为基准 [P]",L"配速：以最慢單位為基準 [P]",L"行軍：最も遅い部隊に合わせる [P]")
-HUDTEXT(cmdPaceFull,L"MARCH: EACH AT FULL SPEED [P]",L"配速：各自全速 [P]",L"配速：各自全速 [P]",L"行軍：各自全速 [P]")
+HUDTEXT(cmdPaceSlowest,L"MARCH: AT THE SLOWEST UNIT'S PACE",L"配速：以最慢单位为基准",L"配速：以最慢單位為基準",L"行軍：最も遅い部隊に合わせる")
+HUDTEXT(cmdPaceFull,L"MARCH: EACH AT FULL SPEED",L"配速：各自全速",L"配速：各自全速",L"行軍：各自全速")
 HUDTEXT(cmdQueued,L"%ls QUEUED (%.0f, %.0f): %d UNIT(S)%ls",L"%ls 已排队（%.0f, %.0f）：%d 个单位%ls",L"%ls 已排隊（%.0f, %.0f）：%d 個單位%ls",
         L"%ls 予約（%.0f, %.0f）：%d ユニット%ls")
-// The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText).
+// The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText). Stock is a guard's
+// own (free within NpcGuardRadius); on the march it is formStockFollow (the game's own follow, below).
 HUDTEXT(formStock,L"DEFAULT",L"默认",L"預設",L"標準")
 HUDTEXT(formColumn,L"COLUMN",L"纵队",L"縱隊",L"縦隊")
 HUDTEXT(formStaggered,L"STAGGERED COLUMN",L"交错纵队",L"交錯縱隊",L"千鳥縦隊")
@@ -487,6 +503,8 @@ HUDTEXT(formEchelonRight,L"ECHELON RIGHT",L"右梯队",L"右梯隊",L"右梯形"
 HUDTEXT(formDiamond,L"DIAMOND",L"菱形",L"菱形",L"菱形")
 HUDTEXT(formBounding,L"BOUNDING OVERWATCH",L"交替掩护",L"交替掩護",L"交互躍進")
 HUDTEXT(formPerimeter,L"PERIMETER",L"环形防御",L"環形防禦",L"全周防御")
+HUDTEXT(formFollow,L"FOLLOW",L"跟随",L"跟隨",L"追従")
+HUDTEXT(formStockFollow,L"STOCK FOLLOW",L"原版跟随",L"原版跟隨",L"標準追従")
 HUDTEXT(cmdFormationResult,L"FORMATION %ls: %d SQUAD(S)",L"编队 %ls：%d 个小队",L"編隊 %ls：%d 個小隊",L"隊形 %ls：%d 分隊")
 HUDTEXT(sweepOn,L"FETCHING BOXES: %d LEFT, %d IN   [%ls] call back",L"拾取箱子：剩 %d 个，已捡 %d   [%ls] 召回",L"拾取箱子：剩 %d 個，已撿 %d   [%ls] 召回",
         L"アイテム回収：残り %d、回収 %d   [%ls] 呼び戻し")
@@ -620,6 +638,7 @@ HUDTEXT(barrageNoHook,L"this EDF.dll's rockets cannot be steered",L"此版 EDF.d
 HUDTEXT(barrageNoTarget,L"no caller or target",L"呼叫者或目标无效",L"呼叫者或目標無效",L"呼び出し元または目標が無効です")
 HUDTEXT(barrageNoRounds,L"no round could be planned",L"未能规划任何炮弹",L"未能規劃任何砲彈",L"砲弾を計画できませんでした")
 // A sortie's second wave refused when due (airstrike.cpp SupportFollowUpTick): given up, with the dispatcher's reason.
+HUDTEXT(moduleOff,L"%hs kept faulting: off for this mission (EDF6VehicleCrew.log)",L"%hs 连续出错，本局已停用（见 EDF6VehicleCrew.log）",L"%hs 連續出錯，本局已停用（見 EDF6VehicleCrew.log）",L"%hs でエラーが続いたため、このミッション中は停止しました（EDF6VehicleCrew.log）")
 HUDTEXT(followUpRefused,L"Second wave not called: %ls",L"第二波未能呼叫：%ls",L"第二波未能呼叫：%ls",L"第二波を呼べませんでした：%ls")
 // --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
 HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")
@@ -1229,3 +1248,9 @@ HUDTEXT(mapLaunchNone,L"As equipped (no presets: make them in the armory)",L"当
 HUDTEXT(mapLaunchWaiting,L"Making the files (%ls): starts when done; move the cursor to cancel",L"正在生成文件（%ls）：完成后自动出击，移动光标取消",L"正在產生檔案（%ls）：完成後自動出擊，移動游標取消",L"ファイル生成中（%ls）：完了後に出撃、カーソル移動で取消")
 HUDTEXT(mapLaunchFailed,L"Not started, the files were not made: %ls. Confirm again to start with the files as they are",L"未出击，文件生成失败：%ls。再次确认则按现有文件出击",L"未出擊，檔案產生失敗：%ls。再次確認則按現有檔案出擊",L"未出撃、ファイル生成失敗：%ls。もう一度決定で現在のファイルのまま出撃")
 HUDTEXT(mapProgress,L"Campaign %d / %d cleared",L"战役进度 %d / %d 已通关",L"戰役進度 %d / %d 已通關",L"キャンペーン %d / %d クリア")
+HUDTEXT(cmdSupportArmedFlown,L"%ls: LEFT-CLICK THE MAP FOR ITS DESTINATION (G: TURN ITS WAY IN; RIGHT-CLICK: CANCEL)",L"%ls：左键点击地图指定目的地（G 旋转入场方向，右键取消）",L"%ls：左鍵點擊地圖指定目的地（G 旋轉入場方向，右鍵取消）",L"%ls：マップを左クリックで目的地（G で進入方向を回転、右クリックで取消）")
+HUDTEXT(cmdEntryTurn,L"Way in turned %d deg from yours (G; Shift+G back)",L"入场方向：从你这边转 %d°（G；Shift+G 反转）",L"入場方向：從你這邊轉 %d°（G；Shift+G 反轉）",L"進入方向：自分側から %d° 回転（G／Shift+G で逆）")
+HUDTEXT(auraTitle,L"AURA",L"光环",L"光環",L"オーラ")
+HUDTEXT(auraAttack,L"ATTACK +%d%%",L"攻击 +%d%%",L"攻擊 +%d%%",L"攻撃 +%d%%")
+HUDTEXT(auraRepair,L"REPAIR %.1f%%/s",L"维修 %.1f%%/秒",L"維修 %.1f%%/秒",L"修理 %.1f%%/秒")
+HUDTEXT(auraAmmo,L"AMMO %.1f%%/s",L"补弹 %.1f%%/秒",L"補彈 %.1f%%/秒",L"補給 %.1f%%/秒")

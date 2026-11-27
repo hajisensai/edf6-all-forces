@@ -1,4 +1,4 @@
-// The vehicles' own turrets (seat_turret.inc, StoreSpec::turret) over the vehicles' tag 15 transport (seat_net.h): the
+// The vehicles' own turrets (seat_turret.inc, StoreSpec::turret) over the object message layer (object_net.h): the
 // turrets a machine trains (its player's gunner seat, its NPC gunner, the unmanned auto turrets of a vehicle it runs) and
 // where they point. A receiver turns that turret of its copy (fresh within kRemoteMs, else back to its rest). The rounds
 // are the gun's own: the trainer's machine pulls the trigger of the holder on that seat, as every seat's own fire.
@@ -15,7 +15,7 @@ constexpr std::uint32_t kVersion=1;
 constexpr int kMostTurrets=8;                 // seat_turret.inc kMostTurrets
 constexpr unsigned long long kSendMs=50,kRemoteMs=600;
 struct State {
-    seat_net::Head head{kMagic,kVersion,0,0,-1};
+    object_net::Head head{kMagic,kVersion,0,0,-1};
     std::uint8_t trained=0;                   // bit n: entry n is a turret this sender trains
     std::uint8_t pad[3]{};
     std::int16_t holder[kMostTurrets]{};      // its weapon's holder in the vehicle's holder array (the same on every copy)
@@ -26,7 +26,7 @@ static_assert(sizeof(State)==24+4+16+64+4,"the wire block");
 
 constexpr float kMostAngle=3.2f;              // |rad| a turret's angle can be
 inline bool Valid(const State& s) noexcept {
-    if(!seat_net::HeadValid(s.head,kMagic,kVersion) || !s.trained || s.pad[0] || s.pad[1] || s.pad[2] || s.tail)return false;
+    if(!object_net::HeadValid(s.head,kMagic,kVersion) || !s.trained || s.pad[0] || s.pad[1] || s.pad[2] || s.tail)return false;
     for(int n=0;n<kMostTurrets;++n) {
         if(!(s.trained&(1u<<n))) {
             if(s.holder[n] || s.yaw[n]!=0.0f || s.pitch[n]!=0.0f)return false;   // an unused entry is all zero

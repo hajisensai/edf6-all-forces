@@ -354,7 +354,10 @@ bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
 // The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
 bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
+namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.
+bool AuraViewNow(AuraView*) noexcept { return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
 bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
@@ -2639,7 +2642,7 @@ int Scenes(const std::wstring& dir) {
         bool named=false,apart=true;
         for(std::size_t i=0;i<drew.size();++i) {
             const Drew& p=drew[i];
-            if(p.text.find(FormationText(sceneFormation))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
+            if(p.text.find(FormationText(sceneFormation,false))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
                 named=p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f;
             for(std::size_t k=i+1;k<drew.size();++k) {
                 const Drew& q=drew[k];

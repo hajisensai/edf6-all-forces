@@ -7,6 +7,7 @@
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
 #include "crash_dump.h"
 #include "crew.h"
+#include "aura.h"
 #include "gravity.h"
 #include "gravity_net.h"
 #include "floatgun.h"
@@ -44,6 +45,7 @@
 #include "support_warning.h"
 #include "player_vehicle.h"
 #include "commander.h"
+#include "module.h"
 #include <iterator>
 
 namespace crew {
@@ -130,85 +132,7 @@ void MissionStart() noexcept {
     LogMemory("mission start entered");
     CheckCrashFilter();   // the crash dump's filter and abort handler still first (crash_dump.h)
     WatchMissionPhase("resets");
-    ResetVulcanRotors();
-    ResetSeatTurrets();
-    ResetBarrelRecoil();
-    ResetEnemyControlNetwork(); // stop authenticated leases before native input restoration
-    ResetEnemyControl(); // release native player-mode leases before scene/team identities are reset
-    if(!EnemyControlNativePvpReset())Log("ENEMY CONTROL pending native ownership restore retained across mission reset");
-    ResetPvp();  // true world boundary: restore teams and release support-owner weak identities
-    ResetCommander();   // the commander mode's last mission dropped, its map lock let go (commander.cpp)
-    ResetPlayer();
-    ResetFirstPerson();
-    thermal::Reset();
-    gpufx::Reset();
-    ResetCrew();
-    ResetHelis();
-    ResetGround();
-    ResetNpcAi();
-    ResetQMarks();   // the Q marks, ours and the teammates' (qmark.cpp)
-    AutoTurretMissionReset();   // EDF6AutoTurret's auto-aim back to its ini's (off), its lock let go (turretaim.cpp)
-    ResetNpcPosts();
-    ResetAirstrikes();
-    ResetUltimate();
-    ResetBarrages();
-    ResetSupportFollowUps();
-    ResetSupportFirepower();
-    ResetSupportWarnings();
-    SupportPointsReset();
-    ResetSupportDispatch();
-    ResetTransports();
-    ResetAirdrops();
-    ResetJets();
-    ResetBoosters();
-    ResetShields();
-    ResetPlayerJets();
-    ResetSazabi();
-    ResetDreadnought();
-    ResetBoarding();
-    ResetSubs();
-    ResetLaser();
-    ResetHud();
-    ResetLauncher();
-    ResetBargaAim();
-    ResetKatyushas();
-    ResetAndryusha();
-    ResetHighCam();
-    ResetSightZoom();
-    ResetInfantryScope();
-    ResetNix();
-    ResetTurretCam();
-    ResetStabilizer();
-    ResetMap();
-    ResetDamageStats();
-    ResetWastedFire();
-    ResetHeliSight();
-    ResetStockHud();
-    ResetStockGauges();
-    ResetRoomUi();          // the room / HQ screen is gone: its menu and room sync go on the next screen frame
-    ResetPayload();
-    ResetSeatSwitch();
-    ResetGear();
-    ResetJetSound();
-    ResetVehicleSound();
-    TraceReset();   // after it: the replay resets where the game did (trace_rec.cpp)
-    ResetBlastSound();
-    ResetSazabiSound();
-    ResetMissiles();
-    ResetDrills();
-    ResetVehicleRams();
-    gravity::Reset();
-    gravity::net::Reset();
-    ResetGravityGun();
-    FloatGunsMissionStart();   // which mission this is (EDF5's last: the float guns), nothing kept from the last
-    ResetEmc();
-    ResetSidecars();
-    ResetProteus();
-    ResetBigWorld();
-    ResetTerrainShare();
-    ResetPlayArea();
-    ResetEdf5Online();   // the EDF5 creation loop's online arguments (edf5online.cpp)
-    ResetVehicleWeapons();     // nothing of this mission's vehicle weapons queued yet (vehicle_weapons.h)
+    modules::ResetAll();       // every module's tables of the last mission dropped (modules.cpp kResets)
     preload::BeginMission();   // this mission's set of the plugin's content (preload_set.h), decided before this
     WatchMissionPhase("jets");
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources

@@ -13,6 +13,9 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+import gen_config  # noqa: E402
+
 checks = 0
 
 
@@ -25,7 +28,8 @@ def ok(cond: bool, what: str) -> None:
 
 
 def read(rel: str) -> str:
-    return (ROOT / rel).read_text(encoding='utf-8-sig')
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    return gen_config.expand((ROOT / rel).read_text(encoding='utf-8-sig'))
 
 
 logic = read('src/scope_spread_logic.h')
@@ -72,7 +76,10 @@ heli = read('src/heli.cpp')
 hook = re.search(r'void __fastcall MedicShotHook\(.*?\n\}', heli, re.S).group(0)
 at = [hook.find(s) for s in ('ScopeSpreadShot(weapon,replay,&scope);', 'medicShotNext(', 'ScopeSpreadRestore(scope);')]
 ok(min(at) >= 0 and at == sorted(at), 'MedicShotHook writes, shoots, restores')
-ok('InstallScopeSpread();' in plugin, 'plugin.cpp installs it')
+installs = read('src/module_table.h')
+installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+ok(installs[:installs.index('\n};')].count('Id::kScopeSpread,&Install<&InstallScopeSpread>}') == 1,
+   'the load installs it (module_table.h kInstalls)')
 ok('target_sources(EDF6VehicleCrew PRIVATE src/scope_spread.cpp)' in read('CMakeLists.txt'), 'the plugin builds it')
 
 host = read('src/host_settings_logic.h')

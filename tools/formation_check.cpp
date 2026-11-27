@@ -2,12 +2,16 @@
 //  - every shape, for 1 to 16 soldiers: nobody on the anchor or on another soldier (at least `spacing` x 0.7 apart),
 //    and each shape where it says it is: the column behind the point, the wedge back and out at 45 degrees, the vee
 //    forward, the line abreast, the echelons back to their side, the diamond round the point, the perimeter a ring of
-//    soldiers `spacing` apart (never tighter than `spacing` from the centre);
+//    soldiers `spacing` apart (never tighter than `spacing` from the centre), the follow a loose cluster behind (the
+//    first right behind, none wider than 1.2 x spacing either side, back in rows; the same slot each time asked);
 //  - the world slot: turning the heading turns the slots with it (distances kept), and the right is the game's right;
 //  - the heading follows the anchor's walk, not its standing turns;
 //  - bounding overwatch swaps its halves when the movers are all there, or after kBoundMost, never with no movers;
 //  - a soldier with no headway gives its slot up for kRestMs, then tries again;
-//  - the key's cycles go round both lists and back to stock.
+//  - the key's cycles go round both lists and back to stock, the march's starting at the default follow; the ini's
+//    march (MarchFromInt): a march as it is, anything else the default;
+//  - the march keeps up: the anchor's speed measured and led, the slot eased, the goal re-sent sparingly, the walk's
+//    least ease, the rest's scatter (the front open), the view cone, the straggler's stretch and its places behind.
 //   cmake --build build --target formation_check && build\formation_check.exe      (exit code 1 on a failure)
 #include "../src/formation.h"
 #include <cstdio>
@@ -43,6 +47,14 @@ void Shapes() {
                 case Shape::line: Check(z[k]==0.0f && x[k]!=0.0f,"the line abreast",k,x[k]);break;
                 case Shape::echelonLeft: Check(x[k]<0.0f && z[k]<0.0f,"echelon left back left",k,x[k]);break;
                 case Shape::echelonRight: Check(x[k]>0.0f && z[k]<0.0f,"echelon right back right",k,x[k]);break;
+                case Shape::follow: {
+                    Check(z[k]<=-sp*0.8f && std::fabs(x[k])<=sp*1.2f,"the follow behind, not wide",k,x[k]);
+                    float x2,z2;
+                    Check(Offset(s,k,n,sp,&x2,&z2) && x2==x[k] && z2==z[k] && Offset(s,k,n+5,sp,&x2,&z2) && x2==x[k] && z2==z[k],
+                          "the follow's slot fixed (by its place, not the count)",k,n);
+                    if(k>=1)Check(z[k]<=z[k-1]+sp*0.2f,"the follow's later places no nearer",k,z[k]);
+                    break;
+                }
                 case Shape::perimeter: {
                     const float r=std::sqrt(x[k]*x[k]+z[k]*z[k]),r0=std::sqrt(x[0]*x[0]+z[0]*z[0]);
                     Check(Near(r,r0,1e-3f) && r>=sp-1e-3f,"the perimeter one ring",k,r);
@@ -56,6 +68,11 @@ void Shapes() {
             // The line and the wedge take both sides, the first left (x < 0).
             if(n>=2 && (s==Shape::line || s==Shape::wedge))Check(x[0]<0.0f && x[1]>0.0f,"left then right",si,n);
             if(s==Shape::perimeter)Check(Near(x[0],0.0f,1e-4f) && z[0]>0.0f,"the perimeter's first ahead (the threat)",x[0],z[0]);
+            if(s==Shape::follow) {
+                Check(std::fabs(x[0])<=sp*0.1f && z[0]<0.0f,"the follow's first right behind",x[0],z[0]);
+                if(n>=3)Check(x[1]*x[2]<0.0f,"the follow's next two either side",x[1],x[2]);
+                if(n==16)Check(z[15]>=-sp*6.0f,"sixteen within six places back (a cluster, not a file)",z[15]);
+            }
         }
     }
     float x,z;
@@ -129,6 +146,88 @@ void Cycles() {
     do{s=Next(s,true);++n;}while(s!=Shape::stock && n<50);
     Check(n==static_cast<int>(sizeof(kGuard)/sizeof(kGuard[0])),"the guard cycle goes round",n);
     Check(FromInt(-1)==Shape::stock && FromInt(kShapes)==Shape::stock && FromInt(3)==Shape::wedge,"ini values");
+    // The default follow first in the march, the stock follow right after it (one key press back to the game's own).
+    Check(kMarch[0]==Shape::follow && kMarch[1]==Shape::stock && kMarchDefault==Shape::follow,"the march's order");
+    Check(MarchShape(Shape::follow) && !GuardShape(Shape::follow) && Next(Shape::follow,true)==Shape::stock,"the follow is a march");
+    Check(MarchFromInt(static_cast<int>(Shape::follow))==Shape::follow && MarchFromInt(0)==Shape::stock && MarchFromInt(9)==Shape::bounding &&
+          MarchFromInt(static_cast<int>(Shape::perimeter))==Shape::follow && MarchFromInt(kShapes)==Shape::follow && MarchFromInt(-1)==Shape::follow,
+          "the ini's march: a march as it is, else the default follow");
+    Check(static_cast<int>(Shape::follow)==11 && static_cast<int>(Shape::perimeter)==10 && static_cast<int>(Shape::bounding)==9,
+          "the ini's numbers kept (the follow appended)");
+}
+// The keeping up (formation.h Observe / Lead / Ease / Resend / EaseLeast / Resting / Scatter):
+// the anchor walked at a steady speed, turned about, stood still, warped.
+void Keeps() {
+    // Observe: a steady 5 m/s along +x settles near 5 m/s; a warp of 200 m in a frame starts it over at rest.
+    Motion m{};
+    float p[3]={0.0f,0.0f,0.0f};
+    for(std::uint64_t t=0;t<=3000;t+=16){p[0]=5.0f*static_cast<float>(t)*0.001f;Observe(m,p,t);}
+    Check(Near(m.vel[0],5.0f,0.2f) && Near(m.vel[1],0.0f,0.05f),"steady walk measured",m.vel[0],m.vel[1]);
+    float led[3];
+    Lead(m,p,led);
+    Check(Near(led[0]-p[0],3.0f,0.2f) && Near(led[2],p[2],0.01f),"5 m/s led 0.6 s",led[0]-p[0]);
+    p[0]+=200.0f;Observe(m,p,3100);
+    Check(SpeedOf(m)==0.0f,"a warp is no speed",SpeedOf(m));
+    // Lead: at a walk a quarter of the lead; a sprint capped at kLeadMost.
+    Motion w{{0.0f,0.0f,0.0f},{3.0f,0.0f},0,true};
+    const float o[3]={0.0f,0.0f,0.0f};
+    Lead(w,o,led);
+    Check(Near(led[0],3.0f*kLeadSec*kWalkLead,1e-3f),"a walk led a quarter",led[0]);
+    Motion r{{0.0f,0.0f,0.0f},{0.0f,40.0f},0,true};
+    Lead(r,o,led);
+    Check(Near(led[2],kLeadMost,1e-3f) && Near(led[0],0.0f,1e-3f),"a sprint led at most kLeadMost",led[2]);
+    Motion still{};
+    Lead(still,o,led);
+    Check(led[0]==0.0f && led[2]==0.0f,"unknown motion: no lead");
+    // Ease: the slot jumps to its first place; a turn about (20 m across) is swung over, not jumped; far it snaps.
+    Goal g{};
+    const float a[3]={0.0f,0.0f,0.0f},b[3]={20.0f,0.0f,0.0f},c[3]={100.0f,0.0f,0.0f};
+    Ease(g,a,0.0f,1000);
+    Check(g.set && g.at[0]==0.0f,"the first goal taken as it is");
+    Ease(g,b,0.0f,1100);
+    Check(Near(g.at[0],kGoalRate*0.1f,1e-3f),"a turn about eased",g.at[0]);
+    Ease(g,b,4.0f,1200);
+    Check(Near(g.at[0],kGoalRate*0.1f+(kGoalRate+kGoalCatch*4.0f)*0.1f,1e-3f),"eased faster with the anchor's speed",g.at[0]);
+    std::uint64_t t=1200;
+    while(g.at[0]<20.0f && t<10000){t+=16;Ease(g,b,0.0f,t);}
+    Check(g.at[0]==20.0f && t<5000,"the eased goal gets there",g.at[0],static_cast<double>(t));
+    Ease(g,c,0.0f,t+16);
+    Check(g.at[0]==100.0f,"past kGoalSnap it jumps",g.at[0]);
+    Ease(g,a,0.0f,t+16+5000);
+    Check(g.at[0]==0.0f,"after a gap it starts over",g.at[0]);
+    // Resend: a small move kept, one past kRegoal re-sent after kRegoalMs, one past kRegoalFar at once.
+    Sent s{};
+    const float s0[3]={0.0f,0.0f,0.0f},s1[3]={1.0f,0.0f,0.0f},s2[3]={2.0f,0.0f,0.0f},s3[3]={10.0f,0.0f,0.0f};
+    Check(Resend(s,s0,0),"the first goal sent");
+    Check(!Resend(s,s1,100) && s.at[0]==0.0f,"1 m: not re-sent");
+    Check(!Resend(s,s2,200),"2 m within kRegoalMs: not yet");
+    Check(Resend(s,s2,600) && s.at[0]==2.0f,"2 m after kRegoalMs: re-sent");
+    Check(Resend(s,s3,650) && s.at[0]==10.0f,"8 m: at once");
+    // EaseLeast: the floor standing near, more walking, all of a walk far behind; never past 1.
+    Check(Near(EaseLeast(0.0f,0.0f),kEaseFloor,1e-4f),"standing near: the floor",EaseLeast(0.0f,0.0f));
+    Check(EaseLeast(3.0f,1.0f)>EaseLeast(0.0f,1.0f),"walking: a higher floor");
+    Check(EaseLeast(0.0f,8.0f)>EaseLeast(0.0f,4.0f) && EaseLeast(0.0f,20.0f)==1.0f,"farther: faster, at most 1");
+    // Resting: still kStillMs within kStillRadius; a step out starts it over.
+    Rest rest{};
+    const float r0[3]={0.0f,0.0f,0.0f},r1[3]={1.0f,0.0f,1.0f},r2[3]={5.0f,0.0f,0.0f};
+    Check(!Resting(rest,r0,0) && !Resting(rest,r1,4000),"not yet resting");
+    Check(Resting(rest,r1,5000),"resting after kStillMs");
+    Check(!Resting(rest,r2,5100) && !Resting(rest,r2,9000) && Resting(rest,r2,10200),"a move starts the rest over");
+    // Scatter: nobody in the open front, nobody nearer the anchor than spacing or to another than spacing x 0.7.
+    const float sp=5.0f;
+    float xs[24],zs[24];
+    for(int k=0;k<24;++k) {
+        Check(Scatter(k,sp,&xs[k],&zs[k]),"a scatter place");
+        const float rr=std::sqrt(xs[k]*xs[k]+zs[k]*zs[k]);
+        const float ang=std::atan2(xs[k],zs[k]);
+        Check(rr>=sp-1e-3f,"scattered off the anchor",k,rr);
+        Check(std::fabs(ang)>=kOpenFront-1e-3f,"the front left open",k,ang);
+        for(int j=0;j<k;++j) {
+            const float d=std::sqrt((xs[k]-xs[j])*(xs[k]-xs[j])+(zs[k]-zs[j])*(zs[k]-zs[j]));
+            Check(d>=sp*0.7f,"scattered apart",k,d);
+        }
+    }
+    Check(!Scatter(-1,sp,&xs[0],&zs[0]) && !Scatter(0,0.0f,&xs[0],&zs[0]),"no place for no soldier or no spacing");
 }
 }  // namespace
 
@@ -139,6 +238,7 @@ int main() {
     Bounds();
     Stuck();
     Cycles();
+    Keeps();
     std::printf(failures ? "formation_check: %d of %d FAILED\n" : "formation_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

@@ -18,6 +18,8 @@ import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+import gen_config  # noqa: E402
 
 failures: list[str] = []
 
@@ -31,8 +33,9 @@ def code_only(text: str) -> str:
 
 
 def read(root: str, rel: str) -> str:
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(root, rel), encoding='utf-8') as f:
-        return f.read()
+        return gen_config.expand(f.read())
 
 
 def body(text: str, signature: str) -> str:
@@ -116,7 +119,7 @@ def main() -> int:
     drive = body(npcai, 'Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,')
     scripted = body(npcai, 'Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const float* pos) noexcept')
     checks += 1
-    if 'if(a.held[0]>=0){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}' not in drive or 'Backpack(' in scripted:
+    if 'if(a.held[0]>=0 && !silent){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}' not in drive or 'Backpack(' in scripted:
         fail('Backpack runs outside Drive (a script\'s unit), or without the held weapon known')
     checks += 1
     if npcai.count('Backpack(s,h,') != 1:

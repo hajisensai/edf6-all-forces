@@ -1,12 +1,13 @@
 // The plugin's online channels (src/plugin_net_logic.h) and their codec (src/wire.h): no game, no transport.
 //  - registration: no receive, no magic, a magic taken, bounds that make no sense refused; a full registry refuses more;
-//  - routing: by magic, then by a channel's own test; none of theirs left to the support parser (Route::none);
+//  - routing: by magic (every channel has one: the PvP channel's AFPV too); none of theirs left to the support parser (Route::none);
 //  - drops: another version, a size out of bounds (every peer's messages read: no per-feature bits since net-6);
 //  - joins: a channel with a joined callback is told once per peer, again after Reset;
 //  - PUIDs and origins;
 //  - wire.h: field order, sticky failure, finite floats, canonical IDs;
 //  - the room watch: which changes reset every channel, once.
 #include "../src/plugin_net_logic.h"
+#include "../src/pvp_protocol.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -19,13 +20,12 @@ int checks=0,failures=0;
 void Check(bool ok,const char* what) { ++checks;if(!ok){++failures;std::printf("FAIL %s\n",what);} }
 
 constexpr std::uint32_t kA=0x41414141u,kB=0x42424242u,kC=0x43434343u;
-int gotA=0,gotB=0,gotC=0,gotOwned=0;
+int gotA=0,gotB=0,gotC=0,gotPvp=0;
 std::uint32_t lastPeer=0;
 bool ReceiveA(std::uint32_t p,const char*,const void*,std::size_t,std::uint64_t) noexcept { ++gotA;lastPeer=p;return true; }
 bool ReceiveB(std::uint32_t p,const char*,const void*,std::size_t,std::uint64_t) noexcept { ++gotB;lastPeer=p;return true; }
 bool ReceiveC(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept { ++gotC;return true; }
-bool ReceiveOwned(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept { ++gotOwned;return true; }
-bool OwnsXY(const void* b,std::size_t n) noexcept { return n>=4 && !std::memcmp(b,"XY",2); }
+bool ReceivePvp(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept { ++gotPvp;return true; }
 std::vector<std::pair<std::size_t,std::uint32_t>> joins;
 void JoinedB(std::uint32_t) noexcept {}
 
@@ -39,12 +39,13 @@ void RegistryChecks() {
     Registry reg;
     Channel a;a.name="a";a.magic=kA;a.receive=&ReceiveA;            // an older channel: its own versions, every peer
     Channel b;b.name="b";b.magic=kB;b.version=3;b.minSize=b.maxSize=64;b.receive=&ReceiveB;b.joined=&JoinedB;
-    Channel own;own.name="owned";own.owns=&OwnsXY;own.receive=&ReceiveOwned;
-    Check(reg.Register(a) && reg.Register(b) && reg.Register(own),"three channels registered");
+    // The PvP channel as support_net.cpp registers it: its magic, the protocol's own size bounds.
+    Channel pvp;pvp.name="pvp";pvp.magic=pvp_protocol::kMagic;pvp.minSize=32;pvp.maxSize=pvp_protocol::kMaxWireBytes;pvp.receive=&ReceivePvp;
+    Check(reg.Register(a) && reg.Register(b) && reg.Register(pvp),"three channels registered");
     Channel dup=a;dup.receive=&ReceiveC;
     Check(!reg.Register(dup),"a magic taken is refused");
     Channel none;none.receive=&ReceiveC;
-    Check(!reg.Register(none),"no magic and no own test is refused");
+    Check(!reg.Register(none),"no magic is refused (every channel has one)");
     Channel noReceive;noReceive.magic=kC;
     Check(!reg.Register(noReceive),"no receive is refused");
     Channel badSize;badSize.magic=kC;badSize.receive=&ReceiveC;badSize.minSize=100;badSize.maxSize=50;
@@ -62,8 +63,14 @@ void RegistryChecks() {
     Check(reg.Dispatch(1,"p1",old.data(),old.size(),0)==Route::dropped && gotB==2,"another version: the channel's, dropped");
     auto small=Message(kB,3,63);
     Check(reg.Dispatch(1,"p1",small.data(),small.size(),0)==Route::dropped && gotB==2,"a size out of bounds: dropped");
-    auto xy=Message(0x00005958u,0,8);   // "XY"
-    Check(reg.Dispatch(3,"p3",xy.data(),xy.size(),0)==Route::delivered && gotOwned==1,"a channel's own test routes it");
+    {
+        pvp_protocol::Message hello{};hello.kind=pvp_protocol::Kind::Hello;
+        unsigned char bytes[pvp_protocol::kMaxWireBytes];
+        const std::size_t n=pvp_protocol::wire::Encode(hello,bytes,sizeof(bytes));
+        Check(n>=32 && !std::memcmp(bytes,"AFPV",4),"the PvP wire starts with its magic");
+        Check(reg.Dispatch(3,"p3",bytes,n,0)==Route::delivered && gotPvp==1,"a PvP message routed by its magic");
+        Check(reg.Dispatch(3,"p3",bytes,31,0)==Route::dropped && gotPvp==1,"shorter than a PvP header: the channel's, dropped");
+    }
     auto unknown=Message(0x54525053u,2,176);   // support_net's own (support_protocol.h kMagic): none of the channels'
     Check(reg.Dispatch(1,"p1",unknown.data(),unknown.size(),0)==Route::none,"none of theirs: left to the support parser");
     Check(reg.Dispatch(1,"p1",ma.data(),3,0)==Route::none,"too short to have a magic: none");

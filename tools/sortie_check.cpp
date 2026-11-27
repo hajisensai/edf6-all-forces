@@ -5,7 +5,8 @@
 //  - the carpet: bombs let go level at kCarpetAlt land where they are reckoned to, the window kCarpetHalf either side, and
 //    the gap spreads a load over it;
 //  - the lap: a circle counted either way round across the angle's wrap, done after one full turn, not before;
-//  - the circle's velocity: round the centre at its speed on the radius, back onto it from inside and outside.
+//  - the circle's velocity: round the centre at its speed on the radius, back onto it from inside and outside;
+//  - the missile rain's hold: it fires only over the target area with its nose settled for kRainHoldMs (RainHoldStep).
 //
 //   cmake --build build --target sortie_check && build\sortie_check.exe        exit code 0: every check passed
 #include "../src/sortie_plan.h"
@@ -60,6 +61,12 @@ void Carpet() {
           Near(request.half,250.0f,0.01f) && Near(request.x,0.6f,0.001f) && Near(centre[2],240.0f,0.01f),
           "two ground points define the requested direction, midpoint and distance");
     Check(!RunFromPoints(start,start,&request,centre),"a zero-length run cannot be called");
+    // The way in alone (a flown call's heading, no line): unit, half 0; any other length refused on the wire.
+    const RunSpec way=HeadingRun(3.0f,4.0f);
+    Check(HasHeading(way) && RunValid(way) && way.half==0.0f && Near(way.x,0.6f,1e-5f) && Near(way.z,0.8f,1e-5f),
+          "a heading alone is a valid request, made unit");
+    Check(!HasHeading(HeadingRun(0.0f,0.0f)) && RunValid(RunSpec{}) && !RunValid(RunSpec{2.0f,0.0f,0.0f}) &&
+          !RunValid(RunSpec{1.0f,0.0f,5.0f}),"no heading is none; a non-unit heading or a too short line is refused");
     const auto shortGap=CarpetGapMs(6,speed,100.0f),longGap=CarpetGapMs(6,speed,250.0f);
     Check(shortGap<longGap && Near(static_cast<float>(longGap)*0.001f*speed*5.0f,500.0f,2.0f),
           "release timing follows the length of the marked attack run");
@@ -131,16 +138,67 @@ void Volleys() {
     for(int r=0;r<salvo::kRounds;++r)all=all && salvo::SalvoNode(r,so,1,1)==0;
     Check(all,"one lock takes the whole salvo");
 }
+// The rain's hold (RainHoldStep): no fire on arrival, outside kRainOpen or with the nose swinging; kRainHoldMs settled
+// over the target area opens it, a wobble before that starts the count again, and once open it stays open.
+void RainHold() {
+    int phase=0;unsigned long long since=0;
+    Check(!RainHoldStep(phase,since,kRainFrom-10.0f,0.0f,1000) && phase==0,"no fire on arrival outside the target area");
+    Check(!RainHoldStep(phase,since,kRainOpen-10.0f,kRainSteadyCone+0.05f,2000) && phase==0,"no fire with the nose off its aim");
+    bool early=false;
+    for(unsigned long long t=3000;t<3000+kRainHoldMs;t+=16)early=early || RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,t);
+    Check(!early && phase==1 && since==3000,"the hold runs its kRainHoldMs settled");
+    Check(!RainHoldStep(phase,since,kRainOpen-10.0f,0.6f,3000+kRainHoldMs-100) && phase==0,"a wobble starts it again");
+    Check(!RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,6000) && !RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,6000+kRainHoldMs-1),
+          "counted again from the settled nose");
+    Check(RainHoldStep(phase,since,kRainOpen-10.0f,0.1f,6000+kRainHoldMs) && phase==2,"open after kRainHoldMs settled");
+    Check(RainHoldStep(phase,since,kRainTo+1.0f,0.7f,9000),"open stays open through the lock's dwell and the burst");
+    const float closes=kRainOpen-kRainSpeed*static_cast<float>(kRainHoldMs+kRainBurstMs)/1000.0f;
+    Check(closes>kRainTo,"from kRainOpen the hold and the burst end before the window does");
+}
 }  // namespace
+
+// The marked strafe (jet_sortie.cpp MarkedRun; the user, 2026-11-26: 「扫射时间是不是不对」「只有机枪」「需要绕一或n圈」).
+void Strafe() {
+    // The strike jet's: gunClose 120, the guns' reach 1000, attack 215 m/s.
+    const float least=120.0f*2.6f,preferred=900.0f,speed=215.0f;
+    // The old run: the nose 260 m on from 160 m up was at the 70 m floor 215 m (2.5 s) in, on a line of 500.
+    Check(StrafeDescent(160.0f,260.0f,215.0f)<=70.5f,"the old fixed lead came down to its floor 2.5 s into the line");
+    float last=0.0f;bool covered=true,longer=true,rockets=true;
+    const float halves[]={100.0f,250.0f,400.0f,600.0f};
+    for(float half:halves) {
+        const float over=StrafeHeight(half,preferred),lead=StrafeLead(half,over,least,kStrafeLeadMost);
+        // In at its height, the nose's point walking the whole line: never under the floor before the end.
+        covered=covered && StrafeDescent(over,lead,2.0f*half)>=kStrafeFloor*0.99f && over>=kStrafeLow && over<=kStrafeTop;
+        // The guns reach the point all the way (lead within reach) and the rockets fire on it (past 2.5 gunClose,
+        // inside kRocketOpen 1400: jet_combat.cpp Fire), so a strafe is guns and stores, not guns only.
+        rockets=rockets && lead>120.0f*2.5f && lead<1400.0f && lead<=1000.0f;
+        const float s=StrafeSeconds(half,speed);
+        longer=longer && s>last;last=s;
+    }
+    Check(covered,"the strafe's height and lead last the whole line down to the floor");
+    Check(rockets,"the lead lies inside the guns' reach and the rockets' window all the line");
+    Check(longer && Near(StrafeSeconds(250.0f,speed),500.0f/speed,1e-4f),"the fire window grows with the line: 2 half / speed");
+    Check(!StrafeOpen(-600.0f,300.0f,250.0f) && StrafeOpen(-550.0f,300.0f,250.0f) && !StrafeOver(0.0f,200.0f,250.0f) &&
+          StrafeOver(100.0f,200.0f,250.0f),"the window opens with the point at the line's start, over past its end");
+    // The capture: on the line along it needs nothing; beside it, turns it can make; heading away, a lap (never flown).
+    const float r=900.0f;
+    Check(Near(CaptureDistance(0.0f,0.0f,r),0.0f,1e-3f),"on the line along it: captured");
+    Check(CaptureDistance(100.0f,1.6f,r)>=1e8f && CaptureDistance(-50.0f,-1.6f,r)>=1e8f,"heading away from along it: no capture");
+    const float s1=CaptureDistance(50.0f,0.0f,r),s2=CaptureDistance(200.0f,0.0f,r);
+    Check(s1>0.0f && s2>s1 && s2<2.0f*r+1.0f,"beside it, parallel: an S onto it, longer the farther off");
+    Check(CaptureDistance(200.0f,-0.3f,r)<CaptureDistance(200.0f,0.3f,r),"closing on it takes less than drifting off it");
+}
 
 int main() {
     Lines();
+    Strafe();
     Carpet();
     Laps();
     Circle();
     Check(SalvoLocked(256,1) && SalvoLocked(256,64) && SalvoLocked(256,256) && !SalvoLocked(256,0) && !SalvoLocked(0,256),
           "missile rain fires on its first lock");
     Volleys();
+    RainHold();
     const unsigned long long burst=static_cast<unsigned long long>(crew::salvo::VolleyFrames(crew::salvo::kRounds))*1000/60;
     Check(SalvoDraining(1000+burst,1000) && !SalvoDraining(1000+kRainBurstMs+1,1000) && !SalvoDraining(1000,0),
           "the jet stays on its pass until the volleys are out");

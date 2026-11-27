@@ -135,14 +135,9 @@ void Sfx(Mech& m,SzSfx which,const float* at) noexcept {
 // uses +8, weaks +0xC; the final weak release deletes the control through vtable slot 1.
 void AssignLockTarget(Arms& a,const ObjRef& next) noexcept {
     if(next.obj==a.lockOnTarget.obj && next.ctrl==a.lockOnTarget.ctrl)return;
-    if(next.ctrl)InterlockedIncrement(reinterpret_cast<volatile LONG*>(static_cast<unsigned char*>(const_cast<void*>(next.ctrl))+0xC));
+    objref::Retain(next.ctrl);
     const ObjRef old=a.lockOnTarget;a.lockOnTarget=next;
-    if(!old.ctrl)return;
-    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(old.ctrl));
-    if(InterlockedExchangeAdd(reinterpret_cast<volatile LONG*>(ctrl+0xC),-1)==1) {
-        using Delete=void(*)(void*);
-        (*reinterpret_cast<Delete* const*>(ctrl))[1](ctrl);
-    }
+    objref::Release(old.ctrl);
 }
 void DropLocalAim(Arms& a) noexcept {
     AssignLockTarget(a,{});

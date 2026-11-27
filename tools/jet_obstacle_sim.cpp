@@ -357,6 +357,85 @@ void EntryCase(float offDeg,float over,bool launched,float* gunAt,float* missile
     }
 }
 
+// The marked strafe (jet_sortie.cpp MarkedRun; the user, 2026-11-26: 「需要绕一或n圈才能进入航线」「只有机枪」「扫射时间是
+// 不是不对」): a `role` jet with guns, a rocket pod and air-to-ground missiles made `cross` m beside a gun run's line (its
+// half `half`, along +z through the origin), 3000 m short of its start, heading `angleDeg` off it, at the height the run
+// comes in at. Flown through SortieGuide / Wing / Fire to its end: what it fired along the line and how it got there.
+struct StrafeResult {
+    int gunFrames=0,rockets=0,missiles=0;
+    float firstAim=1e9f,lastAim=-1e9f;   // m along the line the point its nose was on was at its first / last shot
+    float fireFrom=-1.0f,fireTo=-1.0f;   // s: its first and last shot
+    float turned=0.0f;                   // rad its heading swung through, all told
+    float lowest=1e9f;                   // m over the line, firing
+    bool cameRound=false,done=false;
+};
+StrafeResult StrafeCase(Role role,float half,float cross,float angleDeg) {
+    boxes.clear();
+    const Kind& k=KindOf(role);
+    const float mark[3]={0.0f,0.0f,0.0f},heading[3]={0.0f,0.0f,1.0f};
+    Arms arms{};arms.gunSpeed=960.0f;arms.gunRange=960.0f;arms.pick=-1;arms.guns=3600;arms.hasGun=true;
+    arms.hasMissile=true;arms.missiles=4;arms.locked=1;arms.missileRange=1800.0f;
+    static std::vector<unsigned char> pod(0x2000,0);
+    static const StoreSpec rocketSpec{L"sim","rockets",StoreRole::rocket,1.0f,0.0f};
+    arms.stores[0]=Store{pod.data(),&rocketSpec,38,0,0.0f,38};arms.storeCount=1;arms.rocket=0;
+    const float least=k.gunClose*2.6f,reach=GunReach(k,arms);
+    const float over=sortie::StrafeHeight(half+k.attack*sortie::kStrafeSettleS*0.5f,std::fmax(least,reach*0.9f));
+    const float off=angleDeg*kPi/180.0f;
+    const float at[3]={cross,over,-half-3000.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    Place(j,v,ctrl.data(),role,at,dir,k.attack,0.0f);
+    j.launched=true;j.burden=Burden{1.0f,0.0f};
+    static int targetDummy=0;
+    j.t.target=&targetDummy;j.t.flyer=false;std::memcpy(j.t.aim,mark,12);std::memcpy(j.t.tgtPrev,mark,12);
+    SortieBegin(j,SortiePass::gunRun,mark,at,heading,nowMs,sortie::RunSpec{0.0f,1.0f,half});
+    const ULONGLONG born=nowMs;
+    StrafeResult r;
+    ULONGLONG rocketSeen=j.t.rocketAt,missileSeen=j.t.missileAt;
+    float lastYaw=std::atan2(dir[0],dir[2]);
+    for(int f=0;f<60*90 && !j.sortie.done;++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
+        bool gunsOk=false,missileOk=false;
+        SortieGuide(j,k,arms,pos,nose,mark,mark[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
+        if(j.sortie.phase>=2)r.cameRound=true;
+        Wing(j,k,v,pos,clear,nose,want,speed,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        if(j.phase!=jetphase::Phase::withdraw)Fire(j,v,pos,nose,j.sortie.strafing ? j.sortie.shotPoint : mark,gunsOk,missileOk,arms,nowMs);
+        else v[kFireGun]=v[kFireMissile]=0;
+        const bool rocket=j.t.rocketAt!=rocketSeen,missile=j.t.missileAt!=missileSeen;
+        rocketSeen=j.t.rocketAt;missileSeen=j.t.missileAt;
+        if(rocket)++r.rockets;
+        if(missile){++r.missiles;--arms.missiles;}
+        if(v[kFireGun])++r.gunFrames;
+        if(v[kFireGun] || rocket || missile) {
+            const float t=static_cast<float>(nowMs-born)*0.001f,aimed=j.sortie.shotPoint[2];
+            if(r.fireFrom<0.0f)r.fireFrom=t;
+            r.fireTo=t;
+            if(aimed<r.firstAim)r.firstAim=aimed;
+            if(aimed>r.lastAim)r.lastAim=aimed;
+            if(pos[1]<r.lowest)r.lowest=pos[1];
+        }
+        const float yaw=std::atan2(j.m.vel[0],j.m.vel[2]);
+        float d=yaw-lastYaw;
+        while(d>kPi)d-=2.0f*kPi;
+        while(d< -kPi)d+=2.0f*kPi;
+        r.turned+=std::fabs(d);lastYaw=yaw;
+        Move(j,v);
+    }
+    r.done=j.sortie.done;
+    return r;
+}
+
 // The air case (the user 2026-10-12: 「战斗机对空能力甚至不如直升机」): a gun jet `role` loaded with air-to-air missiles the
 // game has locked, `range` m from a flyer `up` m over the ground circling at `circle` m/s (a bee, a drone). Over `seconds`:
 // when its guns first fire (-1: never), how many frames they fire, when its first missile goes (-1: never).
@@ -488,7 +567,8 @@ int SelfTest(const char* outDir) {
             support::PassLine line{};
             const support::Reach reach{WorldHalf()-kArrivalRoom,1000.0f};
             const bool lined=support::MakePassLine(MapPlayArea(),reach,point,dir,FerryTurn(KindOf(role)),line);
-            j.ferry=true;j.ferryLine=line;j.ferryPass=ferry::Pass{};j.ferryGone=false;
+            j.phase=jetphase::Phase::fly;j.reap=false;EnterPhase(j,jetphase::Event::ferry,nowMs);
+            j.ferryLine=line;j.ferryPass=ferry::Pass{};
             int crossings=0,ends=0;float worstAcross=0.0f,mostOut=0.0f,firstAt=-1.0f;
             bool lastAhead=true,inEnd=false,gone=false;float goneAt[3]{};
             const ULONGLONG born=nowMs;
@@ -507,7 +587,7 @@ int SelfTest(const char* outDir) {
                 HoldOffGround(j,pos,clear,kDt,nowMs);
                 j.m.ready=true;
                 Move(j,v);
-                if(j.ferryGone){gone=true;std::memcpy(goneAt,pos,12);}
+                if(j.reap){gone=true;std::memcpy(goneAt,pos,12);}
                 float along,across;ferry::Along(line,pos,&along,&across);
                 const bool ahead=along<0.0f ? j.ferryPass.dir>0 : j.ferryPass.dir<0;   // the point still ahead on this pass
                 if(lastAhead && !ahead && std::fabs(along)<200.0f) {   // over the point (along its pass)
@@ -646,6 +726,31 @@ int SelfTest(const char* outDir) {
             std::printf("air %-11s %4.0f m out, %3.0f m up, %2.0f m/s: guns at %.1f s (%d frames), missile at %.1f s %s\n",
                         KindOf(r.role).name,static_cast<double>(r.range),static_cast<double>(r.up),static_cast<double>(r.circle),
                         static_cast<double>(a.gunAt),a.gunFrames,static_cast<double>(a.missileAt),!r.held ? "info" : ok ? "ok" : "FAIL");
+        }
+    }
+    // The marked strafe: in straight on its line (no lap: its heading never swings through more than a half turn), its
+    // guns, rockets and missiles on the line from near its start to near its end for about the 2 half / speed it takes.
+    // Off the line where it can turn onto it, it does; heading away from it, it comes round once, never more.
+    {
+        const struct { Role role; float half,cross,angle; bool round; } runs[]={
+            {Role::strike,250.0f,0.0f,0.0f,false},{Role::strike,600.0f,0.0f,0.0f,false},
+            {Role::multirole,400.0f,0.0f,0.0f,false},{Role::multirole,150.0f,0.0f,0.0f,false},
+            {Role::strike,400.0f,250.0f,0.0f,false},{Role::strike,300.0f,-150.0f,10.0f,false},
+            {Role::strike,300.0f,600.0f,100.0f,true}};
+        for(const auto& c:runs) {
+            const StrafeResult s=StrafeCase(c.role,c.half,c.cross,c.angle);
+            const float window=sortie::StrafeSeconds(c.half,KindOf(c.role).attack),span=s.fireTo-s.fireFrom;
+            const bool covered=s.firstAim<=-c.half+0.25f*c.half && s.lastAim>=c.half-0.25f*c.half && span>=0.7f*window;
+            const bool ok=s.done && covered && s.gunFrames>=30 && s.rockets>=2 && s.missiles>=1 && s.cameRound==c.round &&
+                          s.turned<(c.round ? 2.0f*kPi+1.0f : kPi);
+            if(!ok)++bad;
+            std::printf("strafe %-9s line %4.0f m, %4.0f m off at %3.0f deg: fired %.1f-%.1f s (%.1f of %.1f), aim %5.0f..%5.0f m, "
+                        "guns %d frames, %d ripples, %d missiles, lowest %.0f m, turned %.0f deg%s %s\n",KindOf(c.role).name,
+                        static_cast<double>(2.0f*c.half),static_cast<double>(c.cross),static_cast<double>(c.angle),
+                        static_cast<double>(s.fireFrom),static_cast<double>(s.fireTo),static_cast<double>(span),
+                        static_cast<double>(window),static_cast<double>(s.firstAim),static_cast<double>(s.lastAim),s.gunFrames,
+                        s.rockets,s.missiles,static_cast<double>(s.lowest),static_cast<double>(s.turned*180.0f/kPi),
+                        s.cameRound ? ", came round once" : "",ok ? "ok" : "FAIL");
         }
     }
     if(logFile)std::fclose(logFile);
@@ -992,7 +1097,7 @@ int WithdrawSuite() {
     int cases=0,fails=0;
     {
         Jet salvo{};
-        salvo.mode=Mode::withdraw;salvo.modeAt=1000;salvo.sortie.pass=SortiePass::missileRain;
+        salvo.phase=jetphase::Phase::withdraw;salvo.phaseAt=salvo.modeAt=1000;salvo.sortie.pass=SortiePass::missileRain;
         const auto& kind=KindOf(Role::interceptor);
         salvo.sortie.line.dir[0]=1.0f;
         groundHalf=2100.0f;

@@ -26,7 +26,8 @@ struct FieldTarget {
 constexpr int kFieldTargets=1024;
 FieldTarget fieldTargets[kFieldTargets]{};
 bool FieldTargetLive(const FieldTarget& t) noexcept {
-    return t.ref && Readable(t.ref.obj,kHpMax+4) && Readable(t.ref.ctrl,12) && At<int>(t.ref.ctrl,8)>0 && t.ref.Is(t.ref.obj);
+    // Still this object (deleted or dead too: its multiplier is restored until it is freed), objref.h.
+    return objref::Identity(t.ref)>=objref::Life::removed && Readable(t.ref.obj,kHpMax+4);
 }
 void RestoreFieldMultiplier(unsigned char* o,std::size_t offset,bool& written,float base,float last) noexcept {
     if(written && At<float>(o,offset)==last)Put<float>(o,offset,base);

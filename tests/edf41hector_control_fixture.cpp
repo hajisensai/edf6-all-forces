@@ -12,6 +12,11 @@ ULONGLONG fakeClock=1000;const void* lastDeleted=nullptr;
 alignas(16) unsigned char shieldObject[0x2000]{},bones[crew::kBoneSize]{},ghost[0x100]{},recent[0x100]{},ghostShield[0x100]{};
 alignas(16) unsigned char object[0x2000]{},other[0x2000]{},enemy[0x400]{},gun[2][0x30]{};
 int weak=0;crew::Config config{};
+// The weapon objects' own control blocks (src/objref.h: the entry holds a weak count on each; uses 1, weaks 1).
+void __fastcall NoBlockFn(void*) {}
+void* const kBlockVtable[2]={reinterpret_cast<void*>(&NoBlockFn),reinterpret_cast<void*>(&NoBlockFn)};
+struct alignas(16) Block { void* const* vt=kBlockVtable; std::int32_t uses=1,weaks=1; } shieldBlock,ghostBlock;
+void Own(unsigned char* o,Block& b){const void* p=&b;std::memcpy(o+crew::kSelfCtrl,&p,8);}
 float lastGoal[4]{},lastFace[4]{},lastSpeed=0;
 void Check(bool value,const char* why){++checks;if(!value){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);}}
 void Jump(std::size_t at,void* destination){unsigned char code[14]={0xFF,0x25,0,0,0,0};std::memcpy(code+6,&destination,8);std::memcpy(crew::image+at,code,sizeof(code));}
@@ -89,9 +94,6 @@ void SetFlag(void*,std::uint32_t,bool) noexcept {}
 bool SetTeam(void*,std::int32_t,bool) noexcept {return false;}
 int RagdollLayer(void*) noexcept {return -1;}
 bool SetRagdollLayer(void*,int) noexcept {return false;}
-void WeakSet(WeakRef& w,const void* object) noexcept {w=WeakRef{const_cast<void*>(object),const_cast<void*>(object)};}
-void WeakReset(WeakRef& w) noexcept {w=WeakRef{};}
-bool WeakAlive(const WeakRef& w) noexcept {return w.object!=nullptr;}
 }
 int main(){
  using namespace fixture;using namespace crew;
@@ -99,6 +101,7 @@ int main(){
  Jump(kChildByName,reinterpret_cast<void*>(&fixture::Child));Jump(kChildCount,reinterpret_cast<void*>(&Count));Jump(kChildIndex,reinterpret_cast<void*>(&Index));Jump(kNodeFloat,reinterpret_cast<void*>(&Number));
  Jump(kGetTarget,reinterpret_cast<void*>(&fixture::Target));Jump(kBaseUpdate,reinterpret_cast<void*>(&Base));Jump(kMoveTo,reinterpret_cast<void*>(&Move));Jump(kFaceTarget,reinterpret_cast<void*>(&Face));Jump(kGunStart,reinterpret_cast<void*>(&Start));Jump(kNodeText,reinterpret_cast<void*>(&fixture::Text));
  const void* identity=&weak;std::memcpy(object+kSelfCtrl,&identity,8);object[kHasTargetAt]=1;
+ Own(shieldObject,shieldBlock);Own(ghostShield,ghostBlock);
  *reinterpret_cast<float*>(enemy+kPosAt)=50;*reinterpret_cast<float*>(object+kAxisXAt)=1;*reinterpret_cast<float*>(object+kAxisZAt+8)=1;
  void* guns[]={gun[0],nullptr,gun[1],nullptr};
  *reinterpret_cast<void***>(object+kGunsAt)=guns;*reinterpret_cast<std::uint64_t*>(object+kGunCountAt)=2;
@@ -133,7 +136,7 @@ int main(){
  active=true;GunStartHook(gun[1]);Check(starts==fired,"player-driven: the shield arm's gun still never starts");
  GunStartHook(gun[0]);Check(starts==fired+1,"player-driven: the other arm still fires");
  BaseUpdateHook(object,nullptr);BaseUpdateHook(object,nullptr);
- Check(created==1 && entry->weapon[1].object==shieldObject && entry->weapon[0].object==nullptr,"the weapon is asked for once, on its arm only, not every frame");
+ Check(created==1 && entry->weapon[1].obj==shieldObject && entry->weapon[0].obj==nullptr && shieldBlock.weaks==2,"the weapon is asked for once, on its arm only, not every frame");
  Check(reinterpret_cast<const float*>(shieldObject+edf41c::kMatrixAt)[12]==31,"the weapon object follows its arm bone's world matrix");
  Check(edf41c::modelMatrices==2 && edf41c::disabled==0 && weapons[shieldObject].layered,"its skeleton is rebuilt from that matrix every frame; a live shield keeps its ragdoll");
  object[kDestroyedAt]=1;BaseUpdateHook(object,nullptr);BaseUpdateHook(object,nullptr);
@@ -141,13 +144,13 @@ int main(){
  Check(reinterpret_cast<const float*>(shieldObject+edf41c::kMatrixAt)[12]==31 && edf41c::modelMatrices==4,"on the corpse it still follows the arm bone");
  object[kDestroyedAt]=0;
  fakeClock+=60000;BaseUpdateHook(object,nullptr);   // a pause of a minute: nothing ticked, the wall clock went on
- Check(Find(object)==entry && deleted==0 && created==1 && entry->weapon[1].object==shieldObject,"a long pause keeps the entry and its weapon (not deleted and made again)");
- table[ghost].seenAt=0;edf41c::WeakSet(table[ghost].weapon[0],ghostShield);table[recent].seenAt=0x7000;
+ Check(Find(object)==entry && deleted==0 && created==1 && entry->weapon[1].obj==shieldObject,"a long pause keeps the entry and its weapon (not deleted and made again)");
+ table[ghost].seenAt=0;table[ghost].weapon[0]=ObjRef::Of(ghostShield);table[recent].seenAt=0x7000;
  ticks=0x7FFF;Tick(object);   // the sweep: every kStaleTicks Hector ticks
- Check(table.count(ghost)==0 && deleted==1 && lastDeleted==ghostShield,"an entry not ticked for kStaleTicks Hector ticks is swept with its weapons");
- Check(table.count(recent)==1 && Find(object)==entry && entry->weapon[1].object==shieldObject,"entries ticked within kStaleTicks stay, the live one's weapon too");
+ Check(table.count(ghost)==0 && deleted==1 && lastDeleted==ghostShield && ghostBlock.weaks==1,"an entry not ticked for kStaleTicks Hector ticks is swept with its weapons");
+ Check(table.count(recent)==1 && Find(object)==entry && entry->weapon[1].obj==shieldObject,"entries ticked within kStaleTicks stay, the live one's weapon too");
  table.erase(recent);marked=false;Tick(object);
- Check(table.count(object)==0 && deleted==2 && lastDeleted==shieldObject,"a Hector that loses its marker drops its entry and deletes its weapons");
+ Check(table.count(object)==0 && deleted==2 && lastDeleted==shieldObject && shieldBlock.weaks==1,"a Hector that loses its marker drops its entry and deletes its weapons (and lets their weak counts go)");
  weapons.clear();
  table.clear();VirtualFree(image,0,MEM_RELEASE);image=nullptr;std::printf("PASS %d production Hector control-isolation checks\n",checks);
 }

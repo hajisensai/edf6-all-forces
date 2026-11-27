@@ -122,17 +122,12 @@ Owned owned[kOwnedLimit]{};
 unsigned epoch=0;
 
 void ReleaseWeak(Owned& entry) noexcept {
-    if(entry.ref.ctrl) {
-        auto* ctrl=const_cast<unsigned char*>(static_cast<const unsigned char*>(entry.ref.ctrl));
-        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(ctrl+0xC))==0)
-            reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(ctrl,0)[1])(ctrl);
-    }
+    objref::Release(entry.ref.ctrl);
     entry=Owned{};
 }
 // The retained weak block remains readable after the object has died; never dereference the object first.
 bool Live(const Owned& entry) noexcept {
-    return entry.ref.ctrl && At<LONG>(entry.ref.ctrl,8)>0 && entry.ref.Is(entry.ref.obj) &&
-        !(At<unsigned char>(entry.ref.obj,0x18)&4);
+    return objref::Exists(entry.ref);   // dead or not: a fallen soldier stays its entry's until it leaves the scene
 }
 Owned* FreeEntry() noexcept {
     for(auto& entry:owned) {
@@ -271,7 +266,7 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
             failure=SupportSpawnFailure::wrongClass;destroy(soldier);return false;
         }
         // Retain only the weak count. The scene manager owns the actual soldier, exactly as CreateFriend.
-        InterlockedIncrement(reinterpret_cast<volatile LONG*>(ctrl+0xC));
+        objref::Retain(ctrl);
         *entry=Owned{ObjRef::Of(soldier),epoch,true,carried.on};
         stage="team";
         team(soldier,2,true);
@@ -471,7 +466,7 @@ bool RegisterSupportObject(const void* object,const unsigned char* id) noexcept 
         auto* ctrl=At<unsigned char*>(object,kSelfCtrl);
         if(!mgr || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0)return false;
         ObjRef consumed=ObjRef::Of(object);
-        InterlockedIncrement(reinterpret_cast<volatile LONG*>(ctrl+0xC));
+        objref::Retain(ctrl);   // the weak handed to the registration (it is the game's to let go)
         const auto registered=registerObject(mgr,&consumed,id);
         const unsigned expected=OnlineHostOnly() ? 2u : 1u;
         return registered && Readable(registered,32) && std::memcmp(registered,id,20)==0 && std::memcmp(registered+24,id+24,8)==0 &&

@@ -30,6 +30,7 @@ enum class Shape : std::uint8_t {
     diamond,        // left, right, behind, ahead: an all-round march
     bounding,       // bounding overwatch: the halves leapfrog in a wedge
     perimeter,      // defence: a ring round the point, all round
+    follow,         // the default march: a loose cluster trailing the point (2026-11-27, appended: the ini values stay)
     count
 };
 constexpr int kShapes=static_cast<int>(Shape::count);
@@ -39,9 +40,11 @@ constexpr std::uint64_t kStuckMs=3000,kRestMs=6000;
 constexpr float kArrive=1.5f;              // m from its slot that is there
 constexpr float kHeadwayMin=0.5f;          // m nearer its slot within kStuckMs that is headway
 
-// The shapes a key cycles through: on the move all the marching ones; on a guard point the defensive ones (and the
-// marching shapes that make sense facing a threat: the line and the wedge).
-constexpr Shape kMarch[]={Shape::stock,Shape::column,Shape::staggered,Shape::wedge,Shape::vee,Shape::line,Shape::echelonLeft,
+// The shapes a key cycles through: on the move all the marching ones, the default follow first and the stock follow
+// next (the user, 2026-11-27: 「新的跟随逻辑设为默认」, the stock one kept as a choice); on a guard point the defensive
+// ones (and the marching shapes that make sense facing a threat: the line and the wedge).
+constexpr Shape kMarchDefault=Shape::follow;
+constexpr Shape kMarch[]={Shape::follow,Shape::stock,Shape::column,Shape::staggered,Shape::wedge,Shape::vee,Shape::line,Shape::echelonLeft,
                           Shape::echelonRight,Shape::diamond,Shape::bounding};
 constexpr Shape kGuard[]={Shape::stock,Shape::perimeter,Shape::line,Shape::wedge};
 template<int N> constexpr Shape NextOf(const Shape (&list)[N],Shape s) noexcept {
@@ -53,6 +56,8 @@ constexpr Shape Next(Shape s,bool guard) noexcept { return guard ? NextOf(kGuard
 constexpr bool GuardShape(Shape s) noexcept { for(Shape g:kGuard)if(g==s)return true; return false; }
 constexpr bool MarchShape(Shape s) noexcept { for(Shape g:kMarch)if(g==s)return true; return false; }
 constexpr Shape FromInt(int v) noexcept { return v>=0 && v<kShapes ? static_cast<Shape>(v) : Shape::stock; }
+// The march an ini value (NpcFormation) starts at: its shape when that is a march, else the default (kMarchDefault).
+constexpr Shape MarchFromInt(int v) noexcept { return MarchShape(FromInt(v)) && static_cast<int>(FromInt(v))==v ? FromInt(v) : kMarchDefault; }
 
 inline const char* Name(Shape s) noexcept {
     switch(s) {
@@ -66,6 +71,7 @@ inline const char* Name(Shape s) noexcept {
     case Shape::diamond: return "diamond";
     case Shape::bounding: return "bounding overwatch";
     case Shape::perimeter: return "perimeter";
+    case Shape::follow: return "follow";
     default: return "stock";
     }
 }
@@ -92,6 +98,20 @@ inline bool Offset(Shape s,int k,int n,float spacing,float* x,float* z) noexcept
         case 2: *x=0.0f;*z=-r;break;   // behind
         default: *x=0.0f;*z=r;break;   // ahead
         }
+        return true;
+    }
+    case Shape::follow: {
+        // A loose cluster behind the point, not a drill: rows of 1, 2, 3, 2, 3... (the first right behind; a row of
+        // three centre, left, right; of two left, right), each 0.8 x spacing farther back, the rows of two between
+        // the threes' places; each soldier nudged up to 0.06 x spacing by its place (a fixed pattern, so its slot
+        // does not wander), at least 0.7 x spacing from any other. The Keep logic below (lead, ease, re-send, catch
+        // up, the rest's scatter) is what makes it a follow.
+        int row=0,first=0,size=1;
+        while(k>=first+size){first+=size;++row;size=row%2 ? 2 : 3;}
+        const int col=k-first;
+        const float across=size==1 ? 0.0f : size==2 ? (col==0 ? -0.6f : 0.6f) : (col==0 ? 0.0f : col==1 ? -1.1f : 1.1f);
+        const float jx=0.02f*static_cast<float>((k*37)%7-3),jz=0.02f*static_cast<float>((k*53)%7-3);
+        *x=spacing*(across+jx);*z=-spacing*(0.9f+0.8f*static_cast<float>(row)+jz);
         return true;
     }
     case Shape::perimeter: {
@@ -152,9 +172,122 @@ inline bool GiveUp(Progress& p,float dist,std::uint64_t ms) noexcept {
     return false;
 }
 
-static_assert(Next(Shape::stock,false)==Shape::column && Next(Shape::bounding,false)==Shape::stock,"the march cycle");
+// --- Keeping up with the player (2026-11-26, the player: 「可以抄一下这个跟随的好的地方」, a follower mod's design, not its
+// code). What the march adds round its slots (npcai.cpp FormationMove):
+//  - the anchor's motion (Observe): its level velocity, sampled every kSampleMs and blended; a jump (a warp, boarding)
+//    past kJumpSpeed or a gap of over a second starts it over at rest;
+//  - the slots round where the anchor will be (Lead): kLeadSec of its velocity ahead, at most kLeadMost m, a quarter of
+//    that at a walk (kWalkSpeed and under), so they do not trail their slots by the walk's own lag;
+//  - the slot eased (Ease): it moves at most kGoalRate m/s plus kGoalCatch times the anchor's speed, so a heading that
+//    turns about swings the slots round instead of sending every soldier across at once; past kGoalSnap m it jumps;
+//  - the route's goal re-sent only once it moved kRegoal m and kRegoalMs went by since the last (at once past
+//    kRegoalFar): the route is not asked for again every frame the slot moves a little (the stop-start dashes);
+//  - the walk's least stick (EaseLeast): the anchor's speed's share of a full walk, more the farther behind it is, so a
+//    soldier keeps pace with a walking player instead of easing in to a stop behind its slot every few metres;
+//  - resting (Resting / Scatter): the anchor kept within kStillRadius m for kStillMs, the soldiers spread round it,
+//    the front left open (its line of fire); it moves off, they take their slots again;
+constexpr float kLeadSec=0.6f,kLeadMost=6.0f,kWalkSpeed=4.0f,kWalkLead=0.25f;
+constexpr float kJumpSpeed=60.0f,kVelBlend=0.3f;
+constexpr std::uint64_t kSampleMs=50,kSampleGap=1000;
+constexpr float kGoalRate=6.0f,kGoalCatch=1.5f,kGoalSnap=30.0f;
+constexpr float kRegoal=1.5f,kRegoalFar=6.0f;
+constexpr std::uint64_t kRegoalMs=500;
+constexpr float kFullWalk=6.0f,kCatchFrom=3.0f,kCatchBand=6.0f,kEaseFloor=0.3f;
+constexpr float kStillRadius=2.0f;
+constexpr std::uint64_t kStillMs=5000;
+constexpr float kOpenFront=1.0471976f;     // rad either side of the heading left open while resting (60 degrees)
+
+inline float Level2(const float* a,const float* b) noexcept {
+    const float dx=a[0]-b[0],dz=a[2]-b[2];
+    return std::sqrt(dx*dx+dz*dz);
+}
+
+struct Motion { float last[3]; float vel[2]; std::uint64_t at; bool set; };
+inline void Observe(Motion& m,const float* at,std::uint64_t ms) noexcept {
+    if(!m.set || ms<m.at){m=Motion{{at[0],at[1],at[2]},{0.0f,0.0f},ms,true};return;}
+    const std::uint64_t dt=ms-m.at;
+    if(dt<kSampleMs)return;
+    const float s=static_cast<float>(dt)*0.001f;
+    const float vx=(at[0]-m.last[0])/s,vz=(at[2]-m.last[2])/s;
+    if(dt>kSampleGap || !std::isfinite(vx) || !std::isfinite(vz) || vx*vx+vz*vz>kJumpSpeed*kJumpSpeed){m.vel[0]=m.vel[1]=0.0f;}
+    else{m.vel[0]+=(vx-m.vel[0])*kVelBlend;m.vel[1]+=(vz-m.vel[1])*kVelBlend;}
+    m.last[0]=at[0];m.last[1]=at[1];m.last[2]=at[2];m.at=ms;
+}
+inline float SpeedOf(const Motion& m) noexcept { return m.set ? std::sqrt(m.vel[0]*m.vel[0]+m.vel[1]*m.vel[1]) : 0.0f; }
+inline void Lead(const Motion& m,const float* at,float* out) noexcept {
+    const float v=SpeedOf(m);
+    float dx=0.0f,dz=0.0f;
+    if(v>1e-3f) {
+        const float ahead=v*kLeadSec*(v<=kWalkSpeed ? kWalkLead : 1.0f);
+        const float l=ahead<kLeadMost ? ahead : kLeadMost;
+        dx=m.vel[0]/v*l;dz=m.vel[1]/v*l;
+    }
+    out[0]=at[0]+dx;out[1]=at[1];out[2]=at[2]+dz;
+}
+
+struct Goal { float at[3]; std::uint64_t ms; bool set; };
+inline void Ease(Goal& g,const float* target,float anchorSpeed,std::uint64_t ms) noexcept {
+    const float d=g.set ? Level2(g.at,target) : 0.0f;
+    if(!g.set || ms<g.ms || ms-g.ms>kSampleGap || !(d<=kGoalSnap)) {
+        g.at[0]=target[0];g.at[1]=target[1];g.at[2]=target[2];g.ms=ms;g.set=true;
+        return;
+    }
+    const float step=(kGoalRate+kGoalCatch*(anchorSpeed>0.0f ? anchorSpeed : 0.0f))*static_cast<float>(ms-g.ms)*0.001f;
+    const float t=d>step ? step/d : 1.0f;
+    g.at[0]+=(target[0]-g.at[0])*t;g.at[2]+=(target[2]-g.at[2])*t;g.at[1]=target[1];
+    g.ms=ms;
+}
+
+struct Sent { float at[3]; std::uint64_t ms; bool set; };
+inline bool Resend(Sent& s,const float* goal,std::uint64_t ms) noexcept {
+    const float d=s.set ? Level2(s.at,goal) : 0.0f;
+    if(s.set && ms>=s.ms && !(d>=kRegoalFar) && !(d>=kRegoal && ms-s.ms>=kRegoalMs))return false;
+    s.at[0]=goal[0];s.at[1]=goal[1];s.at[2]=goal[2];s.ms=ms;s.set=true;
+    return true;
+}
+
+inline float EaseLeast(float anchorSpeed,float dist) noexcept {
+    const float v=kEaseFloor+(anchorSpeed>0.0f ? anchorSpeed/kFullWalk : 0.0f)+(dist>kCatchFrom ? (dist-kCatchFrom)/kCatchBand : 0.0f);
+    return v<kEaseFloor ? kEaseFloor : v>1.0f ? 1.0f : v;
+}
+
+struct Rest { float at[3]; std::uint64_t since; bool set; };
+inline bool Resting(Rest& r,const float* anchor,std::uint64_t ms) noexcept {
+    if(!r.set || ms<r.since || !(Level2(anchor,r.at)<=kStillRadius)) {
+        r.at[0]=anchor[0];r.at[1]=anchor[1];r.at[2]=anchor[2];r.since=ms;r.set=true;
+        return false;
+    }
+    return ms-r.since>=kStillMs;
+}
+// Soldier k's place round a resting anchor (x right, z forward of its heading): rings `spacing` apart outwards, each
+// filled round the back, kOpenFront either side of the heading left open; at least `spacing` between neighbours.
+inline bool Scatter(int k,float spacing,float* x,float* z) noexcept {
+    if(k<0 || !(spacing>0.0f))return false;
+    const float arc=2.0f*3.14159265f-2.0f*kOpenFront;
+    int first=0;
+    for(int ring=0;;++ring) {
+        const float r=spacing*static_cast<float>(ring+1);
+        int room=static_cast<int>(arc*r/spacing);
+        if(room<1)room=1;
+        if(k<first+room) {
+            const float a=kOpenFront+arc*(static_cast<float>(k-first)+0.5f)/static_cast<float>(room);
+            *x=r*std::sin(a);*z=r*std::cos(a);
+            return true;
+        }
+        first+=room;
+    }
+}
+
+// A soldier's own keeping up: its eased slot, the goal its route was last given.
+struct Keep { Goal goal; Sent sent; };
+
+static_assert(Next(Shape::follow,false)==Shape::stock && Next(Shape::stock,false)==Shape::column &&
+              Next(Shape::bounding,false)==Shape::follow,"the march cycle: the default follow first, the stock follow next");
+static_assert(MarchFromInt(static_cast<int>(Shape::follow))==Shape::follow && MarchFromInt(0)==Shape::stock &&
+              MarchFromInt(static_cast<int>(Shape::perimeter))==kMarchDefault && MarchFromInt(-1)==kMarchDefault,"the ini's march");
 static_assert(Next(Shape::stock,true)==Shape::perimeter && Next(Shape::wedge,true)==Shape::stock,"the guard cycle");
-static_assert(Next(Shape::perimeter,false)==Shape::stock && Next(Shape::column,true)==Shape::stock,"a shape of the other list starts over");
-static_assert(GuardShape(Shape::perimeter) && !MarchShape(Shape::perimeter) && !GuardShape(Shape::column),"the lists");
+static_assert(Next(Shape::perimeter,false)==Shape::follow && Next(Shape::column,true)==Shape::stock,"a shape of the other list starts over");
+static_assert(GuardShape(Shape::perimeter) && !MarchShape(Shape::perimeter) && !GuardShape(Shape::column) &&
+              MarchShape(Shape::follow) && !GuardShape(Shape::follow),"the lists");
 }  // namespace formation
 }  // namespace npc

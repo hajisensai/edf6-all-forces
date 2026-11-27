@@ -11,22 +11,6 @@
 
 namespace crew {
 namespace {
-// Overwrite `size` code bytes at image+rva with `value`, after the `expect` bytes at image+checkRva
-// (covering the patched bytes) still read as the stock code. False and untouched otherwise.
-bool PatchCode(std::size_t checkRva,const unsigned char* expect,std::size_t expectSize,
-               std::size_t rva,const unsigned char* value,std::size_t size) noexcept {
-    if(rva<checkRva || rva+size>checkRva+expectSize)return false;
-    if(!Matches(checkRva,expect,expectSize))return false;
-    unsigned char* at=image+rva;
-    edf::ClaimCode(at,size);   // a code write of its own (edf/code_owner.h)
-    DWORD old=0;
-    if(!VirtualProtect(at,size,PAGE_EXECUTE_READWRITE,&old))return false;
-    std::memcpy(at,value,size);
-    edf::RestoreProtection(at,size,old);
-    FlushInstructionCache(GetCurrentProcess(),at,size);
-    return true;
-}
-
 // The helicopter body build (0x656E90, called from 0x64E9B6 / 0x650AA6) sets the
 // hknp body quality to CHARACTER (10): `mov byte [rbp+0x86],0x0A` at 0x6571AD. NOT the car/tank chassis:
 // CarBase/TankBase take [veh+0x1698] from the model's physics data (car_base_body_name, 0x663A70), so
@@ -39,10 +23,11 @@ constexpr std::size_t kChassisQualityAt=0x6571AD;
 constexpr unsigned char kChassisQualityCode[]={0xC6,0x85,0x86,0x00,0x00,0x00,0x0A};
 constexpr unsigned char kQualityVehicle=0x09;
 
+// The whole instruction checked, its immediate (the last byte) written.
 bool WeldVehicleChassis() noexcept {
-    const std::size_t immediate=kChassisQualityAt+sizeof(kChassisQualityCode)-1;
-    return PatchCode(kChassisQualityAt,kChassisQualityCode,sizeof(kChassisQualityCode),
-                     immediate,&kQualityVehicle,1);
+    constexpr std::size_t kImmediate=sizeof(kChassisQualityCode)-1;
+    return Matches(kChassisQualityAt,kChassisQualityCode,sizeof(kChassisQualityCode)) &&
+           edf::PatchCode(image+kChassisQualityAt+kImmediate,kChassisQualityCode+kImmediate,&kQualityVehicle,1);
 }
 
 // Character proxy vertical contacts (0x11DDFD0, rdi = character, rbx = contact point): the constraint
@@ -62,6 +47,8 @@ constexpr unsigned char kVerticalContactCode[]={0x80,0x7B,0x30,0x01,0x8B,0x43,0x
                                                 0x0F,0x10,0x05,0x5F,0x94,0x66,0x00,0x89};
 constexpr std::size_t kMaxImpulseLoadAt=0x11DE049;  // movss xmm0,[HK_REAL_HIGH], 8 bytes
 constexpr std::size_t kMaxImpulseResumeAt=0x11DE051;
+static_assert(kMaxImpulseLoadAt>=kVerticalContactAt && kMaxImpulseResumeAt<=kVerticalContactAt+sizeof(kVerticalContactCode),
+              "the patched load lies in the checked bytes");
 constexpr std::size_t kBodyStride=0xB0;
 constexpr std::uint32_t kBodyFlagsMotionMask=7;  // STATIC=1 DYNAMIC=2 KEYFRAMED=4
 constexpr std::uint32_t kBodyFlagDynamic=2;
@@ -139,11 +126,9 @@ bool CapGiantContact() noexcept {
         VirtualFree(cave,0,MEM_RELEASE);
         return false;
     }
-    const auto rel=static_cast<std::int32_t>(static_cast<unsigned char*>(cave)-(image+kMaxImpulseLoadAt+5));
-    unsigned char jump[8]={0xE9,0,0,0,0,0x90,0x90,0x90};
-    std::memcpy(jump+1,&rel,sizeof(rel));
-    if(PatchCode(kVerticalContactAt,kVerticalContactCode,sizeof(kVerticalContactCode),
-                 kMaxImpulseLoadAt,jump,sizeof(jump)))return true;
+    // The load (8 bytes) becomes a jump to the cave, which jumps back to kMaxImpulseResumeAt itself.
+    if(edf::RedirectToThunk(image+kMaxImpulseLoadAt,kVerticalContactCode+(kMaxImpulseLoadAt-kVerticalContactAt),
+                            kMaxImpulseResumeAt-kMaxImpulseLoadAt,cave,edf::Branch::kJump))return true;
     // The dt hook alone is harmless; leave it, but the unreached cave can go.
     VirtualFree(cave,0,MEM_RELEASE);
     return false;

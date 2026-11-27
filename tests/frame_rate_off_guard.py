@@ -10,6 +10,9 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import gen_config  # noqa: E402
+
 checks = 0
 
 
@@ -22,7 +25,8 @@ def check(ok: object, why: str) -> None:
 
 
 def read(*parts: str) -> str:
-    return open(os.path.join(ROOT, *parts), encoding='utf-8').read()
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    return gen_config.expand(open(os.path.join(ROOT, *parts), encoding='utf-8').read())
 
 
 def code(text: str) -> str:
@@ -87,6 +91,8 @@ check(callers['InstallInputMove()'] == ['frame_rate.cpp'], f"InstallInputMove on
 check(set(callers['SwapFlipUseWaitable(']) <= {'frame_rate.cpp', 'swap_flip.cpp', 'swap_flip.h'}, 'the waitable object only with the frame gate')
 check(re.search(r'if\(gateOn && flip && c\.maxFrameLatency>0\)SwapFlipUseWaitable\(', body), 'the waitable object only with the gate on')
 check(re.search(r'viewOn=framerateview::Install\(\);\s*gateOn=viewOn && InstallGate\(\);', body), 'no interpolation, no gate (#394 review b)')
-plugin = code(read('src', 'plugin.cpp'))
-check(plugin.count('InstallFrameRate();') == 1, 'plugin.cpp installs the frame rate once')
+installs = code(read('src', 'module_table.h'))
+installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+installs = installs[:installs.index('\n};')]
+check(installs.count('&Install<&InstallFrameRate>}') == 1, 'the load installs the frame rate once (module_table.h kInstalls)')
 print(f'frame rate off switch: {checks} checks ok')

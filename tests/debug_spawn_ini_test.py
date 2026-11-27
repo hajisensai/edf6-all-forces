@@ -10,6 +10,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.join(ROOT, p) for p in ('tools', 'pylib', 'testrange')]
+import gen_config  # noqa: E402
 import installer  # noqa: E402
 
 checks = 0
@@ -24,8 +25,9 @@ def check(ok: bool, why: str) -> None:
 
 
 def read(rel: str) -> str:
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(ROOT, rel), encoding='utf-8-sig') as f:
-        return f.read()
+        return gen_config.expand(f.read())
 
 
 def values(text: str) -> dict[str, str]:

@@ -565,7 +565,7 @@ void SetGenerator(Part& p,const GenCfg& g) noexcept {
     if(g.type==0) {
         gen.hasPersist=true;
         gen.persist=g;
-        for(WeakRef& w:gen.slots)WeakReset(w);
+        for(WeakRef& w:gen.slots)w.Reset();
         gen.slots.assign(static_cast<std::size_t>(g.count),WeakRef{});
     }
     if(g.type!=0 || !gen.active || gen.cur.type==0) {
@@ -629,7 +629,7 @@ bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
         DeleteObject(o);return false; // never activated, inserted into a live weak slot, or published as a native spawn
     }
     if(g.flag)Activate(o);
-    if(slot)WeakSet(*slot,o);
+    if(slot)*slot=ObjRef::Of(o);
     NetSpawn(p,o);   // online: the game's child identity, bound to the same enemy on every machine (edf41net)
     SendSpawnMessage(o,0x20102,eject);
     if(said.load()<=40)Log("EDF41M401 %s %p: enemy #%d gets 0x20102 (%.2f %.2f %.2f %.2f)%s",KindName(p.kind),p.obj,p.gen.made,eject[0],eject[1],eject[2],eject[3],
@@ -642,9 +642,9 @@ bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
 void Encount(Part& p) noexcept {
     int woken=0;
     for(WeakRef& w:p.gen.slots)
-        if(WeakAlive(w) && Readable(static_cast<char*>(w.object)+0x4A0,1) && !static_cast<const char*>(w.object)[0x4A0]) { Activate(w.object); ++woken; }
+        if(objref::Exists(w) && Readable(w.Obj()+0x4A0,1) && !w.Obj()[0x4A0]) { Activate(w.Obj()); ++woken; }
     int tracked=0;
-    for(const WeakRef& w:p.gen.slots)tracked+=WeakAlive(w) ? 1 : 0;
+    for(const WeakRef& w:p.gen.slots)tracked+=objref::Exists(w) ? 1 : 0;
     static std::atomic<int> said{0};
     if((woken || said.load()<4) && said.fetch_add(1)<16)Log("EDF41M401 %s %p is hit: %d of its %d live enemies notice",KindName(p.kind),p.obj,woken,tracked);
 }
@@ -655,7 +655,7 @@ void RunGenerator(Part& p) noexcept {
     if(p.control.Active() && !p.controlledWave)return;
     if(DevBits()&64)   // development: the wave's enemies are shot too (the refill of dead slots, Edf41DevShoot)
         for(std::size_t i=0;i<g.slots.size();++i)
-            if(float aim[3]; WeakAlive(g.slots[i]) && AimPoint(g.slots[i].object,aim))DevShoot(g.slots[i].object,aim,static_cast<unsigned>(i)+2);
+            if(float aim[3]; objref::Exists(g.slots[i]) && AimPoint(g.slots[i].Obj(),aim))DevShoot(g.slots[i].Obj(),aim,static_cast<unsigned>(i)+2);
     if(!g.active || (g.cur.type==0 && g.persist.count==0))return;
     if(g.delay>0) { --g.delay; return; }
     if(g.interval>0) { --g.interval; return; }
@@ -664,7 +664,7 @@ void RunGenerator(Part& p) noexcept {
         --g.remaining;
         if(g.cur.type==0) {
             WeakRef* s=g.remaining<static_cast<int>(g.slots.size()) ? &g.slots[static_cast<std::size_t>(g.remaining)] : nullptr;
-            if(!s || !WeakAlive(*s))SpawnOne(p,g.cur,s);
+            if(!s || !objref::Exists(*s))SpawnOne(p,g.cur,s);
         } else SpawnOne(p,g.cur,nullptr);
         g.interval=g.cur.interval;
     }
@@ -1376,7 +1376,7 @@ void Forget(const void* self) noexcept {
     StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);
     MaterialAnimsFree(p.mat);   // before the model it is bound to goes
     GlowsBury(p);
-    for(WeakRef& w:p.gen.slots)WeakReset(w);
+    for(WeakRef& w:p.gen.slots)w.Reset();
     NetForget(p);   // online (edf41net)
     byId.erase(p.id);
     byObj.erase(it);
@@ -1882,7 +1882,7 @@ template<Kind K> void CreatePart(void* info) noexcept {
     void* obj=CloneObject(partClone,kEaoCtor,kEaoSize,info);
     if(!obj)return;
     Register(obj,K);
-    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
+    edf41net::Install();   // online: its class's NetworkObject takes the host's events (edf41net, object_net)
     if(++partsMade<=3)Log("EDF41M401 create %s %p",KindName(K),obj);
 }
 

@@ -437,7 +437,7 @@ void __fastcall PassengerBlastDamage(void* damage,const void* target,void* info)
     __try {
         const auto targetCtrl=At<const unsigned char*>(target,8);
         const void* object=At<const void*>(target,0);
-        if(targetCtrl && At<int>(targetCtrl,8)>0 && object && At<const void*>(object,kSelfCtrl)==targetCtrl)
+        if(objref::Identity(ObjRef{object,targetCtrl})>=objref::Life::removed)
             pass=SidecarBulletPass(At<const void*>(info,0x10),object,At<const void*>(info,0x18));
     } __except(EXCEPTION_EXECUTE_HANDLER) { pass=false; }
     if(!pass)reinterpret_cast<DamageFn>(image+kDamage)(damage,target,info);

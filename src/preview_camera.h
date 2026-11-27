@@ -40,6 +40,56 @@ struct ModelFrame { float size=1.8f,centreY=0.9f; };
 // 16-byte aligned: SetWorldMatrix copies it with movaps (0x1100B90, H).
 struct alignas(16) Matrix4 { float m[4][4]{}; };
 
+// 自由 turned by hand (the viewport dragged, the wheel over it, the right stick): the free preset until it is first
+// moved, then an absolute camera (followStand off: the stand's own turn, a vehicle's turntable, no longer moves it) that
+// starts where the free one looked (`standYaw`: the yaw the view drew the model with, YawOf) so nothing jumps. Kept
+// while another preset is chosen: back on 自由, the view the player left.
+inline constexpr float kLookPitchMin=-0.35f,kLookPitchMax=1.35f;      // from a little below to almost straight down
+inline constexpr float kLookDistanceMin=0.45f,kLookDistanceMax=2.2f;
+inline constexpr float kLookRadPerUnit=0.008f;   // a drag: radians a design unit (the viewport's width ~ 5 radians)
+inline constexpr float kLookStickRad=2.4f;       // the stick full over: radians a second
+inline constexpr float kLookZoomStep=0.88f;      // a wheel notch away from the user: this much closer
+struct FreeLook {
+    float yaw=0.f,pitch=0.f,distance=1.f;
+    bool moved=false;
+};
+// The yaw of a model matrix Place built (its column 0 is (cos yaw, 0, sin yaw): Rx leaves it as Ry made it).
+inline float YawOf(const Matrix4& m) noexcept { return std::atan2(m.m[2][0],m.m[0][0]); }
+inline ViewCamera CameraOf(const FreeLook& l) noexcept {
+    const ViewCamera& free=kCameraPresets[0];
+    return l.moved ? ViewCamera{l.yaw,l.pitch,l.distance,free.lift,false} : free;
+}
+namespace detail {
+inline void StartLook(FreeLook* l,float standYaw) noexcept {
+    if(l->moved)return;
+    const ViewCamera& free=kCameraPresets[0];
+    l->yaw=standYaw+free.yaw;l->pitch=free.pitch;l->distance=free.distance;l->moved=true;
+}
+inline float WrapAngle(float a) noexcept {
+    constexpr float kPi=3.14159265f;
+    while(a>kPi)a-=2*kPi;
+    while(a<-kPi)a+=2*kPi;
+    return a;
+}
+}  // namespace detail
+// Turned by `dYaw` / `dPitch` radians (pitch > 0: more from above), the pitch held in its range.
+inline void Turn(FreeLook* l,float dYaw,float dPitch,float standYaw) noexcept {
+    if(!l || (dYaw==0.f && dPitch==0.f))return;
+    detail::StartLook(l,standYaw);
+    l->yaw=detail::WrapAngle(l->yaw+dYaw);
+    const float p=l->pitch+dPitch;
+    l->pitch=p<kLookPitchMin ? kLookPitchMin : p>kLookPitchMax ? kLookPitchMax : p;
+}
+// `notches` of the wheel (+ away from the user: closer), the distance held in its range.
+inline void Zoom(FreeLook* l,int notches,float standYaw) noexcept {
+    if(!l || !notches)return;
+    detail::StartLook(l,standYaw);
+    float d=l->distance;
+    for(int i=0;i<notches && i<20;++i)d*=kLookZoomStep;
+    for(int i=0;i<-notches && i<20;++i)d/=kLookZoomStep;
+    l->distance=d<kLookDistanceMin ? kLookDistanceMin : d>kLookDistanceMax ? kLookDistanceMax : d;
+}
+
 // The rect's centre in NDC (x right, y up) on a screen of the given aspect (width / height). The design space is
 // stretched over the whole screen, as the UI is.
 struct Ndc { float x=0,y=0; };

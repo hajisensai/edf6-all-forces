@@ -3,10 +3,11 @@
   python tools/check.py [--full | --dry-run] [--base REV] [-j N] [--no-build] [--no-ctest] [--no-selftest] [--no-gen]
                         [--normal-priority]
 
-  build.cmd + offline_checks, then side by side: ctest, tools/selftest.py, py_compile and the generated files' checks.
-  -j N: the processes the tests take in all (default: one a logical core), shared between ctest and selftest.
+  build.cmd + offline_checks in one of the machine's build slots, then one pool (pylib/testpool.py) of ctest's tests,
+  tools/selftest.py's tests and the generated files' checks, the longest first, each in one of the machine's core slots.
+  -j N: the tests at once (default: one a logical core); selftest's take at most SELFTEST_WORKERS of them.
   ctest and selftest run only the tests this branch's changes reach (tools/test_domains.py select_files), chosen once
-  the slot is held and the build is done: the files changed since the merge-base with origin/main, uncommitted and
+  the build is done: the files changed since the merge-base with origin/main, uncommitted and
   untracked ones included, against each test's own dependencies (the Python it imports or runs, the files it reads,
   and for a C++ test the sources its exe compiled, from ninja's records). A CMakeLists.txt change selects the tests and
   targets the changed commands name; one it cannot place (flags, if(), a foreach body), a change to cmake/, build.cmd,
@@ -20,10 +21,13 @@
 Why (the maintainer, 2026-11-10: 「太慢了 ... 特别吃性能，电脑很卡」):
 - Below-normal priority (Windows): this process and everything it starts (the compiler, ctest, every test, selftest's
   workers inherit it), so the desktop, the game and the editor keep the cores whenever they want them.
-- One full check on this machine at a time (pylib/checklock.py): every worktree's session ran its own
-  ctest -j 8 + selftest -j 8 at once, 16 cores asked for 32+ processes and each run took twice as long.
-- ctest and selftest side by side instead of one after the other: selftest's wall time is its longest test, most of
-  its workers idle at its end, while ctest still had work queued; together they keep the cores busy till both end.
+- No more tests at once on the machine than it has cores (pylib/checklock.py core slots, one a test, shared test by
+  test by every check and selftest.py): every worktree's session ran its own ctest -j 8 + selftest -j 8 at once, 16
+  cores asked for 32+ processes and each run took 3-7 times as long. 2026-11-26 (「太慢了，特别是并发」): one whole
+  check at a time made the second session wait for the first's build and its last long test; now two builds at once
+  (build slots) and the sessions' tests share the cores, a waiting slot wakes on its release (a kernel wait, no poll).
+- ctest's and selftest's tests in one pool, the longest first: two pools side by side each ended on its own longest
+  tests with the other's cores idle; one pool keeps the cores busy till the end.
 - Only the tests a change can affect (2026-11-24: 「类似的测试优化都要做。太慢了，性能浪费很严重」): a src/-only branch
   built every model for 10+ minutes in ctest and selftest. 2026-11-26 (「check.py 太长了 ... 十分钟太浪费时间了」):
   by domain, any pylib/ or tools/ change still selected ~all of both and CMakeLists.txt / common/ ran everything in
@@ -39,7 +43,6 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,12 +52,14 @@ import checklock  # noqa: E402
 import gamedir  # noqa: E402
 import heartbeat  # noqa: E402
 import test_domains  # noqa: E402  (tools/, this script's folder)
+import testpool  # noqa: E402
 
 BUSY = 3   # exit code: this worktree's check is already queued or running
 
 # (a generator's command line, the files it rewrites that must then be unchanged in git; None: it checks itself)
 GENERATED = [
-    (['tools/gen_calls.py'], ['src/calls.inc']),
+    (['tools/gen_calls.py'], ['src/calls.inc', 'src/sortie_pass.inc', 'src/barrage_kind.inc']),
+    (['tools/gen_config.py', '--check'], None),
     (['tools/gen_stores.py'], ['src/stores.inc']),
     (['tools/gen_cockpit_fields.py', '--check'], None),
     (['tools/gen_spawn_catalog.py', '--check'], None),
@@ -217,17 +222,6 @@ def say_plan(sel: dict) -> None:
     sys.stdout.flush()
 
 
-def skip_file(sel: dict, part: str) -> str | None:
-    """The file naming the tests of `part` no change selects; None: all run."""
-    if sel['full']:
-        return None
-    path = os.path.join(BUILD, f'check-{part}-skip.txt')
-    chosen = set(sel[part])
-    with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(''.join(f'{n}\n' for n in sel['deps'][part] if n not in chosen))
-    return path
-
-
 def run(cmd: list[str] | str, log: str, env: dict | None = None, shell: bool = False) -> tuple[int, float]:
     started = time.perf_counter()
     with open(log, 'w', encoding='utf-8', errors='replace') as out:
@@ -288,7 +282,11 @@ def gen_checks(log: str, sel: dict) -> tuple[int, float]:
 
 
 def main(argv: list[str]) -> int:
-    known = {'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run', '--base'}
+    # Redirected into a file on a GBK console, a log's stray U+FFFD crashed the report itself: never die printing.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(errors='replace')
+    known ={'-j', '--no-build', '--no-ctest', '--no-selftest', '--no-gen', '--normal-priority', '--full', '--dry-run', '--base'}
     if any(a.startswith('-') and a not in known for a in argv):
         print(__doc__)
         return 0 if {'-h', '--help'} & set(argv) else 2
@@ -329,14 +327,34 @@ def busy_text(who: dict) -> str:
             f'之后的改动等它结束再跑一次（exit {BUSY}）')
 
 
-@contextlib.contextmanager
-def slot():
-    """The machine's check slot: the seconds queued. The tests are chosen once it is held and the build is done
-    (_main: plan), from the changes on disk then: the queue can take tens of minutes, and the choice reads the code
-    and the build as they are when the tests run."""
-    started = time.perf_counter()
-    with checklock.held(f'tools/check.py ({os.path.basename(ROOT)})'):
-        yield time.perf_counter() - started
+SELFTEST_WORKERS = 8   # selftest's worker processes at most (each holds what its tests read of the game's data)
+
+
+def test_jobs(argv: list[str], sel: dict, logs: dict[str, str], env: dict,
+              workers: testpool.SelftestWorkers | None) -> list[testpool.Job]:
+    """The chosen tests of ctest and selftest and the generated files' checks, as one pool's jobs."""
+    jobs: list[testpool.Job] = []
+    costs = testpool._load(GEN_COST)
+    if '--no-ctest' not in argv and (sel['full'] or sel['ctest']):
+        tests = testpool.ctest_tests(BUILD)
+        jobs += testpool.ctest_jobs(tests, None if sel['full'] else set(sel['ctest']), testpool.ctest_costs(BUILD),
+                                    env, BUILD)
+    if workers is not None:
+        # every test selftest.py has but those no change selects: a new test the selection does not know yet runs
+        names = workers.names()
+        skip = set() if sel['full'] else set(sel['deps']['selftest']) - set(sel['selftest'])
+        st_costs = testpool._load(SELFTEST_COST)
+        jobs += [workers.job(n, st_costs.get(n, testpool.UNKNOWN_COST)) for n in names if n not in skip]
+    if '--no-gen' not in argv:
+        def gen() -> tuple[str, str]:
+            code, _ = gen_checks(logs['gen'], sel)
+            return (testpool.FAILED if code else testpool.PASSED), ''
+        jobs.append(testpool.Job('gen', 'gen', costs.get('gen', testpool.UNKNOWN_COST), gen))
+    return jobs
+
+
+GEN_COST = os.path.join(BUILD, 'check-gen-cost.json')
+SELFTEST_COST = os.path.join(BUILD, 'selftest-cost.json')   # tools/selftest.py's COST_FILE
 
 
 def _main(argv: list[str], jobs: int) -> int:
@@ -345,55 +363,49 @@ def _main(argv: list[str], jobs: int) -> int:
     os.makedirs(BUILD, exist_ok=True)
     results: dict[str, tuple[int, float]] = {}
     logs = {k: os.path.join(BUILD, f'check-{k}.log') for k in ('build', 'ctest', 'selftest', 'gen')}
-    # the parts' output goes to their logs: a line every few minutes for whoever watches this run (pylib/heartbeat.py),
-    # from when the slot is ours (checklock says its own while waiting)
-    with slot() as waited, heartbeat.beating('check.py', lambda: heartbeat.parts_progress(results, logs)):
-        for log in logs.values():   # a part's log is this run's from its start on: parts_progress() never reads a stale one
-            with contextlib.suppress(OSError):
-                os.remove(log)
-        # taken inside the lock: it carries checklock.HELD, so selftest.py under this check does not wait for it
-        env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
-        started = time.perf_counter()   # the queue is not the check's time
-        print(f'check.py: {ROOT}, {jobs} processes, below-normal priority (waited {waited:.0f} s for the single '
-              f'check slot); logs build/check-*.log', flush=True)
+    for log in logs.values():   # a part's log is this run's from its start on: parts_progress() never reads a stale one
+        with contextlib.suppress(OSError):
+            os.remove(log)
+    env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
+    started = time.perf_counter()
+    label = f'tools/check.py ({os.path.basename(ROOT)})'
+    # the parts' output goes to their logs: a line every few minutes for whoever watches this run (pylib/heartbeat.py)
+    with heartbeat.beating('check.py', lambda: heartbeat.parts_progress(results, logs)):
+        print(f'check.py: {ROOT}, {jobs} processes, below-normal priority; logs build/check-*.log', flush=True)
         defines, game = game_defines()
         print(f'check.py: native audits {"read " + game if game else "skip (no game found)"}', flush=True)
         if '--no-build' not in argv:
             cmd = f'call "{os.path.join(ROOT, "build.cmd")}" {" ".join(defines)} && call "{os.path.join(ROOT, "tools", "msvc-x64-env.cmd")}" ' \
                   f'&& cmake --build "{BUILD}" --target offline_checks'
-            results['build'] = run(cmd, logs['build'], env, shell=True)
-            print(f"build: {'ok' if not results['build'][0] else 'FAIL'} ({results['build'][1]:.0f} s)", flush=True)
+            with checklock.build_slot(label) as waited:   # BUILDS at once on the machine, apart from the tests
+                results['build'] = run(cmd, logs['build'], env, shell=True)
+            print(f"build: {'ok' if not results['build'][0] else 'FAIL'} ({results['build'][1]:.0f} s"
+                  f"{f', waited {waited:.0f} s for a build slot' if waited >= 1 else ''})", flush=True)
             if results['build'][0]:
                 print(tail(logs['build']))
                 return 1
         # chosen now: the code on disk and the build the tests will run
         sel = plan(argv)
         say_plan(sel)
-        # selftest's wall time is its longest test: half the processes keep it there, ctest takes the rest and the
-        # cores selftest's workers leave when they run out of tests.
-        st_jobs = max(1, min(8, jobs // 2))
-        parts = []
-        if '--no-ctest' not in argv and (sel['full'] or sel['ctest']):
-            ct_skip = skip_file(sel, 'ctest')
-            parts.append(('ctest', lambda: run(['ctest', '--test-dir', BUILD, '--output-on-failure',
-                                                '-j', str(max(1, jobs - st_jobs)),
-                                                *(['--exclude-from-file', ct_skip] if ct_skip else [])],
-                                               logs['ctest'], env)))
+        workers = None
         if '--no-selftest' not in argv and (sel['full'] or sel['selftest']):
-            st_skip = skip_file(sel, 'selftest')
-            parts.append(('selftest', lambda: run([sys.executable, 'tools/selftest.py', '-j', str(st_jobs),
-                                                   *(['--skip', st_skip] if st_skip else [])], logs['selftest'], env)))
-        if '--no-gen' not in argv:
-            parts.append(('gen', lambda: gen_checks(logs['gen'], sel)))
-
-        def go(name, fn):
-            results[name] = fn()
-            print(f"{name}: {'ok' if not results[name][0] else 'FAIL'} ({results[name][1]:.0f} s)", flush=True)
-        threads = [threading.Thread(target=go, args=p) for p in parts]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+            workers = testpool.SelftestWorkers(min(SELFTEST_WORKERS, jobs))
+        with checklock.running(label) as others:
+            if others:
+                print(f'check.py: sharing the cores ({checklock.cores()} slots, one a test) with '
+                      f'{checklock.say_others(others)}', flush=True)
+            env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}   # HELD now: what a test starts waits for no slot
+            try:
+                pool = test_jobs(argv, sel, logs, env, workers)
+                out = run_pool(pool, jobs, logs, workers)
+            finally:
+                if workers is not None:
+                    workers.close()
+        parts = testpool.parts(pool, out)
+        for name in ('ctest', 'selftest', 'gen'):
+            if name in parts:
+                results[name] = parts[name]
+                print(f"{name}: {'ok' if not parts[name][0] else 'FAIL'} ({parts[name][1]:.0f} s)", flush=True)
     failed = [k for k, (code, _) in results.items() if code]
     if 'ctest' in results:
         native = native_tests()
@@ -415,6 +427,53 @@ def _main(argv: list[str], jobs: int) -> int:
         print(tail(logs[k]))
     print(f"check.py: {'FAIL ' + ', '.join(failed) if failed else 'all passed'} in {time.perf_counter() - started:.0f} s")
     return 1 if failed else 0
+
+
+def run_pool(pool: list[testpool.Job], jobs: int, logs: dict[str, str],
+             workers: testpool.SelftestWorkers | None) -> dict[str, testpool.Result]:
+    """The jobs in one pool, `jobs` at once, each in one of the machine's core slots; ctest's and selftest's lines
+    and the failures' output into their logs as each ends, and each test's seconds into its part's cost record."""
+    n = {part: sum(j.part == part for j in pool) for part in ('ctest', 'selftest')}
+    count = {'ctest': 0, 'selftest': 0}
+    files = {part: open(logs[part], 'w', encoding='utf-8', errors='replace', newline='\n')
+             for part in ('ctest', 'selftest') if n[part]}
+    started = time.perf_counter()
+
+    def done(j: testpool.Job, r: testpool.Result) -> None:
+        if j.part not in files:
+            return
+        count[j.part] += 1
+        f = files[j.part]
+        if j.part == 'ctest':
+            f.write(testpool.ctest_line(count['ctest'], n['ctest'], j, r))
+            if r.status in testpool.BAD:
+                f.write(r.text if r.text.endswith('\n') else r.text + '\n')
+        else:
+            f.write(r.text)
+            f.write(testpool.selftest_line(j.name, r))
+        f.flush()
+    out: dict[str, testpool.Result] = {}
+    try:
+        out.update(testpool.schedule(pool, jobs, {'selftest': workers.n if workers else 0}, done))
+    finally:
+        for part, f in files.items():
+            rs = [out[j.name] for j in pool if j.part == part and j.name in out]
+            bad = [j.name for j in pool if j.part == part and j.name in out and out[j.name].status in testpool.BAD]
+            if part == 'ctest':
+                f.write(f'\n{len(rs) - len(bad)}/{len(rs)} tests passed ({len(bad)} failed), '
+                        f'{sum(r.status == testpool.SKIPPED for r in rs)} skipped\n')
+                f.writelines(f'\t{name} (Failed)\n' for name in bad)
+            else:
+                f.write(f'{len(rs) - len(bad)}/{len(rs)} passed in {time.perf_counter() - started:.0f} s '
+                        f'({workers.n if workers else 0} workers)\n')
+            f.close()
+    took = {part: {j.name: out[j.name].seconds for j in pool if j.part == part and j.name in out
+                   and out[j.name].status in (testpool.PASSED, testpool.SKIPPED, testpool.FAILED)}
+            for part in ('ctest', 'selftest', 'gen')}
+    testpool.save_costs(os.path.join(BUILD, 'check-ctest-cost.json'), took['ctest'])
+    testpool.save_costs(SELFTEST_COST, took['selftest'])
+    testpool.save_costs(GEN_COST, took['gen'])
+    return out
 
 
 if __name__ == '__main__':

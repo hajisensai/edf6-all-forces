@@ -64,6 +64,7 @@
 #include "edf/world_tables.h"
 #include "npc_logic.h"
 #include "fp_view.h"
+#include "heli_logic.h"
 #include "store_burden.h"
 #include <atomic>
 #include <cmath>
@@ -498,9 +499,12 @@ struct Heli {
     ULONGLONG circleUntil;// 409: circling for its turret until then (see kTurretCircleMs)
     Door doors[2];        // 410: left, right
     bool medic;           // its door guns heal (Medic): it aims at hurt friends, never at enemies
-    // A called heli (HeliCalled): its post (guard), when its sortie ends (game ms), leaving since leftAt, and
-    // deleted from another object's update once reap is set (HeliReap).
-    bool called,guard,leaving,reap;
+    // Its mission phase (heli_logic.h: follow / guard / ferry / leaving / gone, its duty under a ferry, its own duty before
+    // the first map command): written only through Enter (heliphase::Transition). A called heli (HeliCalled, `called`): its
+    // post (a guard's), when its sortie ends (game ms), leaving since leftAt (heliphase leaving), deleted from another
+    // object's update once gone (HeliReap).
+    heliphase::State mission;
+    bool called;
     float post[3];
     ULONGLONG leaveAt,leftAt;
     // A guard heli's orbit (GuardOrbit): the centre it flies round (eased toward where it should be), whether
@@ -512,14 +516,15 @@ struct Heli {
     // writes them; what they were before the first command kept here to put back on its release.
     Command cmd;
     bool cmdMoving;
-    bool ownGuard;
-    float ownPost[3],ownHold[3];
+    bool high;            // ALTITUDE high (HeliCommand): it holds HeliHeightOf over its post / the player, kHeliHighShare up
+    float ownPost[3],ownHold[3];   // its post and hold before the first command (its duty then: mission.own)
     // A map focus order's target (HeliCommand: the enemy the player marked): engaged before any other, wherever it is,
     // its post and order kept; let go once it is no longer among its targets (PickTarget) or another order comes.
     ObjRef focus;
-    // A ferry (HeliFerry, transport.cpp: carrying a squad): to ferryAt, HeliHeight over it (hold), and with ferryLand down
-    // on it (Mode::land there, staying down); it follows nobody and engages nothing meanwhile. `grounded`: last frame's.
-    bool ferry,ferryLand,grounded;
+    // A ferry (HeliFerry, transport.cpp: carrying a squad; heliphase ferry / ferryLand): to ferryAt, HeliHeight over it
+    // (hold), and landing down on it (Mode::land there, staying down); it follows nobody and engages nothing meanwhile.
+    // `grounded`: last frame's.
+    bool grounded;
     float ferryAt[3];
     // A squad's transport (HeliKeep, transport.cpp): it stays theirs until WITHDRAW; out of fuel or ammo (its door guns
     // are the squad's to fire) it does not leave on its own, only badly damaged.
@@ -538,6 +543,21 @@ struct Heli {
     float sortieFaceAt[3];
 };
 Heli helis[16]{};
+
+// The mission phase's reads (heli_logic.h): what the six bools guard / ferry / ferryLand / leaving / reap / ownGuard said.
+bool Guard(const Heli& h) noexcept { return heliphase::Guard(h.mission); }
+bool Ferrying(const Heli& h) noexcept { return heliphase::Ferrying(h.mission); }
+bool FerryLands(const Heli& h) noexcept { return heliphase::FerryLands(h.mission); }
+bool Leaving(const Heli& h) noexcept { return heliphase::Leaving(h.mission); }
+bool Gone(const Heli& h) noexcept { return heliphase::Gone(h.mission); }
+// ...and its one write: the transition, or false (refused, the phase as it was).
+bool Enter(Heli& h,heliphase::Event e) noexcept {
+    const heliphase::Phase was=h.mission.phase;
+    if(!heliphase::Transition(h.mission,e))return false;
+    if(h.mission.phase!=was && Cfg().debug)
+        Log("HELI v=%p phase %s -> %s",h.ref.obj,heliphase::Name(was),heliphase::Name(h.mission.phase));
+    return true;
+}
 constexpr float kFerryLandNear=80.0f;   // m (level) from its landing point a ferry starts down
 constexpr ULONGLONG kStaleMs=2000;   // a heli flown every frame; one not flown this long is gone (or not NPC-flown)
 constexpr ULONGLONG kAliveFrames=8;  // frames since a heli was last flown that still count as now (HeliReap, the rescue)
@@ -996,12 +1016,15 @@ void Unit(const float* p,float a,float b,float* q) noexcept {
     q[0]=(dx*area.u[0]+dz*area.u[1])/a;q[1]=(dx*area.w[0]+dz*area.w[1])/b;
 }
 
+// How high it holds over its post or the player: HeliHeight, kHeliHighShare times that flying high (ALTITUDE, V on the map).
+float HeliHeightOf(const Heli& h) noexcept { return Cfg().heliHeight*(h.high ? mapcmd::kHeliHighShare : 1.0f); }
+
 // No target: escort the travelling player, or fly the ellipse round the area they are about (see
 // kRoamSpan). Sets the wanted velocity and height; returns how far it is off its slot or the ellipse.
 float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl,float* vel,float* height) noexcept {
     const float* first=fl.first ? fl.first->pos : pos;
     const float group=static_cast<float>(fl.group),wing=static_cast<float>(fl.wing);
-    *height=player.pos[1]+Cfg().heliHeight+Stack(fl);
+    *height=player.pos[1]+HeliHeightOf(h)+Stack(fl);
     if(roaming) {
         // Each flight a V: the first flight on the side the first heli is on, heliFollow out and
         // kEscortAhead forward, the second on the other side, the next ones kGroupGap farther out,
@@ -1190,7 +1213,7 @@ Orbit GuardOrbit(Heli& h,const float* pos,const float* fwd,const float* centre,f
     o.want=o.angle;
     const Heli* first=nullptr;
     for(const auto& g:helis) {
-        if(!g.ref || ms-g.seen>2000 || !g.guard || g.leaving || Dist2(g.post,h.post)>kSamePost)continue;
+        if(!g.ref || ms-g.seen>2000 || !Guard(g) || Leaving(g) || Dist2(g.post,h.post)>kSamePost)continue;
         if(!first)first=&g;
         if(&g==&h)o.place=o.count;
         ++o.count;
@@ -1573,8 +1596,12 @@ void StartLeave(Heli& h,const float* pos,const float* fwd,const char* why) noexc
     float l=std::sqrt(Dot2(d,d));
     if(!player.at || l<1.0f){d[0]=fwd[0];d[2]=fwd[2];l=std::sqrt(Dot2(d,d));}
     if(l<1e-3f){d[0]=0.0f;d[2]=1.0f;l=1.0f;}
+    // Out of any phase but its way out (heliphase leave): a ferry is let go with it (a called transport badly hit on its
+    // ferry used to keep `ferry` set, flew Mode::land / hold over its drop point instead of away, and HeliFerry(nullptr)
+    // could no longer end it: it was leaving).
+    if(!Enter(h,heliphase::Event::leave))return;
     h.hold[0]=pos[0]+d[0]/l*kLeaveOut;h.hold[1]=pos[1]+kLeaveClimb;h.hold[2]=pos[2]+d[2]/l*kLeaveOut;
-    h.leaving=true;h.leftAt=GameMs();h.target=ObjRef{};h.extend=false;
+    h.leftAt=GameMs();h.target=ObjRef{};h.extend=false;
     Log("HELI v=%p %s: leaving towards (%.0f,%.0f)",h.ref.obj,why,h.hold[0],h.hold[2]);
 }
 
@@ -1898,7 +1925,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     std::memcpy(h.pos,pos,12);
     if(!h.started) {
         h.started=true;h.last=now;std::memcpy(h.prev,pos,12);
-        if(!h.guard)std::memcpy(h.hold,pos,12);   // a guard heli's is its post (HeliCalled)
+        if(!Guard(h))std::memcpy(h.hold,pos,12);   // a guard heli's is its post (HeliCalled)
         const float rotor=At<float>(v,kRotor);
         h.hover=std::isfinite(rotor) && rotor>0.2f && rotor<1.0f ? rotor : 0.5f;
         h.prevHeading=s.heading;h.yawSign=1;
@@ -1937,10 +1964,11 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     const ULONGLONG ms=GameMs();
     s.ms=ms;
     s.flight=FlightOf(h,ms);
-    if(h.leaving && !playerAboard && (Dist2(pos,player.pos)>kGoneFar || GameMs()-h.leftAt>kLeaveMaxMs))h.reap=true;
+    if(h.mission.phase==heliphase::Phase::leaving && !playerAboard &&
+       (Dist2(pos,player.pos)>kGoneFar || GameMs()-h.leftAt>kLeaveMaxMs))Enter(h,heliphase::Event::reap);
     // A sea rescue (RescueTick) flies to its goal, fighting nothing, following nobody.
-    s.rescuing=!h.leaving && RescueGoal(v,s.rescueGoal,&s.rescueHeight,&s.rescueClimb,&s.rescueSlow,&s.rescueLow);
-    s.follow=!s.rescuing && !playerAboard && player.at && ms-player.at<10000 && !h.guard && !h.leaving && !h.ferry;
+    s.rescuing=!Leaving(h) && RescueGoal(v,s.rescueGoal,&s.rescueHeight,&s.rescueClimb,&s.rescueSlow,&s.rescueLow);
+    s.follow=!s.rescuing && !playerAboard && player.at && ms-player.at<10000 && !Guard(h) && !Leaving(h) && !Ferrying(h);
     if(s.follow)TrackPlayerStill();
     if(s.follow && player.at!=h.playerAt) {
         const float pdt=h.playerAt ? static_cast<float>(player.at-h.playerAt)*0.001f : 0.0f;
@@ -1948,7 +1976,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
         h.playerAt=player.at;
     }
     if(!s.follow){h.pVel[0]=h.pVel[1]=h.pVel[2]=0.0f;h.playerAt=0;}
-    const float* anchor=s.follow ? player.pos : h.ferry ? h.ferryAt : h.guard ? h.post : pos;
+    const float* anchor=s.follow ? player.pos : Ferrying(h) ? h.ferryAt : Guard(h) ? h.post : pos;
     // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
     const float gunRange=GunRange(*s.type);
     const float pick=s.follow && Cfg().heliCombatRange+gunRange<Cfg().heliRange ? Cfg().heliCombatRange+gunRange : Cfg().heliRange;
@@ -1956,7 +1984,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     if(medic!=h.medic)Log("HELI v=%p %s",v,medic ? "medic: its door guns heal, it aims at hurt friends" : "no longer a medic");
     h.medic=medic;
     const bool moving=!h.focus && CommandMoving(h,pos,anchor);   // a focus order: at it first
-    s.engage=!moving && !h.ferry && !s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
+    s.engage=!moving && !Ferrying(h) && !s.rescuing && !Leaving(h) && PickTarget(h,v,anchor,pos,pick,s.aim);
     if(s.engage) {
         TrackVelocity(h.tgtPrev,h.tgtVel,s.aim,dt,40.0f,!Same(h.tracked,h.target));
         h.tracked=h.target;
@@ -1964,7 +1992,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
         h.tracked=ObjRef{};h.extend=false;
     }
     s.arms=Arms(h,v,ms);
-    if(h.called && !h.leaving && !playerAboard && !s.rescuing)
+    if(h.called && !Leaving(h) && !playerAboard && !s.rescuing)
         if(const char* why=LeaveReason(h,v,s.arms))StartLeave(h,pos,fwd,why);
     // Lead the target by the rounds' flight time and drop: the gun's, and the rockets' for a rocket-run type
     // (the 409), whose nose aims them (its gun is in a turret). The nose, the dip and the fire test use the lead.
@@ -2003,7 +2031,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     });
     const bool quiet=game-h.enemyAt>Cfg().heliLandMs;
     s.land=s.follow && !s.engage && quiet && Cfg().heliLandMs && (game-stillAt>Cfg().heliLandMs || (s.grounded && byPlayer));
-    if(h.ferry)s.land=h.ferryLand && Dist2(pos,h.ferryAt)<kFerryLandNear;   // a ferry lands on its point, nowhere else
+    if(Ferrying(h))s.land=FerryLands(h) && Dist2(pos,h.ferryAt)<kFerryLandNear;   // a ferry lands on its point, nowhere else
     h.grounded=s.grounded;
 
     // The map between it and the target, and a wall along the nose (see kAimWall).
@@ -2018,7 +2046,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     s.aimRange=s.range<kRunAim ? s.range : kRunAim;
     s.rocketsLeft=s.arms.rockets && s.arms.rocketAmmo>0;
     // A guard heli circles its post (GuardOrbit); the engaged 410 too, round a centre moved toward the target.
-    s.guardOrbit=h.guard && !h.focus && !h.ferry && !h.leaving && !s.rescuing && Cfg().heliGuardRadius>0.0f;   // focused: round its target
+    s.guardOrbit=Guard(h) && !h.focus && !Ferrying(h) && !Leaving(h) && !s.rescuing && Cfg().heliGuardRadius>0.0f;   // focused: round its target
     // Aim only once the nose has come round: with the target behind, the dip stick flew it away.
     s.bearingOff=s.engage ? Wrap(std::atan2(s.lead[0]-pos[0],s.lead[2]-pos[2])-s.heading) : kPi;
     return true;
@@ -2071,7 +2099,7 @@ Want FlyRescue(const Heli& h,const Sense& s) noexcept {
 // Land: beside the player (its wing's place farther out), aiming below the ground so it comes down; a ferry on its point.
 Want FlyLand(const Heli& h,const Sense& s) noexcept {
     Want w{};
-    if(h.ferry) {
+    if(Ferrying(h)) {
         Arrive(h,s.pos,h.ferryAt,kRest,w.vel);
         w.off=Dist2(s.pos,h.ferryAt);w.height=h.ferryAt[1]-10.0f;
         return w;
@@ -2194,7 +2222,7 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     const float push=rotorclear::PushShare(land,s.grounded ? 0 : s.ms-h.groundAt,kLiftOffMs);
     c.avoid=Avoid(pos,h.vel,w.vel,&w.height,land || (mode==Mode::rescue && s.rescueLow),h.stopDecel,
                   h.type ? h.type->rotor : kRotor506,push);
-    if((s.follow || s.engage) && !h.guard && !h.leaving)std::memcpy(h.hold,pos,12);
+    if((s.follow || s.engage) && !Guard(h) && !Leaving(h))std::memcpy(h.hold,pos,12);
 
     // Horizontal: the stick for the wanted velocity (full stick flies h.top) plus kBrakeGain per m/s it is
     // off, on the heading rows.
@@ -2293,12 +2321,15 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
                     s.v,h.target.obj,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,h.storeAmmo);
             }
         } else {
-            const ULONGLONG gap=h.sortie==SortiePass::heliHunter && !h.leaving ? sortie::kHunterGapMs : Cfg().heliMissileMs;
+            const ULONGLONG gap=h.sortie==SortiePass::heliHunter && !Leaving(h) ? sortie::kHunterGapMs : Cfg().heliMissileMs;
             shot.missile=Cfg().heliMissile && shot.miss<kMissileCone && s.dist>kMissileMin && s.dist<Cfg().heliRange &&
                          s.ms-h.missileAt>gap;
             if(shot.missile)h.missileAt=s.ms;
         }
     } else h.firing=false;
+    // HOLD FIRE (the map's H; mapcmd.h UnitHoldsFire): it aims as ever and fires only once hurt. A medic's guns heal on.
+    const bool holding=!Medic(s.v) && UnitHoldsFire(s.v);
+    if(holding)shot.gun=shot.missile=false;
     if(shot.gun && !Medic(s.v))shot.gun=!HoldFire(s.v,h.target.obj,pos,s.arms.gunSpeed,s.arms.gunGravity*kGravity);
     if(shot.missile && !Medic(s.v)) {
         const unsigned char* w=s.arms.store ? s.arms.store : h.arms[2].weapon;
@@ -2307,7 +2338,7 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
     }
     if(s.type->guns==Guns::nose){s.v[kFireGun]=shot.gun;s.v[kFireMissile]=shot.missile;}
     else if(doorOk && Cfg().heliDoorGuns && SeatCount(s.v)>=3)
-        for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
+        for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing || holding,s.dt,s.ms);
     return shot;
 }
 
@@ -2317,11 +2348,11 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
     const float* pos=s.pos;
     const ULONGLONG ms=s.ms;
     const bool orbiting=mode==Mode::guardFight || mode==Mode::guard;
-    if(h.guard && orbiting!=h.orbiting) {
+    if(Guard(h) && orbiting!=h.orbiting) {
         h.orbiting=orbiting;
         if(orbiting)Log("HELI v=%p guard orbit on: post (%.0f,%.0f,%.0f), radius %.0f m, speed %.1f m/s, %.0f m from the post",
                         v,h.post[0],h.post[1],h.post[2],Cfg().heliGuardRadius,w.orbit.speed,Dist2(pos,h.post));
-        else Log("HELI v=%p guard orbit off: %s",v,h.leaving ? "leaving" : s.rescuing ? "rescue" : s.engage ? "gun run (fixed guns)" :
+        else Log("HELI v=%p guard orbit off: %s",v,Leaving(h) ? "leaving" : s.rescuing ? "rescue" : s.engage ? "gun run (fixed guns)" :
                  "hold");
     }
     if(orbiting && Cfg().debug && ms-h.orbitLogAt>1000) {
@@ -2389,7 +2420,7 @@ void MirrorStick(unsigned char* v,const Control& c) noexcept;   // online: the i
 //               flies nose first, its doors to the sides), a nose-gun 506 sideways with its nose on the middle; away
 bool SortieFly(Heli& h,const Sense& s,Want& w) noexcept {
     h.sortieFace=false;
-    if(h.sortie==SortiePass::none || h.leaving || !h.called)return false;
+    if(h.sortie==SortiePass::none || Leaving(h) || !h.called)return false;
     // A missile left (holder 2's rounds fell since last frame): one more, at its target (Fire's intent alone may have been
     // held: HoldFire, the weapon not ready).
     const std::int32_t left=s.arms.ammo[2];
@@ -3302,9 +3333,12 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
     __try {
         Heli* const h=HeliCrewed(vehicle) ? Find(vehicle) : nullptr;
         if(!h){Log("HELI v=%p called, but not flown by the plugin (see above): it stays where it is",vehicle);return;}
-        h->called=true;h->guard=guard;
+        if(!Enter(*h,guard ? heliphase::Event::guard : heliphase::Event::follow)) {   // a fresh entry (HeliCrewed): never out
+            Log("HELI v=%p called, but %s already: not called",vehicle,heliphase::Name(h->mission.phase));return;
+        }
+        h->called=true;
         std::memcpy(h->post,post,12);
-        h->hold[0]=post[0];h->hold[1]=post[1]+Cfg().heliHeight;h->hold[2]=post[2];
+        h->hold[0]=post[0];h->hold[1]=post[1]+HeliHeightOf(*h);h->hold[2]=post[2];
         h->leaveAt=GameMs()+static_cast<ULONGLONG>(fuelSec)*1000;
         // Spawned in the air with the rotor still: it starts at the rotor Fly assumes for hover, so it
         // does not drop while the rotor spins up.
@@ -3343,7 +3377,7 @@ bool RescueFlies(const ObjRef& ref) noexcept {
     return false;
 }
 bool Commandable(const Heli& h) noexcept {
-    return h.ref && h.seenFrame && GameFrame()-h.seenFrame<=kAliveFrames && !h.leaving && !h.reap && CommandVehicleLive(h.ref) &&
+    return h.ref && h.seenFrame && GameFrame()-h.seenFrame<=kAliveFrames && !Leaving(h) && CommandVehicleLive(h.ref) &&
            !RescueFlies(h.ref);
 }
 }  // namespace
@@ -3354,16 +3388,30 @@ int HeliCommandUnits(CommandUnit* out,int most) noexcept {
     int n=0;
     for(const auto& h:helis)
         if(n<most && Commandable(h) &&
-           ReadCommandUnit(h.ref,h.type ? h.type->name : "heli",h.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : h.cmd,true,&out[n]))++n;
+           ReadCommandUnit(h.ref,h.type ? h.type->name : "heli",h.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : h.cmd,true,&out[n])) {
+            out[n].high=h.high;
+            out[n].withdraws=h.called;   // a called one: WITHDRAW flies it off (support_dispatch.cpp SupportWithdrawVehicle)
+            ++n;
+        }
     return n;
 }
 
 // guard: the post moved to the point (its guard orbit round it, HeliGuardRadius out; HeliHeight over it with the orbit
 // off), as a guard call's; follow: no post (it follows the player, Fly's escort / orbit); none: the call's own back.
+// altitude: a state, not an order -- HeliHeightOf high or low, its post's hold raised or lowered at once (a ferry's is the
+// ferry's), its order kept.
 bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexcept {
     __try {
         Heli* const h=Find(vehicle);
         if(!h || !Commandable(*h))return false;
+        if(c.order==Order::altitude) {
+            if(c.param>mapcmd::kAltitudeHigh)return false;
+            h->high=c.param==mapcmd::kAltitudeHigh;
+            if(!Ferrying(*h) && Guard(*h))h->hold[1]=h->post[1]+HeliHeightOf(*h);
+            Log("HELI v=%p map command: altitude %s (%.0f m)",vehicle,h->high ? "high" : "low",HeliHeightOf(*h));
+            return true;
+        }
+        if(c.order!=Order::none && c.order!=Order::guard && c.order!=Order::follow && c.order!=Order::focus)return false;
         // focus: the marked enemy engaged first (Heli::focus), its post and order kept; a medic's guns heal (none), and
         // the enemy must be one of its targets now (as npcai.cpp checks a squad's focus).
         if(c.order==Order::focus) {
@@ -3377,17 +3425,18 @@ bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexc
         }
         h->focus={};
         if(h->cmd.order==Order::none) {
-            h->ownGuard=h->guard;
+            heliphase::KeepOwn(h->mission);
             std::memcpy(h->ownPost,h->post,12);std::memcpy(h->ownHold,h->hold,12);
         }
+        // Its duty (heliphase: on a ferry only the duty it goes back to after; Commandable: never on its way out).
         if(c.order==Order::guard) {
-            h->guard=true;
+            Enter(*h,heliphase::Event::guard);
             std::memcpy(h->post,c.at,12);
-            h->hold[0]=c.at[0];h->hold[1]=c.at[1]+Cfg().heliHeight;h->hold[2]=c.at[2];
+            h->hold[0]=c.at[0];h->hold[1]=c.at[1]+HeliHeightOf(*h);h->hold[2]=c.at[2];
         } else if(c.order==Order::follow) {
-            h->guard=false;
+            Enter(*h,heliphase::Event::follow);
         } else if(h->cmd.order!=Order::none) {
-            h->guard=h->ownGuard;
+            Enter(*h,heliphase::Event::release);
             std::memcpy(h->post,h->ownPost,12);std::memcpy(h->hold,h->ownHold,12);
         }
         h->cmd=c;
@@ -3406,9 +3455,9 @@ bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexc
 SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept {
     __try {
         const Heli* const h=vehicle && target ? Find(vehicle) : nullptr;
-        if(!h || h->leaving || h->reap)return SupportEntry::gone;
+        if(!h || Leaving(*h))return SupportEntry::gone;
         if(h->sortie!=SortiePass::none)return SupportEntry::sortie;   // its one pass, then away (StartLeave: gone)
-        if(h->ferry)return SupportEntry::superseded;
+        if(Ferrying(*h))return SupportEntry::superseded;
         if(h->cmd.order!=Order::guard || h->cmd.at[0]!=target[0] || h->cmd.at[1]!=target[1] || h->cmd.at[2]!=target[2])
             return SupportEntry::superseded;
         return h->cmdMoving || h->focus ? SupportEntry::flying : SupportEntry::arrived;
@@ -3418,15 +3467,16 @@ SupportEntry HeliSupportEntry(const void* vehicle,const float* target) noexcept 
 bool HeliFerry(const void* vehicle,const float* at,bool land,float hover) noexcept {
     __try {
         Heli* const h=Find(vehicle);
-        if(!h || h->leaving || h->reap)return false;
+        if(!h || Leaving(*h))return false;
         if(!at) {
-            if(h->ferry)Log("HELI v=%p ferry over",vehicle);
-            h->ferry=h->ferryLand=false;return true;
+            if(Ferrying(*h))Log("HELI v=%p ferry over",vehicle);
+            return Enter(*h,heliphase::Event::ferryEnd);
         }
         if(!std::isfinite(at[0]+at[1]+at[2]))return false;
         const float over=hover>0.0f ? hover : Cfg().heliHeight;
-        const bool same=h->ferry && h->ferryLand==land && Dist2(h->ferryAt,at)<1.0f && std::fabs(h->hold[1]-at[1]-over)<0.5f;
-        h->ferry=true;h->ferryLand=land;std::memcpy(h->ferryAt,at,12);
+        const bool same=Ferrying(*h) && FerryLands(*h)==land && Dist2(h->ferryAt,at)<1.0f && std::fabs(h->hold[1]-at[1]-over)<0.5f;
+        if(!Enter(*h,land ? heliphase::Event::ferryLand : heliphase::Event::ferry))return false;
+        std::memcpy(h->ferryAt,at,12);
         h->hold[0]=at[0];h->hold[1]=at[1]+over;h->hold[2]=at[2];
         h->target=ObjRef{};h->tracked=ObjRef{};h->focus={};h->extend=false;h->circleUntil=0;
         if(!same)Log("HELI v=%p ferry to (%.0f,%.0f,%.0f)%s, %.0f m over it",vehicle,at[0],at[1],at[2],land ? ", landing there" : "",over);
@@ -3445,19 +3495,18 @@ bool HeliGrounded(const void* vehicle) noexcept {
 bool HeliStartLeaving(const void* vehicle) noexcept {
     __try {
         Heli* const h=Find(vehicle);
-        if(!h || h->reap)return false;
-        if(h->leaving)return true;
+        if(!h || Gone(*h))return false;
+        if(Leaving(*h))return true;
         const auto* v=static_cast<const unsigned char*>(vehicle);
         float fwd[3];
         if(!Row(v,kHeadForward,fwd)){fwd[0]=0.0f;fwd[1]=0.0f;fwd[2]=1.0f;}
-        h->ferry=h->ferryLand=false;
         StartLeave(*h,reinterpret_cast<const float*>(v+kPosition),fwd,"withdrawn by a map order");
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 bool HeliLeft(const void* vehicle) noexcept {
-    for(const auto& h:helis)if(h.ref.Is(vehicle))return h.reap;
+    for(const auto& h:helis)if(h.ref.Is(vehicle))return Gone(h);
     return false;
 }
 
@@ -3465,7 +3514,7 @@ bool HeliFuel(const void* vehicle,float* sec) noexcept {
     for(const auto& h:helis) {
         if(!h.called || !h.ref.Is(vehicle))continue;
         const ULONGLONG ms=GameMs();
-        *sec=h.leaving || ms>=h.leaveAt ? 0.0f : static_cast<float>(h.leaveAt-ms)*0.001f;
+        *sec=Leaving(h) || ms>=h.leaveAt ? 0.0f : static_cast<float>(h.leaveAt-ms)*0.001f;
         return true;
     }
     return false;
@@ -3479,7 +3528,7 @@ void HeliReap(const void* self) noexcept {
     if(!deleteOk)return;   // EDF.dll's Delete differs: a called heli that left just flies on away (CheckHeliProfile)
     __try {
         for(auto& h:helis) {
-            if(!h.ref || !h.reap || h.ref.obj==self)continue;
+            if(!h.ref || !Gone(h) || h.ref.obj==self)continue;
             auto v=static_cast<unsigned char*>(const_cast<void*>(h.ref.obj));
             const ObjRef ref=h.ref;
             const bool flown=GameFrame()-h.seenFrame<=kAliveFrames;
@@ -3511,7 +3560,7 @@ constexpr ULONGLONG kFirstFrames=120;
 bool HeliAlive(unsigned char* v,const ObjRef& ref,ULONGLONG made,ULONGLONG seen) noexcept {
     const ULONGLONG frame=GameFrame();
     const bool recent=seen ? frame-seen<=kAliveFrames : frame-made<=kFirstFrames;
-    return recent && Readable(v,kSeats+8) && !v[kDead] && ref.Is(v) && IsHelicopter(v);
+    return recent && objref::Alive(ref) && ref.Is(v) && Readable(v,kSeats+8) && IsHelicopter(v);
 }
 bool RescueHeliAlive(const Rescue& r) noexcept { return HeliAlive(r.vehicle,r.ref,r.launchFrame,r.seenFrame); }
 

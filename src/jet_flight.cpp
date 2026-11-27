@@ -318,9 +318,22 @@ void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept {
     j.mode=m;j.modeAt=ms;
 }
 
+bool EnterPhase(Jet& j,jetphase::Event e,ULONGLONG ms) noexcept {
+    const jetphase::Phase was=j.phase;
+    if(!jetphase::Transition(j.phase,e))return false;
+    j.phaseAt=ms;
+    if(jetphase::Leaving(j.phase) || jetphase::Leaving(was)) {
+        if(Cfg().debug && j.mode!=Mode::patrol)
+            Log("JET v=%p %s -> patrol (%s)",j.Vehicle(),kModeNames[static_cast<int>(j.mode)],jetphase::Name(j.phase));
+        j.mode=Mode::patrol;j.modeAt=ms;
+    }
+    if(Cfg().debug && j.phase!=was)Log("JET v=%p phase %s -> %s",j.Vehicle(),jetphase::Name(was),jetphase::Name(j.phase));
+    return true;
+}
+
 void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
-    if(j.mode==Mode::withdraw)return;
-    j.why=why;SetMode(j,Mode::withdraw,ms);
+    if(!EnterPhase(j,jetphase::Event::withdraw,ms))return;   // withdrawing already
+    j.why=why;
     Log("JET v=%p withdraws: %s",j.Vehicle(),why);
 }
 
@@ -349,7 +362,7 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
     const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
     const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
-    const bool stalled=gone>kWithdrawNear && (ms-j.modeAt>kWithdrawStuckMs || edge);
+    const bool stalled=gone>kWithdrawNear && (ms-j.phaseAt>kWithdrawStuckMs || edge);
     if(gone>kWithdrawFar || stalled) {
         if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
         j.reap=true;
@@ -633,7 +646,7 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     // away from it: it flew round inside under RTB for the rest of the mission (tools/jet_obstacle_sim --withdraw-suite).
     float kept[3]={want[0],want[1],want[2]};
     const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
-    const bool line=j.ferry && SoftEdgeHolds(j);
+    const bool line=j.phase==jetphase::Phase::ferry;   // (withdrawing it is no ferry: jet_logic.h)
     const bool leaving=!SoftEdgeHolds(j);
     airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
     if(j.m.edgeBack!=was && !line && !leaving)
@@ -846,8 +859,8 @@ float FerryTurn(const Kind& k) noexcept { return TurnRadiusOf(k,1.0f,FerrySpeed(
 float Ferry(Jet& j,const float* pos,float height,float* want) noexcept {
     const Kind& k=KindOf(j);
     float way[3];
-    if(ferry::Steer(j.ferryLine,j.ferryPass,pos,j.m.vel,ferry::Lead(FerryTurn(k)),way) && !j.ferryGone) {
-        j.ferryGone=true;
+    if(ferry::Steer(j.ferryLine,j.ferryPass,pos,j.m.vel,ferry::Lead(FerryTurn(k)),way) && !j.reap) {
+        j.reap=true;   // deleted there (JetReap)
         Log("JET v=%p ferry: its last pass is over at (%.0f,%.0f), off the map: deleting",j.Vehicle(),pos[0],pos[2]);
     }
     Level(pos,way,height,want);

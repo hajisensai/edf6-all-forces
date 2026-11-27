@@ -16,7 +16,7 @@ void Check(bool ok,const char* what) {
 int main() {
     using namespace crew;
     using dreadnought_net::State;
-    Check(offsetof(State,head)==0 && offsetof(State,manned)==sizeof(seat_net::Head),"the block starts with the common head");
+    Check(offsetof(State,head)==0 && offsetof(State,manned)==sizeof(object_net::Head),"the block starts with the common head");
     State s;
     s.head.sender=7;s.head.sequence=1;
     s.manned=0x05;s.fired=0x04;
@@ -41,7 +41,7 @@ int main() {
     Check(!dreadnought_net::Valid(bad),"no sequence");
     bad=s;bad.tail=1;
     Check(!dreadnought_net::Valid(bad),"its padding written");
-    seat_net::BasicGate<4> gate;
+    object_net::BasicGate<4> gate;
     Check(gate.Admit(s.head,true,false,-1),"the first block admitted");
     Check(!gate.Admit(s.head,true,false,-1),"the same block again refused");
     State next=s;next.head.sequence=2;

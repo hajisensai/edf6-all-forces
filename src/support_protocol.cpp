@@ -140,7 +140,7 @@ float Float(const unsigned char*& p) noexcept { const auto v=Read32(p);float f;s
 bool ValidMessage(const Message& m) noexcept {
     if(m.kind<Kind::hello || m.kind>Kind::requestStatus || m.catalog>=1024 ||
        m.count>kMaxUnits || m.index>=kMaxUnits || m.ok>1 || !Point(m.target) || !sortie::RunValid(m.run) ||
-       (m.run.half!=0.0f && m.kind!=Kind::request && m.kind!=Kind::begin))return false;
+       ((m.run.half!=0.0f || sortie::HasHeading(m.run)) && m.kind!=Kind::request && m.kind!=Kind::begin))return false;
     if(m.kind==Kind::hello)return m.challenge!=0 && m.request!=0;
     if(!m.epoch)return false;
     if(m.kind==Kind::welcome)return m.challenge!=0 && m.request!=0;

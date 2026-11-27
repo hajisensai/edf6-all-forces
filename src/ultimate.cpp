@@ -186,7 +186,7 @@ struct Show {
     // The caller: a weak reference of the game's (its control block's weak count held, so the block outlives the object),
     // checked every frame: gone (its machine left, the object deleted), the show fires no more rounds and plays its
     // effects out. `by` the object, only while `live`.
-    edf41c::WeakRef caller{};
+    WeakRef caller{};
     const unsigned char* by=nullptr;
     bool live=false;
     // The caller's reference on the wire (net_object_ref.h: its slot), taken when the show began: every message of the
@@ -605,7 +605,7 @@ void Send(Show& s,ultimate_net::Kind kind,std::uint32_t peer=0) noexcept {
 
 // ---- a show's life ----
 void Clear(Show& s) noexcept {
-    edf41c::WeakReset(s.caller);
+    s.caller.Reset();
     s=Show{};
 }
 // Show `s` (slot `i`) over: its rounds and discs deleted, the sky let go of (the last brings it back), its end said.
@@ -629,7 +629,7 @@ void Finish(int i,const char* why) noexcept {
 // firing rounds by a pointer to the freed object).
 void CheckCaller(Show& s) noexcept {
     bool live=false;
-    __try { live=edf41c::WeakAlive(s.caller); } __except(EXCEPTION_EXECUTE_HANDLER){live=false;}
+    __try { live=objref::Exists(s.caller); } __except(EXCEPTION_EXECUTE_HANDLER){live=false;}
     if(live || !s.live)return;
     s.live=false;s.by=nullptr;
     DropRounds(s);
@@ -689,8 +689,8 @@ Show& Begin(int i,bool remote,const Key& k,const unsigned char* caller,const flo
     Show& s=shows[i];
     Clear(s);
     s.on=true;s.remote=remote;s.key=k;
-    edf41c::WeakSet(s.caller,caller);
-    s.live=edf41c::WeakAlive(s.caller);
+    s.caller=ObjRef::Of(caller);
+    s.live=objref::Exists(s.caller);
     s.by=s.live ? caller : nullptr;
     std::memcpy(s.at,at,12);
     std::memcpy(s.plane,plane,sizeof(s.plane));

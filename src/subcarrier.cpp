@@ -240,31 +240,20 @@ const void* SelfCtrl(const unsigned char* v) noexcept { return At<const void*>(v
 // Whether the entry's object is there and alive: its control block still counts it, it is the same object
 // (ObjRef), not deleted, not dead. Read under the caller's __try.
 bool Live(const Sub& s) noexcept {
-    const auto ctrl=static_cast<const unsigned char*>(s.ref.ctrl);
-    return s.vehicle && Readable(ctrl,kCtrlUses+4) && At<std::int32_t>(ctrl,kCtrlUses)>0 && Readable(s.vehicle,kTeam+4) &&
-           s.ref.Is(s.vehicle) && !(s.vehicle[kObjFlags]&kObjDeleted) && !s.vehicle[kDead];
+    return s.vehicle && s.ref.obj==s.vehicle && objref::Alive(s.ref) && Readable(s.vehicle,kTeam+4);
 }
 void DropDrone(Sub& s,int index) noexcept {
-    if(s.droneWeak[index] && s.drone[index].ctrl) {
-        auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.drone[index].ctrl));
-        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(control+0xC))==0)
-            reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(control,0)[1])(control);
-    }
+    if(s.droneWeak[index])objref::Release(s.drone[index].ctrl);
     s.drone[index]={};s.droneWeak[index]=false;
 }
 void DropSub(Sub& s) noexcept {
     for(int i=0;i<kBayDrones;++i)DropDrone(s,i);
-    if(s.weakHeld && s.ref.ctrl) {
-        auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.ctrl));
-        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(control+0xC))==0)
-            reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(control,0)[1])(control);
-    }
+    if(s.weakHeld)objref::Release(s.ref.ctrl);
     s=Sub{};
 }
 bool RetainSub(Sub& s) noexcept {
-    auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.ctrl));
-    if(!Readable(control,16) || At<LONG>(control,8)<=0)return false;
-    InterlockedIncrement(reinterpret_cast<volatile LONG*>(control+0xC));s.weakHeld=true;return true;
+    if(objref::Identity(s.ref)<objref::Life::removed)return false;
+    objref::Retain(s.ref.ctrl);s.weakHeld=true;return true;
 }
 // The entries whose carrier is dead or gone, dropped (with their gauges).
 void Sweep() noexcept {
@@ -403,9 +392,7 @@ void Bay(Sub& s,const float* m,ULONGLONG ms) noexcept {
     for(int i=0;i<kBayDrones;++i) {
         const auto& d=s.drone[i];
         if(d) {
-            const auto* control=static_cast<const unsigned char*>(d.ctrl);
-            const bool live=Readable(control,16) && At<LONG>(control,8)>0 && Readable(d.obj,kDead+1) &&
-                d.Is(d.obj) && !(At<unsigned char>(d.obj,kObjFlags)&kObjDeleted) && !At<unsigned char>(d.obj,kDead);
+            const bool live=objref::Alive(d);
             if(!live || (!InSession() && !JetFlying(d.obj,d.ctrl)))DropDrone(s,i);
         }
         out+=s.drone[i] ? 1 : 0;
@@ -431,10 +418,9 @@ void Bay(Sub& s,const float* m,ULONGLONG ms) noexcept {
         return;
     }
     const ObjRef drone=ObjRef::Of(d);
-    auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(drone.ctrl));
-    if(!Readable(control,16) || At<LONG>(control,8)<=0)return;
+    if(objref::Identity(drone)<objref::Life::removed)return;
     for(int i=0;i<kBayDrones;++i)if(!s.drone[i]) {
-        InterlockedIncrement(reinterpret_cast<volatile LONG*>(control+0xC));
+        objref::Retain(drone.ctrl);
         s.drone[i]=drone;s.droneWeak[i]=true;break;
     }
     Log("SUB v=%p drone bay launched %p (%d out)",s.vehicle,d,out+1);
@@ -1359,10 +1345,9 @@ bool AddSupportSubmarineDrone(const ObjRef& parent,const ObjRef& child) noexcept
         for(const auto& d:s->drone)if(d.obj==child.obj && d.ctrl==child.ctrl)return true;
         for(int i=0;i<kBayDrones;++i) {
             const auto& old=s->drone[i];
-            if(old && Readable(old.ctrl,16) && At<LONG>(old.ctrl,8)>0 && Readable(old.obj,kDead+1) &&
-               old.Is(old.obj) && !(At<unsigned char>(old.obj,kObjFlags)&kObjDeleted) && !At<unsigned char>(old.obj,kDead))continue;
+            if(objref::Alive(old))continue;
             DropDrone(*s,i);
-            auto* owned=const_cast<unsigned char*>(control);InterlockedIncrement(reinterpret_cast<volatile LONG*>(owned+0xC));
+            objref::Retain(control);
             s->drone[i]=child;s->droneWeak[i]=true;return true;
         }
         return false;
@@ -1414,8 +1399,7 @@ bool SnapshotSub(const Sub& s,SubSupportState* out) noexcept {
         std::memcpy(next.turretAim,s.remoteTurretAim,sizeof(next.turretAim));
     } else {
         for(const auto& drone:s.drone) {
-            if(drone && Readable(drone.ctrl,16) && At<LONG>(drone.ctrl,8)>0 && Readable(drone.obj,kDead+1) &&
-               drone.Is(drone.obj) && !At<unsigned char>(drone.obj,kDead) && !(At<unsigned char>(drone.obj,kObjFlags)&kObjDeleted))++next.droneCount;
+            if(objref::Alive(drone))++next.droneCount;
         }
         for(int t=0;t<kTurrets;++t)if(s.turret[t].rec && s.turret[t].posed) {
             next.turretMask|=static_cast<std::uint8_t>(1u<<t);std::memcpy(next.turretAim[t],s.turret[t].aim,12);
@@ -1492,7 +1476,7 @@ bool DeleteSupportSubmarine(const ObjRef& ref) noexcept {
         for(auto& entry:subs)if(entry.ref.obj==ref.obj && entry.ref.ctrl==ref.ctrl){s=&entry;break;}
         if(!s)return !ref.obj;
         auto* v=s->vehicle;
-        if(Readable(ref.ctrl,16) && At<LONG>(ref.ctrl,8)>0 && Readable(v,kSelfCtrl+8) && ref.Is(v)) {
+        if(ref.obj==v && objref::Identity(ref)>=objref::Life::removed) {
             for(unsigned seat=0;seat<SeatCount(v);++seat)if(AnyPlayerIn(SeatAt(v,seat)))return false;
             PvpForgetSupportObject(ref);
             if(!(v[kObjFlags]&kObjDeleted))reinterpret_cast<DeleteFn>(image+kDelete)(v);

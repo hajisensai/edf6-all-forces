@@ -39,9 +39,7 @@ ObjRef* __fastcall UpperHook(void* context,ObjRef* out,const float* matrix,int i
     }
     if(ready && InSession() && observer && index>=0) {
         __try {
-            if(Readable(result,sizeof(ObjRef)) && result->obj && Readable(result->ctrl,16) &&
-               At<LONG>(result->ctrl,8)>0 && Readable(result->obj,kSelfCtrl+8) && result->Is(result->obj) &&
-               !(At<unsigned char>(result->obj,0x18)&4))observer(index,*result);
+            if(Readable(result,sizeof(ObjRef)) && objref::Exists(*result))observer(index,*result);
         } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
     return result;

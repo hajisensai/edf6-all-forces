@@ -21,10 +21,11 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
+    static_assert(kCount==26,"a width for every button");
     const float widths[][kCount]={
-        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,150,190,120},     // English-ish
-        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,120,170,100},         // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,110,120,120,110,100,90,80,80,150,190,120,100},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,80,80,80,80,70,70,70,70,120,170,100,80},           // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150,40},           // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];
@@ -82,19 +83,27 @@ void Card() {
         shown+=Shown(b,vehicle,false);
         squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation);
     }
-    Check(shown==6 && !squadOnly,"a vehicle selected: move, attack-move, hold, stop, the sweep and its switch; no squad order or tool",shown);
+    Check(shown==9 && !squadOnly && Shown(Id::guard,vehicle,false) && Shown(Id::smoke,vehicle,false) && !Available(Id::smoke,vehicle) &&
+          !Shown(Id::pace,vehicle,false),
+          "a vehicle selected: move, attack-move, guard, hold, stop, smoke / decoy (greyed), the sweep and its switch; no squad order or tool",shown);
     // HOLD (H, 2026-10-19): an order button that acts at once (each unit's own spot, no click on the map).
     Check(OrderOf(Id::hold)==Order::hold && !Arms(Id::hold) && OnCard(Id::hold),"HOLD: its button, acting at once");
-    // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): GUARD, ENGAGE AT WILL and
-    // FOCUS FIRE have no button whatever the selection takes (G / the right button / H give them); ALL OUT has one.
+    // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): ENGAGE AT WILL and FOCUS FIRE
+    // have no button whatever the selection takes (the right button gives a focus); ALL OUT has one. GUARD is back on
+    // the card with Broken Arrow's controls (2026-11-27), arming a click as the point orders do.
     const std::uint32_t every=0xFFFFFFFFu;
-    Check(!Shown(Id::guard,every,true) && !Shown(Id::engage,every,true) && !Shown(Id::focus,every,true),
-          "no GUARD / ENGAGE / FOCUS button");
+    Check(Shown(Id::guard,every,true) && Arms(Id::guard) && !Shown(Id::engage,every,true) && !Shown(Id::focus,every,true),
+          "a GUARD button; no ENGAGE / FOCUS button");
+    // Broken Arrow's orders: the moves arm a click, the switches act at once; the paced march a squad tool.
+    Check(Arms(Id::fastMove) && Arms(Id::reverseMove) && Arms(Id::unloadAt) && !Arms(Id::holdFire) && !Arms(Id::altitude) &&
+          !Arms(Id::sprint) && !Arms(Id::smoke) && !Arms(Id::decoy) && OrderOf(Id::holdFire)==Order::holdFire &&
+          OrderOf(Id::decoy)==Order::decoy && OrderOf(Id::pace)==Order::none,"Broken Arrow's buttons: the moves arm a click, the rest at once");
+    Check(Shown(Id::pace,0u,true) && !Shown(Id::pace,0u,false) && Available(Id::pace,0u),"the paced march's switch: a squad tool");
     Check(Shown(Id::dismountAll,1u<<static_cast<unsigned>(Order::dismountAll),false) && OrderOf(Id::dismountAll)==Order::dismountAll &&
           !Arms(Id::dismountAll) && OrderOf(Id::withdraw)==Order::withdraw,"ALL OUT: its button, acting at once");
     int card=0;
     for(int i=0;i<kCount;++i)card+=OnCard(static_cast<Id>(i));
-    Check(card==kCardCount && card==kCount-3,"every button but the three cut is on the card once",card);
+    Check(card==kCardCount && card==kCount-2,"every button but the two cut is on the card once",card);
     int idle=0;
     for(int i=0;i<kCount;++i)idle+=Shown(static_cast<Id>(i),0u,false);
     Check(idle==2 && Shown(Id::sweep,0u,false) && Shown(Id::health,0u,false),"nothing selected: the sweep and its switch alone",idle);

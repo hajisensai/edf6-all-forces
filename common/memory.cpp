@@ -219,6 +219,20 @@ void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept {
     for(int k=0;k<n;++k) batch.Add(spans[k].ptr,spans[k].size);
 }
 ReadableStats TakeReadableStats() noexcept { const ReadableStats s=stats; stats={}; return s; }
+namespace {
+// `code` into a fresh read-write page of ours, the page then made executable (and read-only): the page, or null with
+// the page given back.
+void* SealCode(unsigned char* page,const unsigned char* code,std::size_t size) noexcept {
+    std::memcpy(page,code,size);
+    DWORD previous=0;
+    if(!VirtualProtect(page,0x1000,PAGE_EXECUTE_READ,&previous)) {
+        VirtualFree(page,0,MEM_RELEASE);
+        return nullptr;
+    }
+    FlushInstructionCache(GetCurrentProcess(),page,size);
+    return page;
+}
+}  // namespace
 void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept {
     if(!anchor || !code || !size || size>0x1000) return nullptr;
     SYSTEM_INFO info{};
@@ -236,15 +250,22 @@ void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t 
             page=static_cast<unsigned char*>(VirtualAlloc(reinterpret_cast<void*>(base+step),0x1000,
                 MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     }
-    if(!page) return nullptr;
-    std::memcpy(page,code,size);
-    DWORD previous=0;
-    if(!VirtualProtect(page,0x1000,PAGE_EXECUTE_READ,&previous)) {
-        VirtualFree(page,0,MEM_RELEASE);
-        return nullptr;
+    return page ? SealCode(page,code,size) : nullptr;
+}
+void* AllocateCodeAbove(const void* from,const void* below,const unsigned char* code,std::size_t size) noexcept {
+    if(!from || !below || !code || !size || size>0x1000) return nullptr;
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    const std::uintptr_t grain=info.dwAllocationGranularity ? info.dwAllocationGranularity : 0x10000;
+    const auto end=reinterpret_cast<std::uintptr_t>(below);
+    for(std::uintptr_t at=(reinterpret_cast<std::uintptr_t>(from)+grain-1)&~(grain-1);at+0x1000<=end;at+=grain) {
+        auto* page=static_cast<unsigned char*>(VirtualAlloc(reinterpret_cast<void*>(at),0x1000,MEM_RESERVE|MEM_COMMIT,
+                                                            PAGE_READWRITE));
+        if(!page) continue;
+        if(reinterpret_cast<std::uintptr_t>(page)!=at) { VirtualFree(page,0,MEM_RELEASE); continue; }
+        return SealCode(page,code,size);
     }
-    FlushInstructionCache(GetCurrentProcess(),page,size);
-    return page;
+    return nullptr;
 }
 void* AllocateNearThunk(const void* anchor,void* target) noexcept {
     if(!target) return nullptr;

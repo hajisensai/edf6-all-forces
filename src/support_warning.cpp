@@ -233,7 +233,7 @@ void WarnPreview(int catalog,const float* target,const float* strikeHeading,cons
     } else {
         SupportAircraft spec;
         float from[3];
-        if(SupportCatalogAir(catalog) && AirSpec(catalog,&spec) && SupportPreviewEntry(catalog,target,from)) {
+        if(SupportCatalogAir(catalog) && AirSpec(catalog,&spec) && SupportPreviewEntry(catalog,target,from,strikeHeading)) {
             Kept ring;
             const bool both=FlownOutline(spec,from,target,made,ring);
             // One outline at a time: the route, and the ring it ends in folded into the same points where they fit.

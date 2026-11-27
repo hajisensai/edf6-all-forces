@@ -33,6 +33,8 @@ std::int32_t SupportPointsMost() noexcept { return 30000; }
 void WarnPreview(int,const float*,const float*,const float*) noexcept {}
 int SupportCatalogStrike(int) noexcept {return -1;}
 bool SupportGroundRun(int) noexcept {return false;}
+bool SupportCatalogFlown(int) noexcept {return false;}
+void SupportStrikeHeading(const float*,float* out) noexcept {out[0]=0.0f;out[1]=0.0f;out[2]=1.0f;}
 int SupportStrikeBarrage(int) noexcept {return -1;}
 SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
@@ -72,6 +74,9 @@ bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=netwo
 bool MapCommandNetworkReady() noexcept {return true;}
 void SyncMapCommandWays(const MapCommandWays*,unsigned) noexcept {}
 unsigned ReadMapCommandWays(const ObjRef&,Command*,float (*)[3],unsigned) noexcept {return 0;}
+bool SendMapPing(const ObjRef&,const float*,unsigned) noexcept {return false;}
+bool TakeMapPing(MapPingHeard*) noexcept {return false;}
+bool SupportWithdrawVehicle(const void*) noexcept {return false;}
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {
@@ -113,7 +118,7 @@ bool NpcSweepOn() noexcept {return false;}
 bool NpcPickupHealthToggle() noexcept {return false;}
 bool NpcPickupHealthOn() noexcept {return false;}
 int NpcMarchShape() noexcept {return 0;}
-const wchar_t* FormationText(int) noexcept {return L"";}
+const wchar_t* FormationText(int,bool) noexcept {return L"";}
 bool NpcMarkEnemy(const void*,const float*,bool) noexcept { return false; }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
 PlayerFix player{};
@@ -136,7 +141,7 @@ const void* TransportTripTo(const void*,const float*,float) noexcept { return nu
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
-bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool TankCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 NpcCommandResult NpcMapCommandForRequester(const ObjRef&,const Command&,const ObjRef&,const ObjRef&) noexcept {return {};}

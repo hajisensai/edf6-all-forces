@@ -28,7 +28,7 @@
 //  - A turret nobody trains swings back to its rest (ahead, level).
 // The HUD's sight (hud.cpp GunnerMarks) is on the aim; its panel (hud.cpp DreadnoughtHud) reads the ship (Publish).
 // Every turret is posed every frame (its two local matrices: Pose), the engine composing the worlds (sazabi.cpp's way).
-// Online (dreadnought_net.h, over seat_net.h's tag 15): each machine sends the turrets its players train (their aim kSendMs
+// Online (dreadnought_net.h, over object_net.h's tag 15): each machine sends the turrets its players train (their aim kSendMs
 // apart, at once when one fires); a turret a remote player trains turns to their aim here (fresh within kRemoteMs, else
 // back to its rest) and its rounds are fired here too, of no damage (the damage is theirs, once).
 constexpr int kTurrets=8;                    // pylib/vcobjects.py DREADNOUGHT_TURRETS (tools/selftest.py dreadnought_agrees)
@@ -77,7 +77,7 @@ struct Turrets {
     bool ok=false,said=false;
     Turret t[kTurrets]{};
     Remote remote[kTurrets]{};
-    seat_net::BasicGate<64> gate{};
+    object_net::BasicGate<64> gate{};
     dreadnought_net::State out{};  // this machine's next block: the turrets its players train and what they fired
     ULONGLONG sentAt=0;
     std::uint8_t mine=0,others=0,commanded=0;   // this frame: trained by this machine's gunners, by remote players, by
@@ -341,7 +341,7 @@ void SendTurrets(Turrets& r,unsigned char* v,ULONGLONG ms) noexcept {
     if(!drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128))){r.out=dreadnought_net::State{};return;}
     dreadnought_net::State s=r.out;
     s.head.controller=-1;
-    if(netReady && seat_net::Stamp(&s,sizeof(s)) && dreadnought_net::Valid(s) && seat_net::Send(v,&s,sizeof(s)))r.sentAt=ms;
+    if(netReady && object_net::Stamp(&s,sizeof(s)) && dreadnought_net::Valid(s) && object_net::Send(v,&s,sizeof(s)))r.sentAt=ms;
     r.out=dreadnought_net::State{};
 }
 

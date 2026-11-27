@@ -2,7 +2,7 @@
 aircraft JetLaunch / HeliLaunch makes in the air has no pilot (HeliFrame turns it away at "only NPC pilots") and falls
 (2026-10-09 log); #103 makes Launch refuse crewed bodies and HeliLaunch is going away. So in src/debug_spawn.cpp:
   - no JetLaunch / HeliLaunch / HeliCalled / SpawnJet / PrepareSupportAircraft call at all;
-  - the crewed aircraft rows are support calls (SupportCallAt: the map's air support, real crew seated aboard), each key
+  - the crewed aircraft rows are support calls (SupportCallAt / SupportCallComposedAt with the caller's way in: the map's air support, real crew seated aboard), each key
     one of the calls tools/calls.py ships (src/calls.inc), and none of them a drone-only or submarine call;
   - the one launched aircraft is the gun drone (JetLaunchDrone), which flies with no one aboard;
   - the online branch (NetSpawn: every peer makes it through the support transaction) comes before any local spawn path.
@@ -29,19 +29,19 @@ def main() -> int:
     for banned in ('JetLaunch', 'HeliLaunch', 'HeliCalled', 'SpawnJet', 'PrepareSupportAircraft', 'JetLaunchThrown'):
         if re.search(rf'\b{banned}\s*\(', cpp):
             failures.append(f'debug_spawn.cpp calls {banned}: a crewed aircraft without its crew falls')
-    if not re.search(r'\bSupportCallAt\s*\(', cpp):
-        failures.append('debug_spawn.cpp: the crewed aircraft do not go through SupportCallAt')
+    if not re.search(r'\bSupportCall(?:Composed)?At\s*\(', cpp):
+        failures.append('debug_spawn.cpp: the crewed aircraft do not go through SupportCallAt / SupportCallComposedAt')
     if len(re.findall(r'\bJetLaunchDrone\s*\(', cpp)) != 1:
         failures.append('debug_spawn.cpp: exactly one JetLaunchDrone (the gun drone) expected')
     # MakeRow is the one way every spawn goes (the debug spawn tool's Spawn and the test range's place panel PlaceRow).
     parts = cpp.split('int MakeRow(', 1)
     spawn = parts[1].split('\n}\n', 1)[0] if len(parts) == 2 else ''
-    paths = [spawn.index(x) for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(') if x in spawn]
+    paths = [spawn.index(x) for x in ('SupportCallAt(', 'SupportCallComposedAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(') if x in spawn]
     if not spawn or len(paths) != 4 or 'InSession()' not in spawn or spawn.index('InSession()') > min(paths):
         failures.append('debug_spawn.cpp MakeRow: the online branch must come before every local spawn path')
     for caller in ('void Spawn(int row,unsigned char* human)', 'int PlaceRow('):
         body = cpp.split(caller, 1)[-1].split('\n}\n', 1)[0] if caller in cpp else ''
-        if 'MakeRow(' not in body or any(x in body for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(')):
+        if 'MakeRow(' not in body or any(x in body for x in ('SupportCallAt(', 'SupportCallComposedAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(')):
             failures.append(f'debug_spawn.cpp {caller.split("(")[0]}: it makes its row only through MakeRow')
     # A row ends with its id, or with a flown call's sortie fields after it (src/calls.inc kCalls).
     shipped = set(re.findall(r'L"EDF6VC_CALL_(\w+)"[,}]', calls))

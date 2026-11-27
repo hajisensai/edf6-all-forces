@@ -4,11 +4,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include "seat_net.h"
+#include "object_net.h"
 
 namespace crew {
 namespace drill_net {
-constexpr std::int8_t kTag=seat_net::kTag;   // the vehicles' one tag (seat_net.h): this kind is its kMagic
+constexpr std::int8_t kTag=object_net::kTag;   // the object messages' one tag (object_net.h): this kind is its kMagic
 constexpr std::uint32_t kMagic=0x4C495244,kVersion=1;
 enum class Phase : std::uint32_t { home,out,back };
 struct State {
@@ -46,17 +46,17 @@ inline bool Decode(const void* data,std::size_t size,State& out) noexcept {
     if(!Valid(s))return false;
     out=s;return true;
 }
-// Kept inside the tank's ObjRef-bound Drill, never keyed by a raw address alone (seat_net.h Gate: each sender's
+// Kept inside the tank's ObjRef-bound Drill, never keyed by a raw address alone (object_net.h Gate: each sender's
 // watermark survives a driver change; a delayed packet from the previous driver cannot undo the new driver's launch or
 // catch).
-struct Gate : seat_net::Gate {
+struct Gate : object_net::Gate {
     bool Admit(const State& s,bool session,bool authority,std::int32_t controller) noexcept {
         if(!Valid(s))return false;
-        seat_net::Head h;std::memcpy(&h,&s,sizeof(h));
-        return seat_net::Gate::Admit(h,session,authority,controller);
+        object_net::Head h;std::memcpy(&h,&s,sizeof(h));
+        return object_net::Gate::Admit(h,session,authority,controller);
     }
 };
-using seat_net::Replicated;
+using object_net::Replicated;
 } // namespace drill_net
 bool InstallDrillNet() noexcept;
 bool DrillNetSend(unsigned char* vehicle,drill_net::State state) noexcept;

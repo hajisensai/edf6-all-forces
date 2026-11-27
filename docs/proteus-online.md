@@ -1,6 +1,7 @@
 # 普罗透斯状态与防护同步
 
 > 2026-10-20：传输（签名、读写、接收钩子、发送者 / 序号、去重 Gate）已与钻头、沙扎比、座位选弹合为一份 `src/seat_net.cpp`，按块头 magic 分发；本文的格式、版本与行为不变。见 [seat-net.md](seat-net.md)。
+> 2026-11-27：这份传输与 EDF4.1 类的事件层合并为对象消息层 `src/object_net.*`（设计审查 1126 第 7 步）：类的 slot 17 由 `object_net::ChainClass` 按类表 `kClasses` 统一链，不再各自硬编码 `kReceiveSlot`；本文的块格式、版本与行为不变。
 
 `proteus_net.cpp/.h/.inc` 使用原版 BigBegaruta 的 NetworkObject 对象事件；不另开连接，也不转发第二份命中。适用 EDF.dll `0x678CCB46`。
 2026-10-09 重做后协议版本为 **2**（`barrier` 字段改为原版电磁碉堡墙的 HP 比例，新增 `kBroken`）。

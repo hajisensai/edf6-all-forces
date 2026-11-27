@@ -54,7 +54,7 @@ FULL = (
     'cmake/', 'build.cmd', '.github/', '.gitattributes', '.gitignore',
     'tools/check.py', 'tools/test_domains.py', 'tools/msvc-x64-env.cmd',
     # the test runners and how they find the game: every test runs through them
-    'pylib/checklock.py', 'pylib/testshard.py', 'pylib/gamedir.py', 'pylib/gamelease.py',
+    'pylib/checklock.py', 'pylib/testshard.py', 'pylib/gamedir.py', 'pylib/gamelease.py', 'pylib/testpool.py',
 )
 # The CMake files cmake_effects reads; outside FULL (a line it cannot place runs everything).
 CMAKE_FILES = ('CMakeLists.txt', 'autoturret/CMakeLists.txt', 'common/CMakeLists.txt')
@@ -1212,23 +1212,46 @@ def cmake_effects(old: str, new: str, old_lines: set[int], new_lines: set[int],
     command changed is one whose effect it cannot place: run everything. `old_lines` / `new_lines`: the lines changed
     on each side (diff_lines); `names`: the tests and targets there are (lower-case). A command changed is matched with
     its old self by its name and first argument; what it selects is that argument when it is a test or target, and the
-    tests and targets the change adds to or takes from its arguments (a name in a list of tests)."""
+    tests and targets the change adds to or takes from its arguments (a name in a list of tests).
+    A call of a function() or macro() the file defines is placed as a named command is (2026-11-26: a new
+    edf6_feedback_fixture(<target> <test> ...) line ran every test); a change inside its definition selects the tests
+    and targets every call of it names, on either side."""
     sides = []
     hit: set[tuple[str, str]] = set()
+    own: set[str] = set()                          # the functions and macros the file defines (either side)
+    bodies: set[str] = set()                       # those whose definition the diff touches
+    calls: dict[str, set[str]] = {}                # a defined function -> every argument its calls pass (either side)
     for text, lines in ((old, old_lines), (new, new_lines)):
         every: dict[tuple[str, str], list[str]] = {}
+        inside = None                              # the definition the commands are in
         for first, last, name, args in cmake_commands(text):
+            touched = any(first <= x <= last for x in lines)
+            if name in ('function', 'macro') and args:
+                inside = args[0].lower()
+                own.add(inside)
+            if inside is not None:
+                if touched:
+                    bodies.add(inside)
+                if name in ('endfunction', 'endmacro'):
+                    inside = None
+                continue
+            calls.setdefault(name, set()).update(a.lower() for a in args)
             entity = args[1] if name == 'add_test' and len(args) > 1 and args[0] == 'NAME' else (args or [''])[0]
             every.setdefault((name, entity), []).extend(args)
-            if any(first <= x <= last for x in lines):
+            if touched:
                 hit.add((name, entity))
         sides.append(every)
     out: set[str] = set()
+    for fn in sorted(bodies):
+        got = calls.get(fn, set()) & names
+        if not got:
+            return set(), f'a CMake {fn}() definition changed whose calls name no test or target'
+        out |= got
     for name, entity in sorted(hit):   # a command the diff touches, against all of its name and argument on each side
         a, b = sides[0].get((name, entity), []), sides[1].get((name, entity), [])
         if sorted(a) == sorted(b):
             continue   # moved, or only a comment or the spacing changed
-        if name not in CMAKE_NAMED:
+        if name not in CMAKE_NAMED and name not in own:
             return set(), f'a CMake {name}() changed'
         changed = {t.lower() for t in set(a + b) if a.count(t) != b.count(t)}
         got = ({entity.lower()} | changed) & names

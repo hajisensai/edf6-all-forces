@@ -1,7 +1,7 @@
 // The map view (README 地图; the user, 2026-10-06: "M opens a map with the terrain, zoomed in and out like a normal 3D
 // map"). Design and RE: docs/camera-re.md §8. M (ini MapKey) or a pad button (MapButton, XInput bits) lifts the player's
 // own camera into an overhead view of the real world: the game keeps drawing its terrain, buildings, vehicles and
-// enemies, the mouse / left stick pans it, the right drag / right stick turns and tilts it, the wheel / +- / triggers
+// enemies, WASD / the left stick pans it, the middle drag / right stick turns and tilts it, the wheel / +- / triggers
 // zoom it from 200 m to 3 km; hud.cpp lays 3D pins over it (a grid with distances, north, the player, the squad and
 // friendly vehicles, every enemy the stock radar finds, the plugin's aircraft and carriers, the locks, the objective
 // markers). While it is open the player's controls are held (the game runs on: there is no pause the plugin may take).
@@ -594,9 +594,6 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
     mapcam::View& v=game.view;
     float ahead=0.0f,right=0.0f,turn=0.0f,tilt=0.0f,zoom=0.0f;
     bool keys=false;
-    // The mark key pressed with the pointer on an enemy marks it (mapcmd.cpp), the map does not turn with it. Asked every
-    // frame, in front or not: a release ends the press.
-    const bool eat=MapCommandEats(front);
     // The damage statistics' page over it: the map holds still; the wheel scrolls the page's bars (a notch a row, a fine
     // wheel's part-notches kept until they make one), the pad's D-pad too, LB / RB turn its tabs, Y its scope.
     if(DamageStatsShown()) {
@@ -618,18 +615,16 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         const bool letters=!Down(VK_CONTROL);
         ahead=static_cast<float>(((letters && Down('W')) || Down(VK_UP))-((letters && Down('S')) || Down(VK_DOWN)));
         right=static_cast<float>(((letters && Down('D')) || Down(VK_RIGHT))-((letters && Down('A')) || Down(VK_LEFT)));
-        const bool turnRight=Down('E') && !(eat && Cfg().npcMarkKey=='E'),turnLeft=Down('Q') && !(eat && Cfg().npcMarkKey=='Q');
-        turn=static_cast<float>(static_cast<int>(turnRight)-static_cast<int>(turnLeft))*mapcam::kTurnRate*dt;
-        tilt=static_cast<float>(Down('R')-Down('F'))*mapcam::kTurnRate*0.5f*dt;
+        // Broken Arrow's camera (the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」): WASD pans, the wheel zooms, the
+        // middle drag turns and tilts; Q E R F are the orders' (mapcmd.cpp, map_keys.h), no key turns the map.
         zoom=static_cast<float>((Down(VK_OEM_PLUS) || Down(VK_ADD) || Down(VK_PRIOR))-(Down(VK_OEM_MINUS) || Down(VK_SUBTRACT) || Down(VK_NEXT)));
-        keys=ahead!=0.0f || right!=0.0f || turn!=0.0f || tilt!=0.0f || zoom!=0.0f;
+        keys=ahead!=0.0f || right!=0.0f || zoom!=0.0f;
         float dx=0.0f,dy=0.0f;
         if(MouseDelta(human,&dx,&dy) && (dx!=0.0f || dy!=0.0f)) {
             if(!game.loggedMouse && Cfg().debug){game.loggedMouse=true;Log("MAP mouse delta (%.1f,%.1f) a frame",dx,dy);}
-            // A left drag that is the NPC commands' selection box (mapcmd.cpp: whenever there is a unit to box, or Ctrl
-            // held) is not a pan; the middle button's drag always is (RTS).
-            if(Down(VK_MBUTTON) || (Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured())){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
-            else if(Down(VK_RBUTTON) && !MapCommandPointerCaptured()){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
+            // The middle drag turns and tilts the map; a left drag is the selection box and a right drag a line
+            // (mapcmd.cpp), never the camera's.
+            if(Down(VK_MBUTTON) && !MapCommandPointerCaptured()){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
         }
     }
     const int notches=wheel.exchange(0);
@@ -748,7 +743,6 @@ bool Frame(unsigned char* human) noexcept {
     in.requester=ObjRef::Of(human); // the player owning this map, including a local split-screen viewport
     in.mouse=front && MouseDelta(human,&in.dx,&in.dy);
     std::memcpy(in.eye,eye,12);std::memcpy(in.look,look,12);
-    (void)MapCommandEats(front); // latch the mark-key press before MapCommandFrame consumes its edge
     if(MapCommandFrame(in,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
     game.pad=in.usingPad;
     // Pointer capture must be established before this frame's camera drag, including the first press.
