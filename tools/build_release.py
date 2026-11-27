@@ -411,7 +411,12 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--suffix', default='')
     ap.add_argument('--expect', default='')
+    ap.add_argument('--generator-to', default='', help='only freeze the slim generator and copy it to this file '
+                    '(tools/installer.py fresh_source_generator, run from source)')
     a = ap.parse_args(argv)
+    if a.generator_to:
+        shutil.copy2(build_generator(), a.generator_to)
+        return 0
     version = cmake_version()
     if a.expect and a.expect.lstrip('v') != version:
         raise SystemExit(f'CMakeLists.txt says {version}, expected {a.expect}: bump project(VERSION) first')

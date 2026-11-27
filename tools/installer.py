@@ -1531,15 +1531,12 @@ def fresh_source_generator() -> str | None:
                  for n in os.listdir(os.path.join(root, d)) if n.endswith('.py'))
     if os.path.isfile(slim) and os.path.getmtime(slim) >= newest:
         return slim
-    import shutil
     import subprocess
     print(tr('正在打包战前配置生成器（源码比它新）…', 'Freezing the loadout generator (the sources are newer)...'))
-    try:
-        import build_release
-        built = build_release.build_generator()
+    try:   # its own process: build_release is a developer tool, not in the frozen installer (selftest release_imports)
         os.makedirs(bundle_dir(), exist_ok=True)
-        shutil.copy2(built, slim)
-    except (ImportError, OSError, subprocess.CalledProcessError) as e:
+        subprocess.run([sys.executable, os.path.join(HERE, 'build_release.py'), '--generator-to', slim], check=True)
+    except (OSError, subprocess.CalledProcessError) as e:
         print(tr(f'！ 生成器打包失败（{e}）', f'! Could not freeze the generator ({e})'))
         return None
     return slim
