@@ -811,7 +811,7 @@ constexpr unsigned kContactOwnerCalls[]{0x6DAC96,0x6F12CF,0x6F131D};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
               sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+
-              sizeof(kContactOwnerCalls)/sizeof(kContactOwnerCalls[0])+13==kNativeBodyMathSites);
+              sizeof(kContactOwnerCalls)/sizeof(kContactOwnerCalls[0])+14==kNativeBodyMathSites);
 
 constexpr unsigned kContactOwner=0x11AD2E0,kWorldBodyProperty=0xDAB360;
 using ContactOwnerFn=const void*(__fastcall*)(const unsigned char*,std::uint32_t);
@@ -861,6 +861,105 @@ const void* __fastcall FindContactOwner(const unsigned char* holder,std::uint32_
         const auto row=edf::At<std::uintptr_t>(property,0x20)+static_cast<std::uintptr_t>(index)*sizeof(void*);
         return row ? *reinterpret_cast<const void* const*>(row) : nullptr;
     }
+}
+
+constexpr unsigned kContactSurfaceCall=0x11B9717,kNativeContactSurface=0x11A9C80;
+constexpr unsigned kContactSurfaceTail=0x11A9DD8,kContactSurfaceEnd=0x11A9E6C;
+constexpr unsigned kWorldTagCodec=0xDABB00,kWorldMaterialLibrary=0xDAB9B0;
+constexpr unsigned kUfmCodecTable=0x1AE3388,kUfmDecodeTag=0x11B8800;
+using ContactSurfaceFn=void*(__fastcall*)(void*,const unsigned char*,const unsigned char*,const unsigned char*);
+using SurfaceWorldGetter=const unsigned char*(__fastcall*)(const void*);
+
+bool TryContactSurfaceTail(void* out,const unsigned char* world,std::uint16_t tag,const unsigned char* owner) noexcept {
+    const auto* const table=edf::At<const void*>(world,0x20);
+    if(table!=image+kContactWorldVtable || edf::At<const void*>(table,0x18)!=image+kWorldTagCodec ||
+       edf::At<const void*>(table,0x28)!=image+kWorldMaterialLibrary)return false;
+    const auto* const codec=edf::At<const void*>(world,0x970);
+    if(!codec || edf::At<const void*>(codec,0)!=image+kUfmCodecTable ||
+       edf::At<const void*>(image+kUfmCodecTable,0x20)!=image+kUfmDecodeTag)return false;
+
+    std::uint16_t material=0xFFFF;
+    std::uint64_t userData=0;
+    if(tag!=0xFFFFu) {
+        if(!owner || !(owner[0x1A]&4))return false;
+        const auto base=edf::At<std::int32_t>(owner,0x40);
+        if(base!=-1) {
+            const auto index=static_cast<std::int64_t>(base)+(tag&0xFF);
+            const auto* const materials=edf::At<const std::uint16_t*>(codec,0x20);
+            if(!materials || index<0 || index>=edf::At<std::int32_t>(codec,0x28))return false;
+            material=materials[index];
+        }
+        if(material!=0xFFFFu) {
+            const auto* const library=edf::At<const void*>(world,0x920);
+            if(!library || material>=edf::At<std::uint32_t>(library,0x50))return false;
+            const auto* const rows=edf::At<const unsigned char*>(library,0x48);
+            if(!rows)return false;
+            userData=edf::At<std::uint64_t>(rows,static_cast<std::size_t>(material)*0x50+0x40);
+        }
+    }
+    edf::Put(out,0,material);
+    edf::Put(out,0x10,owner);
+    if(material!=0xFFFFu)edf::Put(out,0x18,userData);
+    return true;
+}
+
+void NativeContactSurfaceTail(void* out,const unsigned char* holder,std::uint16_t tag,const unsigned char* owner) noexcept {
+    struct DecodedTag {
+        std::uint16_t material=0xFFFF,reserved=0;
+        std::uint32_t filter=0;
+        std::uint64_t user=0;
+    } decoded;
+    using DecodeTagFn=void(__fastcall*)(const void*,std::uint16_t,unsigned,unsigned,const void*,
+                                        const void*,unsigned,const void*,DecodedTag*);
+    const auto* world=edf::At<const unsigned char*>(holder,0x58)+0x20;
+    const auto getCodec=edf::At<SurfaceWorldGetter>(edf::At<const void*>(world,0),0x18);
+    const auto* const codec=getCodec(world);
+    const auto decode=edf::At<DecodeTagFn>(edf::At<const void*>(codec,0),0x20);
+    decode(codec,tag,0,0,nullptr,owner,0xFFFFFFFFu,nullptr,&decoded);
+    edf::Put(out,0x10,owner);
+    edf::Put(out,0,decoded.material);
+    if(decoded.material!=0xFFFFu) {
+        world=edf::At<const unsigned char*>(holder,0x58)+0x20;
+        const auto getLibrary=edf::At<SurfaceWorldGetter>(edf::At<const void*>(world,0),0x28);
+        const auto* const library=getLibrary(world);
+        const auto* const rows=edf::At<const unsigned char*>(library,0x48);
+        edf::Put(out,0x18,edf::At<std::uint64_t>(rows,static_cast<std::size_t>(decoded.material)*0x50+0x40));
+    }
+}
+
+void __fastcall ResolveContactSurfaceTail(void* out,const unsigned char* holder,unsigned tag,const unsigned char* owner) noexcept {
+    const auto* const world=edf::At<const unsigned char*>(holder,0x58);
+    if(!TryContactSurfaceTail(out,world,static_cast<std::uint16_t>(tag),owner))
+        NativeContactSurfaceTail(out,holder,static_cast<std::uint16_t>(tag),owner);
+}
+
+bool InstallContactSurface() noexcept {
+    constexpr unsigned char callerReadsUserOnly[]{0x8B,0x84,0x24,0x80,0,0,0,0x89,0x87,0xE0,0,0,0};
+    if(!edf::Matches(image,kContactSurfaceCall+5,callerReadsUserOnly,sizeof callerReadsUserOnly) ||
+       !NativeCodeMatches(kNativeContactSurface,0x11A9EB1,0x1B20DDFC998B9BDDull) ||
+       !NativeCodeMatches(kUfmDecodeTag,0x11B885F,0x05DCE5A64381F825ull) ||
+       !NativeCodeMatches(kWorldTagCodec,0xDABB08,0x0A57BE011E80863Dull) ||
+       !NativeCodeMatches(kWorldMaterialLibrary,0xDAB9B8,0x6B2255F89D6478CDull))return false;
+
+    // The leaf query has already supplied BX and [rbp-40h]. Keep the native frame and its cleanup.
+    constexpr unsigned char setup[]{
+        0x48,0x8B,0xCF,                         // mov rcx,rdi  (result)
+        0x48,0x8B,0xD6,                         // mov rdx,rsi  (world holder)
+        0x44,0x8B,0xC3,                         // mov r8d,ebx  (tag)
+        0x4C,0x8B,0x4D,0xC0,                    // mov r9,[rbp-40h]  (tag owner)
+        0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xD0,  // movabs rax,helper; call rax
+        0xE9,0,0,0,0,                            // jmp native collector cleanup
+    };
+    constexpr auto bytes=kContactSurfaceEnd-kContactSurfaceTail;
+    unsigned char stock[bytes],patch[bytes];
+    std::memcpy(stock,image+kContactSurfaceTail,sizeof stock);
+    std::memset(patch,0x90,sizeof patch);
+    std::memcpy(patch,setup,sizeof setup);
+    const auto target=reinterpret_cast<std::uintptr_t>(&ResolveContactSurfaceTail);
+    std::memcpy(patch+15,&target,sizeof target);
+    const auto skip=static_cast<std::int32_t>(bytes-sizeof setup);
+    std::memcpy(patch+sizeof setup-sizeof skip,&skip,sizeof skip);
+    return edf::PatchCode(image+kContactSurfaceTail,stock,patch,sizeof stock);
 }
 
 unsigned InstallContactOwnerLookups() noexcept {
@@ -1595,6 +1694,7 @@ unsigned InstallNativeBodyMath() noexcept {
     installed+=InstallAvoidanceScan();
     installed+=InstallClingBodyReuse();
     installed+=InstallContactOwnerLookups();
+    installed+=InstallContactSurface();
     installed+=InstallContactDecoders();
     installed+=InstallStaticBodyQuaternionSkip();
     installed+=InstallEmptyBodySignalGate();

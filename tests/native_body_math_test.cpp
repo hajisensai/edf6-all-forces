@@ -1407,6 +1407,152 @@ bool BodyQuaternionUpdates() {
 
 
 
+bool ContactSurfaceCases(const unsigned char* original) {
+    constexpr unsigned shapeDispatchSlot=0x20F1930,compoundLeaf=0xDCBD30,compoundShapeType=11;
+    alignas(16) unsigned char holder[0x60]{},world[0x980]{},body[0xB0]{},codec[0x40]{},library[0x58]{};
+    alignas(16) unsigned char shapes[0x600]{},dispatch[12*0x100]{},materialRows[4*0x50]{};
+    alignas(16) unsigned char input[0x24]{},event[0x28]{},actual[0x20];
+    const std::uint16_t tags[]{0xFFFF,1,2,3};
+    auto* const root=shapes;
+    auto* const rows=shapes+0x80;
+    auto* const nested=shapes+0x100;
+    auto* const children=shapes+0x180;
+    auto* const leaf=shapes+0x240;
+    edf::Put(holder,0x58,world+0);
+    edf::Put(world,0x20,image+kContactWorldVtable);
+    edf::Put(world,0x38,body+0);
+    edf::Put(world,0x40,1u);
+    edf::Put(world,0x970,codec+0);
+    edf::Put(world,0x920,library+0);
+    edf::Put(body,0x50,0x80000000u);
+    body[0x54]=1;
+    edf::Put(body,0x78,root);
+    edf::Put(codec,0,image+kUfmCodecTable);
+    edf::Put(codec,0x20,tags+0);
+    edf::Put(codec,0x28,4);
+    edf::Put(library,0x48,materialRows+0);
+    edf::Put(library,0x50,4u);
+    for(unsigned i=0;i!=4;++i)edf::Put(materialRows,i*0x50+0x40,0xA09E0000ull|i);
+    edf::Put(dispatch,compoundShapeType*0x100+0xA8,image+compoundLeaf);
+    edf::Put(event,8,0x80000000u);
+    edf::Put(event,0xC,0x80000000u);
+    leaf[0x19]=1;
+
+    const auto compound=[](unsigned char* shape,unsigned char* first) {
+        shape[0x18]=static_cast<unsigned char>(compoundShapeType);
+        shape[0x19]=3;
+        shape[0x1A]=4;
+        shape[0x1C]=2;
+        edf::Put(shape,0x48,first-(shape+0x48));
+        edf::Put(shape,0x50,2u);
+    };
+    const auto entry=[](unsigned char* slot,unsigned char* child,std::uint16_t tag) {
+        for(unsigned j=0;j!=3;++j)edf::Put(slot,0x20+j*4,1.0f);
+        edf::Put(slot,0x2C,tag);
+        edf::Put(slot,0x30,child-(slot+0x30));
+    };
+    compound(root,rows);
+    compound(nested,children);
+    entry(rows,leaf,0x0301);
+    entry(rows+0x40,nested,0);
+    entry(children,leaf,0x2302);
+    entry(children+0x40,leaf,0x0303);
+    const auto oldDispatch=edf::At<const void*>(image,shapeDispatchSlot);
+    DWORD protection=0;
+    if(!VirtualProtect(image+shapeDispatchSlot,sizeof(void*),PAGE_READWRITE,&protection))return false;
+    edf::Put(image,shapeDispatchSlot,dispatch+0);
+
+    const auto native=reinterpret_cast<ContactSurfaceFn>(image+kNativeContactSurface);
+    constexpr auto tailSize=kContactSurfaceEnd-kContactSurfaceTail;
+    auto* const tail=image+kContactSurfaceTail;
+    unsigned char patched[tailSize];
+    DWORD tailProtection=0;
+    std::memcpy(patched,tail,sizeof patched);
+    bool good=std::memcmp(patched,original,sizeof patched)!=0 &&
+        VirtualProtect(tail,tailSize,PAGE_EXECUTE_READWRITE,&tailProtection);
+    if(good) {
+        struct Sample {
+            unsigned char fields[0x20];
+            unsigned csr;
+        };
+        std::vector<Sample> samples(12000);
+        const void* alternate[32];
+        std::memcpy(alternate,image+kContactWorldVtable,sizeof alternate);
+        const auto saved=_mm_getcsr();
+        for(int phase=0;phase!=2 && good;++phase) {
+            std::memcpy(tail,phase ? patched : original,tailSize);
+            FlushInstructionCache(GetCurrentProcess(),tail,tailSize);
+            for(unsigned i=0;i<samples.size() && good;++i) {
+                edf::Put(world,0x20,(i%19==0) ? static_cast<const void*>(alternate) : image+kContactWorldVtable);
+                edf::Put(input,0x20,i&1u);
+                edf::Put(event,0x14,(i&2u) ? 0x5FFFFFFFu : 0x3FFFFFFFu);
+                edf::Put(event,0x18,(i&4u) ? 0x4FFFFFFFu : 0x3FFFFFFFu);
+                rows[0x1E]=(i&8u) ? 2 : 0;
+                edf::Put(rows,0x10,-static_cast<float>(i)*0.125f);
+                edf::Put(rows,0x14,static_cast<float>(i%41));
+                edf::Put(rows,0x18,-0.0f);
+                edf::Put(root,0x40,(i%7==0) ? -1 : 0);
+                edf::Put(nested,0x40,(i%13==0) ? -1 : 0);
+                edf::Put(children+0x40,0x2C,static_cast<std::uint16_t>((i%11==0) ? 0xFFFF : 0x0303));
+                std::memset(actual,0xA5,sizeof actual);
+                _mm_setcsr(0x1F80);
+                if(native(actual,holder,input,event)!=actual){good=false;break;}
+                if(phase) {
+                    good=_mm_getcsr()==samples[i].csr && std::memcmp(samples[i].fields,actual,sizeof actual)==0;
+                } else {
+                    samples[i].csr=_mm_getcsr();
+                    std::memcpy(samples[i].fields,actual,sizeof actual);
+                }
+            }
+        }
+        if(good) {
+            edf::Put(world,0x20,image+kContactWorldVtable);
+            edf::Put(root,0x40,0);
+            edf::Put(nested,0x40,0);
+            edf::Put(input,0x20,0u);
+            alignas(16) unsigned char out[0x20]{};
+            const auto measure=[&](const unsigned char* code) {
+                std::memcpy(tail,code,tailSize);
+                FlushInstructionCache(GetCurrentProcess(),tail,tailSize);
+                ULONG64 start=0,finish=0;
+                QueryThreadCycleTime(GetCurrentThread(),&start);
+                for(unsigned i=0;i<500000;++i) {
+                    edf::Put(event,0x18,(i&1u) ? 0x3FFFFFFFu : 0x4FFFFFFFu);
+                    native(out,holder,input,event);
+                }
+                QueryThreadCycleTime(GetCurrentThread(),&finish);
+                return finish-start;
+            };
+            std::array<ULONG64,5> stockCycles{},patchedCycles{};
+            for(unsigned i=0;i<stockCycles.size();++i) {
+                if(i&1u){patchedCycles[i]=measure(patched);stockCycles[i]=measure(original);}
+                else {stockCycles[i]=measure(original);patchedCycles[i]=measure(patched);}
+            }
+            std::sort(stockCycles.begin(),stockCycles.end());
+            std::sort(patchedCycles.begin(),patchedCycles.end());
+            std::printf("500,000 complete contact material queries: %.2f -> %.2f M thread cycles (median of five runs)\n",
+                        static_cast<double>(stockCycles[2])/1e6,static_cast<double>(patchedCycles[2])/1e6);
+        }
+        std::memcpy(tail,patched,tailSize);
+        FlushInstructionCache(GetCurrentProcess(),tail,tailSize);
+        DWORD previous=0;
+        good=VirtualProtect(tail,tailSize,tailProtection,&previous) && good;
+        _mm_setcsr(saved);
+    }
+    if(good) {
+        edf::Put(world,0x20,image+kContactWorldVtable);
+        edf::Put(root,0x40,0);
+        edf::Put(nested,0x40,0);
+        alignas(16) unsigned char out[0x20]{};
+        Bench("contact surface material tail",
+            [&](unsigned i){NativeContactSurfaceTail(out,holder,static_cast<std::uint16_t>(1+(i&1u)),root);},
+            [&](unsigned i){ResolveContactSurfaceTail(out,holder,1+(i&1u),root);});
+    }
+    edf::Put(image,shapeDispatchSlot,oldDispatch);
+    DWORD previous=0;
+    return VirtualProtect(image+shapeDispatchSlot,sizeof(void*),protection,&previous) && good;
+}
+
 bool ContactOwnerLookups() {
     constexpr unsigned count=64;
     alignas(16) unsigned char holder[0x60]{},world[0xF0]{},bodies[count*0xB0]{},buckets[32*0x10]{},property[0x28]{};
@@ -1681,6 +1827,8 @@ int main(int argc,char** argv) {
         return 1;
     }
     auto* const harness=BoxHarness();
+    unsigned char originalSurfaceTail[kContactSurfaceEnd-kContactSurfaceTail];
+    std::memcpy(originalSurfaceTail,image+kContactSurfaceTail,sizeof originalSurfaceTail);
     if(!harness || InstallNativeBodyMath()!=kNativeBodyMathSites || image[kBoxMergeCall]!=0xE8 ||
        image[kBoxMerge]!=0x48 || image[kBoxMerge+2]!=0x4D || !CaptureBoxArguments()) {
         std::puts("FAIL: native attachment math call sites or signatures do not match");
@@ -1795,6 +1943,10 @@ int main(int argc,char** argv) {
     }
     if(!BodyQuaternionUpdates()) {
         std::puts("FAIL: native body quaternion fast path or fallback mismatch");
+        return 1;
+    }
+    if(!ContactSurfaceCases(originalSurfaceTail)) {
+        std::puts("FAIL: native contact surface material or floating point state mismatch");
         return 1;
     }
     if(!ContactOwnerLookups()) {
