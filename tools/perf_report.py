@@ -2,11 +2,15 @@
 
   python tools/perf_report.py RUN_DIR [--top N]     report.md of one run (written into RUN_DIR and printed)
   python tools/perf_report.py --ab RUN_DIR...       the A/B table of several runs (perfrun --ab writes it itself)
+  python tools/perf_report.py --scaling RUN_DIR...  the scaling table of several legs (their metrics.json; perfrun
+                                                    appends it to a multi-leg launch's summary.md)
 
 RUN_DIR holds what perfrun left: run.json (scenario, DLL, the windows as wall-clock seconds), cpu.txt (rip_sampler with
 interval 0: each thread's CPU over the clean window, nothing suspended), stacks.txt (rip_sampler stacks), gpu.csv
 (typeperf GPU engines over the clean window) and vehiclecrew.log (the plugin's Debug=1 PERF rows, one per 5 s).
-Addresses are EDF.dll RVAs, as in docs/*-re.md.
+Addresses are EDF.dll RVAs, as in docs/*-re.md. A report also writes RUN_DIR/metrics.json: the same numbers as data
+(frames, the frame split, each phase's ms a step, the plugin's own work, render, Umbra visible / skinned, the object
+census, the population a bench leg was to hold).
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import bisect
 import collections
 import csv
 import json
+import math
 import os
 import re
 import statistics
@@ -571,6 +576,93 @@ def read_gpu(log: str, window: tuple[float, float]) -> dict[str, float]:
             'palette_ms': mean(11)}
 
 
+# The object census (src/perf_census.cpp, PerfProbe>=1): a period's head row, then its kinds by team and the scene's
+# classes, each a mean over the period's samples.
+CENSUS = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF CENSUS (\d+) samples, (\d+) skipped: ([\d.]+) ms a sample '
+                    r'\(worst ([\d.]+)\); team objects ([\d.]+) in (\d+) kinds, scene objects ([\d.]+) in (\d+) classes')
+CENSUS_TEAM = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF CENSUS TEAM (-?\d+) (.+?): mean ([\d.]+), max (\d+)$')
+CENSUS_SCENE = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF CENSUS SCENE (.+?): mean ([\d.]+), max (\d+)$')
+TEAM_NAMES = {0: 'player team', 1: 'enemies', 2: 'friends', -1: 'table full'}
+# Umbra's found objects by view and the distinct skinned poses, a frame (src/perf_probe.cpp DataCountHook / PaletteHook).
+VISIBLE = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF VISIBLE a frame: umbra collects ([\d.]+), visible ([\d.]+) '
+                     r'\(view 0 ([\d.]+), view 1 ([\d.]+), other ([\d.]+)\), skinned instances ([\d.]+)')
+
+
+def read_census(log: str, window: tuple[float, float]) -> dict:
+    """The PERF CENSUS periods in `window`: each kind's mean weighted by its period's samples (a kind absent from a
+    period counts 0 there) and its max; the samples, the skipped ones, a sample's own time (mean, worst). {} without."""
+    try:
+        with open(log, encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return {}
+    weight = None   # the current period's samples (None: its head is outside the window)
+    total = skipped = 0
+    ms = worst = team_all = scene_all = 0.0
+    teams: dict[tuple[int, str], list[float]] = {}
+    scene: dict[str, list[float]] = {}
+    for line in lines:
+        m = CENSUS.search(line)
+        if m:
+            inside = in_window(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), window)
+            weight = int(m[4]) if inside else None
+            if inside:
+                total += weight
+                skipped += int(m[5])
+                ms += weight * float(m[6])
+                worst = max(worst, float(m[7]))
+                team_all += weight * float(m[8])
+                scene_all += weight * float(m[10])
+            continue
+        if not weight:
+            continue
+        m = CENSUS_TEAM.search(line)
+        if m:
+            row = teams.setdefault((int(m[4]), m[5]), [0.0, 0])
+            row[0] += weight * float(m[6])
+            row[1] = max(row[1], int(m[7]))
+            continue
+        m = CENSUS_SCENE.search(line)
+        if m:
+            row = scene.setdefault(m[4], [0.0, 0])
+            row[0] += weight * float(m[5])
+            row[1] = max(row[1], int(m[6]))
+    if not total:
+        return {}
+    by_team: dict[int, dict[str, tuple[float, int]]] = {}
+    for (team, name), (s, x) in sorted(teams.items(), key=lambda kv: -kv[1][0]):
+        by_team.setdefault(team, {})[name] = (s / total, x)
+    return {'samples': total, 'skipped': skipped, 'sample_ms': ms / total, 'sample_worst': worst,
+            'team_objects': team_all / total, 'scene_objects': scene_all / total, 'teams': by_team,
+            'scene': {k: (s / total, x) for k, (s, x) in sorted(scene.items(), key=lambda kv: -kv[1][0])}}
+
+
+def census_text(census: dict, top: int = 12) -> list[str]:
+    """report.md's census section: the head, each team's kinds, the scene's classes."""
+    out = [f"{census['samples']} samples ({census['skipped']} skipped: a lock held, the sample dropped), "
+           f"{census['sample_ms']:.3f} ms a sample (worst {census['sample_worst']:.3f}, on the game thread, in the "
+           f"measured frames); team objects {census['team_objects']:.1f}, scene objects {census['scene_objects']:.1f}",
+           '', '| team | kind | mean | max |', '|---|---|---:|---:|']
+    for team in sorted(census['teams'], key=lambda t: (t < 0, t)):
+        for name, (m, x) in list(census['teams'][team].items())[:top]:
+            out.append(f'| {team} {TEAM_NAMES.get(team, "")} | {name} | {m:.1f} | {x} |')
+    out += ['', '| scene class | mean | max |', '|---|---:|---:|']
+    out += [f'| {name} | {m:.1f} | {x} |' for name, (m, x) in list(census['scene'].items())[:top * 2]]
+    return out
+
+
+def read_visible(log: str, window: tuple[float, float]) -> dict[str, float]:
+    """The PERF VISIBLE rows in `window`: each a frame, the rows' plain mean. {} without them."""
+    rows = _rows(log, VISIBLE, window)
+    if not rows:
+        return {}
+
+    def mean(i: int) -> float:
+        return sum(float(m[i]) for m in rows) / len(rows)
+    return {'rows': len(rows), 'collects': mean(4), 'visible': mean(5), 'view0': mean(6), 'view1': mean(7),
+            'other': mean(8), 'skinned': mean(9)}
+
+
 def read_net(log: str, window: tuple[float, float], secs: float) -> dict:
     """The PERF NET CHANNELS rows in `window`: each channel's messages and bytes a second, out and in, and the NetId
     resolver's world walks (a frame, ms in all). {} without them."""
@@ -968,6 +1060,30 @@ def plugin_functions(plug: Plugins, stacks: list[list[str]], top: int, frame_ms:
     return out
 
 
+def phase_metrics(img: Image, stacks: list[list[str]], plug: Plugins, frame_ms: float, spf: float | None) -> dict:
+    """The game thread's phases as numbers (metrics.json, the scaling table): a step phase's ms a step (the share of
+    the samples times the mean frame over the steps a frame; ms a frame without the steps a frame), the draw's ms a
+    frame (its parts together), the plugin's own work a frame (plugin_owns) and the plugin's Think hooks a step (a
+    sample with a plugin function named *Think* on it, the measurement probes not counted)."""
+    n = len(stacks)
+    if not n or not frame_ms:
+        return {}
+    per = frame_ms / spf if spf else frame_ms
+    ph: collections.Counter = collections.Counter()
+    own = think = 0
+    for st in stacks:
+        key = phase_of(img, st)[0]
+        ph['draw' if key.startswith('draw: ') else key.split(' (')[0]] += 1
+        own += plugin_owns(plug, st)
+        think += any(is_plugin(f) and 'Think' in (nm := plug.func(f, j == 0)[1]) and 'perfprobe' not in nm
+                     for j, f in enumerate(st))
+    out = {f'{k} ms/step': ph[k] / n * per for k in STEP_PHASES}
+    out['draw ms/frame'] = ph['draw'] / n * frame_ms
+    out['plugin own ms/frame'] = own / n * frame_ms
+    out['plugin Think ms/step'] = think / n * per
+    return out
+
+
 def thread_detail(img: Image, stacks: list[list[str]], top: int) -> list[str]:
     n = len(stacks)
     selfc = collections.Counter()
@@ -1110,6 +1226,14 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 f'{gpu["waits"]:.1f} waiting), {gpu["query_ms"]:.3f} ms (waiting {gpu["wait_ms"]:.3f}, worst call '
                 f'{gpu["query_worst"]:.2f}); skin palettes a frame {gpu["palettes"]:.1f}, {gpu["palette_ms"]:.3f} ms '
                 f'(gpu-5, gpu-6)']
+    visible = read_visible(log, cw)
+    if visible:
+        out += [f'- Umbra a frame: {visible["collects"]:.1f} collects, {visible["visible"]:.0f} objects found (view 0 '
+                f'{visible["view0"]:.0f}, view 1 {visible["view1"]:.0f}, other {visible["other"]:.0f}); skinned '
+                f'instances a frame {visible["skinned"]:.0f} (distinct poses given a palette)']
+    census = read_census(log, cw)
+    if census:
+        out += ['', '## Object census (PerfProbe=1, sampled every 0.5 s)', ''] + census_text(census)
     pm = presentmon_summary(os.path.join(run_dir, 'presentmon.csv'))
     if pm:
         out += ['', f'## Display (PresentMon, {pm["presents"]} presents)', '',
@@ -1132,6 +1256,8 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
     loads = read_loads(log)
     if loads:
         out += ['', '## Mission load (hitch-5)', ''] + loads_text(loads)
+    metrics = {'scenario': run['scenario'], 'population': run.get('population'), 'frames': fs, 'objects': objs,
+               'frame_split': split, 'render': render, 'gpu': gpu, 'visible': visible, 'census': census, 'phases': {}}
     cpu = read_cpu(os.path.join(run_dir, 'cpu.txt')) if os.path.exists(os.path.join(run_dir, 'cpu.txt')) else {}
     stacks_path = os.path.join(run_dir, 'stacks.txt')
     timed = read_timed_samples(stacks_path) if os.path.exists(stacks_path) else {}
@@ -1170,6 +1296,8 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 spf = fs.get('steps_per_frame') if fs else None
                 out += ['by phase (ms/frame: the share times the mean frame; ms/step: a step phase\'s over the steps a '
                         'frame):', ''] + phases(img, s, top, plug, fs['mean_ms'] if fs else None, spf) + ['']
+                if fs and not metrics['phases']:
+                    metrics['phases'] = phase_metrics(img, s, plug, fs['mean_ms'], spf)
                 out += ['#### Plugin functions (game thread)', ''] + plugin_functions(
                     plug, s, top, fs['mean_ms'] if fs else None) + ['']
                 slow = read_slow(log)
@@ -1182,6 +1310,8 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
     text = '\n'.join(out) + '\n'
     with open(os.path.join(run_dir, 'report.md'), 'w', encoding='utf-8') as f:
         f.write(text)
+    with open(os.path.join(run_dir, 'metrics.json'), 'w', encoding='utf-8') as f:
+        json.dump(metrics, f, indent=1, default=str)
     return text
 
 
@@ -1219,12 +1349,85 @@ def ab_table(run_dirs: list[str]) -> str:
     return '\n'.join(out) + '\n'
 
 
+# The scaling table's columns: (heading, a leg's metrics.json -> the value or None).
+SCALING_COLUMNS = (
+    ('frame ms', lambda m: (m.get('frames') or {}).get('mean_ms')),
+    ('step ms', lambda m: (m.get('frame_split') or {}).get('a step')),
+    *((f'{p} ms/step', lambda m, p=p: (m.get('phases') or {}).get(f'{p} ms/step'))
+      for p in ('ai_update', 'pre_update', 'object_update', 'havok_update')),
+    ('draw ms/frame', lambda m: (m.get('frame_split') or {}).get('draw', (m.get('phases') or {}).get('draw ms/frame'))),
+    ('plugin Think ms/step', lambda m: (m.get('phases') or {}).get('plugin Think ms/step')),
+    ('plugin own ms/frame', lambda m: (m.get('phases') or {}).get('plugin own ms/frame')),
+    ('mesh draws', lambda m: (m.get('render') or {}).get('meshes')),
+    ('umbra visible', lambda m: (m.get('visible') or {}).get('visible')),
+    ('skinned', lambda m: (m.get('visible') or {}).get('skinned')),
+    ('scene objects', lambda m: (m.get('census') or {}).get('scene_objects')),
+)
+
+
+def _fit(xs: list[float], ys: list[float]) -> float | None:
+    """The least-squares slope of ys over xs; None under two distinct xs."""
+    if len(xs) < 2 or len(set(xs)) < 2:
+        return None
+    mx, my = statistics.mean(xs), statistics.mean(ys)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+
+
+def scaling_table(run_dirs: list[str]) -> str:
+    """summary.md's scaling table (bench legs, or any legs with enemies): a row a leg by its live enemies (the
+    window's mean of PERF OBJECTS), each column from the leg's metrics.json (perf_report.report writes it); then the
+    least-squares slope in ms (or count) per 1000 enemies and the log-log exponent (1: linear, 2: quadratic). A leg
+    whose population was not held (run.json population.held false) is marked and left out of the fits; '' without two
+    legs to fit."""
+    legs = []
+    for d in run_dirs:
+        try:
+            with open(os.path.join(d, 'metrics.json'), encoding='utf-8') as f:
+                m = json.load(f)
+        except (OSError, ValueError):
+            continue
+        objs = m.get('objects') or {}
+        if not objs.get('enemies'):
+            continue
+        pop = m.get('population') or {}
+        legs.append((objs['enemies'][0], os.path.basename(d), pop, m))
+    if not legs:
+        return ''
+    legs.sort(key=lambda r: r[0])
+    head = '| leg | enemies | held | ' + ' | '.join(c for c, _ in SCALING_COLUMNS) + ' |'
+    out = ['## Scaling (by live enemies; slope: per 1000 enemies)', '', head,
+           '|' + '---|' * (3 + len(SCALING_COLUMNS))]
+    for enemies, name, pop, m in legs:
+        held = ('yes' if pop.get('held') else f'**no** (want {pop.get("want")})') if pop else ''
+        cells = []
+        for _, get in SCALING_COLUMNS:
+            v = get(m)
+            cells.append('' if v is None else f'{v:.2f}')
+        out.append(f'| {name} | {enemies:.0f} | {held} | ' + ' | '.join(cells) + ' |')
+    fit = [(e, m) for e, _, pop, m in legs if not pop or pop.get('held', True)]
+    slopes, exps = [], []
+    for _, get in SCALING_COLUMNS:
+        pts = [(e, get(m)) for e, m in fit if get(m) is not None and e > 0]
+        s = _fit([e for e, _ in pts], [v for _, v in pts])
+        slopes.append('' if s is None else f'{s * 1000:+.2f}')
+        logs = [(math.log(e), math.log(v)) for e, v in pts if v > 0]
+        b = _fit([x for x, _ in logs], [y for _, y in logs])
+        exps.append('' if b is None else f'{b:.2f}')
+    if len(fit) >= 2:
+        out.append('| slope per 1000 | | | ' + ' | '.join(slopes) + ' |')
+        out.append('| log-log exponent | | | ' + ' | '.join(exps) + ' |')
+    return '\n'.join(out) + '\n'
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__)
         return 1
     if argv[0] == '--ab':
         print(ab_table(argv[1:]))
+        return 0
+    if argv[0] == '--scaling':
+        print(scaling_table(argv[1:]) or 'no legs with metrics.json and enemies')
         return 0
     top = int(argv[argv.index('--top') + 1]) if '--top' in argv else 20
     print(report(argv[0], top))

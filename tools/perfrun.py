@@ -812,6 +812,9 @@ def legs_table(dirs: list[str]) -> str:
         scenario = run.get('scenario', '?')
         warm = f'{run["warm"]:.0f}' if 'warm' in run else ''
         errors = [run[k] for k in ('error', 'key_error') if run.get(k)]
+        pop = run.get('population') or {}
+        if pop and not pop.get('held'):   # bench: the window did not hold E (its numbers are another size's)
+            errors.append(f'population not held: {pop.get("mean", 0):.0f} of {pop.get("want")} (max {pop.get("max")})')
         err = ('**ERROR** ' + '; '.join(errors).replace('|', '/')) if errors else ''
         if 'cpu' not in run.get('windows', {}):
             why = (run.get('error') or 'not reached').replace('|', '/')
@@ -960,6 +963,9 @@ def main(argv: list[str]) -> int:
                     perf_report.report(d)
                     print('report:', os.path.join(d, 'report.md'))
         table = legs_table(dirs)
+        scaling = perf_report.scaling_table(dirs)
+        if scaling:
+            table += '\n' + scaling
         with open(os.path.join(out, 'summary.md'), 'w', encoding='utf-8') as f:
             f.write(table)
         print(table)

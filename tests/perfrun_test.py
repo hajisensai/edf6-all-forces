@@ -12,7 +12,8 @@
   - drive.run's `during` ends the stay as soon as it returns (the loop condition, read from the source).
   - the measurement probes' rows (made from the plugin's own format strings): frames and steps, the frame split and
     its n = 0 floor, the render thread, the channels, SLOW FRAME and the samples inside one by QPC, the mission entries
-    cold and warm, PresentMon, EDF6Coop STATS; the thread roles and phase buckets; perfrun's --cycle and --presentmon.
+    cold and warm, PresentMon, EDF6Coop STATS; the thread roles and phase buckets; perfrun's --cycle and --presentmon;
+    the object census and PERF VISIBLE, metrics.json, the scaling table (slope per 1000 enemies, log-log exponent).
   - legs (several scenarios in one launch): the positional arguments with their key= / warm= / diff=, each leg's
     warm-up, its `next` command, the autopilot's NEXT rows, the launch's logs cut a leg each (past midnight too),
     gen.rewrite_scenario keeping the first originals, one launch of three legs with drive.run faked (the range written
@@ -549,6 +550,97 @@ def probe_parsing() -> None:
         check(ph('ntdll.dll+1', 'EDF.dll+705627') == 'app: network / Steam / EOS', 'Application::Update by call')
         check(ph('ntdll.dll+1', 'EDF.dll+11a305f') == 'main loop: render fence wait 0x111CC20', 'the main loop by part')
         check(ph('ntdll.dll+1') == 'outside the frame loop', 'nothing of the frame: outside it')
+
+
+def census_scaling() -> None:
+    """The object census (src/perf_census.cpp) and PERF VISIBLE (perf_probe.cpp) rows, made from the plugin's own
+    format strings: each kind weighted by its period's samples, the rows after a head outside the window not counted;
+    report() writes them into report.md and metrics.json; the scaling table's rows, slopes and log-log exponents, a leg
+    that did not hold its population marked and left out of the fits; summary.md flags it."""
+    with tempfile.TemporaryDirectory() as d:
+        t0 = time.mktime((2026, 11, 7, 13, 0, 0, 0, 0, -1))
+        w = (t0 + 10, t0 + 20)
+        head = c_format('src/perf_census.cpp', 'PERF CENSUS %u samples')
+        team = c_format('src/perf_census.cpp', 'PERF CENSUS TEAM')
+        scene = c_format('src/perf_census.cpp', 'PERF CENSUS SCENE')
+        visible = c_format('src/perf_probe.cpp', 'PERF VISIBLE')
+        objects = c_format('src/crew.cpp', 'PERF OBJECTS')
+        perf = c_format('src/crew.cpp', 'PERF %u frames, %u steps')
+        run = os.path.join(d, 'run')
+        os.makedirs(run)
+        log = os.path.join(run, 'vehiclecrew.log')
+        with open(log, 'w', encoding='utf-8') as f:
+            for stamp, rows in (
+                    ('13:00:15', [head % (10, 1, 0.2, 0.5, 130.0, 2, 300.0, 1),
+                                  team % (1, 'GIANTANT01', 100.0, 120), team % (0, 'Player', 1.0, 1),
+                                  scene % ('xgs::Thing<a, b>', 300.0, 310)]),
+                    ('13:00:20', [head % (30, 0, 0.4, 0.9, 241.0, 3, 500.0, 1),
+                                  team % (1, 'GIANTANT01', 200.0, 210), team % (1, 'GIANTSPIDER01', 40.0, 41),
+                                  team % (0, 'Player', 1.0, 1), scene % ('xgs::Thing<a, b>', 500.0, 520),
+                                  visible % (3.0, 900.0, 600.0, 200.0, 100.0, 400.0)]),
+                    ('13:00:16', [visible % (5.0, 1100.0, 800.0, 200.0, 100.0, 600.0)]),
+                    ('13:00:40', [head % (99, 0, 9.0, 9.0, 9.0, 1, 9.0, 1), team % (1, 'GIANTANT01', 9999.0, 9999),
+                                  scene % ('xgs::Thing<a, b>', 9999.0, 9999),
+                                  visible % (9.0, 9.0, 9.0, 9.0, 9.0, 9.0)])):
+                for row in rows:
+                    f.write(f'[{stamp}.000] {row}\n')
+            f.write('[13:00:15.000] ' + perf % (300, 600, 20.0, 50, 30.0, 6, 20, 1, 33, 8.3, 120, 12.0) + '\n')
+            f.write('[13:00:15.000] ' + objects % (1000, 1, 120) + '\n')
+        c = perf_report.read_census(log, w)
+        ant = c['teams'][1]['GIANTANT01']
+        check(c['samples'] == 40 and c['skipped'] == 1 and abs(ant[0] - 175.0) < 1e-9 and ant[1] == 210
+              and abs(c['teams'][1]['GIANTSPIDER01'][0] - 30.0) < 1e-9 and c['teams'][0]['Player'] == (1.0, 1)
+              and abs(c['sample_ms'] - 0.35) < 1e-9 and c['sample_worst'] == 0.9
+              and abs(c['scene']['xgs::Thing<a, b>'][0] - 450.0) < 1e-9 and c['scene']['xgs::Thing<a, b>'][1] == 520,
+              'PERF CENSUS: each kind weighted by its period\'s samples (absent: 0), the max the max, a class name '
+              'with spaces read whole, the rows of a period outside the window left out')
+        check(list(c['teams'][1]) == ['GIANTANT01', 'GIANTSPIDER01'], 'the census kinds most numerous first')
+        v = perf_report.read_visible(log, w)
+        check(v['rows'] == 2 and v['visible'] == 1000.0 and v['view0'] == 700.0 and v['skinned'] == 500.0
+              and v['collects'] == 4.0, 'PERF VISIBLE: Umbra found objects by view and skinned instances a frame')
+        with open(os.path.join(run, 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump({'scenario': 'bench:1000', 'warm': 30, 'windows': {'cpu': [t0 + 10, t0 + 20]},
+                       'population': {'want': 1000, 'mean': 1000.0, 'max': 1000, 'held': True}}, f)
+        text = perf_report.report(run)
+        with open(os.path.join(run, 'metrics.json'), encoding='utf-8') as f:
+            m = json.load(f)
+        check('## Object census' in text and '| 1 enemies | GIANTANT01 | 175.0 | 210 |' in text
+              and 'skinned instances a frame 500' in text, 'report.md: the census and the Umbra / skinned line')
+        check(m['objects']['enemies'] == [1000.0, 1000] and m['census']['teams']['1']['GIANTANT01'] == [175.0, 210]
+              and m['visible']['visible'] == 1000.0 and m['frames']['mean_ms'] == 20.0 and m['population']['held'],
+              'metrics.json: the report\'s numbers as data')
+
+        def leg(name: str, enemies: float, frame: float, ai: float, held: bool | None = True) -> str:
+            x = os.path.join(d, name)
+            os.makedirs(x)
+            pop = None if held is None else {'want': 4000, 'held': held}
+            with open(os.path.join(x, 'metrics.json'), 'w', encoding='utf-8') as f:
+                json.dump({'objects': {'enemies': [enemies, enemies]}, 'frames': {'mean_ms': frame},
+                           'phases': {'ai_update ms/step': ai}, 'population': pop}, f)
+            return x
+        dirs = [leg('bench_2000', 2000, 16.0, 8.0), leg('bench_500', 500, 10.0, 2.0), leg('bench_1000', 1000, 12.0, 4.0),
+                leg('bench_4000', 3000, 90.0, 90.0, False), os.path.join(d, 'missing')]
+        table = perf_report.scaling_table(dirs).splitlines()
+
+        def cells(row: str) -> list[str]:
+            return [c.strip() for c in row.strip().strip('|').split('|')]
+        cols = cells(table[2])
+        fi, ai = cols.index('frame ms'), cols.index('ai_update ms/step')
+        rows = [cells(r) for r in table[4:]]
+        check([r[0] for r in rows[:4]] == ['bench_500', 'bench_1000', 'bench_2000', 'bench_4000'],
+              'the scaling table: a row a leg by its enemies, a leg without metrics.json left out')
+        check(rows[3][2] == '**no** (want 4000)' and rows[0][2] == 'yes', 'a leg that did not hold E is marked')
+        check(rows[4][0] == 'slope per 1000' and rows[4][fi] == '+4.00' and rows[4][ai] == '+4.00'
+              and rows[5][ai] == '1.00' and float(rows[5][fi]) < 1.0,
+              'the slope per 1000 enemies and the log-log exponent, the un-held leg not fitted')
+        check(perf_report.scaling_table([dirs[1]]).count('slope per 1000 |') == 0, 'one leg: no slope')
+        x = os.path.join(d, 'short')
+        os.makedirs(x)
+        with open(os.path.join(x, 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump({'scenario': 'bench:4000', 'population': {'want': 4000, 'mean': 2500.0, 'max': 2600,
+                                                                 'held': False}}, f)
+        check('population not held: 2500 of 4000 (max 2600)' in perfrun.legs_table([x]),
+              'summary.md: a bench leg that fell short says so')
 
 
 def vanilla_names() -> None:
@@ -1188,6 +1280,7 @@ ini_option()
 scenarios()
 report_parsing()
 probe_parsing()
+census_scaling()
 perfrun_probe_options()
 vanilla_names()
 drive_during()
