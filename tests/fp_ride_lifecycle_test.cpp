@@ -1,5 +1,6 @@
 // Production Ride / Gather / Rebatch on synthetic native layouts: boarding must return a
 // surviving on-foot weapon's batch, without writing a weapon removed in this frame.
+#include <windows.h>
 namespace {
 bool keyDown=false,focused=true,mapOwnsKeys=false,onFoot=true,sazabi=false;
 const unsigned char* mapKeyHuman=nullptr;

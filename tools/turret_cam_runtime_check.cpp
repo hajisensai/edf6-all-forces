@@ -1,5 +1,6 @@
 // Production turret aim, muzzle transforms, round prediction and launcher frame on stand-in native memory.
 // No game process or installed assets. Link src/rounds.cpp, src/launcher.cpp, edf6common and user32.
+#include "../src/vhud.h"
 #include "../src/hud.h"
 namespace crew {
 bool observation=false;

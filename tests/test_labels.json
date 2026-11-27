@@ -4807,6 +4807,7 @@
   },
   "mission_crew_team_dll": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -6348,7 +6349,9 @@
   },
   "real_driver_native_dll": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },

@@ -1,4 +1,5 @@
 // Production seat-input transaction and camera ownership, with native-layout fixtures.
+#include <windows.h>
 namespace {
 bool focused=true;
 DWORD TestWindowProcess(HWND,LPDWORD pid){*pid=focused ? 42 : 43;return 0;}

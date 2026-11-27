@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include "../src/edf_layout.h"
 #include "../src/enemy_control_catalog.h"
 #include "../src/enemy_control_deiroi.h"
 #include "../src/enemy_control_types.h"
