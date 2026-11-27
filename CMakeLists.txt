@@ -171,7 +171,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
 # The measurement probes (src/perf_probe.h: frame anchor, SLOW FRAME, the frame split, Present, the online channels).
-target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/perf_probe.cpp src/perf_census.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_rate.cpp src/frame_rate_view.cpp src/frame_rate_objects.cpp src/render_record.cpp src/swap_flip.cpp)
 set_source_files_properties(src/native_bone_update_avx.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX")
 target_sources(EDF6VehicleCrew PRIVATE src/native_bone_update.cpp src/native_bone_update_avx.cpp)

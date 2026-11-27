@@ -39,7 +39,7 @@ def call(at: int, target: int) -> None:
 checked = 0
 for site, target in (('kInputCall', 'kInput'), ('kFenceCall', 'kFence'), ('kPresentCall', 'kPresentCmd'),
                      ('kUpdateCall', 'kUpdate'), ('kDrawCall', 'kDraw'), ('kResolveCall', 'kResolve'),
-                     ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette'),
+                     ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette'), ('kVisibleCall', 'kDataCount'),
                      ('kHavokBeforeCall', 'kHavokStep'), ('kHavokAfterCall', 'kHavokStep'),
                      ('kHavokBuildCall', 'kHavokBuild'), ('kHavokFinishCall', 'kHavokFinish'),
                      ('kCollideConstructCall', 'kCollideConstruct'), ('kCollideSleepCall', 'kCollideSleep')):
@@ -107,6 +107,16 @@ assert binary[0x1118B45:0x1118B48] == bytes.fromhex('ff5040')
 assert binary[0x11E4230:0x11E4234] == bytes.fromhex('88442420')
 assert binary[0x1631860:0x1631866] == bytes.fromhex('ff90e8000000')
 assert binary[0x163184C:0x1631854] == bytes.fromhex('c744242000000000')
+# Umbra's found objects: the commander callback's command 3 (its jump table at 0x11E435C) is the getDataCount call
+# (mov rcx, r13 the commander), the thunk is the umbra_sandlot import, and the view is the dword at r13+0xE4.
+assert struct.unpack_from('<I', binary, 0x11E435C + 3 * 4)[0] == value('kVisibleCall') - 3
+assert binary[value('kVisibleCall') - 3:value('kVisibleCall')] == bytes.fromhex('498bcd')
+assert binary[0x11E21C6:0x11E21CE] == bytes.fromhex('4183bd' + struct.pack('<I', value('kCommanderView')).hex() + '01')
+thunk = value('kDataCount')
+assert binary[thunk:thunk + 2] == bytes.fromhex('ff25')
+slot = thunk + 6 + struct.unpack_from('<i', binary, thunk + 2)[0]
+assert any(entry.address - pe.OPTIONAL_HEADER.ImageBase == slot and entry.name == b'?getDataCount@Commander@Umbra@@IEBAHXZ'
+           for library in pe.DIRECTORY_ENTRY_IMPORT for entry in library.imports)
 # System::update's steps a frame: the whole ticks due clamped (cmp ebx, ebp; then cmova) right after the tick wait.
 assert binary[0x11A2F76:0x11A2F78] == bytes.fromhex('3bdd')
 print(f'perf probe anchors ok ({checked} call sites)')

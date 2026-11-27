@@ -12,7 +12,8 @@
   - drive.run's `during` ends the stay as soon as it returns (the loop condition, read from the source).
   - the measurement probes' rows (made from the plugin's own format strings): frames and steps, the frame split and
     its n = 0 floor, the render thread, the channels, SLOW FRAME and the samples inside one by QPC, the mission entries
-    cold and warm, PresentMon, EDF6Coop STATS; the thread roles and phase buckets; perfrun's --cycle and --presentmon.
+    cold and warm, PresentMon, EDF6Coop STATS; the thread roles and phase buckets; perfrun's --cycle and --presentmon;
+    the object census and PERF VISIBLE, metrics.json, the scaling table (slope per 1000 enemies, log-log exponent).
   - legs (several scenarios in one launch): the positional arguments with their key= / warm= / diff=, each leg's
     warm-up, its `next` command, the autopilot's NEXT rows, the launch's logs cut a leg each (past midnight too),
     gen.rewrite_scenario keeping the first originals, one launch of three legs with drive.run faked (the range written
@@ -171,9 +172,63 @@ def scenarios() -> None:
     check(perfrun.plan_for('stress:10').squads == 30, 'stress: 3*N squads below the cap')
     check(perfrun.plan_for('stress:1:giantspider01').waves.enemy == 'giantspider01' and
           perfrun.stress_fields(1)[2] == 40.0 and perfrun.stress_fields(100)[2] == 90.0, 'stress: its enemy, its warm-up')
+    bench_scenario()
     for name, (wave, friends, _) in perfrun.PRESETS.items():
         check(wave.split(':')[0] in {s for s, _, _ in gen.ENEMIES} and all(f in gen.DERIVED or f in gen.JETS or
               f.startswith('vehicle') for f in friends), f'preset {name}: an enemy and friends the range knows')
+
+
+def bench_scenario() -> None:
+    """bench:E[:S[:ENEMY]]: the pinned population (gen.BENCH) -- its plan, its script (nothing dies, the refill to E),
+    its warm-up counted from E reached, and the readiness rule (E reached, or a count that stopped rising)."""
+    import re
+    import rmpa
+    p = perfrun.plan_for('bench:2000')
+    check(p.scenario == gen.BENCH and (p.waves.enemy, p.waves.max_alive, p.waves.per_wave) ==
+          ('giantant01', 2000, gen.BENCH_BATCH) and not p.vehicles and not p.friends
+          and p.squads * 6 >= perfrun.BENCH_SOLDIERS > (p.squads - 1) * 6,
+          'bench:E: E enemies, the default soldiers in squads of six, no vehicles')
+    p = perfrun.plan_for('bench:500:60:giantspider01')
+    check((p.waves.max_alive, p.squads, p.waves.enemy) == (500, 10, 'giantspider01'), 'bench:E:S:ENEMY reach the plan')
+    check(perfrun.plan_for('bench:100:7').squads == 2, 'bench: S rounded up to whole squads')
+    check(perfrun.is_range('bench:500') and perfrun.warm_for('bench:500', None) == perfrun.BENCH_SETTLE
+          and perfrun.warm_for('bench:500', 9.0) == 9.0, 'bench is a range leg, warmed BENCH_SETTLE after E')
+    check(perfrun.population_want(p) == 500 and perfrun.population_want(perfrun.plan_for('stress:1')) == 1
+          and perfrun.population_want(None) == 1, 'bench waits for E enemies, the other waves for the first')
+    for bad in ('bench:0', 'bench:10:-6'):
+        try:
+            perfrun.plan_for(bad)
+            check(False, f'{bad} refused')
+        except ValueError:
+            check(True, f'{bad} refused')
+    ready = perfrun.population_ready
+    check(ready([(0.0, 10), (5.0, 500)], 500, 5.0) and not ready([(0.0, 10), (5.0, 400)], 500, 10.0)
+          and ready([(0.0, 10), (5.0, 400), (40.0, 400)], 500, 40.0) and not ready([(0.0, 0)], 500, 99.0)
+          and ready([(0.0, 1)], 1, 0.0) and not ready([(0.0, 0)], 1, 99.0),
+          'population_ready: E reached, or a live count not risen for BENCH_PLATEAU s; never an empty one')
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))] + [
+        rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+        for x in range(-20, 21) for z in range(-20, 21) if (x, z) != (0, 0) and x * x + z * z <= 400]
+    plan = perfrun.plan_for('bench:3000:12')
+    text = gen.script(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan)))
+    squads = re.findall(r'CreateFriendSquad\([^;]*;', text)
+    check(len(squads) == 2 and all(s.endswith('.SetTeamDamageAdjust_Squad(TEAM_ID_ENEMY, 0.0)'
+                                              '.SetAutoResurrectionSquad(true);') for s in squads),
+          'bench script: its squads take no damage from the enemy and come back')
+    check('SetObjectInvincible(GetPlayerObject(0), true);' in text, 'bench script: the player invincible')
+    groups = re.findall(r'CreateEnemyGroup\([^;]*;', text)
+    check(len(groups) == 1 and groups[0].endswith('.SetInvincible(true);') and '"app:/object/giantant01.sgo"' in groups[0]
+          and f', {gen.BENCH_SPREAD:.0f}, ' in groups[0],
+          'bench script: one refill call, its groups invincible, spread BENCH_SPREAD')
+    check('int slots = 3000 - int(GetTeamObjectCount(TEAM_ID_ENEMY));' in text
+          and f'slots < {gen.BENCH_BATCH} ? slots : {gen.BENCH_BATCH}' in text and 'CreateFriend(' not in text
+          and 'CreateVehicle2(' not in text, 'bench script: the refill tops up to E, BENCH_BATCH a call, no vehicles')
+    check(text == gen.script(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))),
+          'bench script: the same every time (spots in a fixed order)')
+    plain = perfrun.plan_for('stress:1')
+    plain_text = gen.script(plain, gen.layout(points, gen.small_count(plain), gen.far_reserved(plain)))
+    check('SetInvincible' not in plain_text and 'SetTeamDamageAdjust' not in plain_text,
+          'stress is unchanged: its enemies and soldiers die')
 
 
 def report_parsing() -> None:
@@ -501,6 +556,97 @@ def probe_parsing() -> None:
         check(ph('ntdll.dll+1', 'EDF.dll+705627') == 'app: network / Steam / EOS', 'Application::Update by call')
         check(ph('ntdll.dll+1', 'EDF.dll+11a305f') == 'main loop: render fence wait 0x111CC20', 'the main loop by part')
         check(ph('ntdll.dll+1') == 'outside the frame loop', 'nothing of the frame: outside it')
+
+
+def census_scaling() -> None:
+    """The object census (src/perf_census.cpp) and PERF VISIBLE (perf_probe.cpp) rows, made from the plugin's own
+    format strings: each kind weighted by its period's samples, the rows after a head outside the window not counted;
+    report() writes them into report.md and metrics.json; the scaling table's rows, slopes and log-log exponents, a leg
+    that did not hold its population marked and left out of the fits; summary.md flags it."""
+    with tempfile.TemporaryDirectory() as d:
+        t0 = time.mktime((2026, 11, 7, 13, 0, 0, 0, 0, -1))
+        w = (t0 + 10, t0 + 20)
+        head = c_format('src/perf_census.cpp', 'PERF CENSUS %u samples')
+        team = c_format('src/perf_census.cpp', 'PERF CENSUS TEAM')
+        scene = c_format('src/perf_census.cpp', 'PERF CENSUS SCENE')
+        visible = c_format('src/perf_probe.cpp', 'PERF VISIBLE')
+        objects = c_format('src/crew.cpp', 'PERF OBJECTS')
+        perf = c_format('src/crew.cpp', 'PERF %u frames, %u steps')
+        run = os.path.join(d, 'run')
+        os.makedirs(run)
+        log = os.path.join(run, 'vehiclecrew.log')
+        with open(log, 'w', encoding='utf-8') as f:
+            for stamp, rows in (
+                    ('13:00:15', [head % (10, 1, 0.2, 0.5, 130.0, 2, 300.0, 1),
+                                  team % (1, 'GIANTANT01', 100.0, 120), team % (0, 'Player', 1.0, 1),
+                                  scene % ('xgs::Thing<a, b>', 300.0, 310)]),
+                    ('13:00:20', [head % (30, 0, 0.4, 0.9, 241.0, 3, 500.0, 1),
+                                  team % (1, 'GIANTANT01', 200.0, 210), team % (1, 'GIANTSPIDER01', 40.0, 41),
+                                  team % (0, 'Player', 1.0, 1), scene % ('xgs::Thing<a, b>', 500.0, 520),
+                                  visible % (3.0, 900.0, 600.0, 200.0, 100.0, 400.0)]),
+                    ('13:00:16', [visible % (5.0, 1100.0, 800.0, 200.0, 100.0, 600.0)]),
+                    ('13:00:40', [head % (99, 0, 9.0, 9.0, 9.0, 1, 9.0, 1), team % (1, 'GIANTANT01', 9999.0, 9999),
+                                  scene % ('xgs::Thing<a, b>', 9999.0, 9999),
+                                  visible % (9.0, 9.0, 9.0, 9.0, 9.0, 9.0)])):
+                for row in rows:
+                    f.write(f'[{stamp}.000] {row}\n')
+            f.write('[13:00:15.000] ' + perf % (300, 600, 20.0, 50, 30.0, 6, 20, 1, 33, 8.3, 120, 12.0) + '\n')
+            f.write('[13:00:15.000] ' + objects % (1000, 1, 120) + '\n')
+        c = perf_report.read_census(log, w)
+        ant = c['teams'][1]['GIANTANT01']
+        check(c['samples'] == 40 and c['skipped'] == 1 and abs(ant[0] - 175.0) < 1e-9 and ant[1] == 210
+              and abs(c['teams'][1]['GIANTSPIDER01'][0] - 30.0) < 1e-9 and c['teams'][0]['Player'] == (1.0, 1)
+              and abs(c['sample_ms'] - 0.35) < 1e-9 and c['sample_worst'] == 0.9
+              and abs(c['scene']['xgs::Thing<a, b>'][0] - 450.0) < 1e-9 and c['scene']['xgs::Thing<a, b>'][1] == 520,
+              'PERF CENSUS: each kind weighted by its period\'s samples (absent: 0), the max the max, a class name '
+              'with spaces read whole, the rows of a period outside the window left out')
+        check(list(c['teams'][1]) == ['GIANTANT01', 'GIANTSPIDER01'], 'the census kinds most numerous first')
+        v = perf_report.read_visible(log, w)
+        check(v['rows'] == 2 and v['visible'] == 1000.0 and v['view0'] == 700.0 and v['skinned'] == 500.0
+              and v['collects'] == 4.0, 'PERF VISIBLE: Umbra found objects by view and skinned instances a frame')
+        with open(os.path.join(run, 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump({'scenario': 'bench:1000', 'warm': 30, 'windows': {'cpu': [t0 + 10, t0 + 20]},
+                       'population': {'want': 1000, 'mean': 1000.0, 'max': 1000, 'held': True}}, f)
+        text = perf_report.report(run)
+        with open(os.path.join(run, 'metrics.json'), encoding='utf-8') as f:
+            m = json.load(f)
+        check('## Object census' in text and '| 1 enemies | GIANTANT01 | 175.0 | 210 |' in text
+              and 'skinned instances a frame 500' in text, 'report.md: the census and the Umbra / skinned line')
+        check(m['objects']['enemies'] == [1000.0, 1000] and m['census']['teams']['1']['GIANTANT01'] == [175.0, 210]
+              and m['visible']['visible'] == 1000.0 and m['frames']['mean_ms'] == 20.0 and m['population']['held'],
+              'metrics.json: the report\'s numbers as data')
+
+        def leg(name: str, enemies: float, frame: float, ai: float, held: bool | None = True) -> str:
+            x = os.path.join(d, name)
+            os.makedirs(x)
+            pop = None if held is None else {'want': 4000, 'held': held}
+            with open(os.path.join(x, 'metrics.json'), 'w', encoding='utf-8') as f:
+                json.dump({'objects': {'enemies': [enemies, enemies]}, 'frames': {'mean_ms': frame},
+                           'phases': {'ai_update ms/step': ai}, 'population': pop}, f)
+            return x
+        dirs = [leg('bench_2000', 2000, 16.0, 8.0), leg('bench_500', 500, 10.0, 2.0), leg('bench_1000', 1000, 12.0, 4.0),
+                leg('bench_4000', 3000, 90.0, 90.0, False), os.path.join(d, 'missing')]
+        table = perf_report.scaling_table(dirs).splitlines()
+
+        def cells(row: str) -> list[str]:
+            return [c.strip() for c in row.strip().strip('|').split('|')]
+        cols = cells(table[2])
+        fi, ai = cols.index('frame ms'), cols.index('ai_update ms/step')
+        rows = [cells(r) for r in table[4:]]
+        check([r[0] for r in rows[:4]] == ['bench_500', 'bench_1000', 'bench_2000', 'bench_4000'],
+              'the scaling table: a row a leg by its enemies, a leg without metrics.json left out')
+        check(rows[3][2] == '**no** (want 4000)' and rows[0][2] == 'yes', 'a leg that did not hold E is marked')
+        check(rows[4][0] == 'slope per 1000' and rows[4][fi] == '+4.00' and rows[4][ai] == '+4.00'
+              and rows[5][ai] == '1.00' and float(rows[5][fi]) < 1.0,
+              'the slope per 1000 enemies and the log-log exponent, the un-held leg not fitted')
+        check(perf_report.scaling_table([dirs[1]]).count('slope per 1000 |') == 0, 'one leg: no slope')
+        x = os.path.join(d, 'short')
+        os.makedirs(x)
+        with open(os.path.join(x, 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump({'scenario': 'bench:4000', 'population': {'want': 4000, 'mean': 2500.0, 'max': 2600,
+                                                                 'held': False}}, f)
+        check('population not held: 2500 of 4000 (max 2600)' in perfrun.legs_table([x]),
+              'summary.md: a bench leg that fell short says so')
 
 
 def vanilla_names() -> None:
@@ -1016,7 +1162,7 @@ def legs_run() -> None:
         gen.restore_scenario = lambda game_: calls.append(('restore',)) or True
         perfrun._sample = fake_sample
 
-        def fake_population(game_, log_, timeout, gate):
+        def fake_population(game_, log_, timeout, gate, want=1):
             calls.append(('population',))
             return 'no live enemy wave' if enter[0] == 'empty' else None
 
@@ -1140,6 +1286,7 @@ ini_option()
 scenarios()
 report_parsing()
 probe_parsing()
+census_scaling()
 perfrun_probe_options()
 vanilla_names()
 drive_during()

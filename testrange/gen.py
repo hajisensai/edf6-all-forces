@@ -284,7 +284,7 @@ class Plan:
     # NPC-piloted heli is flown by the plugin, several of them in formation.
     friends: dict[str, int] = field(default_factory=dict)
     air: AirWaves = field(default_factory=AirWaves)
-    scenario: str = ''   # '' the waves above; GRAND the grand battle (grand_battle)
+    scenario: str = ''   # '' the waves above; GRAND the grand battle (grand_battle); BENCH a pinned population
     # Friendly soldier squads (GRAND_SOLDIERS, six each) by the player before the waves: real soldiers the plugin's
     # auto-crew walks to the empty vehicles (with NpcCrewTest=1 no player has to drive them first).
     squads: int = 0
@@ -326,6 +326,17 @@ GRAND_SOLDIERS = ('app:/object/AiArmySoldier_S_AF_Leader.sgo', 'app:/object/AiAr
 GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to (counted together: the cap is the sum)
 # Far points the sky's waves spawn on besides the ships' (GrandSky makes its jets on them, on the ground).
 GRAND_SKY_SPAWNS = 2
+
+# A benchmark population (tools/perfrun.py bench:E[:S[:ENEMY]]; the user, 2026-11-27: stress:N held 2541 enemies one run
+# and 3332 the next, the noise swamping any A/B): the same E enemies and S soldiers every run, a count that stays put.
+# Nothing dies: every enemy group invincible (as the stock M003_5D's), every soldier squad taking no damage from the
+# enemy (SetTeamDamageAdjust_Squad 0; the stock M017 uses 2) and coming back should one fall anyway (the stock M045's
+# SetAutoResurrectionSquad), the player invincible: the fight goes on at full strength, never one-sided, and once the
+# E are out nothing more is spawned (the spawning's own cost is the fill, before the window). The refill loop still
+# tops the enemies up to E (one fallen out of the world): BENCH_BATCH a call, BENCH_GAP s apart, the enemy spots in a
+# fixed order. No vehicles: no shelling, no wrecks.
+BENCH = 'bench'
+BENCH_BATCH, BENCH_GAP, BENCH_SPREAD = 100, 0.25, 40.0
 
 
 # The plugin's aircraft the player boards (src/playerjet_kinds.h kBoardable) that have a range SGO: the grand battle
@@ -800,12 +811,38 @@ def script(plan: Plan, lay: Layout) -> str:
             lines.append(f'\tCreateVehicle2({_q(point.name)}, {path}, {plan.vehicle_level:.2f});')
     for kind, point in enemy_spots(plan, lay):
         lines.append(f'	CreateEnemy({_q(point.name)}, {_q("app:/object/" + kind + ".sgo")}, {plan.vehicle_level:.2f}, true);')
+    bench = plan.scenario == BENCH
+    if bench:
+        lines.append('\tSetObjectInvincible(GetPlayerObject(0), true);   // (BENCH: nothing dies)')
     for i in range(0 if grand else plan.squads):
         if i and i % SQUAD_BATCH == 0:   # (perfrun's stress: hundreds of squads, not all in one frame)
             lines.append(f'\tWait({SPAWN_GAP:.2f});')
         lines.append(f'	CreateFriendSquad({_q(lay.player.name)}, 20, {_q(GRAND_SOLDIERS[0])}, {_q(GRAND_SOLDIERS[1])}, 6, '
-                     f'{plan.vehicle_level:.2f}, false);')
-    if w.enabled and target_spots(lay) and targets:
+                     f'{plan.vehicle_level:.2f}, false)' +
+                     ('.SetTeamDamageAdjust_Squad(TEAM_ID_ENEMY, 0.0).SetAutoResurrectionSquad(true);' if bench else ';'))
+    if bench and w.enabled and lay.enemy_points:
+        pts = ', '.join(_q(p.name) for p in lay.enemy_points)
+        lines += [
+            '',
+            f'\t// BENCH: the enemies topped up to {int(w.max_alive)}, {BENCH_BATCH} a call, the spots in a fixed order; all',
+            '\t// invincible, so once they are out the count stays put and nothing more is made.',
+            f'\tarray<string> spots = {{ {pts} }};',
+            '\tuint next = 0;',
+            f'\tWait({w.first_delay:.1f});',
+            '\twhile( true ) {',
+            f'\t\tint slots = {int(w.max_alive)} - int(GetTeamObjectCount(TEAM_ID_ENEMY));',
+            '\t\tif( slots > 0 ) {',
+            f'\t\t\tint count = slots < {BENCH_BATCH} ? slots : {BENCH_BATCH};',
+            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], {BENCH_SPREAD:.0f}, '
+            f'{_q("app:/object/" + w.enemy + ".sgo")}, count, {w.level:.2f}, true).SetInvincible(true);',
+            '\t\t\tnext++;',
+            f'\t\t\tWait({BENCH_GAP:.2f});',
+            '\t\t} else {',
+            '\t\t\tWait(1.0);',
+            '\t\t}',
+            '\t}',
+        ]
+    elif w.enabled and target_spots(lay) and targets:
         spots = target_spots(lay)
         per = max(1, int(w.per_wave))
         limit = min(int(w.max_alive), len(spots) * per)

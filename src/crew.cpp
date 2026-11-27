@@ -44,6 +44,7 @@
 #include "support_call.h"
 #include "transport.h"
 #include "perf_probe.h"
+#include "perf_census.h"
 #include "aura.h"
 #include "pvp.h"
 #include "enemy_control.h"
@@ -876,6 +877,7 @@ void PerfTick() noexcept {
     }
     perf.last=now;
     const ULONGLONG t=GetTickCount64();
+    perfcensus::Tick();   // its own sample clock: a sample a kSampleMs, folded into the period's census
     if(t-perf.at<kPerfMs)return;
     const perfprobe::Frames fr=perfprobe::TakeFrames();
     if(Cfg().debug && fr.frames)Log("PERF %u frames, %u steps: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms, %u over "
@@ -887,6 +889,7 @@ void PerfTick() noexcept {
     // what the steps carried (the stress runs: how many there really were, not how many the mission asked for)
     if(Cfg().debug && perf.steps)Log("PERF OBJECTS enemies %d, player team %d, friends %d",TeamObjects(1),TeamObjects(0),
         TeamObjects(2));
+    perfcensus::Report();   // the period's census by kind (PERF CENSUS lines), then zeroed
     // the game thread's memory asks over the same 5 s (edf::Readable): how many, how many the page cache answered, and
     // the system calls left with their time
     const edf::ReadableStats r=edf::TakeReadableStats();   // taken every period: a line covers its own 5 s only

@@ -16,6 +16,17 @@ SCENARIO
   swarm[:ENEMY[:PER[:CAP[:LEVEL]]]]  the test range with waves of ENEMY (default giantant01): PER every 2 s while fewer
                                      than CAP live (default 25, 160), at LEVEL (default 0.3, so they live long enough
                                      to pile up), three NPC tanks and three soldier squads fighting them
+  bench:E[:S[:ENEMY]]                a pinned population for A/B and scaling (the user, 2026-11-27: stress:N held 2541
+                                     enemies one run, 3332 the next): E enemies of ENEMY (default giantant01) on the
+                                     range's enemy spots in a fixed order, S soldiers (default BENCH_SOLDIERS = 120,
+                                     rounded up to squads of six) by the player, no vehicles. Nothing dies (gen.BENCH:
+                                     the enemies invincible, the soldiers taking no damage from them, the player
+                                     invincible) and a refill loop tops the enemies up to E, so the count stays at E
+                                     and nothing is spawned in the window. Its warm-up waits for the PERF OBJECTS
+                                     enemies to reach E (or stop rising for BENCH_PLATEAU s: the report then says it
+                                     fell short), then BENCH_SETTLE s for the fight to close in. Several sizes in one
+                                     launch: perfrun.py bench:500 bench:1000 bench:2000 bench:4000; summary.md's
+                                     scaling table then gives each phase's ms a step against the enemies and its slope
 options
   --dll PATH        EDF6VehicleCrew.dll placed for the run, with the EDF6AutoTurret.dll next to it when there is one
                     (default: this checkout's build; `installed` keeps the game's own)
@@ -87,6 +98,10 @@ for sub in ('pylib', 'testrange', os.path.join('tests', 'autopilot'), 'tools'):
 import gamedir  # noqa: E402
 import gamelease  # noqa: E402
 
+# bench: soldiers by default (the same S at every E, so the slope is the enemies'); seconds after E is reached before
+# sampling (the enemies walking in from 180-450 m); how long a count that stops rising is waited on before sampling it
+BENCH_SOLDIERS, BENCH_SETTLE, BENCH_PLATEAU = 120, 30.0, 30.0
+BENCH_PINNED = 0.95   # the window's mean enemies under this share of E: the report says the count was not held
 WARM = {'grand': 45.0, 'swarm': 30.0, 'horde': 40.0, 'blast': 40.0}   # the waves need this long to fill up; a stock mission's start: 25 s
 # (past drive.run's real-mouse nudge at 20 s, which must not fall into the clean window)
 SAMPLER = os.path.join(ROOT, 'build', 'rip_sampler.exe')
@@ -130,6 +145,19 @@ def plan_for(scenario: str):
         plan.waves = gen.Waves(enabled=True, enemy=enemy, per_wave=per, max_alive=cap, first_delay=3.0, interval=2.0,
                                level=0.3)
         return plan
+    if kind == 'bench':
+        e = int(rest[0]) if rest and rest[0] else 1000
+        soldiers = int(rest[1]) if len(rest) > 1 and rest[1] else BENCH_SOLDIERS
+        if e < 1 or soldiers < 0:
+            raise ValueError('bench:E[:S[:ENEMY]] needs E >= 1 and S >= 0')
+        plan = gen.Plan()
+        plan.vehicles = {}
+        plan.friends = {}
+        plan.scenario = gen.BENCH
+        plan.squads = -(-soldiers // 6)
+        plan.waves = gen.Waves(enabled=True, enemy=rest[2] if len(rest) > 2 and rest[2] else 'giantant01',
+                               per_wave=gen.BENCH_BATCH, max_alive=e, first_delay=3.0, interval=gen.BENCH_GAP, level=1.0)
+        return plan
     if kind == 'grand':
         return gen.grand_battle(gen.Plan())
     if kind in PRESETS:
@@ -168,12 +196,14 @@ def warm_for(scenario: str, override: float | None) -> float:
     kind, *rest = scenario.split(':')
     if kind == 'stress':
         return stress_fields(int(rest[0]) if rest and rest[0] else 1)[2]
+    if kind == 'bench':   # counted from E reached (population_want), not from the mission's start
+        return BENCH_SETTLE
     return WARM.get(kind, 25.0)
 
 
 def is_range(scenario: str) -> bool:
     """Whether `scenario` runs on the test range (plan_for gives it a plan), not a stock mission."""
-    return scenario.split(':')[0] in ('stress', 'grand', 'swarm', *PRESETS)
+    return scenario.split(':')[0] in ('stress', 'grand', 'swarm', 'bench', *PRESETS)
 
 
 def sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, marks: dict,
@@ -352,11 +382,31 @@ def needs_population(plan, opts: dict) -> bool:
     return bool(plan and plan.waves.enabled and plan.waves.per_wave > 0 and debug not in ('0', 'false', 'off', 'no'))
 
 
-def wait_population(game: str, log: str, timeout: float, gate=None) -> str | None:
-    """The mission entry can precede actor creation by tens of seconds. Use only object counts appended after it."""
+def population_want(plan) -> int:
+    """The live enemies wait_population waits for: bench's E (its warm-up counts from there), any other wave's first."""
+    import gen
+    return int(plan.waves.max_alive) if plan is not None and plan.scenario == gen.BENCH else 1
+
+
+def population_ready(counts: list[tuple[float, int]], want: int, now: float, plateau: float = BENCH_PLATEAU) -> bool:
+    """Given the PERF OBJECTS enemies seen so far ((time, count), oldest first): `want` reached, or (want > 1) live
+    enemies whose count has not risen for `plateau` s (the game holds no more: sampled anyway, the report says so)."""
+    if any(n >= want for _, n in counts):
+        return True
+    if want <= 1 or not counts or max(n for _, n in counts) <= 0:
+        return False
+    top = max(n for _, n in counts)
+    first_top = next(t for t, n in counts if n == top)
+    return now - first_top >= plateau
+
+
+def wait_population(game: str, log: str, timeout: float, gate=None, want: int = 1) -> str | None:
+    """The mission entry can precede actor creation by tens of seconds. Use only object counts appended after it:
+    until `want` enemies live (population_ready)."""
     import drive
     mark = log_mark(log)
     deadline = time.monotonic() + timeout
+    seen: dict[int, float] = {}   # a row's offset in the log: when it was first read
     while time.monotonic() < deadline:
         if gate is not None and gate.state != drive.Gate.OPEN:
             return 'the run ended before the enemy wave became active'
@@ -366,7 +416,9 @@ def wait_population(game: str, log: str, timeout: float, gate=None) -> str | Non
             current = run_log(log, mark) or b''
         except OSError:
             current = b''   # the logger may be rotating the file
-        if any(int(row[1]) > 0 for row in WAVE_OBJECTS.finditer(current)):
+        now = time.monotonic()
+        counts = [(seen.setdefault(row.start(), now), int(row[1])) for row in WAVE_OBJECTS.finditer(current)]
+        if population_ready(counts, want, now):
             return None
         time.sleep(0.5)
     return 'no live enemy wave before the readiness deadline (--leg-timeout)'
@@ -382,6 +434,10 @@ def check_wave_window(plan, opts: dict, marks: dict, log: str) -> None:
             marks['error'] = 'no object counts in the battle measurement window'
         elif objects['enemies'][1] <= 0:
             marks['error'] = 'no live enemies in the battle measurement window'
+        elif population_want(plan) > 1:   # bench: the count it was to hold, and what the window held
+            want = population_want(plan)
+            marks['population'] = {'want': want, 'mean': objects['enemies'][0], 'max': objects['enemies'][1],
+                                   'held': objects['enemies'][0] >= BENCH_PINNED * want}
 
 
 def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, variant: str = '') -> int:
@@ -406,7 +462,7 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
 
     def during() -> None:
         if wait_for_wave:
-            why = wait_population(game, log, opts['leg_timeout'], gate)
+            why = wait_population(game, log, opts['leg_timeout'], gate, population_want(plan))
             if why:
                 marks['error'] = why
                 return
@@ -635,7 +691,8 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
                                     daemon=True)
             keys.start()
             if needs_population(plans[i], opts):
-                why = wait_population(game, plugin_log(game), opts['leg_timeout'] - (time.monotonic() - began), gate)
+                why = wait_population(game, plugin_log(game), opts['leg_timeout'] - (time.monotonic() - began), gate,
+                                      population_want(plans[i]))
                 if why:
                     marks['error'] = why
                     return
@@ -755,6 +812,9 @@ def legs_table(dirs: list[str]) -> str:
         scenario = run.get('scenario', '?')
         warm = f'{run["warm"]:.0f}' if 'warm' in run else ''
         errors = [run[k] for k in ('error', 'key_error') if run.get(k)]
+        pop = run.get('population') or {}
+        if pop and not pop.get('held'):   # bench: the window did not hold E (its numbers are another size's)
+            errors.append(f'population not held: {pop.get("mean", 0):.0f} of {pop.get("want")} (max {pop.get("max")})')
         err = ('**ERROR** ' + '; '.join(errors).replace('|', '/')) if errors else ''
         if 'cpu' not in run.get('windows', {}):
             why = (run.get('error') or 'not reached').replace('|', '/')
@@ -903,6 +963,9 @@ def main(argv: list[str]) -> int:
                     perf_report.report(d)
                     print('report:', os.path.join(d, 'report.md'))
         table = legs_table(dirs)
+        scaling = perf_report.scaling_table(dirs)
+        if scaling:
+            table += '\n' + scaling
         with open(os.path.join(out, 'summary.md'), 'w', encoding='utf-8') as f:
             f.write(table)
         print(table)

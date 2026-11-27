@@ -51,6 +51,19 @@ System::update 在 `0x1198FA4` 先调一次绘制录制 `0x11978D0`，然后跑 
 - 蒙皮调色板 `0x11009A0`（gpu-6，PERF GPU 的 `skin palettes`）：
   - 计数挂在 LOD 绘制 `0x1104100` 里的调用点 `0x1104131`，每个 pass 一次。
   - 另有两个调用点 `0x6C2C8A`、`0x1102F2E` 不计入。
+  - PERF VISIBLE 的 `skinned instances`：每帧去重的第 3 个参数 r8（调色板读它 +8 的姿态；rcx 的 +0x10 / +0x20 是骨骼
+    数组与骨骼数，按模型共享，不能拿来数实例）。去重表按帧锚点（InputHook）换代，不清表。
+- Umbra 找到的对象（PERF VISIBLE 的 `visible`）：
+  - Commander 回调 `0x11E2120`：rcx 是 commander（存进 r13），edx 是命令号，跳转表在 `0x11E435C`。
+  - 命令 3（`0x11E3E1C`）在 `0x11E3E1F` 以 rcx = r13 调 `0x12D61C4`，即 umbra_sandlot 导入
+    `Umbra::Commander::getDataCount`，随后按下标 getObjectData / getUserPointer 逐个交给绘制。探针挂这个调用点，
+    计调用次数与返回值之和。
+  - 按 commander+0xE4 分视图（0、1、其他）；回调在 `0x11E21C6` 等处 `cmp [r13+0xE4], 1` 把视图 1 单独处理。
+    视图 0 / 1 各是什么（主视图、阴影等）未实测，只按编号报。
+  - `tests/perf_probe_native_audit.py` 核对跳转表、`mov rcx, r13`、导入名和 +0xE4 的比较字节。
+- 对象普查（PERF CENSUS，`src/perf_census.cpp`，PerfProbe≥1）：游戏线程每 0.5 s 采样一次，TryEnterCriticalSection
+  拿不到锁就跳过这次（计入 skipped），不等锁。按队伍走队伍管理器的 std::set（与 GetTeamObjectCount 同样的过滤），
+  按 SGO 名分类；按场景走 System +0x3D0 的对象链表，按 RTTI 类名分类。每次采样自身的耗时单独报。
 - 实测（Debug=1 + PerfProbe=1，60 fps）：
   - M001 每帧读约 10.6–13 次遮挡查询，几乎都带等待，但**从没遇到未就绪**；全部读取合计 0.05–0.07 ms/帧，单次最差约 1.6 ms。
   - M001 每帧约 92 次蒙皮调色板，0.08 ms/帧。
