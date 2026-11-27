@@ -5227,6 +5227,13 @@
    ],
    "scripts": []
   },
+  "native_bone_update": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "native_cmpl": {
    "labels": [
     "native-codec",
@@ -6681,23 +6688,6 @@
   },
   "redirect_thunk": {
    "labels": [
-    "plugin-air",
-    "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
-    "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
-    "plugin-support",
-    "test-data"
-   ],
-   "scripts": []
-  },
-  "render_pose": {
-   "labels": [
-    "edf41",
-    "native-codec",
     "plugin-air",
     "plugin-core",
     "plugin-enemy",
