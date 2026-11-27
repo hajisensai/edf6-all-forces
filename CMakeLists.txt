@@ -69,6 +69,12 @@ target_sources(EDF6VehicleCrew PRIVATE src/dmgnum.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)
 # Fire that cannot hurt its target (src/wastedfire.cpp, src/wasted_fire.h): fed by the damage hook, asked by the AI.
 target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
+# The soldiers' parallel Decide (src/worker_pool.h): a fork-join pool the game thread runs and waits for in one call.
+target_sources(EDF6VehicleCrew PRIVATE src/worker_pool.cpp)
+add_executable(worker_pool_test EXCLUDE_FROM_ALL tests/worker_pool_test.cpp src/worker_pool.cpp)
+target_include_directories(worker_pool_test PRIVATE src)
+target_compile_options(worker_pool_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME worker_pool COMMAND worker_pool_test)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h); HOLD FIRE's table every firing module asks
 # (src/unit_hold_fire.cpp: the tests of those modules link it as they are).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp src/unit_hold_fire.cpp src/map_signal.cpp)
@@ -1434,6 +1440,7 @@ set(EDF6_OFFLINE_CHECKS log_test common_host_check save_mode_check pjet_kinds he
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks objref_test)
+add_dependencies(offline_checks worker_pool_test)
 add_dependencies(offline_checks keybind_test)
 add_dependencies(offline_checks vehicle_weapons_test)
 add_dependencies(offline_checks rip_sampler)   # built in CI so it keeps compiling; never run there
@@ -1610,7 +1617,7 @@ target_sources(jet_command_test PRIVATE src/jet_flight.cpp)
 target_sources(map_command_runtime_check PRIVATE src/command_unit.cpp src/map_signal.cpp)
 target_sources(map_command_identity_test PRIVATE src/command_unit.cpp src/map_signal.cpp)
 target_sources(npc_post_test PRIVATE src/command_unit.cpp)
-add_executable(npc_core_check EXCLUDE_FROM_ALL tools/npc_core_check.cpp src/ground_navigation.cpp)
+add_executable(npc_core_check EXCLUDE_FROM_ALL tools/npc_core_check.cpp src/ground_navigation.cpp src/worker_pool.cpp)
 target_include_directories(npc_core_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(npc_core_check PRIVATE edf6common user32)
 target_compile_options(npc_core_check PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
