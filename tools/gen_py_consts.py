@@ -58,6 +58,7 @@ def constants() -> list[tuple[str, object, str]]:
         ('kSalvoDropFrames', int(vc.SALVO_DROP[0]), 'pylib/vcobjects.py SALVO_DROP[0]: CP[7][0]'),
         ('kSalvoDropKeep', float(vc.SALVO_DROP[1]), 'pylib/vcobjects.py SALVO_DROP[1]: CP[7][1]'),
         ('kSalvoDropGravity', float(vc.SALVO_DROP_GRAVITY), 'pylib/vcobjects.py SALVO_DROP_GRAVITY'),
+        ('kSalvoLockCone', float(vc.SALVO_LOCK_CONE), 'pylib/vcobjects.py SALVO_LOCK_CONE: LockonAngle, rad off the nose'),
         ('kSalvoFan', float(vc.SALVO_FAN), 'pylib/vcobjects.py SALVO_FAN: FireAccuracy'),
         ('kSalvoAccel', float(vc.SALVO_ACCEL), 'pylib/vcobjects.py SALVO_ACCEL: CP[4]'),
         ('kSalvoTurn', float(vc.SALVO_TURN), 'pylib/vcobjects.py SALVO_TURN: CP[5]'),

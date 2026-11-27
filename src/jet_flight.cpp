@@ -649,7 +649,7 @@ const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept {
 namespace {
 // The horizontal soft edge and the soft ceiling (CeilingY less kCeilingGap less ini AirSoftCeil): `want` turned so its
 // turn back (or its push over) ends on them. Logged as it goes past the soft line and as it is back inside.
-void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
+void SoftEdge(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const Kind& k=KindOf(j);
     const float s=std::sqrt(j.m.vel[0]*j.m.vel[0]+j.m.vel[2]*j.m.vel[2]),s3=Len(j.m.vel);
     const float r=TurnRadiusOf(k,j.burden.mass,s);
@@ -692,7 +692,16 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
     const bool line=j.phase==jetphase::Phase::ferry;   // (withdrawing it is no ferry: jet_logic.h)
     const bool leaving=!SoftEdgeHolds(j);
-    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
+    // A sortie flying in from off the map on its pass's line (airbound.h Arriving) is let be until it has been inside:
+    // not `back`, so its pass steers it and its targets in the play area stay its own (jet_combat.cpp).
+    const bool sortie=j.sortie.pass!=SortiePass::none && !j.sortie.done,came=!j.sortie.arrived;
+    if(sortie && airbound::Arriving(soft,pos,&j.sortie.arrived)) {
+        j.m.edgeBack=false;j.m.edgeTurn=0;
+    } else {
+        if(sortie && came)Log("JET v=%p sortie: inside the soft edge at (%.0f,%.0f), %llu ms after it came",j.Vehicle(),pos[0],
+                              pos[2],ms-j.sortie.begun);
+        airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
+    }
     if(j.m.edgeBack!=was && !line && !leaving)
         Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
             was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,
@@ -729,7 +738,7 @@ void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcep
     const float r=s*s/(k.maxG*kG);
     for(const auto& w:learned)if(Holds(w,pos,ms))TurnOff(w,j,pos,r,want);
     // The soft edge last: coming back in comes before its fight, its target out there, a learned wall.
-    SoftEdge(j,pos,want);
+    SoftEdge(j,pos,want,ms);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
     const float here=clear,there=GroundClearance(probe);
