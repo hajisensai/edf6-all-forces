@@ -225,7 +225,7 @@ def check_calls(root: str) -> None:
 
 
 def check_session(root: str) -> None:
-    session = body(code_only(read(root, 'src/netprobe.cpp')), 'bool InSession()')
+    session = body(code_only(read(root, 'src/netprobe.cpp')), 'bool ReadSession()')   # InSession is stepobj::Once over it
     if not before(session, 'if(!SessionCodeKnown(base))return false;', 'At<const unsigned char*>(base,kGameStatus)'):
         fail('src/netprobe.cpp InSession: reject an unknown native profile before reading session state')
 

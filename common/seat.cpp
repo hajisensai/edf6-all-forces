@@ -12,14 +12,14 @@ namespace edf {
 bool IsPlayer(const unsigned char* human) noexcept {
     if(!stepobj::Reads(human,kHumanPlayer+1))return false;
     __try {
-        return human[kHumanPlayer] && At<const void*>(human,kHumanPad) && (human[kRiderNet+kNetFlags]&1)==0;   // !RemoteRider
+        return human[kHumanPlayer] && At<const void*>(human,kHumanPad) && !RemoteRider(human);
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
 bool IsAnyPlayer(const unsigned char* human) noexcept {
     if(!stepobj::Reads(human,kHumanPlayer+1))return false;
     __try {
-        return human[kHumanPlayer] && (At<const void*>(human,kHumanPad) || (human[kRiderNet+kNetFlags]&1)!=0);
+        return human[kHumanPlayer] && (At<const void*>(human,kHumanPad) || RemoteRider(human));
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
