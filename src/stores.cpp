@@ -11,6 +11,9 @@
 #include "store_burden.h"
 #include "crew.h"
 #include "memory.h"
+#include "vhud.h"
+#include "vecmath.h"
+#include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -310,6 +313,13 @@ int ReadStores(unsigned char* v,Store* out,int most) noexcept {
 
 void TriggerStore(const Store& s) noexcept {
     if(s.weapon && s.ammo>0 && Readable(s.weapon+kWeaponTrigger,1,true))s.weapon[kWeaponTrigger]=1;
+}
+
+bool StoreLands(const Store& s,float reach,float* at) noexcept {
+    RoundModel m{};
+    float from[3],dir[3],sec=0.0f;
+    return s.weapon && ReadRound(s.weapon,&m) && edf::MeanMuzzle(s.weapon,8,from,dir) && vec::Normalize(dir)
+           && RoundLands(s.weapon,m,from,dir,reach,at,&sec);
 }
 
 const JetMass* JetMassOf(float mark) noexcept {

@@ -151,6 +151,7 @@ bool HoldFire(const void*,const void* target,const float*,float,float,float*) no
 bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept { return false; }
 int ReadStores(unsigned char*,Store*,int) noexcept { return 0; }
 void TriggerStore(const Store&) noexcept {}
+bool StoreLands(const Store&,float,float*) noexcept { return false; }   // no bomb round flown here
 void NpcGear(unsigned char*,float,float) noexcept {}
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
 void JetSmoke(const unsigned char*,bool,ULONGLONG) noexcept {}

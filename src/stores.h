@@ -84,6 +84,10 @@ constexpr int kMostStores=7;   // the gunship: its four pylons and its shells, c
 int ReadStores(unsigned char* vehicle,Store* out,int most) noexcept;
 // Fires the store's weapon this frame (its trigger latch, weapon +0x139; held, again each frame).
 void TriggerStore(const Store& s) noexcept;
+// Where a round of `s` let go now first meets the map, as the game flies it (rounds.cpp RoundLands: from the store's
+// muzzle, its eject along it, the shooter's share of velocity, the world's gravity x its AmmoGravityFactor), at most
+// `reach` m on: false with no weapon, its round unread, or none landing within `reach`.
+bool StoreLands(const Store& s,float reach,float* at) noexcept;
 // What `count` stores add to the jet of mark `mark`: its mass over its clean mass (>= 1) and its parasitic drag's
 // share over clean (>= 0), their rounds left and the pylons they were loaded on (store_burden.h). A mark without a mass:
 // none.

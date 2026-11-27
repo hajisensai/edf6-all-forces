@@ -24,6 +24,7 @@ void Done(Jet& j,const char* why,ULONGLONG ms) noexcept {
     j.sortie.done=true;
     Withdraw(j,why,ms);
 }
+constexpr float kBombReach=4000.0f;   // m a bomb's path is followed for its landing (the carpet's: ~1.6 km from 260 m up)
 // Level at `height` toward the point `lead` m on along the pass from where it is.
 void Run(const Jet& j,const float* pos,float height,float lead,float* want) noexcept {
     float p[3];sortie::Ahead(j.sortie.line,pos,lead,p);
@@ -322,25 +323,31 @@ void SortieFire(Jet& j,const unsigned char* v,const float* pos,const Arms& arms,
     if(!carpet && s.fired>=sortie::kPopBombs){s.phase=1;s.phaseAt=ms;return;}
     const float mark=s.line.at[1];
     if(pos[1]-mark<sortie::kPopAlt*0.6f)return;   // its own bombs' blast
-    float at[3];sortie::Impact(pos,j.m.vel,mark,kG,at);
+    // The bomb it would let go now and where that lands as the game flies it (StoreLands: the world's gravity, 14.7 m/s^2,
+    // x the bomb's factor, its eject and the share of the jet's velocity it takes; the ground or a building under it). It
+    // reckoned 9.8 m/s^2 onto the mark's height before (the user, 2026-11-27: 「炸弹也很难投中」): every bomb fell ~22%
+    // sooner than it planned, ~300 m short from the carpet's height at its speed, wide of a 150 m window.
+    const Store* bomb=nullptr;
+    int bombs=0;
+    for(int i=0;i<arms.storeCount;++i) {
+        const Store& st=arms.stores[i];
+        if(st.spec->role!=StoreRole::bomb || st.ammo<=0)continue;
+        bombs+=st.ammo;
+        if(!bomb)bomb=&st;
+    }
+    if(!bomb){if(!carpet && s.fired){s.phase=1;s.phaseAt=ms;}return;}   // out of bombs before its second
+    float at[3];
+    if(!StoreLands(*bomb,kBombReach,at))return;   // none lands within reach yet: held
     const float half=s.runHalf>0.0f ? s.runHalf : sortie::kCarpetHalf;
     if(carpet ? std::fabs(sortie::Along(s.line,at))>half : HorizDist(at,s.line.at)>sortie::kPopDrop)return;
     if(s.runHalf>0.0f) {
         const float offset[3]={at[0]-s.line.at[0],0.0f,at[2]-s.line.at[2]};
         if(std::fabs(sortie::Dot2(offset,s.line.side))>65.0f)return;
     }
-    int bombs=0;
-    for(int i=0;i<arms.storeCount;++i)if(arms.stores[i].spec->role==StoreRole::bomb)bombs+=arms.stores[i].ammo>0 ? arms.stores[i].ammo : 0;
     const ULONGLONG gap=carpet ? sortie::CarpetGapMs(bombs+s.fired,Len(j.m.vel),half) : 150;
     if(s.fired && ms-s.bombAt<gap)return;
-    for(int i=0;i<arms.storeCount;++i) {
-        const Store& st=arms.stores[i];
-        if(st.spec->role!=StoreRole::bomb || st.ammo<=0)continue;
-        TriggerStore(st);
-        s.bombWeapon=st.weapon;s.bombAmmo=st.ammo;
-        return;
-    }
-    if(!carpet && s.fired){s.phase=1;s.phaseAt=ms;}   // out of bombs before its second
+    TriggerStore(*bomb);
+    s.bombWeapon=bomb->weapon;s.bombAmmo=bomb->ammo;
 }
 }  // namespace jet
 }  // namespace crew
