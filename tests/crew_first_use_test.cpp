@@ -27,6 +27,10 @@ namespace perfprobe {   // the measurement probes (src/perf_probe.cpp): no frame
 Frames TakeFrames() noexcept { return {}; }
 void Report(unsigned) noexcept {}
 }  // namespace perfprobe
+namespace perfcensus {   // the object census (src/perf_census.cpp, not linked here)
+void Tick() noexcept {}
+void Report() noexcept {}
+}  // namespace perfcensus
 void NpcParallelReport(unsigned) noexcept {}   // npcai.cpp's PERF NPCMT line (not linked here)
 void ResetMissionCrew() noexcept {}
 bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }
