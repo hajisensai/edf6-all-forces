@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设定集 · EDF 全军出击</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="wide">
+  <header class="top">
+    <h1>EDF 全军出击 · 设定集</h1>
+    <nav aria-label="页面"><a href="/">测试</a> · <a href="/outline.html">剧情大纲</a> · <a href="/story.html">关卡策划</a> · <b aria-current="page">设定集</b></nav>
+    <span class="me"><span id="me"></span> · <a id="auth" href="/logout">退出</a></span>
+  </header>
+  <p id="error" class="err hide" role="alert"></p>
+  <div id="groupBar" class="row hide bar"><span>查看哪个组</span><fieldset id="group" class="chips" aria-label="查看哪个组"></fieldset></div>
+  <section class="stTop">
+    <div class="row stHeadRow">
+      <h2>需要设计的东西</h2>
+      <span id="count" class="muted" role="status"></span>
+      <span class="grow"></span>
+      <button class="btn hide" id="add" type="button">＋ 新增设定</button>
+    </div>
+    <p class="muted">剧情里要用到、需要设计或制作的角色、载具、武器、装备、地图、怪物。每条写外观、设定和参考，并关联到大纲里出现它的步骤、关卡策划里用到它的关卡。谁都能看；<span id="who">同组成员都能编辑</span>。</p>
+    <div class="row tools">
+      <input type="search" id="filter" placeholder="搜索名称、阵营、外观、设定……（按 / 跳到这里）" aria-label="搜索设定">
+    </div>
+    <fieldset id="kinds" class="chips" aria-label="按分类筛选"></fieldset>
+    <fieldset id="stats" class="chips hide" aria-label="按状态筛选"></fieldset>
+    <p id="hint" class="muted small hide">点一条展开就地编辑，打字即存本机草稿 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · <kbd>Esc</kbd> 收起 · 删除后可在提示里撤销</p>
+  </section>
+  <div id="list">加载中……</div>
+  <datalist id="sides"></datalist>
+</main>
+<script src="/ui.js"></script>
+<script src="/groups.js"></script>
+<script src="/design.js"></script>
+</body>
+</html>

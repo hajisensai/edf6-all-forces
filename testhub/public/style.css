@@ -290,3 +290,19 @@ body.dragActive .olSteps { min-height: 40px; }
 .olBadges { display: inline-flex; gap: 6px; align-items: center; }
 .olBadges .badge { color: var(--info); }
 .olBadges .badge.olMain { color: var(--warn); }
+/* 设定集 (/design.html) */
+.dsKind { margin: 18px 0 6px; }
+.dsKindHead h3 { margin: 0; font-size: 17px; }
+.dsList { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: start; }
+.dsCard.open { grid-column: 1 / -1; }
+.dsSum { margin: -4px 12px 10px 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.dsCard .stToggle { padding-left: 12px; }
+.dsPick { display: grid; gap: 4px; max-height: 320px; overflow: auto; padding: 6px 2px; }
+.dsLane { border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px 6px; margin: 0; display: grid; gap: 2px; }
+.dsLane legend { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 4px; }
+.dsCheck { display: flex; gap: 6px; align-items: baseline; font-size: 14px; font-weight: 400; color: var(--ink); cursor: pointer; overflow-wrap: anywhere; }
+.stField details > summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.stField details select { margin: 4px 0; }
+.dsLinks { margin: 0; padding-left: 18px; }
+.olDesigns { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; margin: 6px 0 0; }
+.olDesigns a.tag { text-decoration: none; }
