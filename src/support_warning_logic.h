@@ -93,6 +93,24 @@ inline int Route(const float* from,const float* mark,float beyond,float (*out)[3
     return 3;
 }
 
+// A deployment's route as its lead flies it (the user, 2026-11-27: 「飞机进场会有个红线停留在原地」): the route laid
+// when it was made (`way`, `n` points: where it came in, the point, a pass's end) cut down to what is still ahead of `at`
+// (where the lead is now). A point is behind it once it stands past it along the leg into that point (flat). Out: `at`,
+// then the points still ahead; its count, under 2 once every point is behind (it has flown the route: the warning goes).
+inline int RouteAhead(const float (*way)[3],int n,const float* at,float (*out)[3]) noexcept {
+    int next=1;
+    for(;next<n;++next) {
+        const float leg[2]={way[next][0]-way[next-1][0],way[next][2]-way[next-1][2]};
+        const float past[2]={at[0]-way[next][0],at[2]-way[next][2]};
+        if(leg[0]*past[0]+leg[1]*past[1]<0.0f)break;   // still short of it
+    }
+    if(next>=n)return 1;
+    for(int i=0;i<3;++i)out[0][i]=at[i];
+    int count=1;
+    for(int k=next;k<n;++k,++count)for(int i=0;i<3;++i)out[count][i]=way[k][i];
+    return count;
+}
+
 // The carpet bombers' strip (sortie_plan.h: their bombs land within kCarpetHalf of the mark along the line, three jets
 // abreast up to kMaxOffset to a side), widened by `blast` all round: its four corners on the mark's plane, in order.
 inline void CarpetStrip(const float* from,const float* mark,float blast,float (*out)[3]) noexcept {

@@ -111,6 +111,19 @@ inline float StrafeHeight(float half,float lead) noexcept {
     const float h=kStrafeFloor*std::exp(2.0f*half/(lead>1.0f ? lead : 1.0f));
     return h<kStrafeLow ? kStrafeLow : h>kStrafeTop ? kStrafeTop : h;
 }
+// m short of the mark (a marked run's centre) a jet must stand, straight on its line, to fly its gun run in without a
+// turn (the user, 2026-11-27: 「还是会进场先转圈」; support_entry.h AirRoute `runIn`). A marked strafe (jet_sortie.cpp
+// MarkedRun) puts its nose down once `room` = -half - settle - lead - along is used up and calls the line missed (the
+// teardrop: a lap) when it is past -settle there: from an entry `t` m out (along = -t) that is t >= half + settle + lead,
+// the lead at most kStrafeLeadMost, and one more settle for its nose to come down onto the line first. An unmarked gun
+// run (jet_combat.cpp Strike) dives once within `diveStart` of its target with it off its nose by less than the dive cone;
+// nearer than that at its entry it finds the target inside its turn and flies out to come round: diveStart and a settle.
+// `attack`: the jet's attack speed (m/s); 0 for a pass that needs no straight run in.
+inline float StraightRunIn(bool gunRun,float half,float attack,float diveStart) noexcept {
+    if(!gunRun || !(attack>0.0f))return 0.0f;
+    const float settle=attack*kStrafeSettleS;
+    return half>0.0f ? half+2.0f*settle+kStrafeLeadMost : diveStart+settle;
+}
 // The aim on the line (along + lead): from -half the window is open, past +half it is over.
 inline bool StrafeOpen(float along,float lead,float half) noexcept { return along+lead>=-half; }
 inline bool StrafeOver(float along,float lead,float half) noexcept { return along+lead>half; }

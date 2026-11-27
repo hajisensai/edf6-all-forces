@@ -499,6 +499,11 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
 float SupportPassTurn(const SupportAircraft& spec) noexcept {
     return spec.transportPlane ? FerryTurn(KindOf(Row(Body::transportPlane).role)) : 0.0f;
 }
+float SupportRunIn(const SupportAircraft& spec,float runHalf) noexcept {
+    if(spec.jet<0 || spec.heli>=0 || spec.transportPlane)return 0.0f;
+    const Kind& k=KindOf(Row(SupportBody(spec)).role);
+    return sortie::StraightRunIn(static_cast<SortiePass>(spec.sortie)==SortiePass::gunRun,runHalf,k.attack,k.diveStart);
+}
 
 void SupportAircraftFrame(unsigned char* v) noexcept {
     for(std::size_t i=0;i<sizeof(supportAircraft)/sizeof(supportAircraft[0]);++i) {

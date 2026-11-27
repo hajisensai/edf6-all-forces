@@ -166,5 +166,18 @@ int main() {
      const auto westBlocked=[&](const float* from,const float*){return !(from[0]<-100.0f && from[2]<-100.0f);};
      check(AirRoute(area,stock,target,observer,way,150,0,westBlocked,mapGround(area),exact)==Refusal::none &&
            exact.heading[0]*way[0]+exact.heading[2]*way[2]>0.85f && exact.heading[0]*way[0]+exact.heading[2]*way[2]<0.99f,"its corridor blocked: the nearest clear bearing to it");}
+    // The straight run in a jet's gun run needs (sortie_plan.h StraightRunIn; the user, 2026-11-27: 「还是会进场先转圈」):
+    // the entry that far out on the heading asked for, not at the nearest off-map point (600 m in: past its line's start
+    // as it came in, it flew a lap first); no farther than the physical square holds.
+    {const float way[3]={0.0f,0.0f,1.0f};
+     Route nearest,runIn;
+     check(AirRoute(area,stock,target,observer,way,150,0,clear,mapGround(area),nearest)==Refusal::none,"no run in: an entry");
+     check(AirRoute(area,stock,target,observer,way,150,0,clear,mapGround(area),runIn,2200.0f)==Refusal::none &&
+           std::fabs(runIn.heading[2]-1.0f)<1e-6f && std::fabs(FlatDistance(runIn.from,target)-2200.0f)<0.5f,
+           "a run in asked for: the entry that far out, on the heading asked for");
+     check(FlatDistance(nearest.from,target)<FlatDistance(runIn.from,target),"...farther than the nearest off-map entry");
+     Route cap;
+     check(AirRoute(area,stock,target,observer,way,150,0,clear,mapGround(area),cap,1.0e6f)==Refusal::none &&
+           InSquare(cap.from,stock.half) && std::fabs(cap.heading[2]-1.0f)<1e-6f,"a run in past the square: as far as it holds");}
     std::printf("support_entry_test: %d checks passed\n",checks);
 }
