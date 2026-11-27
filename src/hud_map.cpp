@@ -935,6 +935,25 @@ void MapSelectionCards(void* drawer,void* ctx,Text* text,float s,const MapComman
     }
 }
 
+// Broken Arrow's order path (the user, 2026-11-27: 「这个操作方式和显示都抄抄断箭吧」): a line from (x0, y0) to (x1, y1)
+// with an arrowhead at its end, the way the unit goes; `dashed` (a Shift-queued leg, still to come) in dashes.
+void MapPathArrow(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float t,float s,bool dashed,const float* rgba) noexcept {
+    const float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
+    if(!(len>1.0f))return;
+    const float ux=dx/len,uy=dy/len,head=std::fmin(10.0f*s,len*0.5f);
+    const float bx=x1-ux*head,by=y1-uy*head;   // the line stops at the head's base
+    const float body=len-head;
+    if(!dashed)Seg(drawer,ctx,x0,y0,bx,by,t,rgba);
+    else {
+        const float on=8.0f*s,off=6.0f*s;
+        for(float a=0.0f;a<body;a+=on+off) {
+            const float b=std::fmin(body,a+on);
+            Seg(drawer,ctx,x0+ux*a,y0+uy*a,x0+ux*b,y0+uy*b,t,rgba);
+        }
+    }
+    Tri(drawer,ctx,bx,by,x1,y1,head*0.55f,rgba);
+}
+
 // The ALTITUDE button's word: the active selection's altitude (mapcue::StateOf), the order's name with none flying.
 Tx AltitudeWord(const mapcue::Altitudes& a) noexcept {
     switch(mapcue::StateOf(a)) {
@@ -1849,14 +1868,19 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
                 std::memcpy(last,q,12);
             }
             float gx,gy,depth;
-            if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))Seg(drawer,ctx,ux,uy,gx,gy,1.5f*s,u.now.order==Order::guard ? kMapOrderDim : order);
-            // Its Shift-queued points after that one (mapcmd_logic.h Waypoints): a line on through them, a small ring each.
+            // Broken Arrow's path: the unit's line to its point with an arrowhead there (a guard's, standing, dim).
+            if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))
+                MapPathArrow(drawer,ctx,ux,uy,gx,gy,1.5f*s,s,false,u.now.order==Order::guard ? kMapOrderDim : order);
+            // Its Shift-queued points after that one (mapcmd_logic.h Waypoints): dashed legs in the order's colour, an
+            // arrowhead and a small ring at each (a leg running off the screen: its clipped line, plain).
             const float* from=u.now.at;
             for(int w=0;w<u.ways && w<mapcmd::kWaypointsMost;++w) {
                 const float a[3]={from[0],from[1]+1.0f,from[2]},b[3]={u.way[w][0],u.way[w][1]+1.0f,u.way[w][2]};
-                MapLine(drawer,ctx,vp,width,height,a,b,1.5f*s,kMapOrderDim);
-                float wx,wy,wd;
-                if(Project(vp,b,width,height,&wx,&wy,&wd))Arc(drawer,ctx,wx,wy,5.0f*s,0.0f,kTurn,1.5f*s,12,kMapOrder);
+                float ax,ay,ad,wx,wy,wd;
+                const bool aOn=Project(vp,a,width,height,&ax,&ay,&ad),bOn=Project(vp,b,width,height,&wx,&wy,&wd);
+                if(aOn && bOn)MapPathArrow(drawer,ctx,ax,ay,wx,wy,1.5f*s,s,true,order);
+                else MapLine(drawer,ctx,vp,width,height,a,b,1.5f*s,order);
+                if(bOn)Arc(drawer,ctx,wx,wy,5.0f*s,0.0f,kTurn,1.5f*s,12,kMapOrder);
                 from=u.way[w];
             }
         }
