@@ -1366,6 +1366,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         const bool hostileVisitReady=InstallNativeHostileVisit();
         Log("AI native hostile visitor: %s",hostileVisitReady ? "direct" : "stock");
         Log("AI native hostile roster: %s",InstallNativeHostileRoster(nearestReady && hostileVisitReady) ? "cached" : "stock");
+        Log("AI native soldier scoring: %s",InstallNativeSoldierScore() ? "optimized" : "stock");
     }
     if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
         Log("RENDER pose snapshots installed=%d",renderpose::Install());

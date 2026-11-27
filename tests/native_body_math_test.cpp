@@ -256,6 +256,83 @@ bool TargetScoreCases() {
     return valid && edf::At<int>(control,8)==2;
 }
 
+bool SoldierScoreCases() {
+    using Score=void(__fastcall*)(void*,void*);
+    constexpr unsigned start=kSoldierRosterVisitor,end=kSoldierScoreFunctionEnd;
+    constexpr std::size_t prefix=start&63u,bodySize=end-start;
+    constexpr unsigned char tail[]{0xFF,0x25,0,0,0,0,0,0,0,0,0,0,0,0};
+    std::array<unsigned char,prefix+bodySize+sizeof(tail)> old{};
+    auto* const body=old.data()+prefix;
+    std::memcpy(body,image+start,bodySize);
+    std::memcpy(body+bodySize,tail,sizeof(tail));
+    edf::Put(old.data(),old.size()-sizeof(void*),image+0x12DA8BE);
+    constexpr unsigned call=0x598CE4-start;
+    edf::Put(body,call+1,static_cast<std::int32_t>(bodySize-call-5));
+    auto* const reference=static_cast<unsigned char*>(edf::AllocateNearCode(image+start,old.data(),old.size()));
+    if(!reference)return false;
+    const auto before=reinterpret_cast<Score>(reference+prefix);
+    const auto after=reinterpret_cast<Score>(image+start);
+    const unsigned oldMode=_mm_getcsr();
+    const bool valid=[&] {
+        if(!InstallNativeSoldierScore() ||
+           std::memcmp(image+kSoldierScoreEnd,body+(kSoldierScoreEnd-start),0x13)!=0)return false;
+        alignas(16) unsigned char soldier[0xA0]{},actors[2][0x4A1]{};
+        const auto compare=[&](unsigned mxcsr,bool firstActive,bool secondActive) {
+            struct Result { const void* winner;std::uint32_t score,calls,fp; };
+            const auto run=[&](Score score) {
+                alignas(16) unsigned char walk[0x28]{};
+                edf::Put(walk,8,soldier+0);
+                edf::Put(walk,0x10,FLT_MAX);
+                _mm_setcsr(mxcsr);
+                score(walk,actors[0]);
+                score(walk,actors[1]);
+                return Result{edf::At<const void*>(walk,0x18),edf::At<std::uint32_t>(walk,0x10),
+                              edf::At<std::uint32_t>(walk,0x20),_mm_getcsr()&0x3Fu};
+            };
+            actors[0][0x4A0]=firstActive?1:0;
+            actors[1][0x4A0]=secondActive?1:0;
+            const auto a=run(before),b=run(after);
+            return a.winner==b.winner && a.score==b.score && a.calls==2 && b.calls==2 && a.fp==b.fp;
+        };
+        constexpr unsigned modes[]{0x1F80,0x3F80,0x5F80,0x7F80,0x9FC0,0xBFC0};
+        constexpr std::uint32_t special[]{0,0x80000000,1,0x807FFFFF,0x00800000,0x7F7FFFFF,0xFF7FFFFF,
+                                          0x7F800000,0xFF800000,0x7FC00091,0x7F8000EA,0x3F800000};
+        std::mt19937 rng(20261127);
+        std::uniform_real_distribution<float> coordinates(-400.0f,400.0f);
+        for(const unsigned mxcsr:modes) {
+            for(unsigned i=0;i<1024;++i) {
+                for(auto* const point:{soldier+0x90,actors[0]+0x90,actors[1]+0x90}) {
+                    for(unsigned lane=0;lane<4;++lane) {
+                        if(i%3)edf::Put(point,lane*4,coordinates(rng));
+                        else edf::Put(point,lane*4,(rng()&1u)?rng():special[rng()%std::size(special)]);
+                    }
+                }
+                if(i%8==0)std::memcpy(actors[1]+0x90,actors[0]+0x90,16);
+                if(i%32==0)std::memcpy(soldier+0x90,actors[0]+0x90,16);
+                if(!compare(mxcsr,(i&1)!=0,(i&2)!=0))return false;
+            }
+        }
+        std::puts("native soldier scoring: 6144 identical decisions, candidate counts and floating-point status values");
+        _mm_setcsr(oldMode);
+        alignas(16) unsigned char oldWalk[0x28]{},newWalk[0x28]{};
+        for(auto* const walk:{oldWalk,newWalk}) {
+            edf::Put(walk,8,soldier+0);
+            edf::Put(walk,0x10,FLT_MAX);
+        }
+        const float a[4]{10.0f,5.0f,2.0f,1.0f},b[4]{8.0f,3.0f,1.0f,1.0f},from[4]{0,0,0,1};
+        std::memcpy(actors[0]+0x90,a,16);
+        std::memcpy(actors[1]+0x90,b,16);
+        std::memcpy(soldier+0x90,from,16);
+        actors[0][0x4A0]=actors[1][0x4A0]=1;
+        Bench("soldier target scores", [&](unsigned i){before(oldWalk,actors[i%2]);},
+              [&](unsigned i){after(newWalk,actors[i%2]);});
+        return edf::At<std::uint32_t>(oldWalk,0x20)==edf::At<std::uint32_t>(newWalk,0x20);
+    }();
+    _mm_setcsr(oldMode);
+    VirtualFree(reference,0,MEM_RELEASE);
+    return valid;
+}
+
 struct HostileNode {
     HostileNode *left{},*parent{},*right{};
     unsigned char color{},nil{};
@@ -1367,6 +1444,10 @@ int main(int argc,char** argv) {
     }
     if(!FlatRosterCases()) {
         std::puts("FAIL: native hostile roster cache changes traversal behavior");
+        return 1;
+    }
+    if(!SoldierScoreCases()) {
+        std::puts("FAIL: packed soldier scoring differs from stock");
         return 1;
     }
     if(!MotionLibraryCases(false)) {
