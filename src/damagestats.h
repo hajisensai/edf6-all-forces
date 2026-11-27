@@ -72,4 +72,9 @@ void ResetWastedFire() noexcept;      // mission.cpp MissionStart: the last miss
 // list them (npcai.cpp Gather, heli.cpp's side copy for the gunner seats), so a target the AI asks of only once it would
 // be the best (npc_logic.h PickTarget, enemy_points.h Nearest) was watched all along. Game thread.
 void WatchTarget(const void* target) noexcept;
+// True when WastedFire(shooter, target) is true for every readable shooter this frame, whoever asks: an ordinary target
+// (its override always takes a hit, or one not asked) with the invincible flag (+0x380 bit 0). The verdict WastedFire
+// would give each shooter, made once (the frame's memo): npcai.cpp Gather leaves such targets out of the soldiers' picks
+// (bench:4000, 2026-11-28: a crowd of invincible enemies had every soldier's pick ask of every one of them). Game thread.
+bool WastedOnEveryShooter(const void* target) noexcept;
 }  // namespace crew

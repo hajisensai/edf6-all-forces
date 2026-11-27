@@ -157,6 +157,11 @@ constexpr float kLookMost=0.35f;        // rad a frame
 constexpr float kSpotStop=3.0f;         // m from its combat spot it stops
 constexpr float kBehindPlayer=8.0f;     // m behind the player a hurt soldier falls back to
 constexpr ULONGLONG kSpotMs=4000,kLosFrames=6,kStaleMs=2000,kLogMs=2000,kPlayerFixMs=2000;
+// A soldier's pick ends once this many targets nearer than any it took were ones its fire is wasted on (npc_grid.h
+// PickTarget's mostRejects; the targets wasted on every shooter are not among them: World::pickRow). Its own held fire
+// (wasted_fire.h: its hits on a target all hurting nothing) or a plan's verdict (a ship's shut hatch from where it
+// stands) on that many: it takes none of the farther ones this frame (the stock AI's target stays), and asks again.
+constexpr int kPickRejects=64;
 constexpr int kArmMissFrames=90;        // a pick not taken this long (1.5 s: a heavy weapon's switch takes a while): picking off for it
 constexpr int kMaxArms=16,kMaxRoot=16;
 // The soldiers', the frame's enemies' and friends' tables grow with the battle (perfrun stress:30: 662 soldiers, 1508
@@ -266,6 +271,14 @@ struct World {
     // 2026-11-07: those scans were ~22 ms of a 132 ms frame, growing with soldiers x enemies). frRadius: the widest
     // friend's radius (a shot's line is looked along that far off it).
     npc::grid::Grid enemyGrid,friendGrid;
+    // The rows a soldier's pick may take (ascending) and their grid: the frame's enemies less those every shooter's
+    // fire is wasted on (WastedOnEveryShooter: the invincible flag), left out once a frame (Gather: IndexPicks), not
+    // asked of by every soldier's pick (bench:4000, 2026-11-28: 4000 invincible enemies, every pick asked WastedFire of
+    // each of them in its scope, ~26 ms a frame). pickAll: none left out (the pick goes over enemyGrid itself).
+    npc::grid::Grid pickGrid;
+    std::vector<int> pickRow=std::vector<int>(kFirstEnemies);
+    int picks=0;
+    bool pickAll=true;
     float frRadius=0.0f;
     bool player=false,lane=false,lookOk=false;
     float playerAt[3]{},look[3]{},eye[3]{};   // eye: the camera's (lookOk), where the player's view is from
@@ -570,6 +583,16 @@ void IndexWorld(World& w) noexcept {
     w.friendGrid.Build(w.friends,[&w](int i) noexcept { return w.fr[static_cast<std::size_t>(i)].pos; },kFriendCell);
     w.frRadius=0.0f;
     for(int i=0;i<w.friends;++i)if(w.fr[static_cast<std::size_t>(i)].radius>w.frRadius)w.frRadius=w.fr[static_cast<std::size_t>(i)].radius;
+    w.pickAll=true;w.picks=w.enemies;
+}
+// The rows the picks may take (World::pickRow): every row but those `out(k)` leaves out, and their grid (none left out:
+// pickAll, no grid made). After IndexWorld.
+template<class Out> void IndexPicks(World& w,Out out) {
+    Room(w.pickRow,w.enemies);
+    int n=0;
+    for(int k=0;k<w.enemies;++k)if(!out(k))w.pickRow[static_cast<std::size_t>(n++)]=k;
+    w.picks=n;w.pickAll=n==w.enemies;
+    if(!w.pickAll)w.pickGrid.Build(n,[&w](int j) noexcept { return w.enemy[static_cast<std::size_t>(w.pickRow[static_cast<std::size_t>(j)])].aim; },kEnemyCell);
 }
 // The frame's lists. A fault in the walks (the game's tables, its objects) is the caller's handler's (ThinkHook's Fault),
 // as before; the lists then hold what was walked until it, and __finally makes the grids from them on the way out (a
@@ -601,6 +624,8 @@ void Gather(std::int32_t team) noexcept {
     // Every enemy's window and motion watched this frame (damagestats.h WatchTarget), not only those a soldier asks of:
     // PickTarget asks WastedFire of a would-be best alone (npc_logic.h).
     for(int i=0;i<w.enemies;++i)WatchTarget(w.enemy[static_cast<std::size_t>(i)].object);
+    // The targets no soldier's fire would hurt this frame (WastedFire's verdict for every shooter): out of the picks.
+    IndexPicks(w,[&w](int k) noexcept { return WastedOnEveryShooter(w.enemy[static_cast<std::size_t>(k)].object); });
     PlayerLane(w);
     FormationTick();
     SweepFrame();
@@ -795,7 +820,11 @@ enum Cause : int {
 // to): a step's motion at most. Nothing moves in the pass (physics steps after it), but the anchors are copied at the
 // fork and a target's lock point comes from the pair's last plan (a step late, as the plan itself holds 150 ms).
 constexpr float kNear=0.5f;
-struct PickQ { float eye[3],anchor[3],scope,reach; int held,row; };
+// unknown: the rows the pick took as wasted whose verdict was a plan's with none made yet (WastedFirePeek -1), in the
+// order asked: the kept row stands when each of them is wasted at Apply (asked then), as the game thread's pick would
+// have found them; one not wasted, more than kUnknowns: the pick made at Apply.
+constexpr int kUnknowns=4;
+struct PickQ { float eye[3],anchor[3],scope,reach; int held,row,unknowns,unknown[kUnknowns]; };
 struct ClearQ { const void* target; float from[3],to[3],blast; bool clear; };
 struct RayQ { const void* target; float a[3],b[3],hit[3],dist; };
 struct CloseQ { const void* target; float at[3],r; bool yes; };
@@ -919,11 +948,19 @@ struct Pick { const Enemy* e; float dist; };
 // looked up once by the index (one row an object): isCurrent is then an int compare for each enemy visited. (ObjRef::Is
 // compares the pointer first and reads memory only for the row that is the held object, so the scan's isCurrent read
 // once a frame too: what the row saves is the compares, not reads.)
-// The pick's row (-1 none) over the frame's enemies, `usable(k)` the fire-is-not-wasted ask of row k.
+// The pick's row (-1 none) over the frame's enemies, `usable(k)` the fire-is-not-wasted ask of row k. The rows every
+// shooter's fire is wasted on are not asked of (World::pickRow: their answer is no for every soldier, so the pick is
+// the same); at most kPickRejects noes.
 template<class Usable>
 int PickRow(int held,const float* eye,const float* anchor,float scope,float reach,Usable usable) noexcept {
-    return npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
-                                 [held](int k) noexcept { return k==held; },usable,eye,anchor,scope,reach);
+    if(world.pickAll)
+        return npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
+                                     [held](int k) noexcept { return k==held; },usable,eye,anchor,scope,reach,kPickRejects);
+    const int* const rows=world.pickRow.data();
+    const int j=npc::grid::PickTarget(world.pickGrid,world.picks,[rows](int i) noexcept { return world.enemy[rows[i]].aim; },
+                                      [rows,held](int i) noexcept { return rows[i]==held; },
+                                      [rows,&usable](int i) noexcept { return usable(rows[i]); },eye,anchor,scope,reach,kPickRejects);
+    return j<0 ? -1 : rows[j];
 }
 int PickRowNow(const void* self,int held,const float* eye,const float* anchor,float scope,float reach) noexcept {
     return PickRow(held,eye,anchor,scope,reach,[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); });
@@ -944,6 +981,10 @@ Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* 
         else if(!mt::Fresh(*in))cause=mt::kStaleCause;
         else kept=true;
     }
+    // The rows the Decide took as wasted on a plan's verdict it could not read: asked now (a plan made, as the game
+    // thread's pick would make it); one not wasted after all, the pick made now.
+    for(int k=0;kept && k<in->pick.unknowns;++k)
+        if(!WastedFire(self,world.enemy[static_cast<std::size_t>(in->pick.unknown[k])].object)){kept=false;cause=mt::kPlan;}
     if(kept) {
         mt::Kept(mt::kUsedPick);
         i=in->pick.row;
@@ -2334,9 +2375,12 @@ void Decide(void* ctx,int index) noexcept {
         std::memcpy(in.pick.eye,eye,12);in.pick.scope=g.scope;in.pick.reach=g.reach;in.pick.held=held;
         bool known=true;
         const void* const self=in.h;
-        in.pick.row=PickRow(held,eye,in.pick.anchor,g.scope,g.reach,[self,&known](int k) noexcept {
+        PickQ& q=in.pick;
+        q.unknowns=0;
+        q.row=PickRow(held,eye,q.anchor,g.scope,g.reach,[self,&known,&q](int k) noexcept {
             const int w=WastedFirePeek(self,world.enemy[static_cast<std::size_t>(k)].object);
-            if(w<0)known=false;   // a plan's verdict with none made yet: the game thread's, so the pick is too
+            // A plan's verdict with none made yet (the game thread's): taken as wasted here, asked at Apply.
+            if(w<0){if(q.unknowns<kUnknowns)q.unknown[q.unknowns++]=k;else known=false;}
             return w==0;
         });
         in.pickOk=known;

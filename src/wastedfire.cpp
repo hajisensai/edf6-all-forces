@@ -445,21 +445,25 @@ bool Feedback(const void* shooter,const void* target) noexcept {
 // the plans are.
 // Keyed by memoepoch::Clock (src/memo_epoch.h): once a frame, not once per wall-clock step.
 memoepoch::Clock memoClock;
-struct TargetMemo { const void* target; ULONGLONG frame; bool readable; Kind kind; hitpredict::Verdict verdict; };
-TargetMemo targetMemo[4096];   // direct-mapped: 300 targets in 1024 slots shared a slot a quarter of the time
+struct TargetMemo { bool readable; Kind kind; hitpredict::Verdict verdict; };
+// Every target of the epoch keeps its answer (memo_epoch.h Table: open addressing, no slot shared). The direct-mapped
+// 4096 slots it replaces lost a quarter to a third of 4000 targets each frame (bench:4000, 2026-11-28): each ask of
+// one re-read it, and the peek found it missing.
+memoepoch::Table<TargetMemo> targetMemo;
 struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shooterMemo{};
 // The prime's epoch and clock (WastedFirePrime): what a peek reads the memo under.
 ULONGLONG primedEpoch=0,primedMs=0;
-const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
-    TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
-    if(m.target==target && m.frame==frame)return m;
-    m={target,frame,stepobj::Reads(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
-    if(!m.readable)return m;
-    const auto o=static_cast<const unsigned char*>(target);
-    m.kind=AcceptOk() ? KindOf(o) : Kind::none;
-    // An ordinary enemy (its override always takes a hit, or one the plugin does not ask): only the invincible flag.
-    if(m.kind==Kind::none || m.kind==Kind::yes)
-        m.verdict=At<std::uint32_t>(o,kObjFlags)&kInvincible ? hitpredict::Verdict::skip : hitpredict::Verdict::fire;
+TargetMemo TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
+    if(const TargetMemo* m=targetMemo.Find(target,frame))return *m;
+    TargetMemo m{stepobj::Reads(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
+    if(m.readable) {
+        const auto o=static_cast<const unsigned char*>(target);
+        m.kind=AcceptOk() ? KindOf(o) : Kind::none;
+        // An ordinary enemy (its override always takes a hit, or one the plugin does not ask): only the invincible flag.
+        if(m.kind==Kind::none || m.kind==Kind::yes)
+            m.verdict=At<std::uint32_t>(o,kObjFlags)&kInvincible ? hitpredict::Verdict::skip : hitpredict::Verdict::fire;
+    }
+    try { targetMemo.Make(target,frame)=m; } catch(const std::bad_alloc&) {}   // no room: answered, not kept
     return m;
 }
 // The plan (from the shooter's own eye when `from` is null).
@@ -469,7 +473,7 @@ hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
         shooterMemo={shooter,frame,stepobj::Reads(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;
-    const TargetMemo& t=TargetThisFrame(target,frame);
+    const TargetMemo t=TargetThisFrame(target,frame);
     if(!t.readable)return hitpredict::Verdict::fire;
     const Kind k=t.kind;
     if(k==Kind::none || k==Kind::yes)return t.verdict;
@@ -492,6 +496,15 @@ void WatchTarget(const void* target) noexcept {
         if(k==Kind::none || k==Kind::yes)return;   // nothing to watch: only the invincible flag, read on the ask
         See(target,k,memoClock.Epoch(GameFrame(),WallMs()));
     } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
+bool WastedOnEveryShooter(const void* target) noexcept {
+    if(!target)return false;
+    __try {
+        const TargetMemo m=TargetThisFrame(target,memoClock.Epoch(GameFrame(),WallMs()));
+        return m.readable && (m.kind==Kind::none || m.kind==Kind::yes) && m.verdict==hitpredict::Verdict::skip;
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return false;
 }
 
 void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
@@ -531,7 +544,7 @@ void ResetWastedFire() noexcept {
     watched.Clear();
     plans.Clear();
     targetPoints.Clear();
-    for(auto& m:targetMemo)m=TargetMemo{};
+    targetMemo.Clear();
     shooterMemo=ShooterMemo{};
     memoClock.Reset();   // epochs only grow: no cleared memo's key comes back
     planLog=planlog::Gate{};
@@ -548,6 +561,7 @@ void PrimeOne(const void* target,ULONGLONG epoch) noexcept {
 void WastedFirePrime(const void* const* targets,int count) noexcept {
     primedEpoch=memoClock.Epoch(GameFrame(),WallMs());
     primedMs=FeedbackMs();
+    try { targetMemo.Reserve(static_cast<std::size_t>(count>0 ? count : 0)+targetMemo.Size()); } catch(const std::bad_alloc&) {}
     for(int i=0;i<count;++i)if(targets[i])PrimeOne(targets[i],primedEpoch);
     peekVersion.fetch_add(1,std::memory_order_relaxed);
 }
@@ -571,8 +585,9 @@ const Plan* PeekPlan(const void* shooter,const void* target,float speed,float gr
 FirePeek WastedFirePeekFor(const void* shooter,const void* target,float speed,float gravity) noexcept {
     FirePeek r{0,0,false,{}};
     if(!target || !shooter)return r;   // VerdictOf's fire, and Feedback has no shooter's hits to hold
-    const TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
-    if(m.target!=target || m.frame!=primedEpoch || !primedEpoch){r.wasted=r.hold=-1;return r;}
+    const TargetMemo* const found=targetMemo.Find(target,primedEpoch);
+    if(!found){r.wasted=r.hold=-1;return r;}
+    const TargetMemo& m=*found;
     if(m.readable && m.kind!=Kind::none && m.kind!=Kind::yes) {   // its plan: the game thread's last one (PlanFor)
         const Plan* w=PeekPlan(shooter,target,0.0f,0.0f);
         const Plan* h=speed==0.0f && gravity==0.0f ? w : PeekPlan(shooter,target,speed,gravity);

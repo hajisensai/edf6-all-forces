@@ -38,6 +38,7 @@ bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
 void WatchTarget(const void*) noexcept {}                           // wastedfire.cpp: nothing watched here
+bool WastedOnEveryShooter(const void*) noexcept { return false; }   // wastedfire.cpp: none left out of the picks
 bool HoldFire(const void*,const void*,const float*,float,float,float*) noexcept { return false; }
 online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }
 Config inputConfig{};

@@ -29,15 +29,20 @@ inline float TargetDistanceLimitSquared(float bestScore,float reach,float bonus)
 // distance, the held target's kKeepTarget taken off every one). A tie: the lower index (the scan's first). usable is
 // asked as the scan asks it, of a point that would become the best (its answers fixed within the frame: the same pick;
 // it may be asked of other points than the scan asked).
+// mostRejects: the walk ends once usable has said no that many times (the best found by then, -1 with none): a pick's
+// asks are bounded whatever the crowd its fire is wasted on (the noes come nearest cells first). Fewer noes:
+// the scan's pick. The scan's own fallback (an odd point, a bound not regular) is not bounded.
+constexpr int kAnyRejects=0x7FFFFFFF;
 template<class AimOf,class IsCurrent,class Usable>
 int PickTarget(const Grid& g,int n,AimOf aimOf,IsCurrent isCurrent,Usable usable,const float* eye,const float* anchor,
-               float scope,float reach) noexcept {
+               float scope,float reach,int mostRejects=kAnyRejects) noexcept {
     if(g.Points()!=n || g.Odd() || !std::isfinite(eye[0]+eye[1]+eye[2]+anchor[0]+anchor[2]+scope+reach) || !(scope>=0.0f) ||
        !Grid::Regular(eye[0],eye[2]) || !Grid::Regular(anchor[0],anchor[2]))
         return npc::PickTarget(n,aimOf,isCurrent,usable,eye,anchor,scope,reach);
     int best=-1;float bestScore=0.0f;
     float distanceLimit[]{std::numeric_limits<float>::infinity(),std::numeric_limits<float>::infinity()};
-    g.NearFirst(eye[0],eye[2],g.Within(anchor[0],anchor[2],scope),[&](float lb) noexcept {
+    int rejects=0;
+    g.NearFirstUntil(eye[0],eye[2],g.Within(anchor[0],anchor[2],scope),[&](float lb) noexcept {
         if(best<0)return false;
         const float d=lb*(1.0f-1e-5f);   // Dist's own rounding
         return d-kKeepTarget+(reach>0.0f && d>reach ? kOutOfReach : 0.0f)>bestScore;
@@ -45,14 +50,15 @@ int PickTarget(const Grid& g,int n,AimOf aimOf,IsCurrent isCurrent,Usable usable
         const float* aim=aimOf(i);
         const bool current=isCurrent(i);
         const float squared=DistSquared(eye,aim);
-        if(squared>distanceLimit[current])return;
-        if(Horiz(anchor,aim)>scope)return;
+        if(squared>distanceLimit[current])return false;
+        if(Horiz(anchor,aim)>scope)return false;
         const float score=TargetScore(std::sqrt(squared),reach,current);
-        if(best>=0 && !(score<bestScore || (score==bestScore && i<best)))return;
-        if(!usable(i))return;
+        if(best>=0 && !(score<bestScore || (score==bestScore && i<best)))return false;
+        if(!usable(i))return ++rejects>=mostRejects;
         best=i;bestScore=score;
         distanceLimit[0]=TargetDistanceLimitSquared(bestScore,reach,0.0f);
         distanceLimit[1]=TargetDistanceLimitSquared(bestScore,reach,kKeepTarget);
+        return false;
     });
     return best;
 }
