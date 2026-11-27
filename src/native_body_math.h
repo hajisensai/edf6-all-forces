@@ -1,7 +1,7 @@
 #pragma once
 
 namespace crew {
-inline constexpr unsigned kNativeBodyMathSites=19;
+inline constexpr unsigned kNativeBodyMathSites=20;
 unsigned InstallNativeBodyMath() noexcept;
 bool InstallNativeTargetScore() noexcept;
 bool InstallNativeHostileVisit() noexcept;

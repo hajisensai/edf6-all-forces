@@ -809,7 +809,7 @@ constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20
 constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
-              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+12==kNativeBodyMathSites);
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+13==kNativeBodyMathSites);
 
 using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
 using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
@@ -1243,6 +1243,48 @@ bool InstallExhaustedMotionGrowthGate() noexcept {
 
 
 
+constexpr unsigned kBodyGrowthListener=0x11AE980,kBodyGrowthCall=0x11AE99F;
+constexpr unsigned kBodyResize=0xE42730,kBodyArrayResize=0xE42FE0;
+constexpr unsigned kBodyGrowthStep=0x1000,kBodyGrowthMaxStep=0x8000,kBodyRecordBytes=0xB0;
+constexpr unsigned kBodyCapacityLimit=(INT32_MAX-0x20u)/kBodyRecordBytes;
+constexpr unsigned kBodyCommitBytesPerSlot=512;
+using BodyResizeFn=void*(__fastcall*)(void*,void*,void*,int);
+
+// Only the stock automatic-growth request is eligible. Explicit reserves and unusual sizes retain their arguments.
+int BodyGrowthCapacity(int current,int requested,std::uint64_t availableCommit) noexcept {
+    if(current<=0 || static_cast<std::int64_t>(current)+kBodyGrowthStep!=requested)return requested;
+    const auto count=static_cast<unsigned>(current);
+    const auto proportional=(count/8+kBodyGrowthStep-1)&~(kBodyGrowthStep-1);
+    if(proportional<=kBodyGrowthStep)return requested;
+    const auto step=(std::min)(proportional,kBodyGrowthMaxStep);
+    const auto target=static_cast<std::uint64_t>(count)+step;
+    // The native body-buffer byte count is signed. Also allow room for side tables during relocation.
+    if(target>kBodyCapacityLimit || target*kBodyCommitBytesPerSlot>availableCommit)return requested;
+    return static_cast<int>(target);
+}
+
+void* __fastcall GrowBodyCapacity(void* manager,void* result,void* external,int requested) {
+    if(!external) {
+        const int current=edf::At<int>(manager,0x18);
+        if(BodyGrowthCapacity(current,requested,UINT64_MAX)!=requested) {
+            MEMORYSTATUSEX memory{};
+            memory.dwLength=sizeof(memory);
+            if(GlobalMemoryStatusEx(&memory))
+                requested=BodyGrowthCapacity(current,requested,memory.ullAvailPageFile);
+        }
+    }
+    return reinterpret_cast<BodyResizeFn>(image+kBodyResize)(manager,result,external,requested);
+}
+
+bool InstallBodyCapacityGrowth() noexcept {
+    if(!NativeCodeMatches(kBodyGrowthListener,0x11AE9A9,0xA18F36A1E1457D94ull) ||
+       !NativeCodeMatches(kBodyResize,0xE42782,0x93EA381687190B60ull) ||
+       !NativeCodeMatches(0xE43190,0xE432AE,0xDFAC3BCDCEE283E0ull))return false;
+    bool changed=false;
+    edf::RedirectCall(image+kBodyGrowthCall,image+kBodyResize,reinterpret_cast<void*>(&GrowBodyCapacity),changed);
+    return changed;
+}
+
 inline __m128 XyzMask() noexcept { return _mm_castsi128_ps(_mm_set_epi32(0,-1,-1,-1)); }
 
 inline __m128 KeepW(__m128 xyz,__m128 original) noexcept {
@@ -1511,6 +1553,7 @@ unsigned InstallNativeBodyMath() noexcept {
         if(boundedMotionSearch)installed+=InstallExhaustedMotionGrowthGate();
     }
     installed+=InstallContactStream();
+    installed+=InstallBodyCapacityGrowth();
     if(!edf::Matches(image,kBasis,kBasisSig,sizeof(kBasisSig)))return installed;
     for(const auto& site:kAttachedBasisCalls) {
         if(!edf::Matches(image,site.arguments,site.argumentSig,sizeof(site.argumentSig)) ||

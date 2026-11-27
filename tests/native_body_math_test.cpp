@@ -697,6 +697,73 @@ bool ProxyPosePrefetchCases() {
     return true;
 }
 
+void* __fastcall BodyTestAllocate(void*,std::size_t bytes) noexcept {
+    return VirtualAlloc(nullptr,bytes,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+}
+void __fastcall BodyTestRelease(void*,void* allocation,std::size_t) noexcept {
+    VirtualFree(allocation,0,MEM_RELEASE);
+}
+
+bool BodyGrowthCases() {
+    constexpr std::uint64_t enough=UINT64_MAX;
+    if(BodyGrowthCapacity(0,4096,enough)!=4096 ||
+       BodyGrowthCapacity(32768,36864,enough)!=36864 ||
+       BodyGrowthCapacity(131072,135168,enough)!=147456 ||
+       BodyGrowthCapacity(163840,167936,enough)!=184320 ||
+       BodyGrowthCapacity(163840,167936,184320ull*kBodyCommitBytesPerSlot-1)!=167936 ||
+       BodyGrowthCapacity(262144,266240,enough)!=294912 ||
+       BodyGrowthCapacity(kBodyCapacityLimit-kBodyGrowthStep,kBodyCapacityLimit,enough)!=kBodyCapacityLimit ||
+       BodyGrowthCapacity(163840,168000,enough)!=168000 ||
+       Redirected<BodyResizeFn>(kBodyGrowthCall)==reinterpret_cast<BodyResizeFn>(image+kBodyResize))return false;
+
+    constexpr unsigned allocatorSlot=0x1F826E0,memcpySlot=0x1756058;
+    DWORD allocatorProtection=0,memcpyProtection=0;
+    if(!VirtualProtect(image+allocatorSlot,sizeof(void*),PAGE_READWRITE,&allocatorProtection))return false;
+    if(!VirtualProtect(image+memcpySlot,sizeof(void*),PAGE_READWRITE,&memcpyProtection)) {
+        DWORD previous=0;
+        VirtualProtect(image+allocatorSlot,sizeof(void*),allocatorProtection,&previous);
+        return false;
+    }
+    const auto savedAllocator=edf::At<void*>(image,allocatorSlot);
+    const auto savedMemcpy=edf::At<void*>(image,memcpySlot);
+    const void* const methods[]{nullptr,reinterpret_cast<const void*>(&BodyTestAllocate),
+                               reinterpret_cast<const void*>(&BodyTestRelease)};
+    const void* const* allocator=methods;
+    edf::Put(image,allocatorSlot,&allocator);
+    edf::Put(image,memcpySlot,reinterpret_cast<void*>(&std::memcpy));
+    alignas(16) unsigned char array[0x30]{};
+    edf::Put(array,0x1C,0x00FFFFFFu);
+    using Resize=void*(__fastcall*)(void*,int*,void*,int,int);
+    const auto resize=reinterpret_cast<Resize>(image+kBodyArrayResize);
+    const bool valid=[&] {
+        int status=-1;
+        if(resize(array,&status,nullptr,64,16)!=&status || status || edf::At<int>(array,8)!=64)return false;
+        auto* const first=edf::At<unsigned char*>(array,0);
+        if(!first || edf::At<int>(first,0)!=1)return false;
+        edf::Put(array,0x1C,2u);
+        edf::Put(first,0x50,0x31000000u);
+        edf::Put(first+kBodyRecordBytes,0x50,0x31000001u);
+        std::array<unsigned char,kBodyRecordBytes*2> live{};
+        std::memcpy(live.data(),first,live.size());
+        if(resize(array,&status,nullptr,128,16)!=&status || status || edf::At<int>(array,8)!=128)return false;
+        const auto* const second=edf::At<const unsigned char*>(array,0);
+        if(!second || std::memcmp(live.data(),second,live.size()) || edf::At<unsigned>(array,0x1C)!=2)return false;
+        // Native growth appends free IDs without reordering the previous free chain.
+        for(int i=2;i<128;++i) {
+            const int next=edf::At<int>(second,static_cast<std::size_t>(i)*kBodyRecordBytes);
+            if(next!=(i==127 ? -1 : i+1))return false;
+        }
+        return true;
+    }();
+    if(auto* const storage=edf::At<void*>(array,0x10))VirtualFree(storage,0,MEM_RELEASE);
+    edf::Put(image,allocatorSlot,savedAllocator);
+    edf::Put(image,memcpySlot,savedMemcpy);
+    DWORD ignored=0;
+    const bool memRestored=VirtualProtect(image+memcpySlot,sizeof(void*),memcpyProtection,&ignored)!=FALSE;
+    const bool allocatorRestored=VirtualProtect(image+allocatorSlot,sizeof(void*),allocatorProtection,&ignored)!=FALSE;
+    return valid && memRestored && allocatorRestored;
+}
+
 bool BoundsValidation() noexcept {
     using Check=bool(__fastcall*)(const float*);
     const auto* const code=image+kBoundsCheck;
@@ -1622,6 +1689,10 @@ int main(int argc,char** argv) {
        std::memcmp(packedProxies.data(),newProxies.data(),sizeof(packedProxies))!=0 ||
        std::memcmp(oldMatrices.data(),newMatrices.data(),sizeof(oldMatrices))!=0) {
         std::puts("FAIL: repeated updates changed the outputs");return 1;
+    }
+    if(!BodyGrowthCases()) {
+        std::puts("FAIL: body capacity policy or native free ID order");
+        return 1;
     }
     if(!BasisArithmeticCases()) {
         std::puts("FAIL: basis arithmetic changed a vector or floating-point status");
