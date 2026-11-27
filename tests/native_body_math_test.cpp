@@ -608,6 +608,34 @@ bool FlatRosterCases() {
     return valid;
 }
 
+bool ProxyPosePrefetchCases() {
+    using Setter=void(__fastcall*)(void*,void*,const float*);
+    const auto stock=reinterpret_cast<Setter>(image+kPoseSetter);
+    const auto early=Redirected<Setter>(kPoseSetterCall);
+    if(early==stock)return false;
+    unsigned char body[0x110]{};
+    alignas(16) Matrix matrix{};
+    alignas(16) Proxy expected{},actual{};
+    std::mt19937 rng(1264);
+    const auto saved=_mm_getcsr();
+    for(unsigned i=0;i<2048;++i) {
+        for(unsigned j=0;j<16;++j)edf::Put(&matrix,j*4,static_cast<std::uint32_t>(rng()));
+        std::memset(&expected,0xA7,sizeof(expected));
+        edf::Put(&expected,0x10,i%2 ? body+0 : static_cast<unsigned char*>(nullptr));
+        actual=expected;
+        const unsigned mode=(i&2) ? 0xBFC0u : 0x1F80u;
+        _mm_setcsr(mode);
+        stock(nullptr,&expected,matrix.data);
+        early(nullptr,&actual,matrix.data);
+        if(std::memcmp(&actual,&expected,sizeof(actual))!=0 || _mm_getcsr()!=mode) {
+            _mm_setcsr(saved);
+            return false;
+        }
+    }
+    _mm_setcsr(saved);
+    return true;
+}
+
 bool BoundsValidation() noexcept {
     using Check=bool(__fastcall*)(const float*);
     const auto* const code=image+kBoundsCheck;
@@ -1533,6 +1561,10 @@ int main(int argc,char** argv) {
        std::memcmp(packedProxies.data(),newProxies.data(),sizeof(packedProxies))!=0 ||
        std::memcmp(oldMatrices.data(),newMatrices.data(),sizeof(oldMatrices))!=0) {
         std::puts("FAIL: repeated updates changed the outputs");return 1;
+    }
+    if(!ProxyPosePrefetchCases()) {
+        std::puts("FAIL: early proxy prefetch changed pose publication");
+        return 1;
     }
     if(!RayResetTemplates()) {
         std::puts("FAIL: ray collector reset template does not reproduce the native state");

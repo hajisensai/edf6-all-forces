@@ -807,7 +807,7 @@ constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20
 constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
-              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+11==kNativeBodyMathSites);
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+12==kNativeBodyMathSites);
 
 using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
 using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
@@ -1319,6 +1319,49 @@ bool InstallBoxMerge() noexcept {
     return false;
 }
 
+constexpr unsigned kPoseSetter=0x109B50,kPoseSetterCall=0x6EDC0C;
+constexpr unsigned char kPoseSetterStock[]{
+    0x41,0x0F,0x28,0x00,0x0F,0x29,0x42,0x60,0x41,0x0F,0x28,0x48,0x10,0x0F,0x29,0x4A,
+    0x70,0x41,0x0F,0x28,0x40,0x20,0x0F,0x29,0x82,0x80,0x00,0x00,0x00,0x41,0x0F,0x28,
+    0x48,0x30,0x0F,0x29,0x8A,0x90,0x00,0x00,0x00,0xC3,
+};
+constexpr unsigned char kPoseSetterSite[]{
+    0x48,0x8B,0x93,0xB0,0x00,0x00,0x00,0x48,0x8D,0x8E,0x10,0x01,0x00,0x00,0x4C,0x8D,
+    0x44,0x24,0x60,0xE8,0x3F,0xBF,0xA1,0xFF,
+};
+constexpr unsigned char kPoseCompoundSubmit[]{
+    0x48,0x8D,0x8E,0x10,0x01,0x00,0x00,0xE8,0x28,0xBF,0xA1,0xFF,0x48,0x8B,0x8E,0xC0,
+    0x00,0x00,0x00,0x48,0x8B,0x49,0x58,0xE8,0x48,0x28,0x6C,0x00,
+};
+
+bool InstallEarlyProxyBodyPrefetch() noexcept {
+    constexpr unsigned callOffset=kPoseSetterCall-0x6EDBF9;
+    if(!edf::Matches(image,kPoseSetter,kPoseSetterStock,sizeof(kPoseSetterStock)) ||
+       !edf::Matches(image,kPoseSetterCall-callOffset,kPoseSetterSite,sizeof(kPoseSetterSite)) ||
+       !edf::Matches(image,0x6EDC4C,kPoseCompoundSubmit,sizeof(kPoseCompoundSubmit)))return false;
+    // Warm the body ID and world reference during pose publication, before the later compound walk.
+    constexpr unsigned char prefetch[]{
+        0x48,0x8B,0x42,0x10,
+        0x0F,0x18,0x88,0xF0,0,0,0,
+        0x0F,0x18,0x88,0,1,0,0,
+    };
+    unsigned char code[sizeof(prefetch)+sizeof(kPoseSetterStock)];
+    std::memcpy(code,prefetch,sizeof(prefetch));
+    std::memcpy(code+sizeof(prefetch),kPoseSetterStock,sizeof(kPoseSetterStock));
+    auto* const site=image+kPoseSetterCall;
+    auto* const thunk=edf::AllocateNearCode(site,code,sizeof(code));
+    if(!thunk)return false;
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+5);
+    if(delta>=INT32_MIN && delta<=INT32_MAX) {
+        unsigned char call[]{0xE8,0,0,0,0};
+        const auto rel32=static_cast<std::int32_t>(delta);
+        std::memcpy(call+1,&rel32,sizeof(rel32));
+        if(edf::PatchCode(site,kPoseSetterSite+callOffset,call,sizeof(call)))return true;
+    }
+    VirtualFree(thunk,0,MEM_RELEASE);
+    return false;
+}
+
 constexpr unsigned kBoundsCheck=0x109CF4,kBoundsInvalid=0x109D14,kBoundsValid=0x109D2A,kScalarBoundsCheck=0x650E0;
 constexpr unsigned kBoundsCheckCall=kBoundsCheck+4;
 constexpr unsigned char kBoundsCheckStock[]{
@@ -1439,8 +1482,10 @@ unsigned InstallNativeBodyMath() noexcept {
     if(edf::Matches(image,kTransformBox,kBoxSig,sizeof(kBoxSig)) &&
        edf::Matches(image,kBoxArguments,kBoxArgumentsSig,sizeof(kBoxArgumentsSig)) &&
        edf::At<std::uint32_t>(image,kSignMask)==0x7fffffffu) {
-        if(InstallBoxMerge())++installed;
-        else {
+        if(InstallBoxMerge()) {
+            ++installed;
+            installed+=InstallEarlyProxyBodyPrefetch();
+        } else {
             bool changed=false;
             edf::RedirectCall(image+kBoxCall,image+kTransformBox,reinterpret_cast<void*>(&TransformBox),changed);
             installed+=changed;
