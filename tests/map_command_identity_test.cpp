@@ -20,6 +20,21 @@ bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t) noexc
 bool EnemyControlExit(const enemy_control::Snapshot& snapshot) noexcept {++enemyExitCalls;enemyLastRequest=snapshot;return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
+// The map's cues (mapcmd.cpp PlayCue; jetaudio.cpp, jetsound.cpp: not linked here): counted, never heard.
+int cuesPlayed=0;
+namespace audio {
+bool ClipsReady() noexcept { return true; }
+void Beat(float) noexcept {}
+void PlayOnce(int,const Heard&) noexcept { ++cuesPlayed; }
+}
+float GameEffectVolume() noexcept { return 1.0f; }
+// The loadout panel's world: no call has a vehicle loadout here (map_command_runtime_check covers the panel).
+int SupportHullCatalog(int) noexcept { return -1; }
+const wchar_t* SupportCallKey(int) noexcept { return nullptr; }
+const SupportConfig& SupportCfg() noexcept { static const SupportConfig c{}; return c; }
+bool SaveSupportLoadout(LoadoutField,const wchar_t*,const wchar_t*,wchar_t*,std::size_t) noexcept { return false; }
+bool SupportVariantReady(const wchar_t*) noexcept { return false; }
+bool SupportPeersHaveVariantFile(std::uint64_t) noexcept { return true; }
 int SupportMenuCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }

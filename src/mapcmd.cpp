@@ -64,6 +64,12 @@
 #include "support_warning.h"
 #include "barrage_plan.h"
 #include "transport.h"
+#include "loadout_store.h"
+#include "map_loadout.h"
+#include "mod_file.h"
+#include "support_net.h"
+#include "support_variants.h"
+#include "support_config.h"
 #include <Xinput.h>
 #include <algorithm>
 #include <atomic>
@@ -133,6 +139,9 @@ struct Game {
     int entryTurn=0;
     // The armed support's composed load (map_buttons.h ComposePanel), while it has seats; -1 none.
     int composeEntry=-1;SupportLoadout compose{};
+    // The armed support's loadout panel (map_loadout.h, LoadoutRows): built for this entry (-1: none), when (its rows'
+    // states change as the mission preloads and a peer's hello comes: built again every kLoadoutRowsMs), the rows.
+    MapLoadoutReadout loadout{};int loadoutBuilt=-1;ULONGLONG loadoutAt=0;
     bool armedClick=false;
     int supportPick;
     int supportTab=0;          // the bar's tab shown (a click on a tab; [ ] picking into another tab: that tab)
@@ -154,7 +163,7 @@ struct Game {
     char subKind[24]{};
     // The pings shown (F1-F4 here, the room's heard: command protocol v11), oldest first.
     MapCommandReadout::Ping ping[MapCommandReadout::kPings]{};int pings=0;
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,stats,place,pvp,enemy,legend };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,loadout,stats,place,pvp,enemy,legend };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; PvpStatus pvp{}; enemy_control::Snapshot enemy{}; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -210,6 +219,7 @@ struct View {
     int supportEntry[kMapSupportHits]{};
     int supportTop=0,supportRows=0,supportFit=0;   // the window of the tab's rows the bar showed (map_buttons.h ColumnWindow)
     int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
+    int loadouts=0;mapbtn::Rect loadout[maploadout::kRowsMost]{};int loadoutCode[maploadout::kRowsMost]{};
     bool pvpVisible=false;
     int pvps=0;mapbtn::Rect pvp[kMapPvpItems]{};int pvpCode[kMapPvpItems]{};PvpStatus pvpStatus{};
     bool enemyVisible=false;int enemies=0;mapbtn::Rect enemy[kMapEnemyItems]{};int enemyCode[kMapEnemyItems]{};enemy_control::Snapshot enemyStatus{};
@@ -645,6 +655,8 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
     i=mapbtn::Hit(v.compose,v.composes,x,y);
     if(i>=0){hit.kind=Game::UiKind::compose;hit.entry=v.composeCode[i];return hit;}
+    i=mapbtn::Hit(v.loadout,v.loadouts,x,y);
+    if(i>=0){hit.kind=Game::UiKind::loadout;hit.entry=v.loadoutCode[i];return hit;}
     i=mapbtn::Hit(v.enemy,v.enemies,x,y);
     if(i>=0){hit.kind=Game::UiKind::enemy;hit.entry=v.enemyCode[i];hit.enemy=v.enemyStatus;return hit;}
     i=mapbtn::Hit(v.pvp,v.pvps,x,y);
@@ -677,6 +689,58 @@ void Arm(Game& g,bool order,Order o,int support) noexcept {
         g.composeEntry=-1;g.compose=SupportLoadout{};
         if(g.armedSupport>=0 && SupportCallPreset(g.armedSupport,&g.compose))g.composeEntry=g.armedSupport;
     }
+}
+// The armed support's loadout panel (the user, 2026-11-27: 「包括m里面装配东西」; map_loadout.h): a call whose hull takes a
+// SupportVehicle_<KEY> (a tank's, a jet's, a mech's: support_dispatch.cpp HullOf) lists stock and the variants the
+// installer generated for its body (mod_file: Mods/OBJECT as installed; one written while the game runs is no choice
+// here), the key's value now lit. Built again when armed, after a pick and every kLoadoutRowsMs. A support with seats
+// keeps its composition panel beside the row too (hud_map.cpp: the loadout panel right of it).
+constexpr ULONGLONG kLoadoutRowsMs=1000;
+maploadout::State LoadoutState(const wchar_t* file) noexcept {
+    if(!SupportVariantReady(file))return maploadout::State::next;   // not preloaded this mission: the call flies stock
+    // Host: a peer without it flies stock too (support_dispatch.cpp DecideVariant); a client is told nothing (true).
+    return SupportPeersHaveVariantFile(VariantHash(file)) ? maploadout::State::ready : maploadout::State::peerMissing;
+}
+void LoadoutRows(Game& g) noexcept {
+    const int entry=g.armedSupport;
+    const ULONGLONG now=GetTickCount64();
+    if(entry==g.loadoutBuilt && (entry<0 || now-g.loadoutAt<kLoadoutRowsMs))return;
+    g.loadoutBuilt=entry;g.loadoutAt=now;g.loadout=MapLoadoutReadout{};
+    const int hull=entry>=0 ? SupportHullCatalog(entry) : -1;
+    const wchar_t* key=hull>=0 ? SupportCallKey(hull) : nullptr;
+    const VehicleBody body=key ? VehicleBodyOfKey(key) : VehicleBody::none;
+    if(body==VehicleBody::none || hull>=kSupportConfigUnits)return;
+    const VehicleLoadout& current=SupportCfg().vehicle[hull];
+    const auto& files=mod_file::dirs[0].files;   // Mods/OBJECT
+    const int n=static_cast<int>((std::min)(files.size(),static_cast<std::size_t>(0x7FFFFFFF)));
+    g.loadout.rows=maploadout::BuildRows(body,current.On() && current.body==body ? current : VehicleLoadout{},n,
+                                         [&](int i) noexcept {return files[static_cast<std::size_t>(i)].c_str();},&LoadoutState,
+                                         g.loadout.row,maploadout::kRowsMost);
+    if(g.loadout.rows<=0)return;
+    g.loadout.entry=entry;
+    if(hull!=entry)_snwprintf_s(g.loadout.shared,_countof(g.loadout.shared),_TRUNCATE,L"%ls",SupportCallName(hull));
+}
+// A loadout row clicked: the hull's SupportVehicle_<KEY> set to it (loadout_store.h: the ini written, the config
+// reloaded; online, room_sync.cpp sends the new config on its next tick, the host plans this machine's calls by it).
+void PickLoadout(Game& g,int row) noexcept {
+    if(g.loadout.entry<0 || row<0 || row>=g.loadout.rows)return;
+    const maploadout::Row& r=g.loadout.row[row];
+    if(r.current)return;
+    const wchar_t* key=SupportCallKey(SupportHullCatalog(g.loadout.entry));
+    wchar_t why[160]{};
+    const wchar_t* shown=r.value[0] ? r.value : hudtext::Tr(hudtext::Tx::loadoutStock);
+    if(key && SaveSupportLoadout(LoadoutField::vehicle,key,r.value,why,_countof(why))) {
+        const hudtext::Tx word=r.state==maploadout::State::ready ? hudtext::Tx::loadoutReady : r.state==maploadout::State::next ?
+                               hudtext::Tx::loadoutNext : r.state==maploadout::State::peerMissing ? hudtext::Tx::loadoutPeerMissing :
+                               hudtext::Tx::loadoutStock;
+        Note(g,hudtext::Tr(hudtext::Tx::cmdLoadoutSaved),shown,hudtext::Tr(word));
+        PlayCue(mapcue::Cue::ack);
+    } else {
+        Note(g,hudtext::Tr(hudtext::Tx::cmdLoadoutFailed),why[0] ? why : L"?");
+        PlayCue(mapcue::Cue::refuse);
+    }
+    g.loadoutBuilt=-2;   // built again now, from the config as saved
+    LoadoutRows(g);
 }
 // The formation menu's pick (map_buttons.h MenuEntry): a defence for the selected squads on a guard point, or the march
 // of the player's squads; the menu closed.
@@ -761,6 +825,7 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
     if(hit.kind==Game::UiKind::fold){g.panelOpen=!g.panelOpen;return;}
     if(hit.kind==Game::UiKind::formation){if(mapbtn::MenuDismount(hit.entry))PickDismount(g,hit.entry);else PickFormation(g,hit.entry);return;}
+    if(hit.kind==Game::UiKind::loadout){PickLoadout(g,hit.entry);return;}
     if(hit.kind==Game::UiKind::compose) {   // a kind: one more aboard; a taken seat: emptied
         if(g.composeEntry>=0 && !mapbtn::ComposeApply(g.compose,SupportCallSeats(g.composeEntry),hit.entry) && hit.entry>=0)
             Note(g,L"%ls",hudtext::Tr(hudtext::Tx::supportLoadoutTooMany));
@@ -1562,6 +1627,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.march=NpcMarchShape();
     r.armedOrder=g.armedOrder;r.armed=g.armed;r.supportArmed=g.armedSupport;r.supportPick=g.supportPick;
     r.composeEntry=g.composeEntry;r.composeSeats=g.composeEntry>=0 ? SupportCallSeats(g.composeEntry) : 0;r.compose=g.compose;
+    r.loadout=g.loadout;
     r.supports=(std::min)(SupportMenuCount(),kMapSupports);   // the sea rescue is no map call
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
@@ -2031,6 +2097,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(sweep)Sweep(g);
     if(health)Health(g);
     RememberSelection(g);
+    LoadoutRows(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(centred){std::memcpy(centre,centreAt,12);return std::isfinite(centre[0]+centre[1]+centre[2]);}
     if(!picked)return false;
@@ -2060,7 +2127,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
+    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=stepfresh::Now();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -2078,7 +2145,7 @@ void MapCommandSupportButtons(const float* rects,const int* entries,int n,int to
     n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupportHits)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.supports=n;
     view.supportTop=n ? top : 0;view.supportRows=n ? rows : 0;view.supportFit=n ? fit : 0;
-    if(!n)view.composes=0;   // no bar drawn: no composition panel beside it either
+    if(!n)view.composes=view.loadouts=0;   // no bar drawn: no composition or loadout panel beside it either
     for(int i=0;i<n;++i){view.support[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.supportEntry[i]=entries[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -2165,6 +2232,12 @@ void MapCommandEnemyButtons(const float* rects,const int* codes,int n,const enem
     for(int i=0;i<n;++i){view.enemy[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.enemyCode[i]=codes[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
+void MapCommandLoadoutButtons(const float* rects,const int* codes,int n) noexcept {
+    n=rects && codes ? (std::max)(0,(std::min)(n,maploadout::kRowsMost)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.loadouts=n;
+    for(int i=0;i<n;++i){view.loadout[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.loadoutCode[i]=codes[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
 void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept {
     n=rects && codes ? (std::max)(0,(std::min)(n,mapbtn::kComposeItems)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.composes=n;
@@ -2215,7 +2288,7 @@ void SuspendMapCommands() noexcept {
     g.frameAt=0;g.boxing=g.pressing=g.rpressing=g.rStartOk=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=g.rightLine=false;
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;g.dismountMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
     g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);armedHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }

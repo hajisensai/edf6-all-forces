@@ -26,6 +26,28 @@ bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t) noexc
 bool EnemyControlExit(const enemy_control::Snapshot&) noexcept {return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
+// The map's cues (mapcmd.cpp PlayCue; jetaudio.cpp, jetsound.cpp: not linked here): counted, never heard.
+int cuesPlayed=0;
+namespace audio {
+bool ClipsReady() noexcept { return true; }
+void Beat(float) noexcept {}
+void PlayOnce(int,const Heard&) noexcept { ++cuesPlayed; }
+}
+float GameEffectVolume() noexcept { return 1.0f; }
+// The loadout panel's world (support_dispatch.cpp, support_config.cpp, loadout_store.cpp, support_variants.cpp,
+// support_net.cpp: not linked here): entry 0's hull its own, an interceptor's; the ini a SupportConfig saved into.
+int SupportHullCatalog(int index) noexcept { return index==0 ? 0 : -1; }
+const wchar_t* SupportCallKey(int index) noexcept { return index==0 ? L"INTERCEPTOR" : nullptr; }
+SupportConfig loadoutCfg{};int loadoutSaves=0;std::wstring loadoutSavedKey,loadoutSavedValue,loadoutReadyFile;
+const SupportConfig& SupportCfg() noexcept { return loadoutCfg; }
+bool SaveSupportLoadout(LoadoutField field,const wchar_t* unit,const wchar_t* value,wchar_t* why,std::size_t capacity) noexcept {
+    ++loadoutSaves;loadoutSavedKey=unit;loadoutSavedValue=value;
+    VehicleLoadout l{};
+    if(field!=LoadoutField::vehicle || (*value && !ParseVehicleLoadout(value,VehicleBody::interceptor,&l,why,capacity)))return false;
+    loadoutCfg.vehicle[0]=l;return true;
+}
+bool SupportVariantReady(const wchar_t* file) noexcept { return file && loadoutReadyFile==file; }
+bool SupportPeersHaveVariantFile(std::uint64_t) noexcept { return true; }
 int SupportMenuCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
@@ -1008,6 +1030,48 @@ void RtsClicks() noexcept {
         Check(supportCalls==1 && supportChosen==1 && supportLoad.count==4 && supportLoad.soldier[3]==SupportWeapon::fencerCannon &&
               game.armedSupport<0 && game.composeEntry<0,"the left click on the map sends the composed load; the panel closes");
         MapCommandComposeButtons(nullptr,nullptr,0);
+    }
+    // The loadout panel (the user, 2026-11-27: 「包括m里面装配东西」): entry 0 (an interceptor hull) armed lists stock (set
+    // now) and the interceptor variants the installer wrote (mod_file), their states; a row's click saves its value as
+    // SupportVehicle_INTERCEPTOR (installer menu 8's key), lights it; disarmed, the panel closes.
+    {
+        static const wchar_t* const kValues[]={L"AAM_M:4,AAM_M:4,AAM_L:2",L"AGM:4,AGM:4,MK82:2"};
+        wchar_t files[2][maploadout::kFileMost]{};VehicleLoadout l[2]{};wchar_t why[80]{};
+        bool made=true;
+        for(int i=0;i<2;++i)made=made && ParseVehicleLoadout(kValues[i],VehicleBody::interceptor,&l[i],why,80) &&
+                                 VehicleVariantFile(l[i],files[i],maploadout::kFileMost);
+        Check(made,"loadout: the variant files named");
+        mod_file::dirs[0].files={L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",files[0],L"EDF6VC_LO_FIGHTER_0000000000000001.SGO",files[1]};
+        loadoutReadyFile=files[0];loadoutCfg=SupportConfig{};loadoutSaves=0;supportCalls=0;
+        const float row0[4]={20,160,240,186};const int entry0=0;
+        MapCommandSupportButtons(row0,&entry0,1);
+        in.dx=(100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(173.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        MapCommandFrame(in,centre);
+        MapCommandReadout rl{};
+        Check(game.armedSupport==0 && PlayerMapCommands(&rl) && rl.loadout.entry==0 && rl.loadout.rows==3,"loadout: armed, the panel lists stock and the two interceptor variants");
+        Check(rl.loadout.row[0].state==maploadout::State::stock && rl.loadout.row[0].current && !rl.loadout.row[1].current &&
+              rl.loadout.row[1].state==maploadout::State::ready && rl.loadout.row[2].state==maploadout::State::next &&
+              !std::wcscmp(rl.loadout.row[1].value,kValues[0]),"loadout: stock set now; one preloaded (ready), one the next mission's");
+        const float hits[12]={900,300,1180,326, 900,330,1180,356, 900,360,1180,386};const int codes[3]={0,1,2};
+        MapCommandSupportButtons(row0,&entry0,1);MapCommandLoadoutButtons(hits,codes,3);
+        const int cuesBefore=cuesPlayed;
+        in.dx=(1000.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(343.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        MapCommandFrame(in,centre);
+        Check(loadoutSaves==1 && loadoutSavedKey==L"INTERCEPTOR" && loadoutSavedValue==kValues[0] && game.armedSupport==0 && !supportCalls,
+              "loadout: a row's click saves SupportVehicle_INTERCEPTOR; still armed, nothing called");
+        Check(PlayerMapCommands(&rl) && rl.loadout.rows==3 && rl.loadout.row[1].current && !rl.loadout.row[0].current &&
+              std::wcsstr(game.note,kValues[0]) && cuesPlayed==cuesBefore+1,"loadout: the saved row lit, the note says it, the ack heard");
+        MapCommandFrame(in,centre);
+        left();   // the lit row again: nothing saved
+        Check(loadoutSaves==1,"loadout: the row set now: no save");
+        MapCommandLoadoutButtons(nullptr,nullptr,0);
+        in.dx=(100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(173.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();   // the row again: disarmed
+        MapCommandFrame(in,centre);
+        Check(game.armedSupport<0 && PlayerMapCommands(&rl) && rl.loadout.entry<0 && rl.loadout.rows==0,"loadout: disarmed, the panel closes");
+        mod_file::dirs[0].files.clear();
     }
     MapCommandSupportButtons(nullptr,nullptr,0);MapCommandButtons(nullptr,nullptr,0);
     // Nothing selected: the right button does nothing.

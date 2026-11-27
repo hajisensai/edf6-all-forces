@@ -1094,9 +1094,10 @@ const wchar_t* KindText(SupportWeapon w) noexcept {
 // The armed support's composition beside the bar (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以
 // 点多次，直到座位满"; a click a whole squad): the seats used over the seats in its title, its squads in their places (each
 // its kind; a click takes it out), the squad kinds a class a row (a click puts one more in; dim once no squad fits).
-void MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandReadout& c,const wchar_t* name,float x0,float top,
-                     float ceiling,float bottom,Line* lines,int* at) noexcept {
-    if(c.composeEntry<0 || c.composeSeats<=0){MapCommandComposeButtons(nullptr,nullptr,0);return;}
+// Returns its right edge (none drawn: x0).
+float MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandReadout& c,const wchar_t* name,float x0,float top,
+                      float ceiling,float bottom,Line* lines,int* at) noexcept {
+    if(c.composeEntry<0 || c.composeSeats<=0){MapCommandComposeButtons(nullptr,nullptr,0);return x0;}
     const auto L=mapbtn::ComposePanel(x0,top,ceiling,bottom,c.composeSeats,s);
     MapUiBox(drawer,ctx,L.box.x0,L.box.y0,L.box.x1,L.box.y1,lines,*at);
     const auto& load=c.compose;
@@ -1148,6 +1149,61 @@ void MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandR
     Label(text,lines,at,L.hint.x0,(L.hint.y0+L.hint.y1)*0.5f,0,kLineScale*0.55f,kMapOrderDim,L"%ls",Tr(Tx::composeHint));
     if(*at>0)FitLine(text,lines[*at-1],L.hint.x0,L.hint.x1);
     MapCommandComposeButtons(rects,codes,hits);
+    return L.box.x1;
+}
+// The armed support's loadout (map_loadout.h; Broken Arrow's loadout card): its name, then a row a loadout (stock first;
+// the ini value, what SupportVehicle_<KEY> is now lit, and whether it flies this mission: ready, next mission's, a peer
+// without its file), a click switches to it; the hint under them (the hull another call's: whose).
+constexpr float kLoadoutW=300.0f,kLoadoutRowH=26.0f;
+void MapLoadoutPanel(void* drawer,void* ctx,Text* text,float s,const MapCommandReadout& c,const wchar_t* name,float x0,float top,
+                     float ceiling,float bottom,Line* lines,int* at) noexcept {
+    const MapLoadoutReadout& L=c.loadout;
+    if(L.entry<0 || L.rows<=0){MapCommandLoadoutButtons(nullptr,nullptr,0);return;}
+    const int rows=L.rows<maploadout::kRowsMost ? L.rows : maploadout::kRowsMost;
+    const float pad=6.0f*s,titleH=24.0f*s,rowH=kLoadoutRowH*s,gap=3.0f*s,hintH=18.0f*s;
+    const int hints=L.shared[0] ? 2 : 1;
+    const float h=pad+titleH+static_cast<float>(rows)*(rowH+gap)+static_cast<float>(hints)*hintH+pad;
+    const float y0=top+h>bottom ? std::fmax(ceiling,bottom-h) : top,x1=x0+kLoadoutW*s;
+    MapUiBox(drawer,ctx,x0,y0,x1,y0+h,lines,*at);
+    Label(text,lines,at,x0+pad,y0+pad+titleH*0.5f,0,kLineScale*0.7f,kWhite,Tr(Tx::loadoutTitle),name);
+    if(*at>0)FitLine(text,lines[*at-1],x0+pad,x1-pad);
+    float rects[maploadout::kRowsMost*4];int codes[maploadout::kRowsMost];int hits=0;
+    const float t=1.2f*s;
+    float y=y0+pad+titleH;
+    for(int i=0;i<rows;++i,y+=rowH+gap) {
+        const maploadout::Row& r=L.row[i];
+        const float qx0=x0+pad,qx1=x1-pad,qy0=y,qy1=y+rowH,mid=(qy0+qy1)*0.5f;
+        const bool hover=!r.current && c.pointer && c.px>=qx0 && c.px<qx1 && c.py>=qy0 && c.py<qy1;
+        Rect(drawer,ctx,qx0,qy0,qx1,qy1,hover ? kBtnLit : r.current ? kBtnFill : kMapBoxFill);
+        const float* edge=r.current ? kMapOrder : kMapOrderDim;
+        const float w=r.current ? 2.0f*t : t;
+        Seg(drawer,ctx,qx0,qy0,qx1,qy0,w,edge);Seg(drawer,ctx,qx1,qy0,qx1,qy1,w,edge);
+        Seg(drawer,ctx,qx1,qy1,qx0,qy1,w,edge);Seg(drawer,ctx,qx0,qy1,qx0,qy0,w,edge);
+        if(r.current)Tri(drawer,ctx,qx0+4.0f*s,mid,qx0+12.0f*s,mid,4.0f*s,kMapOrder);   // a pointer at what is set now
+        // The state word on the right (stock: none), in its colour.
+        float valueRight=qx1-6.0f*s;
+        if(r.state!=maploadout::State::stock) {
+            const Tx word=r.state==maploadout::State::ready ? Tx::loadoutReady : r.state==maploadout::State::next ? Tx::loadoutNext : Tx::loadoutPeerMissing;
+            const float* ink=r.state==maploadout::State::ready ? kMapOrder : r.state==maploadout::State::next ? kAmber : kRed;
+            const int before=*at;
+            Label(text,lines,at,qx1-6.0f*s,mid,2,kLineScale*0.5f,ink,L"%ls",Tr(word));
+            if(*at>before)valueRight=lines[*at-1].x-6.0f*s;
+        }
+        const wchar_t* value=r.value[0] ? r.value : Tr(Tx::loadoutStock);
+        Label(text,lines,at,qx0+16.0f*s,mid,0,kLineScale*0.55f,r.current ? kWhite : kMapOrder,L"%ls",value);
+        if(*at>0)FitLine(text,lines[*at-1],qx0+16.0f*s,valueRight);
+        MapTipSet(c,qx0,qy0,qx1,qy1,Tr(Tx::loadoutTip),value,r.file[0] ? r.file : Tr(Tx::loadoutStock));
+        if(hits<maploadout::kRowsMost){rects[hits*4]=qx0;rects[hits*4+1]=qy0;rects[hits*4+2]=qx1;rects[hits*4+3]=qy1;codes[hits++]=i;}
+    }
+    y+=hintH*0.5f-gap;
+    if(L.shared[0]) {
+        Label(text,lines,at,x0+pad,y,0,kLineScale*0.55f,kAmber,Tr(Tx::loadoutShared),L.shared);
+        if(*at>0)FitLine(text,lines[*at-1],x0+pad,x1-pad);
+        y+=hintH;
+    }
+    Label(text,lines,at,x0+pad,y,0,kLineScale*0.55f,kMapOrderDim,L"%ls",Tr(Tx::loadoutHint));
+    if(*at>0)FitLine(text,lines[*at-1],x0+pad,x1-pad);
+    MapCommandLoadoutButtons(rects,codes,hits);
 }
 void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
                    Line* lines,int* at) noexcept {
@@ -1260,15 +1316,18 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
      if(first>0){Seg(drawer,ctx,cx-h-6.0f*s,cy+h*0.5f,cx-6.0f*s,cy-h*0.5f,w,kAmber);Seg(drawer,ctx,cx-6.0f*s,cy-h*0.5f,cx+h-6.0f*s,cy+h*0.5f,w,kAmber);}
      if(first+placed<allRows){Seg(drawer,ctx,cx-h+6.0f*s,cy-h*0.5f,cx+6.0f*s,cy+h*0.5f,w,kAmber);Seg(drawer,ctx,cx+6.0f*s,cy+h*0.5f,cx+h+6.0f*s,cy-h*0.5f,w,kAmber);}}
     MapCommandSupportButtons(rects,entries,hits,first,allRows,fit);
-    // The armed support's composition beside its row (its name before the "·").
-    int composeRow=-1;
-    for(int k=0;k<placed && composeRow<0;++k)
-        for(int e=shown[k].first;e<shown[k].first+shown[k].count;++e)if(c.composeEntry==idx[e])composeRow=k;
-    if(composeRow<0){MapCommandComposeButtons(nullptr,nullptr,0);return;}
+    // The armed support's composition beside its row (its name before the "·"), then its loadout right of that.
+    const int panelEntry=c.composeEntry>=0 ? c.composeEntry : c.loadout.entry;
+    int panelRow=-1;
+    for(int k=0;k<placed && panelRow<0 && panelEntry>=0;++k)
+        for(int e=shown[k].first;e<shown[k].first+shown[k].count;++e)if(panelEntry==idx[e])panelRow=k;
+    if(panelRow<0){MapCommandComposeButtons(nullptr,nullptr,0);MapCommandLoadoutButtons(nullptr,nullptr,0);return;}
     wchar_t base[40]{};
-    const int most=static_cast<int>(_countof(base))-1,blen=mapbtn::BaseLength(c.support[c.composeEntry].name);
-    std::wmemcpy(base,c.support[c.composeEntry].name,static_cast<std::size_t>(blen<most ? blen : most));
-    MapComposePanel(drawer,ctx,text,s,c,base,x1+6.0f*s,row[composeRow].y0,top,bottom,lines,at);
+    const int most=static_cast<int>(_countof(base))-1,blen=mapbtn::BaseLength(c.support[panelEntry].name);
+    std::wmemcpy(base,c.support[panelEntry].name,static_cast<std::size_t>(blen<most ? blen : most));
+    const float right=MapComposePanel(drawer,ctx,text,s,c,base,x1+6.0f*s,row[panelRow].y0,top,bottom,lines,at);
+    if(c.loadout.entry==panelEntry)MapLoadoutPanel(drawer,ctx,text,s,c,base,right+6.0f*s,row[panelRow].y0,top,bottom,lines,at);
+    else MapCommandLoadoutButtons(nullptr,nullptr,0);
 }
 
 const wchar_t* EnemyAbilityState(const enemy_control::Ability& ability,wchar_t* out,std::size_t size) noexcept {
@@ -1990,7 +2049,7 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
 // The map's click targets dropped (the map shut, or the stats page over it: nothing under the page takes a click).
 void MapTargetsNone() noexcept {
     MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
-    MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);
+    MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);MapCommandLoadoutButtons(nullptr,nullptr,0);
     MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
     MapCommandPlaceButtons(nullptr,nullptr,0,0);MapCommandPvpButtons(nullptr,nullptr,0,nullptr);MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);
     MapCommandLegendButton(nullptr);
