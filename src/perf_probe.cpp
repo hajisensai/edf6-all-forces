@@ -17,6 +17,7 @@
 #include "memory.h"
 #include "edf/patch.h"
 #include "net_counters.h"
+#include "object_update_mt.h"
 
 namespace crew::perfprobe {
 namespace {
@@ -978,6 +979,7 @@ void Report(unsigned frames) noexcept {
         collideTimes={};
     }
     if(taskTrace)ReportTaskGraphs();
+    ReportObjectUpdateMT(frames);
     for(auto& graphs:havokGraphs)graphs={};
     const unsigned p=presents.exchange(0,std::memory_order_relaxed),u=unpaired.exchange(0,std::memory_order_relaxed);
     const unsigned pr=paired.exchange(0,std::memory_order_relaxed);

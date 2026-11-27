@@ -80,6 +80,7 @@
     bool vehicleWelding=true;       // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true;      // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;     // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
+    int objectUpdateMT=1;           // slot5's bones-to-collision-proxy sync (0x6ED800) computed on worker threads, committed in registration order (object_update_mt.cpp); read at start only (docs/object-update-mt-re.md)
     int frameRateCap=170;           // ini FrameRateCap (frame_rate_logic.h FixCap): 170 shipped (the maintainer, 2026-11-27), 0 the game's 59.94 Hz, 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool frameRateFlip=false;       // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
     int maxFrameLatency=0;          // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
@@ -666,6 +667,7 @@
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
+    n.objectUpdateMT=ReadInt(L"ObjectUpdateMT",static_cast<DWORD>(n.objectUpdateMT));
     n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
     n.maxFrameLatency=ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency));
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
@@ -1141,6 +1143,7 @@
     Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax);
     Fix("CarrierLaserDamage",n.carrierLaserDamage,0.0f,1.0e6f);
     Fix("CarrierLaserBreak",n.carrierLaserBreak,0.0f,1.0f);
+    n.objectUpdateMT=static_cast<int>(FixInt("ObjectUpdateMT",n.objectUpdateMT,0,1));
     n.maxFrameLatency=static_cast<int>(FixInt("MaxFrameLatency",n.maxFrameLatency,0,3));
     Reset("StockMissileNav",n.stockMissileNav,2.0f,6.0f,3.0f);
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));

@@ -9,6 +9,7 @@
 #include "scopereticle.h"
 #include "memory.h"
 #include "lazy_rows.h"
+#include "object_update_mt.h"
 #include <cmath>
 #include <cstring>
 
@@ -407,6 +408,7 @@ bool Rag(Transaction& t,unsigned char* rag) noexcept {
     t.stageRag=nullptr;return true;
 }
 bool FlushRag(Transaction& t,unsigned char* rag) noexcept {
+    FlushObjectUpdates();   // 直接读写代理前，先把 slot5 登记的全部提交（object_update_mt.cpp）
     const auto n=At<std::uint64_t>(rag,0x88);auto* records=At<unsigned char*>(rag,0x78);
     for(std::size_t i=0;i<n;++i) {
         auto* r=records+i*0xC0;const auto mode=At<unsigned>(r,0x9C);if(!r[0xA4] || (mode!=1 && mode!=2))continue;
