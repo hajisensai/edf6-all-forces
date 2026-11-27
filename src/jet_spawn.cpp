@@ -485,10 +485,11 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     if(!entry)entry=NewEntry(vehicle,GameMs());
     if(!entry)return false;
     entry->supportMetadata=false;entry->launched=true;entry->mode=airborne ? Mode::patrol : Mode::takeoff;entry->escort=spec.follow;
-    if(airborne) {   // Launch's start: already flying along its nose at its kind's cruise (never a stall, never a drop)
-        const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
-        const float cruise=KindOf(Row(SupportBody(spec)).role).cruise;
-        for(int i=0;i<3;++i)entry->m.vel[i]=m[8+i]*cruise;
+    if(airborne) {   // Launch's start: already flying along its nose at its kind's cruise as its stores let it hold
+        // (AirborneStart: never a stall, never a drop, never faster than it flies on)
+        const Arms arms=ReadArms(vehicle);
+        entry->burden=BurdenOf(BodyMark(vehicle),arms.stores,arms.storeCount);
+        AirborneStart(*entry,KindOf(Row(SupportBody(spec)).role),reinterpret_cast<const float*>(vehicle+kMatrix)+8);
     }
     std::memcpy(entry->anchor,target,12);entry->fuelMs=static_cast<ULONGLONG>(spec.fuelSeconds)*1000;
     JoinFlight(*entry,FlightFor(&supportAircraft,GameMs()));

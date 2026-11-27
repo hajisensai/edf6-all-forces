@@ -1639,6 +1639,7 @@ RainResult RainCase(float back,float under,bool cluster,float ground) {
     Jet& j=jets[0];
     Place(j,v,ctrl.data(),role,at,dir,k.cruise,0.0f);
     j.launched=true;j.burden=Burden{1.02f,0.88f};   // 155 / sqrt(1.88) = 113 m/s, the log's
+    AirborneStart(j,k,dir);   // made in the air as a call's is (jet_spawn.cpp ActivateSupportAircraft)
     std::memcpy(j.anchor,mark,12);
     Arms arms{};arms.pick=-1;arms.rocket=-1;arms.hasMissile=true;arms.missiles=256;arms.locked=26;arms.missileRange=4200.0f;
     SortieBegin(j,SortiePass::missileRain,mark,at,dir,nowMs);
@@ -1707,20 +1708,19 @@ int RainSuite() {
         {"one 600 m short right under its lane, five at the mark",600.0f,0.0f,true},
         {"one 600 m short, 400 m right of its lane, five at the mark",600.0f,400.0f,true},
         {"only the one 600 m short, 170 m left of its lane",600.0f,-170.0f,false},
+        {"one 900 m short, 170 m left of its lane (the log's flight circled it 23 s), five at the mark",900.0f,-170.0f,true},
         {"one 1800 m short (passed before its hold opens), five at the mark",1800.0f,-170.0f,true}};
     for(const float ground:{0.0f,1600.0f+area::kVoidMargin})for(const auto& c:cs) {
         const RainResult r=RainCase(c.back,c.under,c.cluster,ground);
         const float turnedDeg=r.turned*180.0f/kPi,bankDeg=r.bank*180.0f/kPi;
         // Fired inside its window (kRainOpen to kRainTo of the mark) at a target ahead of it on its lane, flown straight
         // there and on to its withdrawal: its heading swung under 20 deg all told and its bank under 30 deg (the log's:
-        // over 200 deg and 80 deg). On the stock map it is made 1000 m past the soft box, arriving at 219 m/s, and the
-        // soft edge's corner rule (airbound.h KeepIn: no turning circle fits its arrival box, drawn in kArriveRoom behind
-        // it) banks it some 50 deg off its lane for its first 2.5 s, as the log's did; that is the soft edge's, not the
-        // pass's, and is left to it: there it must still fire in its window at a target ahead and swing under 90 deg all
-        // told, not round and round its target.
+        // over 200 deg and 80 deg). On the stock map too: made 1000 m past the soft box at the cruise its stores hold
+        // (AirborneStart), held in its arrival box, it flies in along its lane (the log's banked 50-85 deg off it, made
+        // at 220 m/s, its turn wider than the ground, and turned by the soft edge's corner rule: airbound.h KeepIn).
         const bool fired=r.fireAt>=0.0f && r.fireFrom<sortie::kRainOpen && r.fireFrom>sortie::kRainTo && r.targetAhead>0.0f;
         const float passDeg=r.pass*180.0f/kPi;
-        const bool straight=ground>0.0f ? passDeg<90.0f : turnedDeg<20.0f && bankDeg<30.0f && passDeg<20.0f;
+        const bool straight=turnedDeg<20.0f && bankDeg<30.0f && passDeg<20.0f;
         const bool ok=fired && straight && r.done;
         failures+=!ok;++cases;
         std::printf("rain %s %-66s fired %5.1f s %5.0f m out, target %5.0f m ahead; turned %5.1f deg (pass %5.1f), bank %4.1f deg%s (%s)\n",

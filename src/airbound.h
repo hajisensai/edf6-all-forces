@@ -26,6 +26,7 @@ constexpr float kTurnIn=0.5f;       // in its turn's reach: its want points in b
 constexpr float kBackIn=0.7f;       // past the soft line: in by this at least, nearly level (kBackLevel)
 constexpr float kBackLevel=0.2f;
 constexpr float kBackDepth=150.0f;  // m: past the line it flies in until this far inside again
+constexpr float kMarginLook=0.5f;   // s: KeepIn's corner turn waits while its circle's margin still grows this far on
 
 // A horizontal box: x in [lo[0], hi[0]], z in [lo[1], hi[1]].
 struct Box { float lo[2],hi[2]; };
@@ -214,9 +215,20 @@ inline int KeepIn(const Box& soft,const float* pos,const float* vel,float radius
         if(out>0.0f && g<2.0f*radius+s*react+kSlack)nearSide=true;
     }
     // Into a corner (or a box little wider than its turn) the turn back toward one side runs it into the next: once
-    // neither way's whole circle keeps kSlack inside, it turns now, the way that keeps more.
+    // neither way's whole circle keeps kSlack inside, it turns now, the way that keeps more. Not while flying on still
+    // gives that circle more room (kMarginLook s on, the better way's margin grows): its circle then crosses a side it
+    // flies away from, and turning now only swings it off its way. A jet made past its soft edge and held in its arrival
+    // box (drawn in kArriveRoom after it, ArriveBox) had every turn circle wider than that room across the side behind
+    // it: it banked 50-85 deg off its lane on its way in, the far side 2.9 km ahead (2026-11-27 log, a missile rain; the
+    // offline flight test, jet_obstacle_sim --rain-suite). Its margin stops growing where its circle fits best: from
+    // there on it turns.
     const float margin[2]={Margin(soft,pos,vel,radius,react,1.0f),Margin(soft,pos,vel,radius,react,-1.0f)};
-    if(nearSide && (margin[0]>margin[1] ? margin[0] : margin[1])<kSlack)outward=true;
+    const float best=margin[0]>margin[1] ? margin[0] : margin[1];
+    if(nearSide && best<kSlack) {
+        const float on=react+kMarginLook;
+        const float later=std::fmax(Margin(soft,pos,vel,radius,on,1.0f),Margin(soft,pos,vel,radius,on,-1.0f));
+        if(later<=best)outward=true;
+    }
     int how=0;
     const float h=std::sqrt(want[0]*want[0]+want[2]*want[2]),hw=h>1e-4f ? h : 1.0f;
     if(outward && s>1.0f) {

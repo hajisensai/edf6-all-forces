@@ -183,7 +183,7 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     // their drag takes off top speed (drag ~ v^2: the speed it can hold falls as the root of 1 + their share).
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
     const float maxG=(bombing ? kBombG : k.maxG)/mass,tau=SteerTau(k,maxG,bombing ? kBombTau : kSteerTau);
-    speed/=std::sqrt(1.0f+(j.burden.drag>0.0f ? j.burden.drag : 0.0f));
+    speed=HeldSpeed(j.burden,speed);
     float dir[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
     float s=Len(dir);
     if(s<1.0f || !Normalize(dir)){std::memcpy(dir,fwd,12);s=k.minSpeed;}
@@ -608,6 +608,15 @@ PullOutIn PullOutFor(const Jet& j,const Kind& k) noexcept {
 // jet's half circle some 30% wider than at its 5 g: the radius is taken at the g it holds, times kTurnWide.
 constexpr float kTurnWide=1.15f;
 // m: the radius of its level turn at `speed`.
+// A call's jet made in the air (ActivateSupportAircraft): flying along `nose` at the cruise its stores let it hold
+// (HeldSpeed, as JetSteer flies it). Made at the clean cruise, a missile rain's interceptor (its stores' drag share 0.88:
+// its pass's 155 m/s held as 113) came in at 220 m/s and slowed for 4 s, its turn on a stock map's arrival wider than
+// the ground, and the soft edge banked it 50-85 deg off its lane (2026-11-27 log; jet_obstacle_sim --rain-suite).
+void AirborneStart(Jet& j,const Kind& k,const float* nose) noexcept {
+    const float cruise=HeldSpeed(j.burden,k.cruise);
+    for(int i=0;i<3;++i)j.m.vel[i]=nose[i]*cruise;
+}
+
 float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept {
     float g=1.0f+k.thrust/kTurnBleed;
     if(g>k.maxG)g=k.maxG;

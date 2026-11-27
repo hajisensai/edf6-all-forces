@@ -142,6 +142,25 @@ int main() {
         const float up[3]={0.0f,0.0f,200.0f};
         KeepIn(soft,corner,up,1000.0f,1.0f,want4,&b2,&t2);
         Check(want4[0]<-0.9f,"into a corner: turned out of it");
+        // Held in an arrival box (its back side kArriveRoom behind it), flying in along a 1920 m wide box with neither
+        // turn circle inside: each crosses the side behind it, which it flies away from (its margin grows), the far side
+        // 1.9 km ahead. It flies on, not turned off its way (a missile rain banked 50-85 deg there, 2026-11-27 log).
+        bool b3=false;
+        signed char t3=0;
+        const Box held{{-960.0f-kArriveRoom,-960.0f},{960.0f,960.0f}};
+        const float in3[3]={-960.0f,0.0f,-340.0f},v3[3]={155.0f,0.0f,13.0f};
+        float want5[3]={0.9965f,0.0f,0.0836f};
+        Check(Margin(held,in3,v3,600.0f,1.0f,1.0f)<kSlack && Margin(held,in3,v3,600.0f,1.0f,-1.0f)<kSlack,
+              "arriving: (premise) neither turn circle fits");
+        KeepIn(held,in3,v3,600.0f,1.0f,want5,&b3,&t3);
+        Check(t3==0 && want5[0]>0.99f,"arriving: flying away from the side its circles cross, kept on its way");
+        // Further on, the far side near and the circles no better ahead: the corner rule turns it.
+        bool b4=false;
+        signed char t4=0;
+        const float on4[3]={300.0f,0.0f,-340.0f};
+        float want6[3]={0.9965f,0.0f,0.0836f};
+        KeepIn(held,on4,v3,600.0f,1.0f,want6,&b4,&t4);
+        Check(t4!=0,"arriving, the far side near: turned");
     }
     // Back in past two sides (a corner), heading in along the diagonal: that points in over both (kBackIn / sqrt 2 on
     // each), kept as it is, not turned round (it circled there, 2026-11-27 log).
