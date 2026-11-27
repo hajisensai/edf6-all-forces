@@ -29,9 +29,6 @@ bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept;
 DWORD GameThread() noexcept;
 // The frame anchor chained (Install ran with Debug=1 and the input sample call site took the hook): GameThread can be set.
 bool FrameAnchored() noexcept;
-// The native contact stream can keep the same command histogram without going through its old dispatch thunk.
-bool ContactCommandsActive() noexcept;
-void ObserveContactCommand(unsigned kind) noexcept;
 // The frames since the last take (game thread, from PerfTick every 5 s): count, sum and worst ms, over 20 / 33 ms.
 struct Frames { unsigned frames,steps,over20,over33; double sum,worst; };
 Frames TakeFrames() noexcept;

@@ -5223,14 +5223,6 @@
   "native_body_math": {
    "labels": [
     "plugin-core",
-    "plugin-native",
-    "plugin-net"
-   ],
-   "scripts": []
-  },
-  "native_bone_update": {
-   "labels": [
-    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -13833,7 +13825,7 @@
     "sys"
    ]
   },
-  "frame_rate_cap_default_off": {
+  "frame_rate_cap_default_170": {
    "labels": [
     "autoturret-tools",
     "cockpit",
@@ -13861,7 +13853,7 @@
    ],
    "uses": [
     "ROOT",
-    "frame_rate_cap_default_off",
+    "frame_rate_cap_default_170",
     "os",
     "re",
     "src",

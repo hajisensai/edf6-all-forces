@@ -9,7 +9,6 @@
 #include "module.h"
 #include "plugin_log.h"
 #include "config.h"
-#include "native_bone_update.h"
 #include "native_body_math.h"
 #include "render_pose.h"
 #include "render_record.h"
@@ -335,14 +334,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kBeforeAppInit,Id::kFrameRate,&Install<&InstallFrameRate>},
     {IP::kBeforeAppInit,Id::kNativePerformance,[](const LoadContext&) noexcept {
         if(!Cfg().enabled)return;
-        Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
-        Log("PHYSICS attachment and collision: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
-        const bool nearestReady=InstallNativeTargetScore();
-        Log("AI native target scoring: %s",nearestReady ? "optimized" : "stock");
-        const bool hostileVisitReady=InstallNativeHostileVisit();
-        Log("AI native hostile visitor: %s",hostileVisitReady ? "direct" : "stock");
-        Log("AI native hostile roster: %s",InstallNativeHostileRoster(nearestReady && hostileVisitReady) ? "cached" : "stock");
-        Log("AI native soldier scoring: %s",InstallNativeSoldierScore() ? "optimized" : "stock");
+        Log("PHYSICS rigid-body growth and motion ID limit: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
     }},
     {IP::kBeforeAppInit,Id::kRenderOwner,[](const LoadContext&) noexcept {
         if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)

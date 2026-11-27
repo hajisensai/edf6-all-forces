@@ -545,7 +545,7 @@ std::uintptr_t __fastcall PostCollideSignalProbe(void* signal,void* world) {
 }
 
 std::uintptr_t __fastcall EventCommandProbe(void* dispatcher,void* command) {
-    if(ContactCommandsActive())ObserveContactCommand(At<unsigned char>(command,3));
+    if(activeContact && inContactDispatch)++activeContact->commands[At<unsigned char>(command,3)];
     return nextEventCommand(dispatcher,command);
 }
 
@@ -930,8 +930,6 @@ void Install() noexcept {
 bool ChainCall(unsigned rva,unsigned stock,void* hook,void** next) noexcept { return Chain(rva,stock,hook,next); }
 DWORD GameThread() noexcept { return gameThread.load(std::memory_order_relaxed); }
 bool FrameAnchored() noexcept { return anchored; }
-bool ContactCommandsActive() noexcept {return inContactDispatch && activeContact;}
-void ObserveContactCommand(unsigned kind) noexcept {++activeContact->commands[kind];}
 
 Frames TakeFrames() noexcept {
     const Frames f{base.frames,base.steps,base.over20,base.over33,base.sum,base.worst};
