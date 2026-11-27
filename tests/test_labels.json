@@ -5515,6 +5515,18 @@
     "tests/npc_mobility_native_audit.py"
    ]
   },
+  "npc_parallel_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_parallel_guard.py"
+   ]
+  },
   "npc_post_test": {
    "labels": [
     "plugin-air",
