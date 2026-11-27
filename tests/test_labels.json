@@ -6694,23 +6694,6 @@
    ],
    "scripts": []
   },
-  "render_pose": {
-   "labels": [
-    "edf41",
-    "native-codec",
-    "plugin-air",
-    "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
-    "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
-    "plugin-support",
-    "test-data"
-   ],
-   "scripts": []
-  },
   "render_record": {
    "labels": [
     "plugin-core",
@@ -7943,6 +7926,14 @@
    "scripts": [
     "tests/sync_load_probe_native_audit.py"
    ]
+  },
+  "target_grid": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
   },
   "team_native": {
    "labels": [
