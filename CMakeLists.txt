@@ -1104,7 +1104,7 @@ add_executable(wing_turn_test tests/wing_turn_test.cpp)
 target_compile_options(wing_turn_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME wing_turn COMMAND wing_turn_test)
 # ...and the hangar's whole flight home: its capture, its nose, its speed held (src/hangar_recover.h; test hub #42). Its
-# negative controls run under playerjet_recovery (tools/playerjet_recovery_check.py).
+# negative controls run under playerjet_recovery_<I> (tools/playerjet_recovery_check.py).
 add_executable(hangar_recover_test tests/hangar_recover_test.cpp)
 target_compile_options(hangar_recover_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME hangar_recover COMMAND hangar_recover_test)
@@ -1626,8 +1626,11 @@ add_test(NAME ifc_model COMMAND ifc_model_test)
 add_test(NAME ifc_model_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_guard.py")
 add_test(NAME ifc_model_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(ifc_model_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
-    --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
+# In shares run side by side (each case a compile of its own): every 4th case from the I-th.
+foreach(_shard RANGE 0 3)
+  add_test(NAME playerjet_recovery_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
+      --build-dir "${CMAKE_BINARY_DIR}" --negative-controls --shard ${_shard}/4)
+endforeach()
 # Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
 add_executable(drill_heat_test EXCLUDE_FROM_ALL tests/drill_heat_test.cpp)
 target_link_libraries(drill_heat_test PRIVATE edf6common user32)

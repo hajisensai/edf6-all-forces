@@ -4798,7 +4798,55 @@
    ],
    "scripts": []
   },
-  "playerjet_recovery": {
+  "playerjet_recovery_0": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "playerjet_recovery_1": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "playerjet_recovery_2": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "playerjet_recovery_3": {
    "labels": [
     "cockpit",
     "edf41",
@@ -15929,6 +15977,7 @@
   },
   "texture_files_decode_and_slice": {
    "labels": [
+    "native-codec",
     "pylib-model"
    ],
    "scripts": [
