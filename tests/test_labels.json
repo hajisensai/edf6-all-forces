@@ -3679,6 +3679,34 @@
     "tests/gamedir_literal_guard.py"
    ]
   },
+  "generator_excludes": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/generator_excludes_test.py"
+   ]
+  },
   "gltf_glb": {
    "labels": [
     "cockpit",
@@ -4416,6 +4444,14 @@
     "plugin-core",
     "plugin-native",
     "plugin-net"
+   ],
+   "scripts": []
+  },
+  "jet_mix_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native",
+    "plugin-sound"
    ],
    "scripts": []
   },
