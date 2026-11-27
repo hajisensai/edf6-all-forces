@@ -26,6 +26,7 @@
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "py_consts.inc"
 #include "dreadnought_deck.h"
 #include "dreadnought_net.h"
 #include "drill_net.h"
@@ -46,7 +47,7 @@
 namespace crew {
 namespace {
 using vec::Clamp;
-constexpr float kDreadnoughtMark=7601.0f;   // pylib/vcobjects.py DREADNOUGHT_MARK (tools/selftest.py dreadnought_agrees)
+constexpr float kDreadnoughtMark=pyconst::kDreadnoughtMark;   // pylib/vcobjects.py DREADNOUGHT_MARK (src/py_consts.inc)
 constexpr float kDnFighterMark=7041.0f;     // its first fighter's (jet_internal.h kBodies Body::dnFighter, then one a kind)
 constexpr std::size_t kBody=0x1650;
 constexpr std::size_t kContact=0x1580;   // heli.cpp: bit 2, the body rests on something
@@ -64,7 +65,7 @@ constexpr float kDeg=0.017453292f,kPi=3.14159265f;
 // (x left, z ahead), at its bow and stern kReach, its beams kBeam off its centre line. kLength: its bow to stern
 // (tools/prep_dreadnought.py SHIP_LENGTH: its fighters a fighter's size, the user 2026-10-21 「无畏舰太小了…飞机也小了」).
 constexpr float kLength=500.0f;
-constexpr float kKeel=55.25f,kReach=0.44f*kLength,kBeam=0.2f*kLength;   // kKeel: pylib/vcobjects.py DREADNOUGHT_KEEL
+constexpr float kKeel=pyconst::kDreadnoughtKeel,kReach=0.44f*kLength,kBeam=0.2f*kLength;   // kKeel: pylib/vcobjects.py DREADNOUGHT_KEEL
 constexpr float kProbeUp=2.0f;            // m over the keel the rays start (under what it rests on)
 constexpr float kSettleSpeed=8.0f;        // m/s down, nobody in it, to the ground
 constexpr float kSettleGap=0.5f;          // m: settled, its keel this far over the ground (the collision takes the rest)

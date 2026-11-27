@@ -91,6 +91,16 @@ class SrcScan(unittest.TestCase):
         self.assertEqual(srcscan.value(SAMPLE, 'kC'), '7')
         self.assertIsNone(srcscan.value(SAMPLE, 'kNope'))
 
+    def test_takes_the_generated_constant(self) -> None:
+        text = ('constexpr float kKeel=pyconst::kKeel,kReach=0.44f*kLength;\n'
+                'using pyconst::kBone;\nconst wchar_t kHand[]=L"pyconst::kHand";\nconstexpr int kN=8;   // pyconst::kN\n')
+        self.assertEqual(srcscan.value(text, 'kReach'), '0.44f*kLength')   # a second declarator
+        self.assertTrue(srcscan.takes(text, 'kKeel', 'pyconst::kKeel'))
+        self.assertTrue(srcscan.takes(text, 'kBone', 'pyconst::kBone'))
+        self.assertFalse(srcscan.takes(text, 'kHand', 'pyconst::kHand'))   # a hand copy: the name only in a literal
+        self.assertFalse(srcscan.takes(text, 'kN', 'pyconst::kN'))         # ...or a comment
+        self.assertFalse(srcscan.takes(text, 'kReach', 'pyconst::kReach'))
+
     def test_reads_the_real_sources(self) -> None:
         text = srcscan.read('src/live_set.cpp')
         self.assertIn('HasAt', srcscan.functions(text))

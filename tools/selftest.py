@@ -1766,7 +1766,7 @@ def sazabi_bones_agree() -> None:
         want = parent[name]
         assert (par == '-1') == (want == 'body') and (par == '-1' or names[enum.index(par)] == want), f'{name}: parent {par}'
     assert f'{{{vc.SAZABI_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Sazabi'
-    assert f'kSazabiMark={vc.SAZABI_MARK:.1f}f' in src('src/sazabi.cpp'), 'src/sazabi.cpp kSazabiMark'
+    assert srcscan.takes(src('src/sazabi.cpp'), 'kSazabiMark', 'pyconst::kSazabiMark'), 'src/sazabi.cpp kSazabiMark'   # the value: src/py_consts.inc (tools/gen_py_consts.py --check)
 
 
 
@@ -1776,8 +1776,8 @@ def dreadnought_agrees() -> None:
     (dreadnought_turrets.inc kTurrets and their bone names), its fighters' first mark; the fighters' bodies in
     src/jet_internal.h kBodies are vcobjects.DREADNOUGHT_FIGHTERS', in order, mark for mark."""
     code = src('src/dreadnought.cpp')
-    assert f'kDreadnoughtMark={vc.DREADNOUGHT_MARK:.1f}f' in code
-    assert f'kKeel={vc.DREADNOUGHT_KEEL}f' in code, 'src/dreadnought.cpp kKeel != vcobjects.DREADNOUGHT_KEEL'
+    assert srcscan.takes(code, 'kDreadnoughtMark', 'pyconst::kDreadnoughtMark')   # the value: src/py_consts.inc (tools/gen_py_consts.py --check)
+    assert srcscan.takes(code, 'kKeel', 'pyconst::kDreadnoughtKeel'), 'src/dreadnought.cpp kKeel is not vcobjects.DREADNOUGHT_KEEL'
     turrets = src('src/dreadnought_turrets.inc')
     assert f'constexpr int kTurrets={vc.DREADNOUGHT_TURRETS};' in turrets
     for n in range(vc.DREADNOUGHT_TURRETS):
@@ -1871,7 +1871,7 @@ def hand_copies_agree() -> None:
         if c.jet == vc.DREADNOUGHT_JET:   # the Dreadnought: tools/make_dreadnought.py writes it, src/dreadnought.cpp knows its mark
             import make_dreadnought
             assert jet.mark == c.mark == vc.DREADNOUGHT_MARK and make_dreadnought.SGO_FILE == f'{c.vehicle}.SGO', c.id
-            assert f'kDreadnoughtMark={vc.DREADNOUGHT_MARK:.1f}f' in src('src/dreadnought.cpp'), 'src/dreadnought.cpp kDreadnoughtMark'
+            assert srcscan.takes(src('src/dreadnought.cpp'), 'kDreadnoughtMark', 'pyconst::kDreadnoughtMark'), 'src/dreadnought.cpp kDreadnoughtMark'
             assert f'{{{vc.DREADNOUGHT_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Dreadnought'
             continue
         if c.jet in {xm_units.jet_request(k) for k in vc.XM_JETS.values()}:   # an X-Morph jet's twin: make_xmorph writes it
@@ -1935,21 +1935,20 @@ def drill_copies_agree() -> None:
     import drill_model
     import make_drill
     d = src('src/drill.cpp')
-    assert f'kDrillBone[]=L"{drill_model.DRILL_BONE}"' in d, 'src/drill.cpp kDrillBone'
-    assert f'kSpinBone[]=L"{drill_model.SPIN_BONE}"' in d, 'src/drill.cpp kSpinBone'
+    # The drill's bones, length, base radius, base and repeat: pylib/drill_model.py's through src/py_consts.inc
+    # (tools/gen_py_consts.py --check), the drill's code taking them from it.
+    for name, const in (('kDrillBone', 'kDrillBone'), ('kSpinBone', 'kSpinBone'), ('kDrillLength', 'kDrillLength'),
+                        ('kDrillRadius', 'kDrillRadius'), ('kDrillBaseY', 'kDrillBaseY'), ('kDrillBaseZ', 'kDrillBaseZ')):
+        assert srcscan.takes(d, name, f'pyconst::{const}'), f'src/drill.cpp {name}'
+    assert srcscan.value(d, 'kSpinRepeat') == '2.0f*kPi/pyconst::kDrillFolds', srcscan.value(d, 'kSpinRepeat')
     m = re.search(r'kBoxHalfX=([\d.]+)f', d)
     assert m and 2 * float(m.group(1)) <= make_drill.HULL_WIDTH + 1e-6, 'the contact box is no wider than the hull'
     m = re.search(r'kHullFront=([\d.]+)f,kChargeFrom=([\d.]+)f', d)
     assert m and float(m.group(1)) < drill_model.DRILL_BASE[2] + drill_model.DRILL_LENGTH and float(m.group(2)) >= 3.4, m and m.groups()
-    m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
-    assert m and (float(m.group(1)), float(m.group(2))) == (drill_model.DRILL_LENGTH, drill_model.DRILL_RADIUS), m and m.groups()
-    m = re.search(r'kDrillBaseY=([\d.]+)f,kDrillBaseZ=([\d.]+)f', d)
-    assert m and (0.0, float(m.group(1)), float(m.group(2))) == drill_model.DRILL_BASE, m and m.groups()
-    m = re.search(r'kSpinRepeat=2\.0f\*kPi/([\d.]+)f', d)
-    assert m and float(m.group(1)) == drill_model.DRILL_FOLDS, m and m.groups()
+    assert drill_model.DRILL_BASE[0] == 0.0, 'the drill on the hull\'s axis (src/drill.cpp has no kDrillBaseX)'
     bay = src('src/jet_bay.cpp')
-    assert f'kDrillChargeFile[]=L"{vc.DRILL_CHARGE_FILE}"' in bay, 'src/jet_bay.cpp kDrillChargeFile'
-    assert f'kDrillChargeSgo[]=L"app:/object/{vc.DRILL_CHARGE_FILE.lower()}"' in bay, 'src/jet_bay.cpp kDrillChargeSgo'
+    for name in ('kDrillChargeFile', 'kDrillChargeSgo'):   # vc.DRILL_CHARGE_FILE through src/py_consts.inc
+        assert srcscan.takes(bay, name, f'pyconst::{name}'), f'src/jet_bay.cpp {name}'
     assert vc.DRILL_CHARGE_RADIUS >= 3.0, 'a drill charge under 3 m breaks no building (docs/drill-re.md §3)'
     drills = [c for c in calls.CALLS if c.ground == 'drill']
     assert len(drills) == 1 and drills[0].vehicle == make_drill.VEHICLE.sgo and drills[0].mark == 0
@@ -1992,12 +1991,12 @@ def emc_copies_agree() -> None:
     assert bay.index('EDF6VC_EMC_BLAST.SGO') < bay.index(vc.SAZABI_ROUND_FILES[0]), "kEmcFiles: the EMC's first"
     assert 'vc.sazabi_rounds(game)' in src('tools/make_sazabi.py'), "tools/make_sazabi.py writes the Sazabi's beams"
     assert make_emc.names() == [f'OBJECT/{n}' for n in vc.EMC_FILES] and make_emc.OWNER in ledger.OWNERS
-    m = re.search(r'kBeamRange=([\d.]+)f', plan)
-    assert m and float(m.group(1)) == vc.EMC_BEAM_RANGE == vc.EMC_BEAM_SPEED * vc.EMC_BEAM_LIFE, m and m.group(1)
-    m = re.search(r'kSightThin=([\d.]+)f,kSightThick=([\d.]+)f', emc)
-    assert m and float(m.group(1)) == vc.EMC_SIGHT_SIZE and float(m.group(2)) > vc.EMC_SIGHT_SIZE, m and m.groups()
-    m = re.search(r'kSgoBlastRadius=([\d.]+)f', emc)
-    assert m and float(m.group(1)) == vc.EMC_BLAST_RADIUS, m and m.group(1)
+    # The beam's reach, the glow's first thickness (it thickens: a static_assert in emc.cpp) and the blast SGO's radius:
+    # vcobjects' through src/py_consts.inc (tools/gen_py_consts.py --check).
+    assert vc.EMC_BEAM_RANGE == vc.EMC_BEAM_SPEED * vc.EMC_BEAM_LIFE
+    assert srcscan.takes(plan, 'kBeamRange', 'pyconst::kEmcBeamRange') and srcscan.takes(emc, 'kSightThin', 'pyconst::kEmcSightSize')
+    assert srcscan.takes(emc, 'kSgoBlastRadius', 'pyconst::kEmcBlastRadius')
+    assert 'static_assert(kSightThick>kSightThin,' in srcscan.code(emc)
     m = re.search(r'kAhead=([\d.]+)f,kLead=([\d.]+)f,kInto=([\d.]+)f,kBlastLead=([\d.]+)f', emc)
     assert m, 'src/emc.cpp kAhead / kLead / kInto / kBlastLead'
     lead, into, blast_lead = (float(m.group(i)) for i in (2, 3, 4))
@@ -2055,13 +2054,10 @@ def ultimate_copies_agree() -> None:
     radii = re.search(r'kModelRadius\[kModelCount\]=\{([^}]*)\}', plan)
     assert radii and [float(x.strip().rstrip('f')) for x in radii.group(1).split(',')] ==         [magic_circle.LAYERS[k].radius for k in magic_circle.LAYERS], radii
     assert 'PreloadUltimate(mgr);' in src('src/jet_spawn.cpp')
-    for name, value in (('kRingBlast', vc.ULT_BLAST_RADIUS), ('kSparkRadius', vc.ULT_SPARK_RADIUS)):
-        m = re.search(rf'\b{name}=([\d.]+)f', plan)
-        assert m and float(m.group(1)) == value, (name, m and m.group(1), value)
-    m = re.search(r'\bkGatherReach=([\d.]+)f', plan)
-    assert m and float(m.group(1)) == vc.ULT_GATHER_REACH, m and m.group(1)
-    m = re.search(r'\bkBoltFrames=(\d+);', plan)
-    assert m and int(m.group(1)) == vc.ULT_BOLT_ROUNDS, m and m.group(1)
+    # a ring's blast, a spark's, the gather's reach, a bolt's rounds: vcobjects' through src/py_consts.inc
+    for name, const in (('kRingBlast', 'kUltBlastRadius'), ('kSparkRadius', 'kUltSparkRadius'),
+                        ('kGatherReach', 'kUltGatherReach'), ('kBoltFrames', 'kUltBoltRounds')):
+        assert srcscan.takes(plan, name, f'pyconst::{const}'), name
     ults = [c for c in calls.CALLS if c.brings == 'ultimate']
     assert ults and all(cw.template_of(c) == cw.ULTIMATE_TEMPLATE and c.mark >= 1 and float(c.mark).is_integer()
                         for c in ults), ults
@@ -2172,11 +2168,11 @@ def sortie_copies_agree() -> None:
     at_split = vc.SALVO_EJECT + vc.SALVO_ACCEL * vc.SALVO_SPLIT_AFTER
     assert abs(at_split * 60.0 - vc.SALVO_CHILD_SPEED * 60.0) < 30.0 and at_split <= vc.SALVO_TOP, at_split
     assert vc.SALVO_CHILD_SPEED < vc.SALVO_CHILD_TOP, 'the children still accelerate'
-    assert f'constexpr float kRainRoundSpeed={vc.SALVO_CHILD_SPEED * 60.0:.1f}f;' in plan, 'HoldFire flies the children'
+    assert srcscan.takes(plan, 'kRainRoundSpeed', 'pyconst::kSalvoChildSpeed'), 'HoldFire flies the children'   # the value: src/py_consts.inc (tools/gen_py_consts.py --check)
     assert 'off>(salvo ? sortie::kRainFireCone : kMissileCone)' in combat
     # The glow declaration's mark and the classes' first free indices agree with the plugin's reader (gpufx_glow.h).
     glow = src('src/gpufx/gpufx_glow.h')
-    assert f'constexpr double kMark={vc.GLOW_MARK:.1f};' in glow and vc.GLOW_MARK not in (vc.MISSILE_MARK, vc.SALVO_MARK)
+    assert srcscan.takes(glow, 'kMark', 'pyconst::kGlowMark') and vc.GLOW_MARK not in (vc.MISSILE_MARK, vc.SALVO_MARK)
     kinds = {'MissileBullet01': '0x17A1C10u', 'MissileBullet02': '0x17A1E28u'}
     assert set(kinds) == set(vc.GLOW_FIRST_FREE)
     assert 'constexpr Kind kKinds[]={' + ','.join(f'{{{kinds[k]},{vc.GLOW_FIRST_FREE[k]}}}' for k in kinds) + '};' in glow
@@ -2212,8 +2208,9 @@ def sortie_copies_agree() -> None:
     # The salvo's volleys (src/salvo_volley.h, src/lockon.cpp ShotHook; the user, 2026-11-26: 「每帧只能出一发 什么垃圾设定，
     # 改」): its constants the store's, both shot calls patched, one lock enough, the old repeat-lock queue gone.
     volley = src('src/salvo_volley.h')
-    assert f'constexpr int kRounds={vc.SALVO_ROUNDS};' in volley and f'constexpr int kVolley={vc.SALVO_VOLLEY};' in volley
-    assert f'constexpr int kVolleyGap={vc.SALVO_VOLLEY_GAP};' in volley and vc.SALVO_VOLLEY % 4 == 0
+    for name, const in (('kRounds', 'kSalvoRounds'), ('kVolley', 'kSalvoVolley'), ('kVolleyGap', 'kSalvoVolleyGap')):
+        assert srcscan.takes(volley, name, f'pyconst::{const}'), name   # the value: src/py_consts.inc (tools/gen_py_consts.py --check)
+    assert vc.SALVO_VOLLEY % 4 == 0
     frames = (-(-vc.SALVO_ROUNDS // vc.SALVO_VOLLEY) - 1) * vc.SALVO_VOLLEY_GAP
     assert 1.5 <= frames / 60.0 <= 2.0, frames
     assert vc.STORES['SALVO'].weapon.burst_gap == vc.SALVO_VOLLEY_GAP
@@ -6769,7 +6766,9 @@ def map_commands_wired() -> None:
     reader = code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
     # The order keys are the ini's (map_keys.h, Broken Arrow's set: Tab the sub-selection among them), read in one loop.
     assert 'for(int i=0;i<mapkeys::count;++i)k.order[i]=keys.vk[i]>0 && Down(keys.vk[i]);' in reader
-    assert "int vk[count]={'Q','E','R','T','U','F','H','Z','X','C','V','B',0x09," in src('src/map_keys.h')
+    import config_keys
+    fields = re.findall(r'\bc\.(map\w+Key)\b', srcscan.function(src('src/map_keys.h'), 'Of'))
+    assert [int(config_keys.BY_FIELD[f].default, 0) for f in fields] == [*map(ord, 'QERTUFHZXCVB'), 0x09, 0x70, 0x71, 0x72, 0x73], fields
     # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range; enemy placement also works online): on any other map
     # they stay the game's and never switch the input back from the pad.
     assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn();' in code

@@ -12,6 +12,7 @@
 // 一个向中间蓄力的细节」, the shock waves 「最后的爆炸加个冲击波」.
 #pragma once
 #include <cmath>
+#include "py_consts.inc"
 #include <cstdint>
 
 namespace crew {
@@ -47,7 +48,7 @@ constexpr int kBoltSpread=180;
 static_assert(kChargeEnd+kBoltSpread<kGatherAt,"the bolts cover the area before the gather");
 constexpr float kBoltCore=0.08f;
 constexpr float kBoltsPerSec=150.0f;
-constexpr int kBoltFrames=8;              // a bolt's rounds (the SGO's: pylib/vcobjects.py ULT_BOLT_ROUNDS)
+constexpr int kBoltFrames=pyconst::kUltBoltRounds;   // a bolt's rounds (the SGO's: pylib/vcobjects.py ULT_BOLT_ROUNDS)
 // The main beam: from the top sky circle's centre straight down, growing to full size in kBeamGrow frames (and thinning
 // away as long).
 constexpr int kBeamGrow=120;
@@ -56,7 +57,7 @@ constexpr float kBeamSize=48.0f,kCoreSize=18.0f;
 // each blast kRingBlast m. A slow wave out to the edge.
 constexpr int kRings=12;
 constexpr int kRingGap=26;
-constexpr float kRingBlast=55.0f;
+constexpr float kRingBlast=pyconst::kUltBlastRadius;
 constexpr int kLastRing=kStormEnd+kBeamGrow+(kRings-1)*kRingGap;   // the show frame the last ring goes off
 static_assert(kChargeEnd<kGatherAt && kGatherAt<kStormEnd && kStormEnd<kCannonEnd && kCannonEnd<kAfterEnd,"phases in order");
 static_assert(kStormEnd+kBeamGrow+kRings*kRingGap<=kCannonEnd,"every ring goes off in the cannon phase");
@@ -243,7 +244,7 @@ inline int BoltsAt(std::uint64_t seed,int frame,Bolt* out) noexcept {
 // kGatherReach short of the centre (it ends on the centre, never past it), over kGatherPulse frames, again and again.
 constexpr int kGatherEach=4;
 constexpr int kGatherRays=(kCircleCount-1)*kGatherEach;   // kSkyTop is the last circle: none from it
-constexpr float kGatherRim=0.95f,kGatherReach=120.0f;
+constexpr float kGatherRim=0.95f,kGatherReach=pyconst::kUltGatherReach;
 constexpr int kGatherPulse=40;
 static_assert(kSkyTop==kCircleCount-1,"the gather's rays come from every circle before the top one");
 struct GatherRay { bool shown; int circle; float angle,slide,size; };   // slide: 0 at the rim .. 1 at the farthest start
@@ -330,7 +331,7 @@ inline WavePose WaveAt(int w,int frame) noexcept {
 // kWaveEvery frames each ground shock wave's front kWaveBursts round its circle while it is within kWaveBurstReach.
 enum class BurstKind : unsigned char { spark, blast, wave };   // a bolt's landing, a ring's blast, a shock wave's front
 struct Burst { float at[2]; BurstKind kind; float radius,share; bool great; };   // great: the great shock wave's
-constexpr float kSparkRadius=40.0f;            // m: the spark SGO's blast (ULT_SPARK_RADIUS); a wave's bursts are sparks too
+constexpr float kSparkRadius=pyconst::kUltSparkRadius;   // m: the spark SGO's blast (ULT_SPARK_RADIUS); a wave's bursts are sparks too
 constexpr float kBoltShare=0.25f,kSparkShare=0.25f,kBlastShare=1.0f,kBeamShare=0.03f,kCoreShare=0.03f;
 constexpr float kWaveShare=0.05f;              // a wave front's burst (未调: a front crosses a point in a few of them)
 constexpr int kWaveEvery=5,kWaveBursts=16;

@@ -21,6 +21,7 @@
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea: it wades).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "py_consts.inc"
 #include "exhaust_pose.h"
 #include "firstperson.h"
 #include "fp_view.h"
@@ -46,7 +47,7 @@ namespace crew {
 namespace {
 using vec::Clamp;using vec::Len;
 using namespace szarms;
-constexpr float kSazabiMark=7401.0f;   // pylib/vcobjects.py SAZABI_MARK (tools/selftest.py sazabi_bones_agree)
+constexpr float kSazabiMark=pyconst::kSazabiMark;   // pylib/vcobjects.py SAZABI_MARK (src/py_consts.inc)
 constexpr std::size_t kBody=0x1650;
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr std::size_t kAreaInset=0xE00;   // playerjet.cpp: the move-area clamp's inset

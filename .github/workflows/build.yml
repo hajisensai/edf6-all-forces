@@ -103,6 +103,9 @@ jobs:
           # src/mech_parts.inc: from pylib/mech_parts.py (no game needed).
           python tools/gen_mech_parts.py --check
           if ($LASTEXITCODE) { Write-Error 'src/mech_parts.inc is stale: run python tools/gen_mech_parts.py and commit it'; exit 1 }
+          # src/py_consts.inc: the values the plugin shares with pylib (no game needed); each used by a source.
+          python tools/gen_py_consts.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/py_consts.inc is stale or unused: run python tools/gen_py_consts.py and commit it'; exit 1 }
           python tools/gen_weapon_series.py --check
           if ($LASTEXITCODE) { Write-Error 'src/weapon_series.inc is stale: run python tools/gen_weapon_series.py and commit it'; exit 1 }
           # common/edf/katyusha_cab_gen.h is measured on the Katyusha's model (no Root.cpk here): checked against its own

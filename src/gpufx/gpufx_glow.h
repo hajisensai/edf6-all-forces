@@ -19,6 +19,7 @@
 // without it. Rounds of any other class are not looked at (add the class here once its reads are known).
 #pragma once
 #include "gpufx_sim.h"
+#include "../py_consts.inc"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -26,7 +27,7 @@
 
 namespace crew::gpufx::glow {
 
-constexpr double kMark=7146.0;   // the first number: this list is a glow declaration (pylib/vcobjects.py GLOW_MARK)
+constexpr double kMark=pyconst::kGlowMark;   // the first number: this list is a glow declaration (pylib/vcobjects.py GLOW_MARK)
 constexpr int kFields=6;         // mark, r, g, b, intensity, size
 constexpr int kBackField=6;      // the optional seventh: back, m (0..kMostBack)
 constexpr int kMostFields=16;    // more numbers than that: not ours
