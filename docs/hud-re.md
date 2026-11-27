@@ -1,4 +1,6 @@
-# 载具状态 HUD 逆向笔记（`src/hud.cpp`）
+# 载具状态 HUD 逆向笔记（`src/hud.cpp` 等）
+
+代码分文件（2026-11-27，design-review-1126 第 6 步）：`hud.cpp`（`HudDraw` 总入口、座舱屏 `cockpit_screens.inc`、模块横幅）、`hud_text.cpp`（Line / Text 基础设施：游戏字体量宽与绘制、世界文字、`LineSink`、`FitLine`）、`hud_vehicle.cpp`（NPC 载具读数、母舰面板、沙扎比、原版载具 HUD）、`hud_air.cpp`（战机 / 直升机）、`hud_map.cpp`（M 地图整段，含统计页 `hud_stats.inc`）、`hud_scope.cpp`（瞄准镜），共享声明在 `hud_internal.h`；下文写「`hud.cpp` 某函数」的指这几份里同名函数。
 
 EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。可信度：H = 反汇编逐条确认；M = 由调用方式推断、未进游戏验证；L = 猜测。
 
@@ -495,6 +497,11 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 
 离线：`tools/hud_view` 把全部画面按英 / 简 / 繁 / 日各画一遍（`DIR`、`DIR\zh-CN`、`DIR\zh-TW`、`DIR\ja`），替代字体的宽度按上面实测的步进（中日韩 1 em，英日文模式拉丁 0.5 em，中文模式拉丁用中文字体的步进表）；
 每种语言检查：文字都在屏幕内、面板里的文字不出面板、没有英文里没有的文字重叠，原来的 RWR / 原版载具块 / 自瞄行互不重叠检查在每种语言下也跑。`python tools/hud_view.py DIR` 有游戏时用游戏自己的四款字体按同样的回退顺序出图。
+
+限宽与丢字（2026-11-27）：
+- 一帧的行（`kMaxLines`）和一行的字（`kLineChars`=128）满了不再静默丢：面板先 `LineSink::Room(n,__func__)` 要位，单行用 `Push`；满了这块不画、记一次日志（哪块、要几行、已占几行）。`_vsnwprintf_s` 截断由 `TextWritten` 记一次（带开头 48 字）。`hud_view` 把这两种日志算失败（英文 `npcMouseKeys` 就是这样查出超 127 字，已拆成 `npcMouseKeys` / `npcMouseKeys2` 两行）。
+- 有槽宽的文字走 `FitLine(text,row,left,right,shrink)`：按游戏自己的量宽缩到 `text_fit.h kMinScale`（原来最小缩到 1%，等于看不见），还放不下就二分截断补 `...`。HUD 一行只有一排，要换行的由调用方画两行。插件 UI（`ui_text`、`worldmap` 的 `Text()`）走 `textfit::Fit` / `Labels::Draw`，策略 `Policy{shrink,ellipsis,wrap}`（GDI 实测字宽）。
+- 离线 `tests/hudtext_fit.py`：`hudtext.inc` 全部文本四种语言按 `hud_view` 的字宽表量：带参数后不超一行 127 字；登记了槽的（组成面板的兵种按钮 / 兵种列、统计页签、M 图底栏，槽宽和字号从画它的代码里读）缩到 `kMinScale` 仍放不下的必须登记 `CUT` 并写原因，登记了却放得下也算失败。`hud_view` 末尾列出这一轮被 `FitLine` 截断的文字（`fit:`）。
 
 **需实机确认**：选项里切语言后 HUD 是否下一帧就换；繁体 / 日文模式下字形是否与原版菜单同一风格；中文模式下拉丁字母变成比例字体后各行长度（已按测量排版）。
 

@@ -3,7 +3,7 @@
 // enemy, the enemies' attacks, the heals, the timeline), the scope (mine / everyone), a bar chart (or the timeline's
 // columns) whose bar under the pointer has its figures in a box by it, and a click on a bar opening its breakdown on the
 // right: whom a weapon hit (friendly fire marked) or healed (an enemy marked), which weapons hit an enemy, whom an enemy hit.
-// Included by hud.cpp (its primitives: Rect, Seg, Tri, Label, MapUiBox, FitLine), just before MapScreen.
+// Included by hud_map.cpp (its primitives: Rect, Seg, Tri, Label, MapUiBox, FitLine), just before MapScreen.
 
 alignas(16) const float kStatsShade[4]={0.0f,0.0f,0.0f,0.35f};
 alignas(16) const float kStatsPanel[4]={0.03f,0.05f,0.08f,0.9f};
