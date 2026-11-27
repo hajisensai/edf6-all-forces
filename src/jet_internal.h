@@ -48,6 +48,7 @@ using SetTeamFn=void(*)(void*,std::int32_t,bool);
 using DeleteFn=void(*)(void*);
 
 constexpr float kPi=3.14159265f,kG=9.8f,kGravity=14.7f;
+constexpr float kBombReach=4000.0f;   // m a bomb's path is followed for where it lands (StoreLands; the carpet's: ~1.6 km from 260 m)
 // m/s no jet is commanded past (see jet_flight.cpp JetSteer and jetprops.cpp).
 constexpr float kBodyTop=250.0f;
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this

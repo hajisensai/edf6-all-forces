@@ -24,7 +24,6 @@ void Done(Jet& j,const char* why,ULONGLONG ms) noexcept {
     j.sortie.done=true;
     Withdraw(j,why,ms);
 }
-constexpr float kBombReach=4000.0f;   // m a bomb's path is followed for its landing (the carpet's: ~1.6 km from 260 m up)
 // Level at `height` toward the point `lead` m on along the pass from where it is.
 void Run(const Jet& j,const float* pos,float height,float lead,float* want) noexcept {
     float p[3];sortie::Ahead(j.sortie.line,pos,lead,p);
@@ -336,8 +335,8 @@ void SortieFire(Jet& j,const unsigned char* v,const float* pos,const Arms& arms,
         if(!bomb)bomb=&st;
     }
     if(!bomb){if(!carpet && s.fired){s.phase=1;s.phaseAt=ms;}return;}   // out of bombs before its second
-    float at[3];
-    if(!StoreLands(*bomb,kBombReach,at))return;   // none lands within reach yet: held
+    float at[3],fall=0.0f;
+    if(!StoreLands(*bomb,kBombReach,at,&fall))return;   // none lands within reach yet: held
     const float half=s.runHalf>0.0f ? s.runHalf : sortie::kCarpetHalf;
     if(carpet ? std::fabs(sortie::Along(s.line,at))>half : HorizDist(at,s.line.at)>sortie::kPopDrop)return;
     if(s.runHalf>0.0f) {

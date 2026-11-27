@@ -86,8 +86,8 @@ int ReadStores(unsigned char* vehicle,Store* out,int most) noexcept;
 void TriggerStore(const Store& s) noexcept;
 // Where a round of `s` let go now first meets the map, as the game flies it (rounds.cpp RoundLands: from the store's
 // muzzle, its eject along it, the shooter's share of velocity, the world's gravity x its AmmoGravityFactor), at most
-// `reach` m on: false with no weapon, its round unread, or none landing within `reach`.
-bool StoreLands(const Store& s,float reach,float* at) noexcept;
+// `reach` m on, and the seconds it falls there (`sec`): false with no weapon, its round unread, or none landing within `reach`.
+bool StoreLands(const Store& s,float reach,float* at,float* sec) noexcept;
 // What `count` stores add to the jet of mark `mark`: its mass over its clean mass (>= 1) and its parasitic drag's
 // share over clean (>= 0), their rounds left and the pylons they were loaded on (store_burden.h). A mark without a mass:
 // none.
