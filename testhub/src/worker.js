@@ -79,6 +79,8 @@ async function route(request, env) {
   if (path === '/logout') return redirect('/login.html', { 'set-cookie': 's=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax' });
   if (PUBLIC_ASSETS.has(path)) return env.ASSETS.fetch(request);
   if (path === '/download') return env.ASSETS.fetch(new Request(new URL('/download.html', url), request));
+  // /rate/en, /rate/ja, /rate/zh: the review page in that language (a link to hand out; rate.js reads the suffix).
+  if (/^\/rate\/(zh|en|ja)$/.test(path)) return env.ASSETS.fetch(new Request(new URL('/rate.html', url), request));
   if (path.startsWith('/share/')) {
     const out = await shareRoute(request, env, path);
     if (out) return out;
