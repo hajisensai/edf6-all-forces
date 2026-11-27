@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS story_outlines (
   updated_by TEXT,
   updated_at INTEGER,
   author TEXT,                      -- who started it (migrations/0006)
+  open INTEGER NOT NULL DEFAULT 0,  -- 1 = any account may edit it, not only its group (migrations/0009)
+  main INTEGER NOT NULL DEFAULT 0,  -- 1 = the main outline: listed first, opened by default; at most one (migrations/0009)
   PRIMARY KEY (grp, book)
 );
 

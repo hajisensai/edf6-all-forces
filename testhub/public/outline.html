@@ -20,7 +20,7 @@
   <div id="draftBar" class="banner row hide" role="status"></div>
   <section class="olHead">
     <div class="row">
-      <h2 id="title" class="olTitle">剧情大纲</h2>
+      <h2 id="title" class="olTitle">剧情大纲</h2><span id="badges" class="olBadges"></span>
       <input type="text" id="titleInput" class="hide olTitleInput" maxlength="60" placeholder="大纲名称" aria-label="大纲名称">
       <span class="grow"></span>
       <span class="row tight olActs">
@@ -34,7 +34,7 @@
     </div>
     <p class="muted small" id="saved" role="status"></p>
     <div id="problem" class="stProblem hide" role="alert"></div>
-    <p class="muted small hide" id="hint">点任意一步就地修改 · 拖 ⠿ 或 <kbd>Alt</kbd>+方向键 移到别的位置、别的线 · <kbd>Delete</kbd> 删除选中的一步 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · 打字即存本机草稿 · 同组成员都能改 <button class="btn ghost small danger hide" id="removeBook" type="button">删除这份大纲</button></p>
+    <p class="muted small hide" id="hint">点任意一步就地修改 · 拖 ⠿ 或 <kbd>Alt</kbd>+方向键 移到别的位置、别的线 · <kbd>Delete</kbd> 删除选中的一步 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · 打字即存本机草稿 · <span id="who">同组成员都能改</span> <button class="btn ghost small danger hide" id="removeBook" type="button">删除这份大纲</button></p>
     <div id="mapBox" class="olMapBox hide">
       <div class="row"><h3 class="olMapTitle">世界线总图</h3><span id="mapInfo" class="muted small"></span></div>
       <div id="map" class="olMapScroll"></div>

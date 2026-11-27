@@ -287,3 +287,6 @@ body.dragActive .olSteps { min-height: 40px; }
 .olWrite { font-weight: 600; }
 @media (max-width: 720px) { .olFormGrid { grid-template-columns: minmax(0, 1fr); } }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olNode[data-tone="violet"] { --tone: #a98ee8; } }
+.olBadges { display: inline-flex; gap: 6px; align-items: center; }
+.olBadges .badge { color: var(--info); }
+.olBadges .badge.olMain { color: var(--warn); }
