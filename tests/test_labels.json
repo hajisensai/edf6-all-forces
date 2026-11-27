@@ -8792,6 +8792,13 @@
    ],
    "scripts": []
   },
+  "worker_pool": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "world_text_check": {
    "labels": [
     "plugin-core",

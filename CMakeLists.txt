@@ -1154,6 +1154,8 @@ add_test(NAME cockpit_panoramic COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_
 add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
+# The soldiers' parallel Decide reads only (tests/npc_parallel_guard.py: its call graph, the memo wrappers).
+add_test(NAME npc_parallel_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_parallel_guard.py")
 # The stock crosshair hidden while its player controls an enemy (tests/enemy_control_crosshair_guard.py).
 add_test(NAME enemy_control_crosshair_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_crosshair_guard.py")
 # Every channel names a player by its mission slot, never its NetId (tests/player_identity_guard.py).
