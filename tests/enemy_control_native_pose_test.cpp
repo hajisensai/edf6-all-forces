@@ -8,7 +8,9 @@
 #include <utility>
 #include <vector>
 
-namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}
+void FlushObjectUpdates() noexcept {}   // 离线没有 slot5 登记（object_update_mt.cpp）
+}
 namespace {
 using crew::At;using crew::Put;
 using crew::enemy_native::NativeLease;using crew::enemy_native::NativeProfile;
