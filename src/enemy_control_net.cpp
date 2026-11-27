@@ -261,10 +261,7 @@ void Publish() noexcept {
     }
 }
 void Tick(std::uint64_t now) noexcept {
-    networkNow=now;
-    const bool ready=transport.ready && Cfg().enabled;
-    const auto capability=ready && EnemyControlLocalCapacityReady() ? ep::kCapability : 0;
-    protocol.Tick({ready,transport.host,transport.epoch,transport.hostPeer,transport.peerCount,localPuid,capability},now);
+    networkNow=now;protocol.Tick({transport.ready && Cfg().enabled,transport.host,transport.epoch,transport.hostPeer,transport.peerCount,localPuid,EnemyControlLocalCapacityReady() ? ep::kCapability : 0},now);
 }
 bool SameSnapshot(const ep::LeaseView& lease,const enemy_control::Snapshot& snapshot) noexcept {
     if(lease.id!=snapshot.lease || lease.spec.profileHash!=snapshot.profileHash ||
@@ -377,9 +374,7 @@ void UpdateEnemyControlNetwork(const CommandNetworkContext& context,std::uint64_
     transport.localPuid=localPuid;Tick(now);Publish();
 }
 bool ReceiveEnemyControlNetwork(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now) noexcept {
-    // CommandContext updates this channel at the end of the receive pump and publishes the batch's final state.
-    networkNow=now;
-    return protocol.Receive(peer,puid,bytes,size,now);
+    networkNow=now;const bool owned=protocol.Receive(peer,puid,bytes,size,now);if(owned)Publish();return owned;
 }
 void EnemyControlNetworkFrame() noexcept {
     const auto now=GetTickCount64();Tick(now);protocol.TransportFrame(now);PrunePoses();

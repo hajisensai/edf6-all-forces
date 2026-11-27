@@ -85,14 +85,6 @@ public:
     T& operator[](std::size_t i) noexcept {return *rows_[i];}
     const T& operator[](std::size_t i) const noexcept {return *rows_[i];}
 
-    T* Get(std::size_t index) noexcept {return index<Size() ? rows_[index] : nullptr;}
-
-    // For rows paired with another fixed table by index. Publish only the prefix needed by that slot.
-    T* Ensure(std::size_t index,const char* what) noexcept {
-        if(T* row=Get(index))return row;
-        return index<N ? Grow(index,what) : nullptr;
-    }
-
     template<class Free>
     T* FindOrAppend(const char* what,Free&& free) noexcept {
         for(T& row:*this)if(free(row))return &row;
