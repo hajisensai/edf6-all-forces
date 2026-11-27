@@ -124,7 +124,7 @@ bool ReadBaselineForMember(const ObjRef& ref,int* team,int* last) noexcept {
 }
 }
 namespace crew::edf41net {
-void Attach(void*) noexcept{}
+bool Install() noexcept{return true;}
 void Pump(void*) noexcept{}
 bool Enabled() noexcept{return true;}
 bool Online() noexcept{return fixture::online;}
