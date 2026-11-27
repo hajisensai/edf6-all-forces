@@ -77,6 +77,7 @@
 #include "keyconfig.h"
 #include "pad_hold.h"
 #include "aura.h"
+#include "module.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -1357,138 +1358,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("HELI profile=%d",heli);
     Log("GROUND profile=%d",ground);
     CheckPauseFlag();       // the game's pause flag (the game clock and the HUD stop with it): read only
-    // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
-    // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
-    // The crash dump first (its filter and handlers point into this DLL): a crash in any install below is dumped.
-    InstallCrashDump();
-    // The weapon records past 0x800 (weapon_records.cpp): before anything could make the game status, whose
-    // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord.
-    InstallWeaponRecords();
-    InstallFramePacing();      // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
-    InstallRenderFence();      // the game thread's spin on the render fence made a wait (frame_pacing.cpp)
-    InstallFrameLatency();     // before the application's init makes the device: DXGI's queue to ini MaxFrameLatency
-    // ini FrameRateCap (docs/unlimited-fps-re.md): 0 the game's 59.94 Hz, nothing installed; otherwise frames between the
-    // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
-    // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
-    InstallFrameRate();
-    InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
-    InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
-    InstallHavokProps();       // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
-    InstallAiWorldCapacity();  // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024
-    Log("ROOM isolation=%d",InstallModRoom());
-    Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
-    Log("SUPPORT firepower=%d",InstallSupportFirepower());   // support vehicles' and aircraft's damage by level
-    InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
-    InstallBodyBox();       // physics bodies' world boxes: the shield, the missiles' warhead safety
-    InstallBulletPass();    // the bullets' candidate hook: the jets' wingmen and the sidecar's passengers, whatever the heli profile
-    if(heli) {
-        InstallDoorGuns();  // the 410's door guns are part of the heli pilot
-        InstallJets();      // the jets and the carrier are flown from HeliFrame: no heli pilot, none of them
-        InstallSub();
-    } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
-    InstallBoarding();      // after the heli profile's board button check
-    Log("AIRDROP container step watched=%d",InstallAirdrop());   // the transport planes' container airdrops
-    Log("PLAYERVEH loaded requested jets=%d",InstallPlayerVehicles());   // after the airdrop: its vehicle step swaps the path
-    InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
-    InstallSazabi();        // the same: the 506 physics hook and the vehicles' own input
-    InstallDreadnought();   // the same
-    InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
-    gravity::Install();     // the gravity operations (their impacts are the jets' impact charges too); the gravity gun's on them
-    InstallFloatGuns();     // M099's dropped guns that float round the player and fire (the dropped gun's update hook)
-    InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
-    InstallEmc();           // the EMC's charged beam (its rounds are the jets' shells too: jet_bay.cpp)
-    InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
-    InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
-    InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
-    InstallSpotRay();       // the stock spot (Q): off for this machine's players (VanillaSpot=0), else along the drawn camera
-    InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
-    InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
-    thermal::Install();    // mesh heat/depth passes, inert in optical mode
-    nativepad::Install();  // the game's pad read: a plugin chord (on foot: the night vision's L3 + R3) kept from the game
-    gpufx::Install();      // GPU particles at the world's end (thermal.cpp's redirect), the stock particle draw slot
-    InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
-    Log("VIEWDIAG umbra watch %s",InstallUmbraWatch() ? "on" : "NOT installed (EDF.dll's Umbra import is not as read)");
-    InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
-    InstallScopeSpread();   // the player's scoped weapons spread by the scope (the shot entry's hook, the weapon creation's call)
-    Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
-    Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
-    Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());
-    // E516's part events: a name the boss has no part for acts on none (the stock lookup reads past its map's end)
-    Log("GREYBOSS part events by name checked=%d",InstallGreyBossParts());
-    InstallMap();          // the map view (the player's camera overhead, their input held while it is open)
-    InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
-    InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
-    InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
-    InstallHavokMultithread();   // the physics step on the game's Havok worker threads (ini HavokMultithread; havok_mt.cpp)
-    InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
-    InstallStoreRecoil();   // the 403's store holders past its seats: the hull push, not a seat's jitter (storerecoil.cpp)
-    InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
-    InstallAura();          // the aura trucks (aura.cpp)
-    InstallLaser();
-    InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
-    InstallHud();
-    InstallDamageStats();   // the damage function's head and the rounds' spawn (damagestats.cpp): the statistics' page over the map
-    InstallDamageNumbers(); // the damage notice's colours (dmgnum.cpp): weak spots, friendly fire, the allies' numbers
-    InstallKillCounters();  // the battle record's rows: the EDF4.1 port's kill counters after the stock ones (killcount.cpp)
-    InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
-    InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
-    wequip::InstallWeaponEquip();   // the 整备 weapons page's equip (weapon_equip.cpp): signatures only, no patch
-    InstallPackSwitch();    // the HQ's Q / E mission pack switch (pack_switch.cpp): before InstallRoomUi, which wraps its HQ hook
-    InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
-    InstallWorldMap();      // the mission select's list as the world map (worldmap.cpp: the select's update, draw, destructor)
-    InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)
-    Log("OUTFIT41 installed=%d",InstallOutfit41());   // the EDF4.1 outfit: the HQ popup's sixth item, the model paths
-    InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
-    InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
-    InstallPortedMissions(); // ...and with PortedMissionsUnlocked every mission of the ported packs open (edf5campaign.cpp)
-    InstallEdf41MenuBg();    // the EDF4.1 packs' HQ shows 4.1's background when the installer added it (edf5campaign.cpp)
-    InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)
-    InstallJetSound();
-    InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
-    InstallBlastSound();    // the rounds' explosions as War Thunder layers them (blastsound.cpp)
-    InstallMissiles();
-    InstallBarrages();      // the long-range barrages' rounds: RocketBullet01's update (barrage.cpp)
-    InstallAndryusha();     // the Andryusha's carriers: GrenadeBullet01's update, chained (andryusha.cpp)
-    InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
-    InstallSupportUnitOnAllies();   // support units stick to allies (ini SupportUnitOnAllies, live)
-    InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
-    InstallGuidance();      // the stock homing rounds by proportional navigation
-    InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
-    Log("EDF41 original sidecar hooks=%d",InstallEdf41Bike());
-    Log("M163 visual rotor=%d",InstallVulcanRotor());
-    InstallSeatTurrets();    // the gunner seats' own turrets, posed at the same world build
-    InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
-    Log("PVP native hooks=%d",InstallPvp());
-    InstallRoomPvp();       // the room's start held until every member acknowledged the PvP lock (room_pvp.cpp)
-    InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
-    InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
-    InstallAllClassesRide();   // every class in every seat: before any mission makes a vehicle (the seat build is in its constructor)
-    InstallBigWorld();
-    Log("LEGACYMAP collision migration hooked=%d",InstallLegacyMap());   // EDF4.1 maps (plan P6)
-    InstallEdf41Ai();        // the converted EDF4.1 Hectors' arm gate and back-off cycle (edf41ai.cpp)
-    InstallEdf41Fortress();  // the converted EDF4.1 fortress: standing, its drop through the core hatch (edf41fortress.cpp)
-    InstallEdf41Dragon();    // the converted EDF4.1 giant dragon: its flame stream, ranges and glide pass (edf41dragon.cpp)
-    InstallEdf41Insects();   // the DLC's EDF4.1 queen bee and Nephilas: needle speed, thread scatter (edf41insects.cpp)
-    InstallEdf41MechBoost(); // the 406 Begaruta (BM03 Vegalta): the jet slots its old boost parser never builds (edf41mech_boost.cpp)
-    InstallEdf41SmallDragon();  // the DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (edf41smalldragon.cpp)
-    InstallEdf41Natives();   // EDF4.1 script natives the BVM executor lacks: SetEncountReportRadius (edf41natives.cpp)
-    InstallEdf41Before();    // EDF4.1's pre-mission scenes without the menu's black fade over them (edf41before.cpp)
-    InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
-    InstallEdf41Mother();    // EDF4.1's UfoMother301 (ini Edf41Mother; edf41mother.cpp)
-    InstallEdf41Robo();      // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
-    InstallEdf41Deiroi();    // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
-    InstallEdf41Mother401(); // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
-    Log("ENEMY CONTROL radar=%d",InstallEnemyControlRadar());
-    Log("ENEMY CONTROL spawn ownership=%d",InstallControlledPvpSpawnBridge());
-    Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());
-    Log("ENEMY CONTROL weapon aiming=%d",InstallEnemyControlWeaponAim());
-    InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
-    InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
-    InstallLoadout(iniPath);
-    Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
-    if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
-    perfprobe::Install();   // last: it chains call sites other hooks redirect at load (perf_probe.h)
-    syncload::Install();    // after it: the game thread is the frame anchor's (sync_load_probe.h)
+    // Then the modules' installs (modules.cpp kInstalls), in dependency order. From the first patch on the plugin
+    // stays loaded whatever fails after (true below): the loader unloading the DLL would leave patched slots pointing at
+    // unloaded code.
+    modules::InstallAll({heli,ground,iniPath});
     Log("LOAD complete (build %s)",EDF6_BUILD_ID);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     const edf::ClaimStats claims=edf::GetClaimStats();

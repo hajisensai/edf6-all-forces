@@ -1,5 +1,6 @@
 // Run the production auto-crew and boarding-entrance paths against native-layout seats.
 #include "../src/crew.cpp"
+#include "../src/modules.cpp"   // the passes crew.cpp's frame tick runs (module.h); /Gw drops the load's tables it never runs
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
