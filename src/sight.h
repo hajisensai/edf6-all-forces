@@ -1,6 +1,7 @@
 // The gun sight's and the fighter HUD's math (playerjet.cpp Sight, hud.cpp FighterHud), kept apart from the game so
 // it can be checked off it (no EDF.dll in here).
 #pragma once
+#include "screen_view.h"
 #include "vecmath.h"
 
 namespace crew {
@@ -38,11 +39,11 @@ constexpr float kOffScreen=4.0f;
 // a direction has none, and a far point is the sight's whatever the far plane.
 inline bool ToScreen(const float* vp,const float* p,float w,float width,float height,float* sx,float* sy) noexcept {
     float c[4];
-    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+w*vp[12+k];
+    screenview::Clip(vp,p,w,c);
     if(!(c[3]>1e-6f))return false;
     const float x=c[0]/c[3],y=c[1]/c[3];
     if(!(std::fabs(x)<=kOffScreen && std::fabs(y)<=kOffScreen))return false;
-    *sx=width*0.5f*(1.0f+x);*sy=height*0.5f*(1.0f-y);
+    screenview::Pixel(x,y,width,height,sx,sy);
     return true;
 }
 

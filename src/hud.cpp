@@ -413,7 +413,7 @@ void AuraHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
             float x0,y0,x1,y1;
             const int k=(j+1)%r.points;
             if(sight::ToScreen(vp,r.pt[j],1.0f,width,height,&x0,&y0) && sight::ToScreen(vp,r.pt[k],1.0f,width,height,&x1,&y1))
-                Seg(drawer,ctx,x0,y0,x1,y1,2.0f*s,tint);
+                WorldSeg(drawer,ctx,x0,y0,x1,y1,2.0f*s,tint);
         }
     }
     if(!v.here.kinds)return;
@@ -626,7 +626,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         Text text{};
         text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
         text.vp=viewProj;text.width=width;text.height=height;
-        worldRef=worldtext::kViewRef;worldMapView=false;++worldFrame;
+        worldRef=worldtext::kViewRef;worldMapView=false;++worldFrame;worldLens=screenview::Lens{};
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines]{};   // zeroed: no line is a world one unless WorldLabel made it so
         int at=0,shown=0;
@@ -662,7 +662,12 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                                       z.stock ? z.stockHud.zero : 0};
             }
         }
-        if(!scopeOverlay)InfantryScope(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        // The scope's picture in the picture: every world mark from here on as the screen shows the world, the lens's
+        // part at its power (screen_view.h; the user, 2026-11-27: 「开镜以后线会分离」).
+        if(!scopeOverlay) {
+            InfantryScope(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+            worldLens=ScopeLensView(viewProj,width,height);
+        }
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
         const bool mountedOptic=snap.mountedOptic || scopeOverlay; // also cover the first paint before next HUD publication
@@ -818,8 +823,9 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(screensOn)DrawCockpitScreens(drawer,ctx,t,viewProj,width,height,s,snap,lines,&at);
         if(t && textOk)DrawAll(*t,lines,at);
         FreeText(text);
+        worldLens=screenview::Lens{};
         DrawLog(shown,count,lines,at,w,h);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    } __except(EXCEPTION_EXECUTE_HANDLER) {worldLens=screenview::Lens{};}
 }
 bool HudScopeHoldsCrosshair(const void* soldier) noexcept {
     AcquireSRWLockShared(&scopeDrawnLock);
