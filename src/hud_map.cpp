@@ -717,6 +717,15 @@ void MapVariantIcon(void* d,void* c,SupportVariant variant,float x,float y,float
     }
 }
 constexpr float kBtnRowH=30.0f,kBtnGap=6.0f,kBtnPad=8.0f,kBtnIcon=18.0f,kBtnMargin=16.0f,kBtnBottom=142.0f;   // px at 1080 lines
+// Broken Arrow's action panel (map_buttons.h Grid): its cells' width (the widest word's, within these; narrower, the
+// words shrunk, so that every order fits in kGridRows rows: the band no taller than the old one, the 「摆放」 panel and
+// the legend above it keep their room); a narrow screen, where the cells would be narrower than kCellRead, a row more.
+constexpr float kCellMin=60.0f,kCellRead=104.0f,kCellMax=176.0f;
+constexpr int kGridRows=2,kGridRowsMost=3;
+// The selection's cards (MapSelectionCards) left of it: their size; room kept for kCardCols of them (one on a narrow
+// screen); two rows of buttons high (the band is kCardRows rows high at the least while a unit is selected).
+constexpr float kCardW=176.0f,kCardH=2.0f*kBtnRowH+kBtnGap,kCardGap=6.0f;
+constexpr int kCardRows=2,kCardCols=2;
 // The ALL OUT button's menu (map_buttons.h kDismountMenu; test site #45 「如何让某个角色单独下车」): over the button, a row a
 // choice -- everyone, everyone but the driver, one class's riders; a click on a row is that DISMOUNT ALL (mapcmd.cpp
 // PickDismount). Its rows go to mapcmd.cpp as the formation menu's do (one menu at a time).
@@ -842,6 +851,90 @@ void MapAltitudeTag(void* drawer,void* ctx,Text* text,const float* vp,float widt
 
 // The command card as drawn this frame (MapButtons), for its formation menu (MapCommands draws it over every panel).
 float mapCardRects[mapbtn::kCount*4]{};int mapCardIds[mapbtn::kCount]{};int mapCardCount=0;
+// Broken Arrow's selection panel (the user, 2026-11-27: 「这个操作方式和显示都抄抄断箭吧」): left of the command card a card
+// a kind of the selected units (map_buttons.h GroupCards: alike and of one owner stacked, "x N"): its name; its order, an
+// aircraft's altitude (a triangle, high / low, another machine's "?"), HOLD FIRE, its Shift-queued points. Tab's
+// sub-selection (mapcmd_logic.h NextSub) lit, the other kinds dim. Shown only: the orders go as before.
+void MapSelectionCards(void* drawer,void* ctx,Text* text,float s,const MapCommandReadout& c,float left,float right,float top,
+                       float bottom,Line* lines,int* at) noexcept {
+    const char* kind[kCmdUnits];int owner[kCmdUnits],index[kCmdUnits],n=0;
+    for(int i=0;i<c.count && i<kCmdUnits;++i)if(c.unit[i].selected){kind[n]=c.unit[i].name;owner[n]=c.unit[i].owner;index[n++]=i;}
+    mapbtn::CardGroup group[kCmdUnits];
+    const int groups=mapbtn::GroupCards(kind,owner,n,group,kCmdUnits);
+    mapbtn::Rect card[kCmdUnits]{};
+    int placed=mapbtn::Cards(groups,kCardW*s,kCardH*s,left,right,top,bottom,kCardGap*s,card);
+    // More kinds than the cards hold: a row high each (the name and the count, an aircraft's altitude triangle; the
+    // order and the rest on the map's tags), the last a "+N" for the kinds still left over.
+    const bool compact=placed<groups;
+    if(compact)placed=mapbtn::Cards(groups,kCardW*s,kBtnRowH*s,left,right,top,bottom,kCardGap*s,card);
+    const int over=groups-placed;
+    const float scale=kLineScale*0.62f,chipScale=kLineScale*0.52f;
+    for(int g=0;g<placed;++g) {
+        const mapbtn::Rect& q=card[g];
+        const CmdMark& u=c.unit[index[group[g].first]];
+        const bool sub=c.subKind[0] && mapcmd::SameKind(u.name,c.subKind),dim=c.subKind[0] && !sub;
+        Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,sub ? kBtnLit : kBtnFill);
+        const float t=1.5f*s;const float* edge=dim ? kMapOrderDim : kMapOrder;
+        Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,t,edge);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,t,edge);
+        Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,t,edge);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,t,edge);
+        // Its name: the kind (a squad's without its count), an aircraft as the map names it; the stack's count.
+        char base[24]{};
+        std::snprintf(base,sizeof(base),"%s",u.name);
+        if(char* cut=std::strstr(base," x"))*cut=0;
+        wchar_t word[48],name[64];
+        hudtext::WordTo(base,word,_countof(word));
+        if(u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet)
+            _snwprintf_s(name,_countof(name),_TRUNCATE,Tr(u.owner==kCmdOwnerHeli ? Tx::unitHeli : Tx::unitJet),word);
+        else _snwprintf_s(name,_countof(name),_TRUNCATE,L"%ls",word);
+        const float* ink=dim ? kMapLocked : kWhite;
+        const float pad=6.0f*s,line1=q.y0+(kBtnRowH*0.5f)*s,line2=q.y1-(kBtnRowH*0.5f)*s;
+        float nameRight=q.x1-pad;
+        if(compact && over>0 && g==placed-1) {   // the last card: the kinds left over
+            Label(text,lines,at,(q.x0+q.x1)*0.5f,line1,1,scale,kMapOrderDim,L"+%d",over+1);
+            continue;
+        }
+        if(compact && (u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet) && u.high>=0) {
+            const float cx=nameRight-4.0f*s;
+            const float* rgba=dim ? kMapLocked : u.high ? kMapOrder : kAmber;
+            if(u.high)Tri(drawer,ctx,cx,line1+4.0f*s,cx,line1-4.0f*s,4.0f*s,rgba);
+            else Tri(drawer,ctx,cx,line1-4.0f*s,cx,line1+4.0f*s,4.0f*s,rgba);
+            nameRight-=12.0f*s;
+        }
+        if(group[g].count>1) {
+            const int before=*at;
+            Label(text,lines,at,nameRight,line1,2,scale,ink,L"x%d",group[g].count);
+            if(*at>before)nameRight=lines[*at-1].x-4.0f*s;
+        }
+        Label(text,lines,at,q.x0+pad,line1,0,scale,ink,L"%ls",name);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+pad,nameRight);
+        if(compact)continue;
+        // Its state: the order; the altitude; HOLD FIRE; the queued points (the stack's first unit's).
+        float x=q.x0+pad;
+        const auto chip=[&](const float* rgba,const wchar_t* word1) {
+            if(!(x<q.x1-pad))return;
+            const int before=*at;
+            Label(text,lines,at,x,line2,0,chipScale,rgba,L"%ls",word1);
+            if(*at>before){FitLine(text,lines[*at-1],x,q.x1-pad);x=lines[*at-1].x+lines[*at-1].w+8.0f*s;}
+        };
+        chip(dim ? kMapLocked : MapPathColour(u.now.order),MapOrderWord(u.now.order));
+        if(u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet) {
+            const float* rgba=dim || u.high<0 ? kMapLocked : u.high ? kMapOrder : kAmber;
+            if(u.high>=0 && x+10.0f*s<q.x1-pad) {
+                const float cx=x+4.0f*s;
+                if(u.high)Tri(drawer,ctx,cx,line2+4.0f*s,cx,line2-4.0f*s,4.0f*s,rgba);
+                else Tri(drawer,ctx,cx,line2-4.0f*s,cx,line2+4.0f*s,4.0f*s,rgba);
+                x+=11.0f*s;
+            }
+            chip(rgba,u.high<0 ? Tr(Tx::altUnknown) : Tr(u.high ? Tx::altHigh : Tx::altLow));
+        }
+        if(u.holdFire)chip(dim ? kMapLocked : kRed,Tr(Tx::orderHoldFire));
+        if(u.ways) {
+            wchar_t more[8];_snwprintf_s(more,_countof(more),_TRUNCATE,L"+%d",static_cast<int>(u.ways));
+            chip(dim ? kMapLocked : kMapOrderDim,more);
+        }
+    }
+}
+
 // The ALTITUDE button's word: the active selection's altitude (mapcue::StateOf), the order's name with none flying.
 Tx AltitudeWord(const mapcue::Altitudes& a) noexcept {
     switch(mapcue::StateOf(a)) {
@@ -889,9 +982,36 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         const float textW=text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s;
         w[shown]=(2.0f*kBtnPad+kBtnIcon+6.0f)*s+textW;shownIds[shown++]=i;
     }
+    // Broken Arrow's action panel (the user, 2026-11-27: 「这个操作方式和显示都抄抄断箭吧」): cells alike in the bottom-right
+    // corner, each order's key printed in its top-right corner; the selection's cards at its left (MapSelectionCards).
+    float cellW=kCellMin*s;
+    for(int k=0;k<shown;++k)cellW=std::fmax(cellW,w[k]+kBtnPad*s);
+    cellW=std::fmin(cellW,kCellMax*s);
+    // The grid's room: the screen's width, less the cards' while a unit is selected; the fewest rows (kGridRows on)
+    // whose cells stay readable.
+    float room=0.0f;
+    for(int pass=0;pass<2;++pass) {   // kCardCols cards' room, then one card's when the cells would be too narrow
+        const float cards=pass==0 ? static_cast<float>(kCardCols) : 1.0f;
+        const float cardRoom=c.selected>0 ? cards*kCardW*s+(cards-1.0f)*kCardGap*s+3.0f*kBtnGap*s+kBtnMargin*s : 0.0f;
+        room=std::fmax(0.0f,width-cardRoom-kBtnMargin*s);
+        const int cols=(shown+kGridRows-1)/kGridRows;
+        if(cols<=0 || (room+kBtnGap*s)/static_cast<float>(cols)-kBtnGap*s>=kCellRead*s)break;
+    }
+    for(int rowsWant=kGridRows;rowsWant<=kGridRowsMost;++rowsWant) {
+        const int cols=(shown+rowsWant-1)/rowsWant;
+        if(cols<=0)break;
+        const float fit=(room+kBtnGap*s)/static_cast<float>(cols)-kBtnGap*s;
+        if(fit>=kCellRead*s || rowsWant==kGridRowsMost){cellW=std::fmin(cellW,std::fmax(kCellMin*s,fit));break;}
+    }
+    const float share=width>0.0f ? std::fmin(1.0f,(room+kBtnMargin*s)/width) : 1.0f;
     mapbtn::Rect r[n]{};
-    const int rows=mapbtn::Flow(w,shown,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
-    if(rows>0)MapUiBox(drawer,ctx,0,height-(kBtnBottom+static_cast<float>(rows)*(kBtnRowH+kBtnGap)+8.0f)*s,width,height-104.0f*s,lines,*at);
+    const int rows=mapbtn::Grid(shown,cellW,width,share,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
+    float gridLeft=width;
+    for(int k=0;k<shown;++k)if(r[k].x1>r[k].x0)gridLeft=std::fmin(gridLeft,r[k].x0);
+    const int bandRows=c.selected>0 && rows>0 ? (std::max)(rows,kCardRows) : rows;
+    const float bandTop=height-(kBtnBottom+static_cast<float>(bandRows)*(kBtnRowH+kBtnGap))*s;
+    if(bandRows>0)MapUiBox(drawer,ctx,0,bandTop-8.0f*s,width,height-104.0f*s,lines,*at);
+    if(rows>0)MapSelectionCards(drawer,ctx,text,s,c,kBtnMargin*s,gridLeft-3.0f*kBtnGap*s,bandTop,height-kBtnBottom*s,lines,at);
     float rects[n*4];int placed=0,ids[n];
     for(int k=0;k<shown;++k) {
         const mapbtn::Rect& q=r[k];
@@ -908,8 +1028,15 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,t,kMapOrder);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,t,kMapOrder);
         const float iconX=q.x0+(kBtnPad+kBtnIcon*0.5f)*s,mid=(q.y0+q.y1)*0.5f;
         MapOrderIcon(drawer,ctx,b,iconX,mid,kBtnIcon*s,s,available ? kWhite : kMapLocked);
-        Label(text,lines,at,q.x0+(kBtnPad+kBtnIcon+6.0f)*s,mid,0,scale,available ? kWhite : kMapLocked,L"%ls",word[k]);
-        if(*at>0)FitLine(text,lines[*at-1],q.x0+(kBtnPad+kBtnIcon+6.0f)*s,q.x1-kBtnPad*s);
+        // Its key in the top-right corner (Broken Arrow's hotkey badge), the word fitted short of it.
+        float wordRight=q.x1-kBtnPad*s;
+        if(std::wcscmp(kKey[shownIds[k]],L"-")!=0) {
+            const int before=*at;
+            Label(text,lines,at,q.x1-3.0f*s,q.y0+8.0f*s,2,kLineScale*0.42f,available ? kMapOrder : kMapLocked,L"%ls",kKey[shownIds[k]]);
+            if(*at>before)wordRight=std::fmin(wordRight,lines[*at-1].x-3.0f*s);
+        }
+        Label(text,lines,at,q.x0+(kBtnPad+kBtnIcon+6.0f)*s,mid+2.0f*s,0,scale,available ? kWhite : kMapLocked,L"%ls",word[k]);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+(kBtnPad+kBtnIcon+6.0f)*s,wordRight);
         // The tooltip: the full word (the formation's name, the health boxes' state) and how to give it.
         wchar_t full[96];
         if(b==Id::formation)_snwprintf_s(full,_countof(full),_TRUNCATE,Tr(Tx::btnFormation),FormationText(c.march,false));
@@ -926,7 +1053,7 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     std::memcpy(mapCardRects,rects,sizeof(float)*4*static_cast<std::size_t>(placed));
     std::memcpy(mapCardIds,ids,sizeof(int)*static_cast<std::size_t>(placed));
     mapCardCount=placed;
-    return rows;
+    return bandRows;
 }
 
 // The support bar (map_buttons.h GroupSupport / Column; the user, 2026-10-09: "m里面的支援招募弄成一列带图标的hud并且可以

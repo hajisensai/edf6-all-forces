@@ -176,7 +176,8 @@ struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8
     // An aircraft's altitude (ALTITUDE, V): `high` 1 high / 0 low / -1 unknown (another machine's: its authority alone
     // knows); `agl` its height over the ground below, m (-1 none found); `altSince` ms since V switched it (mapcue::kSwitchMs
     // and over: not lately).
-    std::int8_t high=-1; float agl=-1.0f; std::uint32_t altSince=0xFFFFFFFFu; };
+    std::int8_t high=-1; float agl=-1.0f; std::uint32_t altSince=0xFFFFFFFFu;
+    bool holdFire=false; };   // HOLD FIRE on (the selection's cards)
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=64;
 constexpr int kMapSupportHits=kMapSupports*2;   // its rows and chips as hit (MapCommandSupportButtons)

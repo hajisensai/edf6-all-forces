@@ -642,8 +642,15 @@ int WorldTextAgainstFlat(const wchar_t* name,const std::vector<Drew>& world,int 
     for(const Drew& w:world) {
         if(w.text.find_first_not_of(L' ')==std::wstring::npos)continue;
         if(w.world && w.key==kGroundKey){++ground;continue;}
+        // Its flat line: the nearest of the same text (a word can be on a panel too: the selection's cards' orders).
+        const Drew* nearest=nullptr;float best=0.0f;
         for(const Drew& f:flat) {
             if(f.text!=w.text)continue;
+            const float dx=(w.x0+w.x1-f.x0-f.x1)*0.5f,dy=(w.y0+w.y1-f.y0-f.y1)*0.5f,d=dx*dx+dy*dy;
+            if(!nearest || d<best){nearest=&f;best=d;}
+        }
+        for(const Drew* fp=nearest;fp;fp=nullptr) {
+            const Drew& f=*fp;
             ++matched;
             const float wx=(w.x0+w.x1)*0.5f,wy=(w.y0+w.y1)*0.5f,fx=(f.x0+f.x1)*0.5f,fy=(f.y0+f.y1)*0.5f;
             const float fh=f.y1-f.y0,fw=f.x1-f.x0,k=(w.y1-w.y0)/fh;
@@ -982,7 +989,13 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 if(inside)++own;
                 else{++textFailed;std::printf("FAIL map button %d covers %s\n",sceneButtonId[i],Narrow(d.text).c_str());}
             }
-            if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
+            // Its word, and its key's badge in its corner when it has a key (hud_map.cpp MapButtons, Broken Arrow's).
+            const mapbtn::Id id=static_cast<mapbtn::Id>(sceneButtonId[i]);
+            const bool keyed=id==mapbtn::Id::attackMove || id==mapbtn::Id::release || id==mapbtn::Id::withdraw ||
+                id==mapbtn::Id::fastMove || id==mapbtn::Id::reverseMove || id==mapbtn::Id::unloadAt || id==mapbtn::Id::holdFire ||
+                id==mapbtn::Id::altitude || id==mapbtn::Id::sprint || id==mapbtn::Id::smoke || id==mapbtn::Id::decoy ||
+                id==mapbtn::Id::dismountAll;
+            if(own!=(keyed ? 2 : 1)){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
         }
     }
     // The 「摆放」 panel: clickable with the mouse alone (its tab shut; open, its title, six tabs, the rows of the window

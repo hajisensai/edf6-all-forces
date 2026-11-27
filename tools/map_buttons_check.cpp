@@ -265,8 +265,45 @@ void Cues() {
     Check(TagLit(0) && !TagLit(kBlinkMs) && TagLit(2*kBlinkMs),"a switched tag blinks");
     Check(TagLit(kSwitchMs) && TagLit(0xFFFFFFFFu),"then stays lit");
 }
+// Broken Arrow's action grid and selection cards (Grid, Cards, GroupCards).
+void Broken() {
+    Rect r[32]{};
+    // 25 cells 110 wide on 1920, the right 1500 px: 13 a row, two rows, right-aligned, the top row filled first.
+    const int rows=Grid(25,110.0f,1920.0f,1526.0f/1920.0f,938.0f,30.0f,6.0f,16.0f,r);
+    Check(rows==2,"grid: 25 in two rows",rows);
+    Check(std::fabs(r[12].x1-(1920.0f-16.0f))<0.01f,"grid: the top row's last cell on the right margin",r[12].x1);
+    Check(std::fabs(r[0].y1-(938.0f-36.0f))<0.01f && std::fabs(r[13].y1-938.0f)<0.01f,"grid: the top row first, the bottom row on `bottom`",r[0].y1,r[13].y1);
+    Check(std::fabs(r[13].x0-r[0].x0)<0.01f,"grid: the rows' columns line up",r[13].x0,r[0].x0);
+    bool apart=true,inside=true;
+    for(int i=0;i<25;++i) {
+        inside=inside && r[i].x0>=1920.0f-1526.0f-0.01f && r[i].x1<=1904.01f;
+        for(int j=0;j<i;++j)apart=apart && !(r[i].x0<r[j].x1 && r[j].x0<r[i].x1 && r[i].y0<r[j].y1 && r[j].y0<r[i].y1);
+    }
+    Check(apart,"grid: no two cells overlap");
+    Check(inside,"grid: within its share");
+    Check(Hit(r,25,r[7].x0+1.0f,r[7].y0+1.0f)==7 && Hit(r,25,r[7].x1+3.0f,r[7].y0+1.0f)<0,"grid: a click finds its cell, the gap none");
+    Check(Grid(25,110.0f,1920.0f,1526.0f/1920.0f,60.0f,30.0f,6.0f,16.0f,r)==1,"grid: no room for two rows: one",0);
+    Check(Grid(0,110.0f,1920.0f,1.0f,938.0f,30.0f,6.0f,16.0f,r)==0,"grid: none");
+    Check(Grid(3,110.0f,1920.0f,1.0f,938.0f,30.0f,6.0f,16.0f,r)==1 && std::fabs(r[2].x1-1904.0f)<0.01f,"grid: a few in one row, on the right");
+    // Cards: left to right, the bottom row first, no higher than `top`.
+    Rect c[8]{};
+    const int placed=Cards(8,176.0f,66.0f,16.0f,400.0f,860.0f,938.0f,6.0f,c);
+    Check(placed==2,"cards: two fit in one row of 66 under 78 px",placed);
+    Check(std::fabs(c[0].x0-16.0f)<0.01f && std::fabs(c[1].x0-198.0f)<0.01f && std::fabs(c[0].y1-938.0f)<0.01f,"cards: from the left, on the bottom");
+    Check(Cards(5,176.0f,30.0f,16.0f,400.0f,800.0f,938.0f,6.0f,c)==5 && c[2].y1<c[0].y0,"cards: a second row above the first");
+    Check(Cards(3,176.0f,30.0f,16.0f,100.0f,800.0f,938.0f,6.0f,c)==0,"cards: narrower than one: none");
+    // GroupCards: alike and of one owner stacked, in the order first seen.
+    const char* kind[]={"Ranger x4","Ranger x2","Fencer x2","Ranger x6","Nix"};
+    const int owner[]={0,0,0,1,0};
+    CardGroup g[8]{};
+    const int groups=GroupCards(kind,owner,5,g,8);
+    Check(groups==4,"groups: rangers of one owner stacked, another owner's apart",groups);
+    Check(g[0].first==0 && g[0].count==2 && g[1].first==2 && g[2].first==3 && g[3].first==4,"groups: in the order first seen");
+    Check(GroupCards(kind,owner,5,g,2)==2,"groups: at most `most`");
+}
+
 int main() {
-    Layouts();Card();Support();Menu();Compose();Cues();
+    Layouts();Card();Support();Menu();Compose();Cues();Broken();
     std::printf(failures ? "map_buttons_check: %d of %d FAILED\n" : "map_buttons_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

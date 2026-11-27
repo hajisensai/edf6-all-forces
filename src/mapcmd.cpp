@@ -1538,7 +1538,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
         m.of=reinterpret_cast<std::uintptr_t>(e.id.obj);
         m.groups=groups[i];m.ways=0;
-        m.high=high[i];m.agl=agl[i];m.altSince=altSince[i];
+        m.high=high[i];m.agl=agl[i];m.altSince=altSince[i];m.holdFire=e.u.holdFire;
         if(const UnitQueue* q=queues[i])
             for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
         else if(hostWayCount[i]) {   // another machine's: its current order from its host (this machine lists it with none)
