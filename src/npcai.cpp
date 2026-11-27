@@ -492,8 +492,7 @@ npc::formation::Shape MarchShape() noexcept {
     return march.shape;
 }
 bool PeerLive(const ObjRef& p) noexcept {
-    const auto* h=static_cast<const unsigned char*>(p.obj);
-    return h && Readable(h,kDead+1) && p.Is(h) && !h[kDead];
+    return objref::Alive(p);
 }
 // The march round player `root`: this machine's player's (`march`), or another player's (`make`: a slot taken for it).
 March* MarchOf(const unsigned char* root,bool make) noexcept {

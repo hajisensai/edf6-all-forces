@@ -320,9 +320,7 @@ npc::navigation::Profile VehicleRouteProfile(const SupportVehicleSpec& spec) noe
     profile.waypointRadius=kVehicleWaypointRadius;profile.greed=npc::navigation::kRouteGreed;
     return profile;
 }
-bool Live(const ObjRef& ref) noexcept {
-    return ref && Readable(ref.obj,kDead+1) && ref.Is(ref.obj) && !static_cast<const unsigned char*>(ref.obj)[kDead];
-}
+using objref::Alive;
 void Matrix(const float* at,const float* heading,float* out) noexcept {
     const float matrix[16]={heading[2],0,-heading[0],0,0,1,0,0,heading[0],0,heading[2],0,at[0],at[1],at[2],1};
     std::memcpy(out,matrix,sizeof(matrix));
@@ -855,7 +853,7 @@ support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalo
     } scope(LoadoutOfPeer(peer,catalog,target,loadout));
     if(SupportSubCatalog(static_cast<int>(catalog))) {
         ObjRef requester{};
-        if(!SupportAuthenticatedRequester(peer,&requester) || !Live(requester))return support_net::PlanResult::refused;
+        if(!SupportAuthenticatedRequester(peer,&requester) || !Alive(requester))return support_net::PlanResult::refused;
         return PlanSubmarine(catalog,target,static_cast<const float*>(static_cast<const void*>(
             static_cast<const unsigned char*>(requester.obj)+kPosition)),loadout,out);
     }
@@ -1029,7 +1027,7 @@ constexpr ULONGLONG kRetireSettleFrames=30;
 constexpr std::size_t kSoldierVehicle=0x1548;   // Human: the vehicle it is in (crew.h, by kHumanVehicleCtrl)
 bool Unseat(const ObjRef& soldier) noexcept {
     __try {
-        if(!Live(soldier))return true;
+        if(!Alive(soldier))return true;
         auto* h=static_cast<unsigned char*>(const_cast<void*>(soldier.obj));
         auto* v=At<unsigned char*>(h,kSoldierVehicle);
         if(!v)return true;
@@ -1060,7 +1058,7 @@ bool AirArrival(Deployment& deployed) noexcept {
         if(deployed.released[i] || deployed.plan.units[i].role || deployed.plan.units[i].resourceId<kAircraft ||
            deployed.plan.units[i].resourceId>=kVehicle)continue;
         const void* object=deployed.objects[i].obj;
-        const SupportEntry entry=!Live(deployed.objects[i]) ? SupportEntry::gone :
+        const SupportEntry entry=!Alive(deployed.objects[i]) ? SupportEntry::gone :
                                  spec.heli>=0 ? HeliSupportEntry(object,deployed.plan.target) : JetSupportEntry(object,deployed.plan.target);
         if(entry==SupportEntry::flying || entry==SupportEntry::sortie){all=false;continue;}
         if(entry==SupportEntry::arrived) {
@@ -1087,7 +1085,7 @@ void Trace(Deployment& d) noexcept {
             d.delivered,d.withdrawing,d.stuckSince ? static_cast<float>(now-d.stuckSince)*0.001f : 0.0f,draw);
         for(unsigned i=0;i<d.plan.count;++i) {
             const ObjRef& ref=d.objects[i];
-            if(!Live(ref)){Log("SUPPORT TRACE %llu   #%u gone",static_cast<unsigned long long>(d.id),i);continue;}
+            if(!Alive(ref)){Log("SUPPORT TRACE %llu   #%u gone",static_cast<unsigned long long>(d.id),i);continue;}
             const auto* o=static_cast<const unsigned char*>(ref.obj);
             const float* p=reinterpret_cast<const float*>(o+kPosition);
             const float moved=first ? 0.0f : support::FlatDistance(p,d.traced[i]);
@@ -1134,7 +1132,7 @@ void Retire(Deployment& deployed) noexcept {
     const auto& plan=deployed.plan;
     for(unsigned i=0;i<plan.count;++i) {
         const auto resource=plan.units[i].resourceId;
-        if(plan.units[i].role || resource<kAircraft || resource>=kVehicle || !Live(deployed.objects[i]))continue;
+        if(plan.units[i].role || resource<kAircraft || resource>=kVehicle || !Alive(deployed.objects[i]))continue;
         auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
         bool aboard=false;
         for(unsigned seat=0;seat<SeatCount(hull);++seat)aboard=aboard || AnyPlayerIn(SeatAt(hull,seat));
@@ -1158,7 +1156,7 @@ void Retire(Deployment& deployed) noexcept {
 // it came in at, there its own crew still aboard deleted and then the hull once its seats are empty (as Retire does an
 // aircraft's). With no driver it goes where it stands. A player aboard keeps it (the withdrawal ends).
 void WithdrawGround(Deployment& deployed) noexcept {
-    if(!Live(deployed.objects[0])){deployed.withdrawing=false;return;}
+    if(!Alive(deployed.objects[0])){deployed.withdrawing=false;return;}
     auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
     for(unsigned seat=0;seat<SeatCount(hull);++seat)if(AnyPlayerIn(SeatAt(hull,seat))) {
         deployed.withdrawing=false;Status(L"玩家已登乘，撤离取消");return;
@@ -1211,7 +1209,7 @@ void Destroy(std::uint64_t id) noexcept {
         // A player can board a newly visible hull before support becomes Active. Cancellation must
         // not invalidate that player's live ride, including a player replicated from another peer.
         for(unsigned i=0;i<deployed.plan.count;++i) {
-            if(!Live(deployed.objects[i]))continue;
+            if(!Alive(deployed.objects[i]))continue;
             auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
             if(deployed.plan.units[i].resourceId<kAircraft)preserve[i]=edf::IsAnyPlayer(object);
             else for(unsigned seat=0;seat<SeatCount(object);++seat)
@@ -1241,7 +1239,7 @@ void Destroy(std::uint64_t id) noexcept {
             if(preserve[i])continue;
             if(deployed.plan.units[i].resourceId==kSupportSubmarineResource)DeleteSupportSubmarine(deployed.objects[i]);
             else if(deployed.plan.units[i].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(deployed.plan.units[i].resourceId))DeleteSupportDrone(deployed.objects[i]);
-            else if(deployed.plan.units[i].resourceId>=kVehicle && Live(deployed.objects[i]))DeleteSupportVehicle(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)));
+            else if(deployed.plan.units[i].resourceId>=kVehicle && Alive(deployed.objects[i]))DeleteSupportVehicle(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)));
             else if(deployed.plan.units[i].resourceId>=kAircraft)DeleteSupportAircraft(deployed.objects[i]);
         }
         const bool rescue=IsRescue(deployed.plan.catalogId);
@@ -1481,7 +1479,7 @@ bool SupportWithdrawVehicle(const void* vehicle) noexcept {
             if(!deployed.used || deployed.remote)continue;
             for(unsigned i=0;i<deployed.plan.count;++i) {
                 const auto resource=deployed.plan.units[i].resourceId;
-                if(deployed.plan.units[i].role || resource<kAircraft || !deployed.objects[i].Is(vehicle) || !Live(deployed.objects[i]))continue;
+                if(deployed.plan.units[i].role || resource<kAircraft || !deployed.objects[i].Is(vehicle) || !Alive(deployed.objects[i]))continue;
                 // The rescue heli is the rescue's (heli.cpp flies it to the swimmer and on): no map order sends it off.
                 if(IsRescue(deployed.plan.catalogId))return false;
                 if(resource>=kVehicle) {
@@ -2015,7 +2013,7 @@ void SupportDispatchTick() noexcept {
     for(auto& deployed:deployments) {
         if(!deployed.used)continue;
         bool anyLive=false;
-        for(unsigned i=0;i<deployed.plan.count;++i)anyLive=anyLive || Live(deployed.objects[i]);
+        for(unsigned i=0;i<deployed.plan.count;++i)anyLive=anyLive || Alive(deployed.objects[i]);
         if(!anyLive) {
             const bool carrierChild=deployed.plan.count==1 &&
                 (deployed.plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(deployed.plan.units[0].resourceId));
@@ -2051,7 +2049,7 @@ void SupportDispatchTick() noexcept {
         if(deployed.remote || deployed.delivered)continue;
         bool alive=true,boarded=true;
         for(unsigned i=0;i<deployed.plan.count;++i) {
-            alive=alive && Live(deployed.objects[i]);
+            alive=alive && Alive(deployed.objects[i]);
             const auto parent=deployed.plan.units[i].role;if(!parent || !alive)continue;
             auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[parent-1].obj));
             bool seated=false;
@@ -2067,7 +2065,7 @@ void SupportDispatchTick() noexcept {
         // way does not end the delivery while its hull and driver live (the survivors still get off at the point; before,
         // they rode on in it for the rest of the mission, and it never went back).
         const bool carrier=drill || (ground && mode==SupportCrewMode::soldiers && kind!=SupportVehicleKind::tank);
-        if(!alive && deployed.started && carrier && Live(deployed.objects[0]) && deployed.plan.count>1 && Live(deployed.objects[1])) {
+        if(!alive && deployed.started && carrier && Alive(deployed.objects[0]) && deployed.plan.count>1 && Alive(deployed.objects[1])) {
             if(!deployed.lost) {
                 Log("SUPPORT deployment %llu: a passenger lost on the way: the vehicle carries the rest on",static_cast<unsigned long long>(deployed.id));
                 deployed.lost=true;Status(L"支援途中遭受损失，存活单位继续执行任务");
@@ -2150,7 +2148,7 @@ void SupportDispatchTick() noexcept {
                     // in the plan's order a leader every four (as planned), each member following the leader before it
                     // (that leader lost: the first of the rest leads).
                     const auto passenger=[&](unsigned i) noexcept {
-                        return deployed.plan.units[i].role==1 && Live(deployed.objects[i]) && SeatCount(vehicle)>0 &&
+                        return deployed.plan.units[i].role==1 && Alive(deployed.objects[i]) && SeatCount(vehicle)>0 &&
                                At<const void*>(SeatAt(vehicle,0),kSeatRider)!=deployed.objects[i].obj && Seated(vehicle,deployed.objects[i]);
                     };
                     const void* tops[3]{};int squadCount=0;ObjRef top;

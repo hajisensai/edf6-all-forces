@@ -88,9 +88,7 @@ transport::Tuning tuning{};
 Jumper* FreeJumper() noexcept;
 int NextJumper(unsigned char* vehicle) noexcept;
 
-bool Live(const ObjRef& r) noexcept {
-    return r && Readable(r.obj,kDead+1) && r.Is(r.obj) && !static_cast<const unsigned char*>(r.obj)[kDead];
-}
+using objref::Alive;
 const float* Pos(const void* o) noexcept { return reinterpret_cast<const float*>(static_cast<const unsigned char*>(o)+kPosition); }
 unsigned char* Vehicle(const ObjRef& r) noexcept { return static_cast<unsigned char*>(const_cast<void*>(r.obj)); }
 bool Transportable(const void* v) noexcept {
@@ -136,10 +134,10 @@ int PassengersOff(unsigned char* v) noexcept {
 // The trip's end: each rider takes its order on foot (`off`: the riding ones get off first, when the vehicle is at rest),
 // the vehicle waits where it is (a helicopter's ferry ends: it guards the drop point).
 void EndTrip(Trip& t,bool off,const char* why) noexcept {
-    unsigned char* const v=Live(t.vehicle) ? Vehicle(t.vehicle) : nullptr;
+    unsigned char* const v=Alive(t.vehicle) ? Vehicle(t.vehicle) : nullptr;
     for(int i=0;i<t.count;++i) {
         const TripRider& r=t.riders[i];
-        if(!Live(r.top))continue;
+        if(!Alive(r.top))continue;
         if(off && v)NpcSquadDisembark(r.top.obj,v);
         NpcSquadSetOrder(r.top.obj,r.after,false);
     }
@@ -151,7 +149,7 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
     if(v && t.leave && still) {
         // Nobody may go back with it: the riders still listed get off, and so does anyone else in a seat past the
         // driver's (a squad that left the trip while aboard is no longer listed here: LeaveTrips).
-        for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDisembark(t.riders[i].top.obj,v);
+        for(int i=0;i<t.count;++i)if(Alive(t.riders[i].top))NpcSquadDisembark(t.riders[i].top.obj,v);
         left=PassengersOff(v);
         if(left)Log("TRANSPORT v=%p delivered, but %d still aboard will not get off: it stays",t.vehicle.obj,left);
     }
@@ -177,14 +175,14 @@ void EndTrip(Trip& t,bool off,const char* why) noexcept {
 transport::View ViewOf(Trip& t,ULONGLONG ms) noexcept {
     transport::View view{};
     view.ms=ms;
-    view.vehicleLive=Live(t.vehicle);
+    view.vehicleLive=Alive(t.vehicle);
     if(!view.vehicleLive){view.squadLive=false;return view;}
     unsigned char* const v=Vehicle(t.vehicle);
     const float* vp=Pos(v);
     int alive=0,aboard=0;float farthest=0.0f;
     for(int i=0;i<t.count;++i) {
         SquadSeats s{};
-        if(!Live(t.riders[i].top) || !NpcSquadSeats(t.riders[i].top.obj,v,&s))continue;
+        if(!Alive(t.riders[i].top) || !NpcSquadSeats(t.riders[i].top.obj,v,&s))continue;
         alive+=s.alive-s.crew;aboard+=s.aboard-s.crew;
         if(s.onFoot>0){const float d=transport::Level(Pos(t.riders[i].top.obj),vp);if(d>farthest)farthest=d;}
     }
@@ -205,7 +203,7 @@ transport::View ViewOf(Trip& t,ULONGLONG ms) noexcept {
         const float clear=GroundClearance(vp);
         view.hovering=transport::Hovering(view.vehicleToDrop,view.speed,clear==kNoGround ? -1.0f : clear);
         for(const auto& j:jumpers) {
-            if(j.descent==transport::Descent::rope && j.carrier.Is(v) && Live(j.human)) {
+            if(j.descent==transport::Descent::rope && j.carrier.Is(v) && Alive(j.human)) {
                 view.ropeOccupied=true;
                 break;
             }
@@ -231,7 +229,7 @@ void Act1(Trip& t,Act a,const transport::View& view,ULONGLONG ms) noexcept {
     switch(a) {
     case Act::comeTo: {
         const TripRider* farthest=nullptr;float d=-1.0f;
-        for(int i=0;i<t.count;++i)if(Live(t.riders[i].top)) {
+        for(int i=0;i<t.count;++i)if(Alive(t.riders[i].top)) {
             const float e=transport::Level(Pos(t.riders[i].top.obj),Pos(v));
             if(e>d){d=e;farthest=&t.riders[i];}
         }
@@ -248,7 +246,7 @@ void Act1(Trip& t,Act a,const transport::View& view,ULONGLONG ms) noexcept {
         } else if(fresh || ms-t.actAt>kWalkEveryMs) {   // nobody to drive it: they walk to it
             t.actAt=ms;
             const float* vp=Pos(v);
-            for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))
+            for(int i=0;i<t.count;++i)if(Alive(t.riders[i].top))
                 NpcSquadSetOrder(t.riders[i].top.obj,mapcmd::Command{mapcmd::Order::move,{vp[0],vp[1],vp[2]}},true);
         }
         return;
@@ -257,7 +255,7 @@ void Act1(Trip& t,Act a,const transport::View& view,ULONGLONG ms) noexcept {
         if(heli)HeliFerry(v,Pos(v),true);else Hold(v);
         if(fresh || ms-t.actAt>kBoardEveryMs) {
             t.actAt=ms;
-            for(int i=0;i<t.count;++i)if(Live(t.riders[i].top)) {
+            for(int i=0;i<t.count;++i)if(Alive(t.riders[i].top)) {
                 const float* sp=Pos(t.riders[i].top.obj);
                 NpcSquadSetOrder(t.riders[i].top.obj,mapcmd::Command{mapcmd::Order::guard,{sp[0],sp[1],sp[2]}},true);   // no walking off
                 NpcSquadBoardVehicle(t.riders[i].top.obj,v);
@@ -274,7 +272,7 @@ void Act1(Trip& t,Act a,const transport::View& view,ULONGLONG ms) noexcept {
         if(heli)HeliFerry(v,Pos(v),true);else Hold(v);
         if(fresh || ms-t.actAt>kUnloadEveryMs) {
             t.actAt=ms;
-            for(int i=0;i<t.count;++i)if(Live(t.riders[i].top))NpcSquadDisembark(t.riders[i].top.obj,v);
+            for(int i=0;i<t.count;++i)if(Alive(t.riders[i].top))NpcSquadDisembark(t.riders[i].top.obj,v);
         }
         return;
     case Act::hover:
@@ -308,7 +306,7 @@ void Act1(Trip& t,Act a,const transport::View& view,ULONGLONG ms) noexcept {
 }
 
 void TripFrame(Trip& t,ULONGLONG ms) noexcept {
-    if(Live(t.vehicle) && !IsOnlineAuthority(t.vehicle.obj))return;   // driven on another machine: its trip is that one's
+    if(Alive(t.vehicle) && !IsOnlineAuthority(t.vehicle.obj))return;   // driven on another machine: its trip is that one's
     const transport::View view=ViewOf(t,ms);
     const Phase was=t.t.phase;
     const transport::Step step=transport::Advance(t.t,view,tuning);
@@ -379,7 +377,7 @@ void RopeTop(const Rope& r,float* top) noexcept {
 // The rope for a jumper just out of helicopter `heli` at `p`: one of its within kRopeShare (level), else a new one there
 // (kRopesPerHeli at most: then the nearest of its). -1: no place for one (it goes down all the same, onto where it got out).
 int RopeFor(const ObjRef& heli,const float* p,ULONGLONG ms) noexcept {
-    if(!Live(heli))return -1;
+    if(!Alive(heli))return -1;
     const float* hp=Pos(heli.obj);
     int nearest=-1,mine=0;float best=1e9f;
     for(int i=0;i<kRopes;++i) {
@@ -402,12 +400,12 @@ int RopeFor(const ObjRef& heli,const float* p,ULONGLONG ms) noexcept {
     return nearest;
 }
 void RopeFrame(Rope& r,ULONGLONG ms) noexcept {
-    if(!Live(r.heli) || ms-r.used>kRopeKeepMs){RopeFree(r.obj);r=Rope{};return;}
+    if(!Alive(r.heli) || ms-r.used>kRopeKeepMs){RopeFree(r.obj);r=Rope{};return;}
     if(r.obj){float top[3];RopeTop(r,top);RopeMove(r.obj,top);}
 }
 
 void JumpFrame(Jumper& j,ULONGLONG ms) noexcept {
-    if(!Live(j.human) || !HumanOnFoot(static_cast<const unsigned char*>(j.human.obj)) || ms-j.at>kJumpMostMs) {
+    if(!Alive(j.human) || !HumanOnFoot(static_cast<const unsigned char*>(j.human.obj)) || ms-j.at>kJumpMostMs) {
         ChuteCanopyFree(j.canopy);j=Jumper{};return;
     }
     auto* h=static_cast<unsigned char*>(const_cast<void*>(j.human.obj));
@@ -445,7 +443,7 @@ void JumpFrame(Jumper& j,ULONGLONG ms) noexcept {
         if(j.rope>=0 && (!ropes[j.rope].on || !j.carrier.Is(ropes[j.rope].heli.obj)))j.rope=-1;
         if(j.rope<0)j.rope=RopeFor(j.carrier,p,ms);
         float anchor[3]={p[0],p[1],p[2]};
-        if(j.rope>=0 && ropes[j.rope].on && Live(ropes[j.rope].heli)){RopeTop(ropes[j.rope],anchor);ropes[j.rope].used=ms;}
+        if(j.rope>=0 && ropes[j.rope].on && Alive(ropes[j.rope].heli)){RopeTop(ropes[j.rope],anchor);ropes[j.rope].used=ms;}
         transport::RopeStep(vel,p,anchor);
         return;
     }
@@ -469,7 +467,7 @@ int NextJumper(unsigned char* plane) noexcept {
 }
 
 void DropFrame(Drop& d,ULONGLONG ms) noexcept {
-    if(!Live(d.plane)){Log("TRANSPORT drop: its plane is gone (%d out)",d.jumped);d=Drop{};return;}
+    if(!Alive(d.plane)){Log("TRANSPORT drop: its plane is gone (%d out)",d.jumped);d=Drop{};return;}
     unsigned char* const plane=Vehicle(d.plane);
     if(!IsOnlineAuthority(plane))return;
     const int seat=NextJumper(plane);
@@ -478,7 +476,7 @@ void DropFrame(Drop& d,ULONGLONG ms) noexcept {
             // On along its line to its end off the map, deleted there (jet.cpp JetFerryDone); a plane flying no line withdraws.
             if(!JetFerryDone(plane))JetWithdrawNow(plane,"paratroopers out");
             for(int i=0;i<d.topCount;++i)
-                if(Live(d.tops[i]))NpcSquadSetOrder(d.tops[i].obj,mapcmd::Command{mapcmd::Order::guard,{d.target[0],d.target[1],d.target[2]}},false);
+                if(Alive(d.tops[i]))NpcSquadSetOrder(d.tops[i].obj,mapcmd::Command{mapcmd::Order::guard,{d.target[0],d.target[1],d.target[2]}},false);
             Log("TRANSPORT drop over (%d out): the plane leaves",d.jumped);
             d=Drop{};
         }
@@ -522,7 +520,7 @@ bool TransportPair(const void* top,const void* vehicle) noexcept {
         if(!top || !Transportable(vehicle))return false;
         TransportCancel(top);
         Pair* p=PairOf(top);
-        if(!p)for(auto& row:pairs)if(!row.top || !Live(row.top) || !Live(row.vehicle)){p=&row;break;}
+        if(!p)for(auto& row:pairs)if(!row.top || !Alive(row.top) || !Alive(row.vehicle)){p=&row;break;}
         if(!p){Log("TRANSPORT pairs full (%d): squad %p not paired",kPairs,top);return false;}
         p->top=ObjRef::Of(top);p->vehicle=ObjRef::Of(vehicle);
         if(IsHelicopter(vehicle))HeliKeep(vehicle);   // theirs until WITHDRAW (no leaving for fuel or ammo)
@@ -534,14 +532,14 @@ bool TransportPair(const void* top,const void* vehicle) noexcept {
 const void* TransportOf(const void* top) noexcept {
     __try {
         const Pair* p=PairOf(top);
-        return p && Live(p->vehicle) ? p->vehicle.obj : nullptr;
+        return p && Alive(p->vehicle) ? p->vehicle.obj : nullptr;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
 
 const void* TransportRiderOf(const void* vehicle) noexcept {
     __try {
         for(const auto& p:pairs) {
-            if(!p.vehicle.Is(vehicle) || !Live(p.top))continue;
+            if(!p.vehicle.Is(vehicle) || !Alive(p.top))continue;
             SquadSeats s{};
             if(NpcSquadSeats(p.top.obj,vehicle,&s) && s.aboard>s.crew)return p.top.obj;
         }
@@ -553,7 +551,7 @@ const void* TransportTripTo(const void* unit,const float* at,float within) noexc
     __try {
         if(!unit)return nullptr;
         for(const auto& t:trips) {
-            if(t.count<=0 || !Live(t.vehicle))continue;
+            if(t.count<=0 || !Alive(t.vehicle))continue;
             const bool carrier=t.vehicle.Is(unit);
             for(int i=0;i<t.count;++i) {
                 const TripRider& r=t.riders[i];
@@ -568,7 +566,7 @@ const void* TransportTripTo(const void* unit,const float* at,float within) noexc
 bool TransportOrder(const void* top,const mapcmd::Command& c) noexcept {
     __try {
         const Pair* p=PairOf(top);
-        if(!p || !Live(p->vehicle) || !mapcmd::PointOrder(c.order))return false;
+        if(!p || !Alive(p->vehicle) || !mapcmd::PointOrder(c.order))return false;
         unsigned char* const v=Vehicle(p->vehicle);
         if(!IsOnlineAuthority(v))return false;
         SquadSeats s{};
@@ -592,7 +590,7 @@ void TransportCancel(const void* top) noexcept {
 NpcCommandReason TransportWithdraw(const void* top) noexcept {
     __try {
         Pair* p=PairOf(top);
-        if(!p || !Live(p->vehicle))return NpcCommandReason::noTransport;
+        if(!p || !Alive(p->vehicle))return NpcCommandReason::noTransport;
         unsigned char* const v=Vehicle(p->vehicle);
         if(!IsOnlineAuthority(v))return NpcCommandReason::notAuthority;
         // Its riders off first, at rest only (a vehicle under way would leave with them: refused).
@@ -600,14 +598,14 @@ NpcCommandReason TransportWithdraw(const void* top) noexcept {
         const bool heli=IsHelicopter(v);
         const bool still=heli ? HeliGrounded(v) : !t || t->speed<=tuning.stopped;
         for(const auto& q:pairs) {
-            if(!q.vehicle.Is(v) || !Live(q.top))continue;
+            if(!q.vehicle.Is(v) || !Alive(q.top))continue;
             SquadSeats s{};
             if(NpcSquadSeats(q.top.obj,v,&s) && s.aboard>s.crew && !still)return NpcCommandReason::noTransport;
         }
         if(!SupportWithdrawVehicle(v))return NpcCommandReason::noTransport;   // only a support vehicle leaves the field
         if(t)EndTrip(*t,true,"withdrawn");
         for(auto& q:pairs)if(q.vehicle.Is(v)) {
-            if(Live(q.top))NpcSquadDisembark(q.top.obj,v);
+            if(Alive(q.top))NpcSquadDisembark(q.top.obj,v);
             q=Pair{};
         }
         Log("TRANSPORT v=%p withdrawn by order (squad %p)",v,top);
@@ -654,7 +652,7 @@ bool TransportDeliver(const void* vehicle,const void* const* tops,int count,cons
 
 bool TransportParadrop(const void* plane,const float* target) noexcept {
     if(!plane || !target)return false;
-    for(auto& d:drops)if(!d.plane || !Live(d.plane)) {
+    for(auto& d:drops)if(!d.plane || !Alive(d.plane)) {
         d=Drop{};d.plane=ObjRef::Of(plane);std::memcpy(d.target,target,12);d.lastJump=GameMs();
         Log("TRANSPORT plane %p: paratroop drop over (%.0f,%.0f,%.0f)",plane,target[0],target[1],target[2]);
         return true;
@@ -668,8 +666,8 @@ void TransportTick() noexcept {
     frame=GameFrame();
     __try {
         const ULONGLONG ms=GameMs();
-        for(auto& p:pairs)if(p.top && (!Live(p.top) || !Live(p.vehicle))) {
-            if(Live(p.top) && !Live(p.vehicle))Log("TRANSPORT squad %p: its transport is gone",p.top.obj);
+        for(auto& p:pairs)if(p.top && (!Alive(p.top) || !Alive(p.vehicle))) {
+            if(Alive(p.top) && !Alive(p.vehicle))Log("TRANSPORT squad %p: its transport is gone",p.top.obj);
             p=Pair{};
         }
         for(auto& t:trips)if(t.count>0)TripFrame(t,ms);
@@ -704,7 +702,7 @@ int TransportLinks(TransportLink* out,int most) noexcept {
     int n=0;
     __try {
         for(const auto& p:pairs) {
-            if(n>=most || !Live(p.top) || !Live(p.vehicle))continue;
+            if(n>=most || !Alive(p.top) || !Alive(p.vehicle))continue;
             if(!HumanOnFoot(static_cast<const unsigned char*>(p.top.obj)))continue;   // aboard: its vehicle's mark stands for it
             std::memcpy(out[n].squad,Pos(p.top.obj),12);std::memcpy(out[n].vehicle,Pos(p.vehicle.obj),12);
             out[n].trip=TripOf(p.vehicle.obj)!=nullptr;

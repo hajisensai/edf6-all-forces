@@ -114,9 +114,7 @@ bool installed=false;
 bool netReady=false;   // the turrets' blocks (dreadnought_net.h) go over object_net
 
 bool Live(const Ship& s) noexcept {
-    const auto ctrl=static_cast<const unsigned char*>(s.ref.ctrl);
-    return s.vehicle && Readable(ctrl,12) && At<std::int32_t>(ctrl,8)>0 && s.ref.Is(s.vehicle) && !(s.vehicle[0x18]&4) &&
-           !s.vehicle[kDead];
+    return s.vehicle && s.ref.obj==s.vehicle && objref::Alive(s.ref);
 }
 Ship* Find(const unsigned char* v) noexcept {
     for(auto& s:ships)if(s.vehicle==v && s.ref.Is(v))return &s;

@@ -3539,7 +3539,7 @@ constexpr ULONGLONG kFirstFrames=120;
 bool HeliAlive(unsigned char* v,const ObjRef& ref,ULONGLONG made,ULONGLONG seen) noexcept {
     const ULONGLONG frame=GameFrame();
     const bool recent=seen ? frame-seen<=kAliveFrames : frame-made<=kFirstFrames;
-    return recent && Readable(v,kSeats+8) && !v[kDead] && ref.Is(v) && IsHelicopter(v);
+    return recent && objref::Alive(ref) && ref.Is(v) && Readable(v,kSeats+8) && IsHelicopter(v);
 }
 bool RescueHeliAlive(const Rescue& r) noexcept { return HeliAlive(r.vehicle,r.ref,r.launchFrame,r.seenFrame); }
 

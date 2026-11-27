@@ -48,7 +48,7 @@ using ReleaseFn=void(*)(unsigned char*);
 enum class Phase : std::uint8_t { free, carried, falling };
 struct Drop {
     Phase phase=Phase::free;
-    ObjRef carrier,box;
+    WeakRef carrier,box;   // held (objref.h): the box is a scene object (Exists), the carrier a GameObject (Alive)
     SupportVehicleKind kind{};
     float target[3]{};
     float closest=1e30f;
@@ -60,18 +60,12 @@ Drop drops[kDrops]{};
 // AirdropTest (tests only): the vehicle delivered last, the player put into it kTestBoardMs after (BoardingRequest, the
 // boarding gun's path: the stock board button), once.
 constexpr ULONGLONG kTestBoardMs=4000;
-ObjRef testVehicle{};ULONGLONG testVehicleAt=0;
+WeakRef testVehicle{};ULONGLONG testVehicleAt=0;
 bool profile=false,watching=false,boxPreloaded=false;
 
-// A scene object still the one referred to (its weak self block unchanged and alive: lockon.cpp's test).
-bool Alive(const ObjRef& ref) noexcept {
-    if(!ref || !Readable(ref.obj,kSelfCtrl+8) || !ref.Is(ref.obj))return false;
-    return Readable(ref.ctrl,0x10) && At<std::int32_t>(ref.ctrl,8)>0;
-}
-bool CarrierAlive(const ObjRef& ref) noexcept {
-    return Alive(ref) && Readable(ref.obj,kDead+1) && !static_cast<const unsigned char*>(ref.obj)[kDead];
-}
 unsigned char* Raw(const ObjRef& ref) noexcept {return static_cast<unsigned char*>(const_cast<void*>(ref.obj));}
+// A drop slot emptied (its weak counts given back); outside the __try functions (a temporary Drop needs unwinding).
+void Clear(Drop& d) noexcept { d=Drop{}; }
 
 // The container's configured vehicle path as its vehicle step reads it (0x5E8FB9: the buffer, or the pointer when the
 // capacity is 8 or more): the key that tells its CreateObject from any other container's.
@@ -98,21 +92,21 @@ void LetGo(Drop& d,const char* why) noexcept {
         const float* at=reinterpret_cast<const float*>(Raw(d.box)+kPosition);
         Log("AIRDROP container %p let go %s at (%.0f,%.0f,%.0f), %.0f m from its point",d.box.obj,why,at[0],at[1],at[2],
             Level(at,d.target));
-    } __except(EXCEPTION_EXECUTE_HANDLER){Log("AIRDROP container %p: release fault",d.box.obj);d=Drop{};return;}
-    if(CarrierAlive(d.carrier))HeliStartLeaving(d.carrier.obj);
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("AIRDROP container %p: release fault",d.box.obj);Clear(d);return;}
+    if(objref::Alive(d.carrier))HeliStartLeaving(d.carrier.obj);
 }
 
 void Frame(Drop& d,ULONGLONG ms) noexcept {
-    if(!Alive(d.box)) {
+    if(!objref::Exists(d.box)) {
         Log("AIRDROP container %p gone %s",d.box.obj,d.phase==Phase::carried ? "while carried" : "before its vehicle was made");
-        if(d.phase==Phase::carried && CarrierAlive(d.carrier))HeliStartLeaving(d.carrier.obj);
-        d=Drop{};return;
+        if(d.phase==Phase::carried && objref::Alive(d.carrier))HeliStartLeaving(d.carrier.obj);
+        Clear(d);return;
     }
     if(d.phase==Phase::falling) {
-        if(ms-d.since>airdrop::kFallMs){Log("AIRDROP container %p made no vehicle in %llu s",d.box.obj,airdrop::kFallMs/1000);d=Drop{};}
+        if(ms-d.since>airdrop::kFallMs){Log("AIRDROP container %p made no vehicle in %llu s",d.box.obj,airdrop::kFallMs/1000);Clear(d);}
         return;
     }
-    if(!CarrierAlive(d.carrier)){LetGo(d,"(its helicopter lost)");return;}
+    if(!objref::Alive(d.carrier)){LetGo(d,"(its helicopter lost)");return;}
     Hold(d);
     const float dist=Level(reinterpret_cast<const float*>(Raw(d.carrier)+kPosition),d.target);
     if(dist<d.closest-airdrop::kCloser || !d.closerAt){d.closest=dist;d.closerAt=ms;}
@@ -129,7 +123,7 @@ unsigned char* VehicleStep(void* mgr,const float* m,const wchar_t* sgo,void* par
     PlayerVehicleMade(v);   // a custom mech's own setup (before the stock step that would apply the request's)
     __try {
         for(auto& d:drops) {
-            if(d.phase!=Phase::falling || sgo!=d.vehicleSgo || !Alive(d.box))continue;
+            if(d.phase!=Phase::falling || sgo!=d.vehicleSgo || !objref::Exists(d.box))continue;
             const auto spec=SupportVehicleInfo(d.kind);
             const bool same=v && spec && At<const void*>(v,0)==image+spec->vtable;
             const bool setup=same && ApplySupportVehicleSetup(v,d.kind);
@@ -139,7 +133,7 @@ unsigned char* VehicleStep(void* mgr,const float* m,const wchar_t* sgo,void* par
                 !v ? "CreateObject failed" : !same ? "not the expected class (setup not applied)" :
                 setup ? "its mission setup applied" : "its mission setup FAILED");
             if(v && Cfg().airdropTest){testVehicle=ObjRef::Of(v);testVehicleAt=GameMs();}
-            d=Drop{};
+            Clear(d);
             break;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("AIRDROP vehicle step fault");}
@@ -187,12 +181,12 @@ bool AirdropBegin(const void* carrier,SupportVehicleKind kind,const float* targe
         const airdrop::SharedRef none{};   // no requester: the container's delivery event goes to nobody (0x5E911C)
         const auto setup=airdrop::EmptySetup();
         reinterpret_cast<ConfigureFn>(image+kConfigure)(box,&none,spec->sgo,&setup,1.0f);
-        *d=Drop{};
+        Clear(*d);
         d->phase=Phase::carried;d->carrier=ObjRef::Of(carrier);d->box=ObjRef::Of(box);d->kind=kind;
         std::memcpy(d->target,target,12);d->since=GameMs();d->vehicleSgo=ConfiguredPath(box);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         Log("AIRDROP container making fault (%p)",box);
-        *d=Drop{};HeliFerry(carrier,nullptr,false);return false;
+        Clear(*d);HeliFerry(carrier,nullptr,false);return false;
     }
     Log("AIRDROP helicopter %p carries container %p for %ls to (%.0f,%.0f,%.0f)",carrier,box,spec->sgo,target[0],target[1],
         target[2]);
@@ -207,18 +201,18 @@ void AirdropTick() noexcept {
         const ULONGLONG ms=GameMs();
         for(auto& d:drops)if(d.phase!=Phase::free)Frame(d,ms);
         if(testVehicle && ms-testVehicleAt>=kTestBoardMs) {
-            if(CarrierAlive(testVehicle)) {
+            if(objref::Alive(testVehicle)) {
                 Log("AIRDROP AirdropTest: the player put into vehicle %p (team %d)",testVehicle.obj,At<std::int32_t>(testVehicle.obj,kTeam));
                 BoardingRequest(Raw(testVehicle));
             }
-            testVehicle=ObjRef{};
+            testVehicle.Reset();
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("AIRDROP frame fault");}
 }
 
 void ResetAirdrops() noexcept {
-    for(auto& d:drops)d=Drop{};
-    testVehicle=ObjRef{};testVehicleAt=0;
+    for(auto& d:drops)Clear(d);
+    testVehicle.Reset();testVehicleAt=0;
 }
 
 bool AirdropWatching() noexcept { return watching; }

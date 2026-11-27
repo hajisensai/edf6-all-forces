@@ -347,9 +347,7 @@ const Kind* KindOf(const unsigned char* v) noexcept {
 
 // Whether the entry's object is there and alive (subcarrier.cpp Live).
 bool Live(const PJet& j) noexcept {
-    const auto ctrl=static_cast<const unsigned char*>(j.ref.ctrl);
-    return j.vehicle && Readable(ctrl,kCtrlUses+4) && At<std::int32_t>(ctrl,kCtrlUses)>0 && Readable(j.vehicle,kTeam+4) &&
-           j.ref.Is(j.vehicle) && !(j.vehicle[kObjFlags]&kObjDeleted) && !j.vehicle[kDead];
+    return j.vehicle && j.ref.obj==j.vehicle && objref::Alive(j.ref) && Readable(j.vehicle,kTeam+4);
 }
 PJet* Find(const unsigned char* v) noexcept {
     for(auto& j:jets)if(j.vehicle==v && j.ref.Is(v))return &j;

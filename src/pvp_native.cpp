@@ -66,7 +66,7 @@ enemy_identity::State Identity(const ObjRef& ref) noexcept {
     return enemy_identity::Read(ref.obj,ref.ctrl,kObjectFlags+4);
 }
 bool Live(const ObjRef& ref) noexcept {
-    return Identity(ref)==enemy_identity::State::current && !(At<unsigned char>(ref.obj,0x18)&4);
+    return objref::Exists(ref) && Readable(ref.obj,kObjectFlags+4);
 }
 bool PuidValid(const char* text) noexcept {
     if(!text || !text[0] || !std::memchr(text,0,65))return false;

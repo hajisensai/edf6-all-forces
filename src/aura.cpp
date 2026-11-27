@@ -117,7 +117,8 @@ Truck* TruckOf(const unsigned char* v,ULONGLONG ms) noexcept {
 }
 
 bool TruckLive(const Truck& t) noexcept {
-    return t.ref && Readable(t.ref.obj,kHpMax+4) && Readable(t.ref.ctrl,12) && At<std::int32_t>(t.ref.ctrl,8)>0 && t.ref.Is(t.ref.obj);
+    // Still this truck (deleted or dead too: what it wrote is undone on it until it is freed), objref.h.
+    return objref::Identity(t.ref)>=objref::Life::removed && Readable(t.ref.obj,kHpMax+4);
 }
 
 float Strength(aura::Kind k,const Config& c) noexcept {

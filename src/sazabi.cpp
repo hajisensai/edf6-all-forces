@@ -109,9 +109,7 @@ bool testBoarded=false;   // SazabiTestBoard: once a mission
 ULONGLONG firstSeenMs=0;
 
 bool Live(const Mech& m) noexcept {
-    const auto ctrl=static_cast<const unsigned char*>(m.ref.ctrl);
-    return m.vehicle && Readable(ctrl,12) && At<std::int32_t>(ctrl,8)>0 && m.ref.Is(m.vehicle) && !(m.vehicle[0x18]&4) &&
-           !m.vehicle[kDead];
+    return m.vehicle && m.ref.obj==m.vehicle && objref::Alive(m.ref);
 }
 Mech* Find(const unsigned char* v) noexcept {
     for(auto& m:mechs)if(m.vehicle==v && m.ref.Is(v))return &m;

@@ -3168,12 +3168,6 @@
    ],
    "scripts": []
   },
-  "heli_phase": {
-   "labels": [
-    "plugin-native"
-   ],
-   "scripts": []
-  },
   "heli_physical_sight": {
    "labels": [
     "plugin-native"
@@ -3424,12 +3418,6 @@
    "scripts": []
   },
   "jet_lever_net": {
-   "labels": [
-    "plugin-native"
-   ],
-   "scripts": []
-  },
-  "jet_phase": {
    "labels": [
     "plugin-native"
    ],
@@ -4266,12 +4254,6 @@
     "tests/npc_vehicle_ai_native_audit.py"
    ]
   },
-  "object_net": {
-   "labels": [
-    "plugin-native"
-   ],
-   "scripts": []
-  },
   "online_authority": {
    "labels": [
     "plugin-native"
@@ -4983,13 +4965,6 @@
    "scripts": [
     "tests/redirect_owner_guard.py"
    ]
-  },
-  "redirect_thunk": {
-   "labels": [
-    "plugin-native",
-    "test-data"
-   ],
-   "scripts": []
   },
   "render_record": {
    "labels": [

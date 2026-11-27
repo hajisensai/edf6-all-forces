@@ -495,7 +495,7 @@ int shotCount[5]={},removedCount[5]={};   // bullets fired and parts removed, fo
 std::unordered_map<void*,Hull> hulls;
 std::unordered_map<void*,Part> parts;
 
-// Liveness by the objects' own weak references (edf41c::WeakRef), keyed by object. A deleted object (DeleteObject: bit 4 of +0x18)
+// Liveness by the objects' own weak references (WeakRef), keyed by object. A deleted object (DeleteObject: bit 4 of +0x18)
 // stays allocated until the scene frees it, and only then does its destructor (slot 1, HullDtor / PartDtor) drop its record: in
 // between, and for the parts of a hull destroyed this frame, the weak reference is what says it is gone. Until 2026-10-17 the
 // destructor wrapper sat on slot 0, which is no destructor, so no record was ever dropped by it (M123: the script deleted the
@@ -514,9 +514,9 @@ void ControlTick(void* object) noexcept;
 void NetControlIn(void* object) noexcept;
 void NetPartIn(void* part,Part& p) noexcept;                // a part's frame: the host's decisions
 void NetForget(void* part) noexcept;
-void Forget(void* o) noexcept { const auto it=refs.find(o); if(it!=refs.end()) { WeakReset(it->second); refs.erase(it); } }
-void Track(void* o) noexcept { Forget(o); WeakSet(refs[o],o); }
-bool Live(void* o) noexcept { const auto it=refs.find(o); return it!=refs.end() && WeakAlive(it->second); }
+void Forget(void* o) noexcept { const auto it=refs.find(o); if(it!=refs.end()) { it->second.Reset(); refs.erase(it); } }
+void Track(void* o) noexcept { Forget(o); refs[o]=ObjRef::Of(o); }
+bool Live(void* o) noexcept { const auto it=refs.find(o); return it!=refs.end() && objref::Exists(it->second); }
 Hull* HullOf(void* h) noexcept { const auto it=hulls.find(h); return it==hulls.end() ? nullptr : &it->second; }
 Part* PartOf(void* p) noexcept { const auto it=parts.find(p); return it==parts.end() ? nullptr : &it->second; }
 void StopAnimationSounds(Part& p,int fade) noexcept {
@@ -1000,8 +1000,8 @@ void PanelTick(void* obj,Part& p,Hull& h,float s) noexcept {
 
 bool OriginalSpawnTeam301(const Part& part,int* team) noexcept {
     if(!team)return false;
-    const auto weak=refs.find(part.hull);if(weak==refs.end() || !WeakAlive(weak->second))return false;
-    const ObjRef hull{part.hull,weak->second.control};
+    const auto weak=refs.find(part.hull);if(weak==refs.end() || !objref::Exists(weak->second))return false;
+    const ObjRef hull{part.hull,weak->second.ctrl};
     if(controlled_pvp::HasTemporaryTeam(hull)) {
         int baseline=0,last=0;
         if(!controlled_pvp::ReadBaselineForMember(hull,&baseline,&last))return false;
@@ -2475,7 +2475,7 @@ bool PvpCollect301(void*,const ObjRef& root,ObjRef* members,unsigned capacity,un
     if(!h) {const Part* p=PartOf(selected);if(!p)return false;hull=p->hull;h=HullOf(hull);}
     const auto hullWeak=refs.find(hull);
     if(!h || !h->built || hullWeak==refs.end())return false;
-    const ObjRef hullRef{hull,hullWeak->second.control};
+    const ObjRef hullRef{hull,hullWeak->second.ctrl};
     if(PvpIdentity301(hullRef)!=controlled_pvp::Life::live || At<const void*>(hull,0)!=&hullClass.block[1])return false;
     const auto add=[&](const ObjRef& ref) {
         for(unsigned i=0;i<used;++i)if(members[i].obj==ref.obj)return members[i].ctrl==ref.ctrl;
@@ -2488,7 +2488,7 @@ bool PvpCollect301(void*,const ObjRef& root,ObjRef* members,unsigned capacity,un
         // The only removal paths erase the typed record on destruction/replacement. Never follow the old raw address.
         if(!p || p->hull!=hull || p->gone)continue;
         const auto weak=refs.find(object);if(weak==refs.end())return false;
-        const ObjRef ref{object,weak->second.control};
+        const ObjRef ref{object,weak->second.ctrl};
         const auto life=PvpIdentity301(ref);if(life==controlled_pvp::Life::gone)continue;
         if(life!=controlled_pvp::Life::live || At<const void*>(object,0)!=&partClass.block[1])return false;
         if(p->team<-1 || p->team>=crew::team_native::kTeamCapacity || !add(ref) || emission>=emitterCapacity)return false;
@@ -2513,7 +2513,7 @@ controlled_pvp::Life PvpRead301(void*,const controlled_pvp::Emitter& emitter,int
     if(emitter.object!=&p->team || At<const void*>(emitter.member.obj,0)!=&partClass.block[1])return Life::invalid;
     const auto it=refs.find(const_cast<void*>(emitter.member.obj));
     if(it==refs.end())return Life::invalid;
-    if(it->second.object!=emitter.member.obj || it->second.control!=emitter.member.ctrl)return Life::invalid;
+    if(it->second.obj!=emitter.member.obj || it->second.ctrl!=emitter.member.ctrl)return Life::invalid;
     if(p->team<-1 || p->team>=crew::team_native::kTeamCapacity)return Life::invalid;
     *team=p->team;return Life::live;
 }
