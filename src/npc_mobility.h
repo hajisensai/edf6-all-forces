@@ -405,5 +405,67 @@ inline bool CountMiss(int& misses,Outcome o) noexcept {
 constexpr std::uint64_t kStuckMs=1500;
 constexpr float kStuckLeast=1.0f;
 inline bool Stuck(float moved,std::uint64_t elapsedMs) noexcept { return elapsedMs>=kStuckMs && moved<kStuckLeast; }
+
+// --- Ranger / Air Raider: SPRINT's rolls (the map's Z; the user, 2026-11-27: 「冲刺支持翻滚」) ---
+// The stock side roll (slot 68 0x552E20 -> state 0x552B10, docs/fp-soldier-re.md §3.2): d76 pressed with |stick x| over
+// 0.35 (0x1790138) and the control mask's roll bit (+0x158C & 0x800). Its speed goes along the stick's direction
+// (+0x11E0 normalised, turned by the yaw +0x1244), so a roll diagonally ahead carries the soldier on its way. Under
+// SPRINT a walk of the plugin's own (its MoveTo) is rolled: one roll every kSprintRollGapMs, each kSprintRollTurn off the
+// way, the side alternating (the zig-zag a player rolls). Nothing is moved by the plugin: the stock roll carries it.
+constexpr float kSprintRollTurn=0.6435f;        // rad (~37 deg) off the way: a way straight ahead gets |x| 0.6
+constexpr float kSprintRollLeast=0.45f;         // |x| the stick keeps (over 0.35, a margin for the float stick)
+constexpr std::uint64_t kSprintRollGapMs=900;   // between two presses: a roll's state ends first (a press in it is lost)
+constexpr float kSprintRollFar=15.0f;           // m left of the walk to roll it (nearer: it walks the rest)
+constexpr float kSprintRollClear=8.0f;          // m free along the roll's own way (terrain, buildings, vehicles)
+// The roll's stick for a way (x, z) local to the view (LocalMove's), turned towards `right` first; the other side when
+// that one's x is under kSprintRollLeast (one of the two always clears it: they are 74 deg apart). `*rightOut` the side
+// taken (the next roll takes the other). False for no way.
+inline bool SprintRollStick(float x,float z,bool right,float* ox,float* oz,bool* rightOut) noexcept {
+    const float l=std::sqrt(x*x+z*z);
+    if(!(l>1e-6f) || !std::isfinite(l))return false;
+    x/=l;z/=l;
+    const float c=std::cos(kSprintRollTurn),s=std::sin(kSprintRollTurn);
+    for(int k=0;k<2;++k) {
+        const bool r=k==0 ? right : !right;
+        const float t=r ? s : -s;   // turned by +-turn: towards +x (right) or -x (left)
+        const float rx=x*c+z*t,rz=-x*t+z*c;
+        if(std::fabs(rx)>=kSprintRollLeast){*ox=rx;*oz=rz;*rightOut=r;return true;}
+    }
+    return false;
+}
+// What keeps a sprinting soldier from rolling now (none: roll). The log's `because=`.
+enum class RollBlock : std::uint8_t { none, notSprinting, notWalking, quiet, firing, notPermitted, pressed, tooNear, rest, wall };
+inline const char* RollBlockName(RollBlock b) noexcept {
+    switch(b) {
+    case RollBlock::notSprinting: return "not sprinting";
+    case RollBlock::notWalking: return "not walking";
+    case RollBlock::quiet: return "quiet walk";
+    case RollBlock::firing: return "firing";
+    case RollBlock::notPermitted: return "not permitted";
+    case RollBlock::pressed: return "pressed";
+    case RollBlock::tooNear: return "near";
+    case RollBlock::rest: return "rest";
+    case RollBlock::wall: return "wall";
+    case RollBlock::none: break;
+    }
+    return "none";
+}
+// `walking`: the plugin's own walk this frame; `quiet`: one no dash is for (to a box, its seat, the support route);
+// `permitted`: the control mask's roll and move bits; `pressed`: d76 already this frame (an evasion's, the stock's);
+// `left`: m to the walk's stop; `sinceMs`: since its last roll (either: an evasion's too); `clear`: m free along the
+// roll's way (only asked once the rest pass: a ray).
+struct RollGoal { bool sprinting,walking,quiet,firing,permitted,pressed; float left; std::uint64_t sinceMs; float clear; };
+inline RollBlock SprintRollBlock(const RollGoal& g) noexcept {
+    if(!g.sprinting)return RollBlock::notSprinting;
+    if(!g.walking)return RollBlock::notWalking;
+    if(g.quiet)return RollBlock::quiet;
+    if(g.firing)return RollBlock::firing;   // a shot outranks the roll (its squad fights on the way: MoveJudged)
+    if(!g.permitted)return RollBlock::notPermitted;
+    if(g.pressed)return RollBlock::pressed;
+    if(!(g.left>kSprintRollFar))return RollBlock::tooNear;
+    if(g.sinceMs<kSprintRollGapMs)return RollBlock::rest;
+    if(!(g.clear>=kSprintRollClear))return RollBlock::wall;
+    return RollBlock::none;
+}
 }  // namespace mobility
 }  // namespace npc

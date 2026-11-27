@@ -228,6 +228,8 @@ struct Soldier {
     float mobDir[3];
     bool mobOff;
     ULONGLONG mobAt,mobLogAt,mobWhyAt,mobPosAt;
+    ULONGLONG sprintRollAt;  // SPRINT's last roll (SprintRoll), the side it took
+    bool sprintRollRight;
     float mobPos[3];
     // The Wing Diver's walk dash watched for how far it carried (npc_mobility.h CarryTick: logged only), and the last
     // look for vehicles along a dash's way (VehicleNear: not cast every frame).
@@ -1946,10 +1948,55 @@ void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONG
                    sit.wayDist,sit.rise,sit.clear,std::isfinite(sit.vehicle) ? sit.vehicle : -1.0f,stuck,sit.threatNear);
 }
 
-// `restShare`: of each dash's rest (1; its squad's SPRINT: mapcmd_logic.h kSprintRestShare).
-void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms,float restShare) noexcept {
+// SPRINT's rolls (npc_mobility.h SprintRollBlock): a Ranger's / Air Raider's walk under its squad's SPRINT rolled with the
+// stock side roll (d76 with the stick's x over 0.35: Evade's press), diagonally ahead along the route's straight run,
+// the side alternating. Debug: a sprinting walk not rolled says why, once in kLogMs for each soldier (SPRINTROLL skip).
+void SprintRoll(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms,bool sprinting) noexcept {
+    using namespace npc::mobility;
+    const Config& c=Cfg();
+    const Way w=WayOf(s,pos);
+    const unsigned mask=At<std::uint32_t>(h,kControlMask);
+    const ULONGLONG last=s.rollAt>s.sprintRollAt ? s.rollAt : s.sprintRollAt;
+    RollGoal g{sprinting,w.walking,!DashFree(p),p.fire,(mask&kMaskRoll) && (mask&kMaskMove),h[kJumpPress]!=0,
+               w.walking ? w.goalDist-w.stop : 0.0f,ms-last,0.0f};
+    if(!sprinting)return;
+    float x=0.0f,z=0.0f,rx=0.0f,rz=0.0f,way[3]{};
+    bool right=s.sprintRollRight;
+    if(w.walking) {
+        npc::LocalMove(At<float>(h,kViewYaw),w.runDir,1.0f,&x,&z);
+        if(!SprintRollStick(x,z,!s.sprintRollRight,&rx,&rz,&right))g.walking=false;
+    }
+    g.clear=kSprintRollClear;   // the rays only once the rest would let it roll
+    RollBlock why=SprintRollBlock(g);
+    if(why==RollBlock::none) {
+        npc::WorldMove(At<float>(h,kViewYaw),rx,rz,way);
+        float clear=ClearAhead(pos,way,kSprintRollClear+1.0f);
+        if(clear>=kSprintRollClear)clear=std::fmin(clear,VehicleNear(s,pos,way,kSprintRollClear+1.0f,ms));
+        g.clear=std::fmin(clear,w.run);   // and the route runs on straight that far
+        why=SprintRollBlock(g);
+    }
+    if(why!=RollBlock::none) {
+        if(c.debug && why!=RollBlock::rest && why!=RollBlock::pressed && ms-s.mobWhyAt>=kLogMs) {
+            s.mobWhyAt=ms;
+            Log("SPRINTROLL skip %p move=%s because=%s left=%.0f run=%.0f clear=%.0f mask 0x%X",h,p.move,RollBlockName(why),g.left,
+                w.run,g.clear,mask);
+        }
+        return;
+    }
+    Put<float>(h,kMoveX,rx);Put<float>(h,kMoveY,0.0f);Put<float>(h,kMoveZ,rz);Put<float>(h,kMoveW,1.0f);
+    h[kJumpPress]=1;
+    s.sprintRollAt=ms;s.sprintRollRight=right;
+    if(c.debug)Log("SPRINTROLL %p %s move=%s left=%.0f run=%.0f stick=(%.2f,%.2f) way=(%.2f,%.2f) at=(%.0f,%.0f,%.0f)",h,right ? "right" : "left",
+                   p.move,g.left,w.run,rx,rz,way[0],way[2],pos[0],pos[1],pos[2]);
+}
+
+// `sprinting`: its squad under SPRINT (mapcmd_logic.h kSprintMs): the dashes rest kSprintRestShare of their gap, the
+// rollers roll their walk (SprintRoll).
+void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms,bool sprinting) noexcept {
+    const float restShare=sprinting ? mapcmd::kSprintRestShare : 1.0f;
     if(c.agility==Agility::wingDash)WingDash(s,h,pos,p,ms,restShare);
     else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms,restShare);
+    else if(c.agility==Agility::roll)SprintRoll(s,h,pos,p,ms,sprinting);
 }
 
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
@@ -2132,7 +2179,7 @@ void Think(unsigned char* h,int cls) noexcept {
     s->hpSeen=hpNow;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
     if(!npc::Scripted(control))   // a script's unit keeps its stock moves
-        Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil ? mapcmd::kSprintRestShare : 1.0f);
+        Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil);
     if(Cfg().verbose && ms-s->loggedAt>kLogMs) {   // every soldier every 2 s: the bulk of a Debug=1 log, so Debug=2
         s->loggedAt=ms;
         Log("NPCAI %s %p %s pos=(%.0f,%.0f,%.0f) arms=%d held=%d arm=%d reach=%.0f target=%p move=%s fire=%d",kSoldiers[cls].name,h,
@@ -3088,7 +3135,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
                            SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr,
                            SquadRiding(q) ? At<const void*>(q.top.obj,kHumanRiding) : nullptr};
         out[n].joinOnly=joinOnly;
-        out[n].sprints=kSoldiers[q.cls].agility!=Agility::roll;   // Wing Divers' and Fencers' dashes (Mobility)
+        out[n].sprints=true;   // every class: the dashes unrested, the rollers' walk rolled (Mobility)
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
     for(int i=0;i<remoteSquadCount && n<most;++i) {
@@ -3101,6 +3148,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
                 mapcmd::OffersRecruit(q.control==npc::Control::recruited,npc::Scripted(q.control),false,riding,joinOnly),
                 q.control==npc::Control::recruited};
         out[n].joinOnly=joinOnly;
+        out[n].sprints=true;   // its authority's squad sprints there (the order sent: command_net)
         std::memcpy(out[n++].pos,q.pos,12);
     }
     return n;
@@ -4303,13 +4351,12 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             return why==Reason::none ? CommandResult(Reason::none,1) : CommandResult(why);
         }
         // The Broken Arrow states (mapcmd_logic.h): HOLD FIRE the squad's in the map's table (by its top: Retop carries it),
-        // SPRINT its dashes unrested for kSprintMs (Mobility). Its order, trip, boarding stay as they are.
+        // SPRINT its dashes unrested, its rollers' walk rolled, for kSprintMs (Mobility). Its order, trip, boarding stay as they are.
         if(c.order==Order::holdFire) {
             if(!mapcmd::OrderParamValid(c.order,c.param))return CommandResult(Reason::unsupported);
             SetUnitHoldFire(top,c.param!=0);return CommandResult(Reason::none,static_cast<unsigned>(count>0 ? count : 1));
         }
         if(c.order==Order::sprint) {
-            if(kSoldiers[q->cls].agility==Agility::roll)return CommandResult(Reason::unsupported);
             q->sprintUntil=ms+mapcmd::kSprintMs;return CommandResult(Reason::none,static_cast<unsigned>(count>0 ? count : 1));
         }
         if(mapcmd::PlaceOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {

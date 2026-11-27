@@ -471,6 +471,43 @@ void Misses() {
     Check(n==kMissOff,"pending changes nothing");
     Check(Stuck(0.5f,1500) && !Stuck(0.5f,1499) && !Stuck(2.0f,3000),"stuck: 1.5 s and under 1 m");
 }
+// SPRINT's rolls (npc_mobility.h): the stick always clears the stock roll's 0.35 and stays within ~37 deg + its turn of
+// the way, ahead of the soldier; the side alternates; each gate refuses on its own.
+void SprintRolls() {
+    const float kPi=3.14159265f;
+    int alternated=0,ahead=0,cleared=0,sides=0;
+    for(int k=0;k<360;k+=3) {
+        const float a=static_cast<float>(k)*kPi/180.0f,x=std::sin(a),z=std::cos(a);
+        for(int r=0;r<2;++r) {
+            float ox=0.0f,oz=0.0f;bool right=false;
+            if(!SprintRollStick(x,z,r==1,&ox,&oz,&right))continue;
+            cleared+=std::fabs(ox)>=kSprintRollLeast && std::fabs(ox)>0.35f;
+            ahead+=ox*x+oz*z>=std::cos(kSprintRollTurn)-1e-4f;   // turned by exactly the turn: never behind the way
+            sides+=std::fabs(std::sqrt(ox*ox+oz*oz)-1.0f)<1e-4f;
+            alternated+=right==(r==1);
+        }
+    }
+    Check(cleared==240 && ahead==240 && sides==240,"every way: a roll stick past 0.35, the turn off the way, unit length",cleared);
+    Check(alternated>=150 && alternated<240,"the side asked is the side taken unless its x is too small",alternated);
+    float ox=0.0f,oz=0.0f;bool right=false;
+    Check(SprintRollStick(0.0f,1.0f,true,&ox,&oz,&right) && right && ox>0.59f && oz>0.79f,"straight ahead, right: (0.6, 0.8)");
+    Check(SprintRollStick(0.0f,1.0f,false,&ox,&oz,&right) && !right && ox<-0.59f,"straight ahead, left: (-0.6, 0.8)");
+    // A way 37 deg right: turned left it would be straight ahead (x 0): the right taken instead.
+    Check(SprintRollStick(0.6f,0.8f,false,&ox,&oz,&right) && right && ox>0.9f,"a turn that leaves x under 0.35: the other side");
+    Check(!SprintRollStick(0.0f,0.0f,true,&ox,&oz,&right),"no way: no roll");
+    const RollGoal go{true,true,false,false,true,false,40.0f,kSprintRollGapMs,kSprintRollClear};
+    Check(SprintRollBlock(go)==RollBlock::none,"sprinting, a long open walk, rested: roll");
+    RollGoal g=go;g.sprinting=false;Check(SprintRollBlock(g)==RollBlock::notSprinting,"not sprinting: none");
+    g=go;g.walking=false;Check(SprintRollBlock(g)==RollBlock::notWalking,"not the plugin's walk: none");
+    g=go;g.quiet=true;Check(SprintRollBlock(g)==RollBlock::quiet,"to a box / its seat: walked");
+    g=go;g.firing=true;Check(SprintRollBlock(g)==RollBlock::firing,"firing: the shot first");
+    g=go;g.permitted=false;Check(SprintRollBlock(g)==RollBlock::notPermitted,"the mask's roll bit off: never pressed to be refused");
+    g=go;g.pressed=true;Check(SprintRollBlock(g)==RollBlock::pressed,"d76 already pressed this frame: left as it is");
+    g=go;g.left=kSprintRollFar;Check(SprintRollBlock(g)==RollBlock::tooNear,"near its stop: walked");
+    g=go;g.sinceMs=kSprintRollGapMs-1;Check(SprintRollBlock(g)==RollBlock::rest,"a roll still on: waits");
+    g=go;g.clear=kSprintRollClear-0.1f;Check(SprintRollBlock(g)==RollBlock::wall,"a wall / vehicle in the roll's way: walked");
+    Check(std::fabs(std::sin(kSprintRollTurn)-0.6f)<1e-3f && kSprintRollLeast>0.35f,"the turn gives 0.6 straight ahead, the least over 0.35");
+}
 }  // namespace
 
 int main() {
@@ -484,6 +521,7 @@ int main() {
     FencerChoices();
     Timing();
     Misses();
+    SprintRolls();
     std::printf("npc_mobility_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

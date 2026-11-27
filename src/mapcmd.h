@@ -46,9 +46,9 @@ struct CommandUnit { const void* v; const char* name; Command now; bool air; flo
     bool joinOnly=false;         // a script's squad the stock walk-up would have let in (VanillaRecruit=0, npcai.cpp
                                  // NativeJoinable): not locked, but it takes FOLLOW / RECRUIT alone
     // The Broken Arrow orders' state and means (2026-11-27): `holdFire` HOLD FIRE switched on (mapcmd.cpp ListUnits, the
-    // table below), `high` an aircraft flying high (ALTITUDE), `sprints` it has a dash to unrest or an afterburner
-    // (SPRINT: a Wing Diver / Fencer squad, a jet), `decoys` it has decoys left (DECOY: a jet's flares). No unit has
-    // smoke of its own: SMOKE is taken by none (the card shows it unavailable, the key does nothing).
+    // table below), `high` an aircraft flying high (ALTITUDE), `sprints` it takes SPRINT (every squad: a Wing Diver's /
+    // Fencer's dashes unrested, a Ranger's / Air Raider's walk rolled, npcai.cpp Mobility; a jet's afterburner),
+    // `decoys` it has decoys left (DECOY: a jet's flares). SMOKE retired (no unit has smoke of its own).
     bool holdFire=false,high=false,sprints=false,decoys=false;
     bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field
 };
