@@ -114,6 +114,9 @@ bool RangePlaceOn() noexcept { return false; }
 debugspawn::RowState SpawnRowState(int) noexcept { return debugspawn::RowState::unavailable; }
 int PlaceRow(int,const float*,wchar_t*,std::size_t) noexcept { return kDebugSpawnFailed; }
 bool NpcMarked() noexcept { return false; }
+int NpcBoardRoom(const void*,const void*) noexcept { return 1; }
+bool NpcBoardable(const void*) noexcept { return true; }
+bool NpcBoardingOn() noexcept { return true; }
 int CycleGuardFormation(const void*) noexcept {return -2;}
 int CycleMarchFormation() noexcept {return 0;}
 int SetGuardFormation(const void*,int) noexcept {return -2;}

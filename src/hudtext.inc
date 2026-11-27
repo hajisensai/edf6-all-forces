@@ -284,10 +284,10 @@ HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack / board (drag: line; Shif
         L"%ls   右键 移动 / 攻击 / 上车（拖动：横队；Shift 排队）",
         L"%ls   右鍵 移動 / 攻擊 / 上車（拖曳：橫隊；Shift 排隊）",
         L"%ls   右クリック 移動 / 攻撃 / 乗車（ドラッグ：横隊、Shift で予約）")
-HUDTEXT(npcMouseKeys2,L"%ls attack-move  %ls fast  %ls reverse  %ls stop  %ls hold fire  %ls sub-group  Ctrl+1-9 group",
-        L"%ls 攻击移动   %ls 快速   %ls 倒车   %ls 停止   %ls 停火   %ls 子选择   Ctrl+1-9 编队",
-        L"%ls 攻擊移動   %ls 快速   %ls 倒車   %ls 停止   %ls 停火   %ls 子選擇   Ctrl+1-9 編隊",
-        L"%ls 攻撃移動   %ls 高速   %ls 後退   %ls 停止   %ls 射撃停止   %ls サブ選択   Ctrl+1-9 グループ")
+HUDTEXT(npcMouseKeys2,L"%ls attack-move  %ls back  %ls reverse  %ls stop  %ls hold fire  %ls sub-group  Ctrl+1-9 group",
+        L"%ls 攻击移动   %ls 撤离   %ls 倒车   %ls 停止   %ls 停火   %ls 子选择   Ctrl+1-9 编队",
+        L"%ls 攻擊移動   %ls 撤離   %ls 倒車   %ls 停止   %ls 停火   %ls 子選擇   Ctrl+1-9 編隊",
+        L"%ls 攻撃移動   %ls 撤収   %ls 後退   %ls 停止   %ls 射撃停止   %ls サブ選択   Ctrl+1-9 グループ")
 HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
 HUDTEXT(mapCommanderView,L"COMMANDER VIEW",L"指挥官视角",L"指揮官視角",L"指揮官視点")
 HUDTEXT(mapCommanderSwitch,L"%ls  Switch view",L"%ls 切换视角",L"%ls 切換視角",L"%ls 視点を切り替え")
@@ -403,17 +403,31 @@ HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
 // The RTS moves (mapcmd_logic.h Order::move / attackMove; hud.cpp MapButtons, mapcmd.cpp).
 HUDTEXT(orderMove,L"MOVE",L"移动",L"移動",L"移動")
 HUDTEXT(orderAttackMove,L"ATTACK-MOVE",L"攻击移动",L"攻擊移動",L"攻撃移動")
-// Broken Arrow's orders (2026-11-27; mapcmd_logic.h Order::fastMove .. decoy, map_keys.h F R U H V Z X C).
-HUDTEXT(orderFastMove,L"FAST MOVE",L"快速移动",L"快速移動",L"高速移動")
+// Broken Arrow's orders (2026-11-27; mapcmd_logic.h Order::reverseMove .. decoy, map_keys.h R U H V Z C).
 HUDTEXT(orderReverseMove,L"REVERSE",L"倒车",L"倒車",L"後退")
 HUDTEXT(orderUnloadAt,L"UNLOAD AT",L"定点下车",L"定點下車",L"地点で降車")
 HUDTEXT(orderHoldFire,L"HOLD FIRE",L"停火",L"停火",L"射撃停止")
 HUDTEXT(orderAltitude,L"ALTITUDE",L"飞行高度",L"飛行高度",L"飛行高度")
 HUDTEXT(orderSprint,L"SPRINT",L"冲刺",L"衝刺",L"ダッシュ")
-HUDTEXT(orderSmoke,L"SMOKE",L"烟雾",L"煙霧",L"煙幕")
 HUDTEXT(orderDecoy,L"DECOYS",L"诱饵弹",L"誘餌彈",L"フレア")
 HUDTEXT(btnPace,L"PACED MARCH",L"齐步行军",L"齊步行軍",L"歩調を合わせる")
-HUDTEXT(cmdUnavailable,L"%ls: NONE OF THE SELECTED UNITS CAN",L"%ls：选中的单位都无法执行",L"%ls：選中的單位都無法執行",L"%ls：選択中のユニットは実行できない")
+// A card button greyed / a key refused (map_buttons.h StateOf / OrderState; mapcmd.cpp Refuse, hud.cpp MapButtons): the
+// order's word and why (the user, 2026-11-27: 「各种按钮只在能操作的时候点亮。车上都是满人怎么上车」).
+HUDTEXT(cmdRefused,L"%ls: %ls",L"%ls：%ls",L"%ls：%ls",L"%ls：%ls")
+HUDTEXT(tipUnavailable,L"%ls   UNAVAILABLE: %ls",L"%ls   不可用：%ls",L"%ls   不可用：%ls",L"%ls   使用不可：%ls")
+HUDTEXT(whyCannot,L"none of the selected units can",L"选中的单位都不能执行",L"選中的單位都不能執行",L"選択中のユニットは実行できない")
+HUDTEXT(whyScripted,L"the mission's script commands them",L"由任务脚本控制",L"由任務腳本控制",L"ミッションのスクリプトが指揮中")
+HUDTEXT(whyAllRiding,L"the selected squads are all aboard",L"选中的小队都在车上",L"選中的小隊都在車上",L"選択中の分隊は全員搭乗中")
+HUDTEXT(whyNoneRiding,L"none of the selected units is aboard",L"选中的单位都不在车上",L"選中的單位都不在車上",L"選択中のユニットは誰も搭乗していない")
+HUDTEXT(whyNoRoom,L"no vehicle near with a free seat",L"附近没有空位的载具",L"附近沒有空位的載具",L"近くに空席のある車両がない")
+HUDTEXT(whyNoRoomSelected,L"the selected vehicles have no free seat",L"选中的载具没有空位",L"選中的載具沒有空位",L"選択中の車両に空席がない")
+HUDTEXT(whyNoRoomThat,L"that vehicle has no free seat",L"这辆载具没有空位",L"這輛載具沒有空位",L"その車両に空席がない")
+HUDTEXT(whyBoardOff,L"NPC boarding is off (NpcBoarding=0) or unavailable",L"NPC 上车已关闭（NpcBoarding=0）或不可用",
+        L"NPC 上車已關閉（NpcBoarding=0）或不可用",L"NPC の搭乗がオフ（NpcBoarding=0）か利用できない")
+HUDTEXT(whyNoDecoys,L"no decoys left",L"诱饵弹已用完",L"誘餌彈已用完",L"フレアが残っていない")
+HUDTEXT(whyNoWithdraw,L"nothing to send off (a support's aircraft or transport, or a recruited squad)",
+        L"没有可撤离的（支援飞机、支援运输载具或已招募的小队）",L"沒有可撤離的（支援飛機、支援運輸載具或已招募的小隊）",
+        L"撤収できるものがない（支援機・支援輸送車両・加入済みの分隊）")
 HUDTEXT(cmdSubAll,L"SUB-SELECTION: ALL SELECTED",L"子选择：全部选中单位",L"子選擇：全部選中單位",L"サブ選択：選択中の全ユニット")
 HUDTEXT(cmdSubKind,L"SUB-SELECTION: %hs (%d)",L"子选择：%hs（%d）",L"子選擇：%hs（%d）",L"サブ選択：%hs（%d）")
 HUDTEXT(cmdSubShown,L"ORDERS TO: %ls",L"指令对象：%ls",L"指令對象：%ls",L"命令対象：%ls")
@@ -421,7 +435,8 @@ HUDTEXT(cmdPing,L"PING %d",L"信号 %d",L"信號 %d",L"ピン %d")
 HUDTEXT(cmdPingRange,L"PING %d  %.0f m",L"信号 %d  %.0f m",L"信號 %d  %.0f m",L"ピン %d  %.0f m")
 HUDTEXT(legendPaths,L"ORDER PATHS:",L"指令路线：",L"指令路線：",L"命令の経路：")
 // The transports (transport.cpp; mapcmd_logic.h Order::withdraw).
-HUDTEXT(orderWithdraw,L"SEND TRANSPORT AWAY",L"载具撤离",L"載具撤離",L"輸送車両撤収")
+// 2026-11-27 the card trimmed: DISMISS folded into it (a recruited squad's withdrawal is its dismissal), the word the both.
+HUDTEXT(orderWithdraw,L"WITHDRAW",L"撤离",L"撤離",L"撤収")
 HUDTEXT(cmdNpcNoTransport,L"No transport to withdraw (only a support vehicle leaves; get the squad off a moving one first)",
         L"没有可撤离的运输载具（只有支援载具能撤离；载具行进中请先让小队下车）",L"沒有可撤離的運輸載具（只有支援載具能撤離；載具行進中請先讓小隊下車）",
         L"撤収できる輸送車両がない（支援車両のみ；走行中は先に降車させる）")
@@ -534,7 +549,10 @@ HUDTEXT(rosterCount,L"%d SQ  %d MEN",L"%d 支 %d 人",L"%d 支 %d 人",L"%d 隊 
 HUDTEXT(rosterMore,L"+%d more",L"+%d 支",L"+%d 支",L"+%d 隊")
 HUDTEXT(rosterScripted,L"%d scripted (not selectable)",L"脚本 %d 支（不可选）",L"腳本 %d 支（不可選）",L"スクリプト %d 隊（選択不可）")
 HUDTEXT(rosterOther,L"OTHER",L"其他",L"其他",L"その他")
-// The ALL OUT button's menu (hud.cpp MapDismountMenu, map_buttons.h kDismountMenu): who gets out of the vehicle.
+// The DISMOUNT button's menu (hud.cpp MapDismountMenu, map_buttons.h kDismountMenu): the selected squads off, who gets
+// out of the vehicle, UNLOAD AT.
+HUDTEXT(dismountSquads,L"SQUADS OFF (THE DRIVER STAYS)",L"小队下车（留驾驶与炮手）",L"小隊下車（留駕駛與砲手）",L"分隊降車（運転手・射手は残る）")
+HUDTEXT(dismountUnloadAt,L"UNLOAD AT A POINT...",L"定点下车…",L"定點下車…",L"地点で降車…")
 HUDTEXT(dismountEveryone,L"EVERYONE OUT",L"全体下车",L"全體下車",L"全員降車")
 HUDTEXT(dismountKeepDriver,L"ALL BUT THE DRIVER",L"全体下车（留司机）",L"全體下車（留駕駛）",L"運転手以外降車")
 HUDTEXT(dismountClass,L"%ls OUT",L"%ls下车",L"%ls下車",L"%ls降車")
@@ -542,6 +560,9 @@ HUDTEXT(dismountClass,L"%ls OUT",L"%ls下车",L"%ls下車",L"%ls降車")
 // the ones on a guard point.
 HUDTEXT(menuMarch,L"MARCH",L"行军",L"行軍",L"行軍")
 HUDTEXT(menuDefence,L"DEFENCE",L"守点",L"守點",L"防衛")
+// ...and its switches' rows (2026-11-27, buttons of their own before): on / off.
+HUDTEXT(menuSwitchOn,L"%ls: ON",L"%ls：开",L"%ls：開",L"%ls：オン")
+HUDTEXT(menuSwitchOff,L"%ls: OFF",L"%ls：关",L"%ls：關",L"%ls：オフ")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
 HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
 HUDTEXT(qmarkPlayer,L"P%d %.0f m",L"玩家%d %.0f m",L"玩家%d %.0f m",L"プレイヤー%d %.0f m")

@@ -86,7 +86,7 @@ void Codec() {
     Check(static_cast<int>(mapcmd::Order::hold)==13 && static_cast<int>(mapcmd::Order::formation)==14 &&
           static_cast<int>(mapcmd::Order::fastMove)==15 && mapcmd::kLastOrder==mapcmd::Order::decoy,
           "HOLD is appended (13), the formation order after it (14), the Broken Arrow orders after that (15..22)");
-    Check(kVersion==11,"the wire is version 11 (the Broken Arrow orders, lines and pings), the one spoken (net-6: no negotiation)");
+    Check(kVersion==12,"the wire is version 12 (FAST MOVE / SMOKE retired, BOARD's vehicle), the one spoken (net-6: no negotiation)");
     {   // The requester only a player's reference, a unit only a NetId, the focus either (an enemy player in PvP).
         Request r=Make(2,mapcmd::Order::focus);
         Check(ValidRequest(r),"a focus by its NetId");
@@ -152,7 +152,7 @@ void Version8() {
         unsigned char edit[kWireSize];std::memcpy(edit,bytes,sizeof(edit));std::memcpy(edit+4,&old,4);
         Check(Owned(edit,sizeof(edit)) && !Decode(edit,sizeof(edit),copy),"an older build's request is consumed, never read");
     }
-    Check(Encode(m,bytes,sizeof(bytes)) && bytes[4]==kVersion && !bytes[5] && !bytes[6] && !bytes[7],"everything goes out at version 11");
+    Check(Encode(m,bytes,sizeof(bytes)) && bytes[4]==kVersion && !bytes[5] && !bytes[6] && !bytes[7],"everything goes out at version 12");
 }
 // Version 11: the Broken Arrow orders, a point order's line (a right drag) in its parameter, the switches' params, and
 // the pings (Kind::ping), relayed by the host to every other member when the sender speaks for its player.
@@ -162,10 +162,10 @@ bool Speaks(void*,const char* puid,const unsigned char* requester) noexcept {
 void Version11() {
     Message m;m.kind=Kind::request;m.epoch=7;m.sequence=9;
     unsigned char bytes[kWireSize];Message copy;
-    for(auto order:{mapcmd::Order::fastMove,mapcmd::Order::reverseMove,mapcmd::Order::unloadAt}) {
+    for(auto order:{mapcmd::Order::reverseMove,mapcmd::Order::unloadAt}) {
         m.request=Make(1,order);
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order,
-              "FAST / REVERSE / UNLOAD AT round trip");
+              "REVERSE / UNLOAD AT round trip");
         m.request.flags=kQueued;Check(Encode(m,bytes,sizeof(bytes)),"and are queued as the point orders they are");
         m.request.flags=0;m.request.command.param=mapcmd::LineParam(0.5f,30.0f);
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.param==m.request.command.param,
@@ -181,10 +181,10 @@ void Version11() {
     m.request=Make(1,mapcmd::Order::altitude);m.request.command.param=mapcmd::kAltitudeHigh;
     Check(Encode(m,bytes,sizeof(bytes)),"ALTITUDE high");
     m.request.flags=kQueued;Check(!Encode(m,bytes,sizeof(bytes)),"a switch is not queued");
-    for(auto order:{mapcmd::Order::sprint,mapcmd::Order::smoke,mapcmd::Order::decoy}) {
+    for(auto order:{mapcmd::Order::sprint,mapcmd::Order::decoy}) {
         m.request=Make(1,order);
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order,
-              "SPRINT / SMOKE / DECOY round trip");
+              "SPRINT / DECOY round trip");
         m.request.command.param=1;Check(!Encode(m,bytes,sizeof(bytes)),"with no parameter");
     }
     {   // The ping's codec: a player's point and its kind, nothing else.
@@ -219,6 +219,25 @@ void Version11() {
     }
 }
 // One version, no negotiation (net-6): a hello carries nothing but its epoch; a message of another version is never read.
+// Version 12 (the card trimmed, 2026-11-27): FAST MOVE and SMOKE retired (refused both ways), BOARD names its vehicle in
+// `focus` (a NetId, or none: the nearest with room).
+void Version12() {
+    Message m;m.kind=Kind::request;m.epoch=7;m.sequence=9;
+    unsigned char bytes[kWireSize];Message copy;
+    for(auto order:{mapcmd::Order::fastMove,mapcmd::Order::smoke}) {
+        m.request=Make(1,order);
+        Check(!ValidRequest(m.request) && !Encode(m,bytes,sizeof(bytes)),"a retired order (FAST MOVE / SMOKE) refused");
+    }
+    m.request=Make(1,mapcmd::Order::board);
+    Check(ValidRequest(m.request) && Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy),"BOARD with no vehicle named");
+    m.request.focus[0]=42;
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.focus[0]==42 &&
+          copy.request.command.order==mapcmd::Order::board,"BOARD naming its vehicle round trips");
+    std::memcpy(m.request.focus,m.request.requester,32);
+    Check(!ValidRequest(m.request),"BOARD into the requester refused");
+    m.request=Make(1,mapcmd::Order::move);m.request.focus[0]=42;
+    Check(!ValidRequest(m.request),"a move names no focus");
+}
 void Negotiation() {
     {   // queued and formation orders reach the executor with their flag and parameter
         Room r;Check(r.nodes[1]->session->Ready(),"the client heard its host's capability");
@@ -348,4 +367,4 @@ void Protocol() {
     Check(rebound.nodes[0]->executed==1 && rebound.sent.size()==packets,"peer index cannot inherit another PUID's capability or result cache");
 }
 }
-int main(){Codec();Version8();Version11();Negotiation();WaysMessages();WaysReconnect();Protocol();std::printf("command protocol: %d checks passed\n",checks);}
+int main(){Codec();Version8();Version11();Version12();Negotiation();WaysMessages();WaysReconnect();Protocol();std::printf("command protocol: %d checks passed\n",checks);}

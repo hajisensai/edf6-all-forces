@@ -16,6 +16,7 @@
 #include "support_call.h"
 #include "transport.h"
 #include "map_loadout_row.h"
+#include "map_buttons.h"
 
 namespace crew {
 using mapcmd::Command;
@@ -39,17 +40,19 @@ inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,c
 // `recruited`: a squad the player recruited (the only kind DISMISS lets go: npcai.cpp answers others "not its owner").
 struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr;
     bool riding=false; bool recruitable=false; bool recruited=false;
-    bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard and WITHDRAW
+    bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard
     const void* vehicle=nullptr; // a riding squad's vehicle (its top's): a DISMOUNT / DISMOUNT ALL given to that vehicle is its
     bool carries=false;          // a vehicle unit with a riding squad that takes orders aboard (mapcmd.cpp List): it takes them
     bool joinOnly=false;         // a script's squad the stock walk-up would have let in (VanillaRecruit=0, npcai.cpp
                                  // NativeJoinable): not locked, but it takes FOLLOW / RECRUIT alone
     // The Broken Arrow orders' state and means (2026-11-27): `holdFire` HOLD FIRE switched on (mapcmd.cpp ListUnits, the
-    // table below), `high` an aircraft flying high (ALTITUDE), `sprints` it has a dash to unrest or an afterburner
-    // (SPRINT: a Wing Diver / Fencer squad, a jet), `decoys` it has decoys left (DECOY: a jet's flares). No unit has
-    // smoke of its own: SMOKE is taken by none (the card shows it unavailable, the key does nothing).
+    // table below), `high` an aircraft flying high (ALTITUDE), `sprints` it takes SPRINT (every squad: a Wing Diver's /
+    // Fencer's dashes unrested, a Ranger's / Air Raider's walk rolled, npcai.cpp Mobility; a jet's afterburner),
+    // `decoys` it has decoys left (DECOY: a jet's flares). SMOKE retired (no unit has smoke of its own).
     bool holdFire=false,high=false,sprints=false,decoys=false;
-    bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field
+    bool boards=false;      // a vehicle squads get into at all (npcai.h NpcBoardable; never a jet): BOARD's (mapcmd.cpp Carrier)
+    bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field; a
+                            // squad paired with a support vehicle (transport.cpp TransportWithdrawable): WITHDRAW sends that
 };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
@@ -205,6 +208,7 @@ struct MapCommandReadout {
     bool all;                  // every unit selected (more than one)
     int selected;              // how many are
     std::uint32_t allowedOrders=0; // union of this selection's supported Order bits (keyboard still explains refusals)
+    mapbtn::CardSelection card{};  // the card's summary of the selection (map_buttons.h StateOf: what shows, what is greyed and why)
     int selectedSquads=0;      // selected, unlocked NPC squads for formation/team controls
     bool pointOk;
     float point[3];            // where G sends them (the pointer's ground point; the screen centre's with a pad)
@@ -223,7 +227,7 @@ struct MapCommandReadout {
     // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
     // first one's shape lit) and its march (a selected squad follows the player; `march` lit).
     bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
-    bool dismountMenu=false;   // the ALL OUT button's menu open (map_buttons.h kDismountMenu)
+    bool dismountMenu=false;   // the DISMOUNT button's menu open (map_buttons.h kDismountMenu)
     SquadRow squad[kMapSquadRows];
     bool squadSelected[kMapSquadRows];
     std::uint16_t squadGroups[kMapSquadRows]{}; // each row's RTS groups (CmdMark::groups)

@@ -6796,7 +6796,9 @@ def map_commands_wired() -> None:
     assert 'for(int i=0;i<mapkeys::count;++i)k.order[i]=keys.vk[i]>0 && Down(keys.vk[i]);' in reader
     import config_keys
     fields = re.findall(r'\bc\.(map\w+Key)\b', srcscan.function(src('src/map_keys.h'), 'Of'))
-    assert [int(config_keys.BY_FIELD[f].default, 0) for f in fields] == [*map(ord, 'QERTUFHZXCVB'), 0x09, 0x70, 0x71, 0x72, 0x73], fields
+    # F (FAST MOVE) and X (SMOKE) retired with the card trimmed (2026-11-27): a move judges its own pace, no unit smokes.
+    assert [int(config_keys.BY_FIELD[f].default, 0) for f in fields] == [*map(ord, 'QERTUHZCVB'), 0x09, 0x70, 0x71, 0x72, 0x73], fields
+    assert 'MapFastMoveKey' not in readme and 'MapSmokeKey' not in readme
     # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range; enemy placement also works online): on any other map
     # they stay the game's and never switch the input back from the pad.
     assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn();' in code
@@ -7324,13 +7326,15 @@ def npc_pickup_wired() -> None:
     assert 'npc::Dist(pos,at)>npc::pickup::kReach' in pick
     assert '!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
     assert 'healthPick<0 ? Cfg().npcPickupHealth' in code, 'the ini is the default until the map flips it'
-    # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; sweep and health
-    # the card's buttons alone (Y / O were dropped with Broken Arrow's keys, 2026-11-27).
+    # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; the sweep the
+    # card's button, the health boxes' switch a row of FORMATION's menu (Y / O dropped with Broken Arrow's keys and the
+    # card trimmed, 2026-11-27).
     mapcmd, hud = src('src/mapcmd.cpp'), hud_src()
     assert 'mapbtn::Hit(v.button,v.buttons,x,y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
     assert 'SameUi(g.uiPress,UiAt(' in mapcmd and 'MapCommandUiPanels(mapUiPanels,mapUiPanelCount);' in hud
     assert 'PlayerSelectablePayload(&r)' in hud and 'MapCommandPayloadButtons(rects,r.selectionToken,r.seat,entries,hits);' in hud
-    assert 'const bool sweep=clicked(Id::sweep),health=clicked(Id::health);' in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
+    assert 'const bool sweep=clicked(Id::sweep);' in mapcmd and 'if(sweep)Sweep(g);' in mapcmd
+    assert 'if(entry==mapbtn::kMenuHealth){Health(g);return;}' in mapcmd and 'clicked(Id::health)' not in mapcmd
     assert "Down('Y')" not in mapcmd and "Down('O')" not in mapcmd
     assert 'EXCLUDE_FROM_ALL tools/map_buttons_check.cpp' in cmake and 'map_buttons_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
     assert 'kNotifyBoxSig' in code and 'kApplyBoxSig' in code and 'InstallBoxes();' in code
@@ -7416,9 +7420,14 @@ def npc_ai_wired() -> None:
         assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
     # The soldiers' own dashes (docs/npc-mobility-re.md): after Drive, never for a script's unit; each feature behind its
     # own signatures; keys read, range-checked, shipped and documented; the offline check runs under CTest.
-    # SPRINT (the map's Z, 2026-11-27) shortens its rests while the squad's sprint lasts.
-    assert 'if(!npc::Scripted(control))   // a script\'s unit keeps its stock moves\n        Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil ? mapcmd::kSprintRestShare : 1.0f);' in think, 'Mobility: after Drive, not for a script unit'
+    # SPRINT (the map's Z, 2026-11-27) shortens its rests while the squad's sprint lasts; a Ranger's / Air Raider's walk
+    # is rolled with the stock side roll (the user, 2026-11-27: 「冲刺支持翻滚」): d76 and the stick, never a moved position.
+    assert 'if(!npc::Scripted(control))   // a script\'s unit keeps its stock moves\n        Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil);' in think, 'Mobility: after Drive, not for a script unit'
     assert 'Mobility(' not in scripted and 'kDashPress' not in scripted and 'kSecondary' not in scripted
+    roll = code.split('void SprintRoll(', 1)[1].split('\n}\n', 1)[0]
+    assert 'h[kJumpPress]=1;' in roll and 'SprintRollBlock(g)' in roll and 'kPosition' not in roll and 'Teleport' not in roll
+    assert 'else if(c.agility==Agility::roll)SprintRoll(s,h,pos,p,ms,sprinting);' in code
+    assert 'agility==Agility::roll)return CommandResult(Reason::unsupported)' not in code, 'every class takes SPRINT'
     assert 'InstallMobility();' in code and 'MobilitySigs(kWingDashSigs' in code and 'MobilitySigs(kFencerMoveSigs' in code
     assert 'npc_mobility_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1] and 'tests/npc_mobility_native_audit.py' in cmake
     for key, default in (('NpcWingDash', '1'), ('NpcWingDashFar', '25'), ('NpcWingDashSec', '1.5'), ('NpcWingDashReserve', '0.5'),

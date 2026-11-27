@@ -190,7 +190,11 @@ float MapFloorRay(const float*,const float*,float*) noexcept { return -1.0f; }
 bool groundReady=false;
 bool MapGroundNear(float,float,float level,float* out,bool) noexcept {*out=level;return groundReady;}
 int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
-int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
+const void* stubJetUnit=nullptr;   // a fighter the jets list (BoardCarriers)
+int JetCommandUnits(CommandUnit* out,int max) noexcept {
+    if(!stubJetUnit || max<1)return 0;
+    out[0]=CommandUnit{stubJetUnit,"jet",{},false,{}};return 1;
+}
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
 bool JetCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
@@ -227,7 +231,11 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     if(squad2On && n<most)out[n++]=CommandUnit{squad2Obj,squad2Name,squadReports ? squad2Got : Command{},false,{squad2Pos[0],squad2Pos[1],squad2Pos[2]}};
     return n;
 }
-int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
+const void* stubTankUnit=nullptr;  // a tank the tanks list (BoardCarriers)
+int TankCommandUnits(CommandUnit* out,int max) noexcept {
+    if(!stubTankUnit || max<1)return 0;
+    out[0]=CommandUnit{stubTankUnit,"tank",{},false,{}};return 1;
+}
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept {if(tally)*tally=SquadTally{};return 0;}
 bool SquadCommand(const void* leader,const Command& c) noexcept {
     if(leader==squad2Obj){squad2Got=c;++squad2Orders;return true;}
@@ -284,6 +292,12 @@ bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
 }
 const void* marked=nullptr;int markCalls=0;
 bool NpcMarked() noexcept {return marked!=nullptr;}
+int stubBoardRoom=4;   // npcai.cpp NpcBoardRoom: the seats a squad could take (the card's BOARD)
+int NpcBoardRoom(const void*,const void*) noexcept {return stubBoardRoom;}
+const void* stubJet=nullptr;   // npcai.cpp NpcBoardable: every unit but this one (a fighter) is a vehicle squads get into
+bool NpcBoardable(const void* v) noexcept {return v!=stubJet;}
+bool stubBoardingOn=true;      // npcai.cpp NpcBoardingOn: NpcBoarding=1 and the native ride as read
+bool NpcBoardingOn() noexcept {return stubBoardingOn;}
 bool NpcMarkEnemy(const void* object,const float*,bool toggle) noexcept {
     ++markCalls;
     if(toggle && marked==object){marked=nullptr;return false;}
@@ -450,8 +464,9 @@ void FormationKey() noexcept {
     mapOnline=false;remoteAuthority=nullptr;networkSubmits=0;
 }
 // The map's buttons (hud.cpp draws them and hands their rectangles over): a click on the sweep's button runs it and
-// selects nothing; the guard's arms the next click on the ground (no unit picked by it), clicked again disarms it;
-// the sweep's and the health switch's buttons are theirs alone (Y and O went with Broken Arrow's keys).
+// selects nothing; with nothing selected ATTACK-MOVE is not available (map_buttons.h StateOf: hidden): its click arms
+// nothing and is refused (the note, map_refuse); the health boxes' switch is a row of FORMATION's menu now (the card
+// trimmed, 2026-11-27), its pick turns it, the menu kept open (Y and O went with Broken Arrow's keys).
 void ButtonClicks() noexcept {
     ResetMapCommands();view=View{};
     MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;
@@ -459,34 +474,31 @@ void ButtonClicks() noexcept {
     const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     MapCommandView(vp,1280,720);
     MapCommandFrame(in,centre);   // the pointer placed at the centre (640, 360)
-    const float rects[12]={600,340,680,380, 700,340,780,380, 800,340,880,380};
-    const int ids[3]={static_cast<int>(mapbtn::Id::sweep),static_cast<int>(mapbtn::Id::guard),static_cast<int>(mapbtn::Id::health)};
-    MapCommandButtons(rects,ids,3);
+    const float rects[8]={600,340,680,380, 700,340,780,380};
+    const int ids[2]={static_cast<int>(mapbtn::Id::sweep),static_cast<int>(mapbtn::Id::attackMove)};
+    MapCommandButtons(rects,ids,2);
     sweepCalls=healthCalls=0;sweepState=healthState=false;
     const auto click=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
     click();
     Check(sweepCalls==1 && sweepState && game.sel.n==0,"a click on the sweep's button runs it, nothing selected by it");
-    // The pointer onto the guard's button (100 px right): armed; again: disarmed.
+    // The pointer onto ATTACK-MOVE (100 px right), nothing selected: refused, nothing armed.
     in.dx=100.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
+    const int cuesBefore=cuesPlayed;game.note[0]=0;
     click();
-    Check(game.armedOrder && game.armed==Order::guard,"the guard's button arms the next click on the ground");
-    click();
-    Check(!game.armedOrder,"clicked again: disarmed");
-    click();
-    in.dy=150.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dy=0.0f;   // off the buttons, on the ground
-    click();
-    Check(!game.armedOrder && game.sel.n==0,"armed, a click on the ground is the guard's point (taken, disarmed), no unit picked");
+    Check(!game.armedOrder && cuesPlayed==cuesBefore+1 && game.note[0],"nothing selected: ATTACK-MOVE's click refused (said, map_refuse), nothing armed");
     inputstub::keys['Y']=true;inputstub::keys['O']=true;MapCommandFrame(in,centre);
     inputstub::keys['Y']=inputstub::keys['O']=false;MapCommandFrame(in,centre);
     Check(sweepCalls==1 && healthCalls==0,"Y and O are no map keys any more");
-    in.dx=-100.0f/kPointerGain/(720.0f/1080.0f);in.dy=-150.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    in.dx=-100.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
     click();
     Check(sweepCalls==2 && !sweepState,"the sweep's button again: called back");
-    in.dx=200.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
-    click();
-    Check(healthCalls==1 && healthState,"the health-box button flips its switch");
+    game.formationMenu=true;
+    PickFormation(game,mapbtn::kMenuHealth);
+    Check(healthCalls==1 && healthState && game.formationMenu,"FORMATION's health-box row flips its switch, the menu kept open");
+    MapCommandFrame(in,centre);
     MapCommandReadout r{};
-    Check(PlayerMapCommands(&r) && r.healthOn && !r.sweepOn,"the readout carries the switches for the buttons' labels");
+    Check(PlayerMapCommands(&r) && r.healthOn && !r.sweepOn,"the readout carries the switches for the menu's rows");
+    game.formationMenu=false;MapCommandButtons(nullptr,nullptr,0);
 }
 
 // The mark key and H with the pointer on an enemy (the user, 2026-10-07: "应该在地图里面也能按q标记"); the mark key on
@@ -497,21 +509,21 @@ void FocusButtonPreservesMark() noexcept {
     unsigned char foe[0x400]{},control[0x10]{};static int earlier;
     Put<void*>(foe,kSelfCtrl,control);Put<long>(control,8,1);Put<long>(control,0xC,1);
     stubEnemies[0]=StubEnemy{foe,{0,0,0.5f}};stubEnemyCount=1;marked=&earlier;markCalls=0;
-    squadOn=true;squadOrders=0;Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    squadOn=true;squadOrders=0;groundReady=true;Put<void*>(squadObj,kSelfCtrl,squadCtrl);
     MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;float centre[3]{};
     const float vp[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
     game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);
-    const float rect[4]={600,340,680,380};const int id=static_cast<int>(mapbtn::Id::focus);
+    const float rect[4]={600,340,680,380};const int id=static_cast<int>(mapbtn::Id::hold);   // FOCUS's button gone (the card trimmed): HOLD acts at once
     MapCommandButtons(rect,&id,1);
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
     inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
-    Check(squadOrders==1 && squadGot.order==Order::focus && marked==&earlier && markCalls==0,
-          "the focus button uses the existing mark, never the map enemy behind its HUD rectangle");
+    Check(squadOrders==1 && squadGot.order==Order::hold && marked==&earlier && markCalls==0,
+          "a button's click acts on its own, never on (or marking) the map enemy behind its HUD rectangle");
     Check(!game.hover && At<long>(control,0xC)==1,"HUD buttons release and occlude enemy hover identities");
     game.armedOrder=true;game.armed=Order::move;SuspendMapCommands();
     Check(!game.armedOrder && !view.buttons && game.sel.Has(squadObj),"closing clears armed buttons and their stale rectangles but keeps selection");
-    ResetMapCommands();view=View{};squadOn=false;stubEnemyCount=0;marked=nullptr;
+    ResetMapCommands();view=View{};squadOn=false;stubEnemyCount=0;marked=nullptr;groundReady=false;
 }
 
 void MarkFromMap() noexcept {
@@ -951,11 +963,10 @@ void RtsClicks() noexcept {
     Check(game.armedOrder && game.armed==Order::attackMove && squadOrders==2,"Q arms an attack-move, nothing given yet");
     left();
     Check(squadOrders==3 && squadGot.order==Order::attackMove && !game.armedOrder,"Q, then a left click: an attack-move there");
-    // F (FAST MOVE) the same way, given as its own order.
+    // F (FAST MOVE) retired (2026-11-27: a move judges its own pace): F arms nothing and gives nothing (a left click
+    // after it would be a plain one: the ground's, clearing the selection).
     inputstub::keys['F']=true;MapCommandFrame(in,centre);inputstub::keys['F']=false;MapCommandFrame(in,centre);
-    left();
-    Check(squadOrders==4 && squadGot.order==Order::fastMove,"F, then a left click: a fast move there");
-    squadOrders=3;
+    Check(!game.armedOrder && squadOrders==3 && game.sel.Has(squadObj),"F arms nothing, gives nothing (FAST MOVE retired)");
     const float rect[4]={1100,600,1180,640};const int id=static_cast<int>(mapbtn::Id::move);
     MapCommandButtons(rect,&id,1);
     const float back=game.pointer.x;
@@ -1085,11 +1096,16 @@ void RtsClicks() noexcept {
           "a riding squad: no recruit / follow / point order, dismount and release");
     Check(!Takes(g.list[0],Order::withdraw),"a squad with no transport: no WITHDRAW");
     // Its transport (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): aboard its own vehicle a
-    // squad takes the point orders (it rides there and gets off short of the point) and WITHDRAW; still no follow.
+    // squad takes the point orders (it rides there and gets off short of the point) and WITHDRAW when that vehicle is one
+    // that leaves (a support vehicle: `withdraws`); still no follow.
     g.list[0].u.transport=true;
     Check(Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove) && Takes(g.list[0],Order::guard) &&
-          Takes(g.list[0],Order::withdraw) && Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::follow) &&
-          !Takes(g.list[0],Order::recruit),"a riding squad with its transport: point orders and WITHDRAW, no follow / recruit");
+          !Takes(g.list[0],Order::withdraw) && Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::follow) &&
+          !Takes(g.list[0],Order::recruit),"a riding squad paired with a vehicle no order sends off: point orders, no WITHDRAW");
+    g.list[0].u.recruited=true;
+    Check(Takes(g.list[0],Order::withdraw),"...recruited: WITHDRAW (its dismissal: the card's only way out of command)");
+    g.list[0].u.recruited=false;g.list[0].u.withdraws=true;
+    Check(Takes(g.list[0],Order::withdraw),"a squad paired with a support vehicle: WITHDRAW sends it off");
     CommandUnit free{squadObj,"squad",Command{},false,{0,0,0}};free.recruitable=true;g.list[0]=Entry{free,Owner::squad};
     Check(Takes(g.list[0],Order::recruit) && Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove),"a free squad on foot: all of them");
     CommandUnit tank{squadObj,"tank",Command{},false,{0,0,0}};g.list[0]=Entry{tank,Owner::tank};
@@ -1201,10 +1217,14 @@ void SelectionCapabilityMask() noexcept {
     const float point[3]{};Publish(selection,true,true,point,true);MapCommandReadout r{};PlayerMapCommands(&r);
     Check(r.allowedOrders==((1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::move))|
                             (1u<<static_cast<unsigned>(Order::attackMove))|(1u<<static_cast<unsigned>(Order::hold))|
-                            (1u<<static_cast<unsigned>(Order::follow))|(1u<<static_cast<unsigned>(Order::fastMove))|
+                            (1u<<static_cast<unsigned>(Order::follow))|
                             (1u<<static_cast<unsigned>(Order::reverseMove))|(1u<<static_cast<unsigned>(Order::holdFire))|1u) &&
           !r.selectedSquads,
-        "tank selection enables following, point orders (fast, reverse too), hold fire and release");
+        "tank selection enables following, point orders (reverse too), hold fire and release");
+    Check(r.card.units==1 && r.card.vehicles==1 && !r.card.squads && r.card.takes==r.allowedOrders &&
+          mapbtn::Shown(mapbtn::Id::reverseMove,r.card) && !mapbtn::Shown(mapbtn::Id::board,r.card) &&
+          !mapbtn::Shown(mapbtn::Id::sweep,r.card) && mapbtn::StateOf(mapbtn::Id::dismount,r.card)==mapbtn::Why::noneRiding,
+          "the tank's card: REVERSE, no BOARD or SWEEP, DISMOUNT greyed with no rider");
     selection.list[0].owner=Owner::squad;selection.list[0].u.locked=true;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(!r.allowedOrders && !r.selectedSquads,"script locked squad exposes no executable buttons");
     // The card shows no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了").
@@ -1213,6 +1233,14 @@ void SelectionCapabilityMask() noexcept {
     Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(has(Order::recruit) && !has(Order::dismiss) && has(Order::board) && !has(Order::dismount) && !has(Order::focus) && has(Order::none),
           "a free squad on foot: recruit, no dismiss; board, no dismount; no focus with nothing marked; clear order");
+    // Its card (map_buttons.h StateOf; the user, 2026-11-27: 「车上都是满人怎么上车」): BOARD lit with a seat free, greyed
+    // with none; FOLLOW lit by its recruit; DISMOUNT greyed (it rides nothing).
+    Check(r.card.squads==1 && r.card.onFoot==1 && r.card.boardRoom==stubBoardRoom && mapbtn::Available(mapbtn::Id::board,r.card) &&
+          mapbtn::Available(mapbtn::Id::follow,r.card) && mapbtn::StateOf(mapbtn::Id::dismount,r.card)==mapbtn::Why::noneRiding,
+          "a free squad's card: BOARD with a seat free, FOLLOW (its recruit), DISMOUNT greyed");
+    stubBoardRoom=0;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(r.card.boardRoom==0 && mapbtn::StateOf(mapbtn::Id::board,r.card)==mapbtn::Why::noRoom,"every vehicle full: BOARD greyed, no room");
+    stubBoardRoom=4;
     selection.list[0].u.recruitable=false;selection.list[0].u.recruited=true;
     static int foe=0;marked=&foe;
     Publish(selection,true,true,point,true);PlayerMapCommands(&r);
@@ -1233,6 +1261,48 @@ void SelectionCapabilityMask() noexcept {
 // clicked unit's kind, a group follows a squad through its leader's death, Shift + right click queues the moves that
 // go on frame by frame with the map shut, the HOLD button holds each unit where it stands, the right button on the
 // player follows, H holds their fire.
+// BOARD's vehicles (review 2026-11-27): a jet boxed with a squad is no vehicle to board -- BOARD neither greys as "that
+// vehicle full" nor names it, the nearest with room decides; a remote squad gets no seat in it either; boarding off says so.
+void BoardCarriers() noexcept {
+    ResetMapCommands();stubBoardRoom=4;stubBoardingOn=true;
+    static unsigned char jet[0x400]{},jetCtrl[0x10]{},tank[0x400]{},tankCtrl[0x10]{};
+    Put<void*>(jet,kSelfCtrl,jetCtrl);Put<void*>(tank,kSelfCtrl,tankCtrl);Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    const auto boards=[](const void* v){
+        static Entry listed[kCmdUnits];const int n=ListUnits(listed);
+        for(int i=0;i<n;++i)if(listed[i].u.v==v)return listed[i].u.boards;
+        return false;
+    };
+    stubJetUnit=jet;stubTankUnit=tank;stubJet=nullptr;
+    Check(!boards(jet) && boards(tank),"ListUnits: a jet is never BOARD's vehicle, a tank is");
+    stubJet=tank;Check(!boards(tank),"ListUnits: a vehicle no squad gets into (NpcBoardable) is none either");
+    stubJet=nullptr;stubJetUnit=stubTankUnit=nullptr;
+    static Game g;g=kNewGame;g.count=2;
+    g.list[0]=Entry{CommandUnit{squadObj,"squad",{},false,{}},Owner::squad,ObjRef::Of(squadObj)};
+    g.list[1]=Entry{CommandUnit{jet,"jet",{},false,{}},Owner::jet,ObjRef::Of(jet)};
+    g.sel.Add(squadObj);g.sel.Add(jet);
+    mapbtn::CardSelection c=CardOf(g);
+    Check(c.vehicles==1 && !c.carriers && c.boardRoom==4 && mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::none &&
+          !BoardFocus(g,g.list[0]).obj,"squad + jet: BOARD lit by the nearest vehicle's seats and names none");
+    stubBoardRoom=0;c=CardOf(g);
+    Check(mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::noRoom,"squad + jet, every vehicle full: no room (not the jet full)");
+    g.count=3;g.list[2]=Entry{CommandUnit{tank,"tank",{},false,{}},Owner::tank,ObjRef::Of(tank)};g.list[2].u.boards=true;g.sel.Add(tank);
+    c=CardOf(g);
+    Check(c.carriers==1 && mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::noRoomSelected && BoardFocus(g,g.list[0]).obj==tank,
+          "squad + jet + full tank: the tank is BOARD's (greyed, that vehicle full; it is named, not the jet)");
+    stubBoardRoom=4;c=CardOf(g);
+    Check(c.boardRoom==4 && BoardFocus(g,g.list[0]).obj==tank,"squad + jet + tank with seats: BOARD into the tank");
+    remoteAuthority=squadObj;
+    Check(SquadBoardRoom(g.list[0],&g.list[1])==0 && SquadBoardRoom(g.list[0],&g.list[2])==1 && SquadBoardRoom(g.list[0],nullptr)==1,
+          "a remote squad: no seat in a jet, its authority judges a carrier and the nearest");
+    g.count=2;g.sel.Clear();g.sel.Add(squadObj);g.sel.Add(jet);c=CardOf(g);
+    Check(c.boardRoom==1 && !c.carriers && !BoardFocus(g,g.list[0]).obj,"a remote squad + jet: lit, sent to the nearest");
+    stubBoardingOn=false;c=CardOf(g);
+    Check(!c.boardOff,"boarding off here says nothing of another machine's squad");
+    remoteAuthority=nullptr;stubBoardRoom=0;c=CardOf(g);
+    Check(c.boardOff && mapbtn::StateOf(mapbtn::Id::board,c)==mapbtn::Why::boardOff &&
+          mapbtn::OrderState(Order::board,c)==mapbtn::Why::boardOff,"NpcBoarding=0: BOARD greyed with boarding off as why");
+    stubBoardingOn=true;stubBoardRoom=4;ResetMapCommands();
+}
 void RtsGroups() noexcept {
     ResetMapCommands();view=View{};config=Config{};groundReady=true;
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));
@@ -1603,7 +1673,7 @@ int main() {
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
-    crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();crew::PvpUiActions();
+    crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::BoardCarriers();crew::PlacePanel();crew::PvpUiActions();
     crew::RtsGroups();crew::RosterAndCards();crew::AuthorityQueue();crew::PacedMarch();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;

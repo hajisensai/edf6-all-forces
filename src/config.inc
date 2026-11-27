@@ -285,10 +285,8 @@
     int mapReverseMoveKey=0x52;     // ...MapReverseMoveKey
     int mapFireMissionKey=0x54;     // ...MapFireMissionKey
     int mapUnloadKey=0x55;          // ...MapUnloadKey
-    int mapFastMoveKey=0x46;        // ...MapFastMoveKey
     int mapHoldFireKey=0x48;        // ...MapHoldFireKey
     int mapSprintKey=0x5A;          // ...MapSprintKey
-    int mapSmokeKey=0x58;           // ...MapSmokeKey
     int mapDecoyKey=0x43;           // ...MapDecoyKey
     int mapAltitudeKey=0x56;        // ...MapAltitudeKey
     int mapBackKey=0x42;            // ...MapBackKey
@@ -843,10 +841,8 @@
     n.mapReverseMoveKey=ReadInt(L"MapReverseMoveKey",static_cast<DWORD>(n.mapReverseMoveKey));
     n.mapFireMissionKey=ReadInt(L"MapFireMissionKey",static_cast<DWORD>(n.mapFireMissionKey));
     n.mapUnloadKey=ReadInt(L"MapUnloadKey",static_cast<DWORD>(n.mapUnloadKey));
-    n.mapFastMoveKey=ReadInt(L"MapFastMoveKey",static_cast<DWORD>(n.mapFastMoveKey));
     n.mapHoldFireKey=ReadInt(L"MapHoldFireKey",static_cast<DWORD>(n.mapHoldFireKey));
     n.mapSprintKey=ReadInt(L"MapSprintKey",static_cast<DWORD>(n.mapSprintKey));
-    n.mapSmokeKey=ReadInt(L"MapSmokeKey",static_cast<DWORD>(n.mapSmokeKey));
     n.mapDecoyKey=ReadInt(L"MapDecoyKey",static_cast<DWORD>(n.mapDecoyKey));
     n.mapAltitudeKey=ReadInt(L"MapAltitudeKey",static_cast<DWORD>(n.mapAltitudeKey));
     n.mapBackKey=ReadInt(L"MapBackKey",static_cast<DWORD>(n.mapBackKey));
@@ -1262,10 +1258,8 @@
     n.mapReverseMoveKey=static_cast<int>(FixInt("MapReverseMoveKey",n.mapReverseMoveKey,0,254));
     n.mapFireMissionKey=static_cast<int>(FixInt("MapFireMissionKey",n.mapFireMissionKey,0,254));
     n.mapUnloadKey=static_cast<int>(FixInt("MapUnloadKey",n.mapUnloadKey,0,254));
-    n.mapFastMoveKey=static_cast<int>(FixInt("MapFastMoveKey",n.mapFastMoveKey,0,254));
     n.mapHoldFireKey=static_cast<int>(FixInt("MapHoldFireKey",n.mapHoldFireKey,0,254));
     n.mapSprintKey=static_cast<int>(FixInt("MapSprintKey",n.mapSprintKey,0,254));
-    n.mapSmokeKey=static_cast<int>(FixInt("MapSmokeKey",n.mapSmokeKey,0,254));
     n.mapDecoyKey=static_cast<int>(FixInt("MapDecoyKey",n.mapDecoyKey,0,254));
     n.mapAltitudeKey=static_cast<int>(FixInt("MapAltitudeKey",n.mapAltitudeKey,0,254));
     n.mapBackKey=static_cast<int>(FixInt("MapBackKey",n.mapBackKey,0,254));

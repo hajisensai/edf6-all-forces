@@ -25,9 +25,13 @@ namespace crew::command_net {
 // SPRINT, SMOKE, DECOY (mapcmd::Order past formation), a point order's line in Command::param (mapcmd_logic.h LineParam:
 // a right drag's line and its facing), the two switches' params (OrderParamValid), and the pings (Kind::ping: F1-F4 on
 // the map, relayed by the host to every member). An older build would refuse all of them: it is not spoken to.
+// Version 12 (2026-11-27, the card trimmed: docs/feedback-2026-11-27-map-round4.md 9-12): FAST MOVE and SMOKE retired
+// (mapcmd_logic.h Retired: refused; a move judges its own pace, MoveRushes), BOARD names the vehicle in `focus` (the one
+// picked on the map: a selected vehicle with room, the one right clicked). An older build would send the retired orders
+// and refuse a BOARD with a focus: it is not spoken to.
 // One version, not negotiated (net-6, 2026-11-24: the v6 / v7 negotiation removed): every machine of the room runs
 // this build (mod_room.h kAllForcesRoomProtocol), every message goes out at kVersion and one of another does not decode.
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=11,kMaxPeers=1024;
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=12,kMaxPeers=1024;
 constexpr std::uint32_t kQueued=1u;   // Request::flags: after the points the unit is on its way to (Shift)
 constexpr std::size_t kWireSize=828;
 // ways (version 7): the host's Shift queue of one unit, for a client's map to draw (the queue itself is the host's:

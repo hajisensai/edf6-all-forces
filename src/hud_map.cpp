@@ -7,6 +7,7 @@
 #include "strikes.h"
 #include "damagestats.h"
 #include "mapcmd.h"
+#include "map_card_text.h"
 #include "qmark.h"
 
 namespace crew {
@@ -383,13 +384,11 @@ const wchar_t* MapOrderWord(Order o) noexcept {
     case Order::dismountAll: return Tr(Tx::orderDismountAll);
     case Order::hold: return Tr(Tx::orderHold);
     case Order::formation: return Tr(Tx::btnFormationShort);
-    case Order::fastMove: return Tr(Tx::orderFastMove);
     case Order::reverseMove: return Tr(Tx::orderReverseMove);
     case Order::unloadAt: return Tr(Tx::orderUnloadAt);
     case Order::holdFire: return Tr(Tx::orderHoldFire);
     case Order::altitude: return Tr(Tx::orderAltitude);
     case Order::sprint: return Tr(Tx::orderSprint);
-    case Order::smoke: return Tr(Tx::orderSmoke);
     case Order::decoy: return Tr(Tx::orderDecoy);
     case Order::none: break;
     }
@@ -399,7 +398,6 @@ const float* MapPathColour(Order o) noexcept {
     switch(o) {
     case Order::move: return kWhite;
     case Order::attackMove: return kAmber;
-    case Order::fastMove: return kGreen;
     case Order::reverseMove: return kMapPathReverse;
     case Order::unloadAt: return kYellow;
     default: return kMapOrder;
@@ -668,9 +666,6 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
         Seg(d,c,x-r*0.8f,y-r*0.6f,x+r*0.8f,y+r*0.7f,t*0.7f,rgba);Seg(d,c,x+r*0.8f,y-r*0.6f,x-r*0.8f,y+r*0.7f,t*0.7f,rgba);break;
     case Id::health:        // a cross
         Rect(d,c,x-r*0.25f,y-r*0.8f,x+r*0.25f,y+r*0.8f,kGreen);Rect(d,c,x-r*0.8f,y-r*0.25f,x+r*0.8f,y+r*0.25f,kGreen);break;
-    case Id::fastMove:      // two arrow heads (the arrow twice as fast)
-        Seg(d,c,x-r*0.8f,y+r*0.8f,x+r*0.3f,y-r*0.3f,t,rgba);Tri(d,c,x-r*0.3f,y+r*0.3f,x+r*0.3f,y-r*0.3f,r*0.4f,kGreen);
-        Tri(d,c,x+r*0.1f,y-r*0.1f,x+r*0.85f,y-r*0.85f,r*0.45f,kGreen);break;
     case Id::reverseMove:   // the arrow backwards (down and left)
         Seg(d,c,x+r*0.8f,y-r*0.8f,x-r*0.3f,y+r*0.3f,t,rgba);Tri(d,c,x-r*0.1f,y+r*0.1f,x-r*0.85f,y+r*0.85f,r*0.45f,kMapPathReverse);break;
     case Id::unloadAt:      // out of the box onto a point
@@ -686,9 +681,6 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
     case Id::sprint:        // a bolt
         Seg(d,c,x+r*0.35f,y-r*0.9f,x-r*0.35f,y+r*0.05f,t,kAmber);Seg(d,c,x-r*0.35f,y+r*0.05f,x+r*0.35f,y-r*0.05f,t,kAmber);
         Seg(d,c,x+r*0.35f,y-r*0.05f,x-r*0.35f,y+r*0.9f,t,kAmber);break;
-    case Id::smoke:         // a cloud
-        Arc(d,c,x-r*0.45f,y+r*0.2f,r*0.38f,0.0f,kTurn,t,10,rgba);Arc(d,c,x+r*0.45f,y+r*0.2f,r*0.38f,0.0f,kTurn,t,10,rgba);
-        Arc(d,c,x,y-r*0.25f,r*0.45f,0.0f,kTurn,t,12,rgba);break;
     case Id::decoy:         // a burst of flares
         for(int k=0;k<6;++k) {
             const float a=kTurn*static_cast<float>(k)/6.0f;
@@ -780,24 +772,30 @@ constexpr int kGridRows=2,kGridRowsMost=3;
 // screen); two rows of buttons high (the band is kCardRows rows high at the least while a unit is selected).
 constexpr float kCardW=176.0f,kCardH=2.0f*kBtnRowH+kBtnGap,kCardGap=6.0f;
 constexpr int kCardRows=2,kCardCols=2;
-// The ALL OUT button's menu (map_buttons.h kDismountMenu; test site #45 「如何让某个角色单独下车」): over the button, a row a
-// choice -- everyone, everyone but the driver, one class's riders; a click on a row is that DISMOUNT ALL (mapcmd.cpp
-// PickDismount). Its rows go to mapcmd.cpp as the formation menu's do (one menu at a time).
+// The DISMOUNT button's menu (map_buttons.h kDismountMenu; test site #45 「如何让某个角色单独下车」): over the button, a row
+// a choice -- the selected squads off, a vehicle's riders (everyone, everyone but the driver, one class's), UNLOAD AT --
+// each only when some of the selection takes its order; a click on a row is that order (mapcmd.cpp PickDismount). Its
+// rows go to mapcmd.cpp as the formation menu's do (one menu at a time).
 void MapDismountMenu(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapCommandReadout& c,
                      const float* buttons,const int* ids,int n,Line* lines,int* at) noexcept {
     int button=-1;
-    for(int i=0;i<n;++i)if(ids[i]==static_cast<int>(mapbtn::Id::dismountAll))button=i;
+    for(int i=0;i<n;++i)if(ids[i]==static_cast<int>(mapbtn::Id::dismount))button=i;
     if(button<0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
-    static_assert(mapbtn::kDismountMenuRows<=kMapFormationEntries,"the menu's rows fit the formation menu's");
-    const int count=mapbtn::kDismountMenuRows;
-    int entries[mapbtn::kDismountMenuRows];
+    constexpr int kRows=mapbtn::kDismountMenuRows+2;
+    static_assert(kRows<=kMapFormationEntries,"the menu's rows fit the formation menu's");
+    int entries[kRows];int count=0;
+    if(mapbtn::TakesAny(c.card,Order::dismount))entries[count++]=mapbtn::kMenuDismountSquads;
+    if(mapbtn::TakesAny(c.card,Order::dismountAll))for(const std::uint32_t p:mapbtn::kDismountMenu)entries[count++]=mapbtn::DismountEntry(p);
+    if(mapbtn::TakesAny(c.card,Order::unloadAt))entries[count++]=mapbtn::kMenuUnloadAt;
+    if(count<=0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
     const float scale=kLineScale*0.7f,pad=kBtnPad*s,rowH=26.0f*s,gap=2.0f*s;
-    wchar_t word[mapbtn::kDismountMenuRows][64];float rowW=120.0f*s;
+    wchar_t word[kRows][64];float rowW=120.0f*s;
     for(int i=0;i<count;++i) {
-        const std::uint32_t p=mapbtn::kDismountMenu[i];
-        entries[i]=mapbtn::DismountEntry(p);
+        const std::uint32_t p=mapbtn::MenuDismountParam(entries[i]);
         const std::uint32_t cls=p&mapcmd::kDismountClasses;
-        if(!p)wcsncpy_s(word[i],Tr(Tx::dismountEveryone),_TRUNCATE);
+        if(entries[i]==mapbtn::kMenuDismountSquads)wcsncpy_s(word[i],Tr(Tx::dismountSquads),_TRUNCATE);
+        else if(entries[i]==mapbtn::kMenuUnloadAt)wcsncpy_s(word[i],Tr(Tx::dismountUnloadAt),_TRUNCATE);
+        else if(!p)wcsncpy_s(word[i],Tr(Tx::dismountEveryone),_TRUNCATE);
         else if(!cls)wcsncpy_s(word[i],Tr(Tx::dismountKeepDriver),_TRUNCATE);
         else {
             const Tx name=cls==mapcmd::kDismountRanger ? Tx::npcRanger : cls==mapcmd::kDismountWingDiver ? Tx::npcWingDiver :
@@ -812,11 +810,11 @@ void MapDismountMenu(void* drawer,void* ctx,Text* text,float width,float height,
     float top=buttons[button*4+1];
     for(int i=0;i<n;++i)top=std::fmin(top,buttons[i*4+1]);
     const mapbtn::Rect at0{buttons[button*4],top,buttons[button*4+2],top+(buttons[button*4+3]-buttons[button*4+1])};
-    mapbtn::Rect row[mapbtn::kDismountMenuRows]{};
+    mapbtn::Rect row[kRows]{};
     const int placed=mapbtn::MenuColumn(at0,count,rowW,rowH,gap,width,height,row);
     if(placed<=0){MapCommandFormationButtons(nullptr,nullptr,0);return;}
     MapUiBox(drawer,ctx,row[0].x0-4.0f*s,row[0].y0-4.0f*s,row[0].x1+4.0f*s,row[placed-1].y1+4.0f*s,lines,*at);
-    float rects[mapbtn::kDismountMenuRows*4];
+    float rects[kRows*4];
     for(int i=0;i<placed;++i) {
         const mapbtn::Rect& q=row[i];
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
@@ -839,11 +837,15 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
     int entries[kMapFormationEntries];int count=0;
     if(c.formationGuard)for(const auto shape:npc::formation::kGuard)if(count<kMapFormationEntries)entries[count++]=mapbtn::MenuEntry(true,static_cast<int>(shape));
     if(c.formationMarch)for(const auto shape:npc::formation::kMarch)if(count<kMapFormationEntries)entries[count++]=mapbtn::MenuEntry(false,static_cast<int>(shape));
+    // Its last rows the squads' switches (the card trimmed, 2026-11-27): the paced march, the health boxes.
+    for(const int sw:{mapbtn::kMenuPace,mapbtn::kMenuHealth})if(count<kMapFormationEntries)entries[count++]=sw;
     const float scale=kLineScale*0.7f,pad=kBtnPad*s,rowH=26.0f*s,gap=2.0f*s;
     wchar_t word[kMapFormationEntries][64];float rowW=120.0f*s;
     for(int i=0;i<count;++i) {
-        _snwprintf_s(word[i],_countof(word[i]),_TRUNCATE,L"%ls  %ls",Tr(mapbtn::MenuGuard(entries[i]) ? Tx::menuDefence : Tx::menuMarch),
-                     FormationText(mapbtn::MenuShape(entries[i]),mapbtn::MenuGuard(entries[i])));
+        if(entries[i]==mapbtn::kMenuPace)_snwprintf_s(word[i],_countof(word[i]),_TRUNCATE,Tr(c.paced ? Tx::menuSwitchOn : Tx::menuSwitchOff),Tr(Tx::btnPace));
+        else if(entries[i]==mapbtn::kMenuHealth)_snwprintf_s(word[i],_countof(word[i]),_TRUNCATE,Tr(c.healthOn ? Tx::menuSwitchOn : Tx::menuSwitchOff),Tr(Tx::btnHealth));
+        else _snwprintf_s(word[i],_countof(word[i]),_TRUNCATE,L"%ls  %ls",Tr(mapbtn::MenuGuard(entries[i]) ? Tx::menuDefence : Tx::menuMarch),
+                          FormationText(mapbtn::MenuShape(entries[i]),mapbtn::MenuGuard(entries[i])));
         Line probe{};Format(probe,L"%ls",word[i]);probe.scale=scale;
         if(text)MeasureAll(*text,&probe,1);
         const float w=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*pad;
@@ -862,7 +864,8 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
     for(int i=0;i<placed;++i) {
         const mapbtn::Rect& q=row[i];
         const int shape=mapbtn::MenuShape(entries[i]);
-        const bool lit=mapbtn::MenuGuard(entries[i]) ? shape==c.formationGuardShape : shape==c.march;
+        const bool lit=entries[i]==mapbtn::kMenuPace ? c.paced : entries[i]==mapbtn::kMenuHealth ? c.healthOn :
+                       mapbtn::MenuGuard(entries[i]) ? shape==c.formationGuardShape : shape==c.march;
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
         Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : hover ? kMapBoxFill : kBtnFill);
         Label(text,lines,at,q.x0+pad,(q.y0+q.y1)*0.5f,0,scale,lit ? kWhite : kMapOrder,L"%ls",word[i]);
@@ -1033,32 +1036,24 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     mapCardCount=0;
     if(pad){MapCommandButtons(nullptr,nullptr,0);MapCommandFormationButtons(nullptr,nullptr,0);return 0;}
     constexpr int n=mapbtn::kCount;
-    static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
-                              Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::orderWithdraw,
-                              Tx::orderDismountAll,Tx::orderHold,Tx::orderFastMove,Tx::orderReverseMove,Tx::orderUnloadAt,
-                              Tx::orderHoldFire,Tx::orderAltitude,Tx::orderSprint,Tx::orderSmoke,Tx::orderDecoy,
-                              Tx::btnFormationShort,Tx::btnSweep,Tx::btnHealth,Tx::btnPace};
     // Each button's key in its tooltip: the configured one (map_keys.h, the ini's Map*Key), "-" for a button alone.
     wchar_t kKey[n][32];
     for(auto& k:kKey)wcscpy_s(k,L"-");
     const auto keyOf=[&](Id b,mapkeys::Key key){ControlKeyName(mapkeys::Of(Cfg()).vk[key],kKey[static_cast<int>(b)],32);};
     keyOf(Id::attackMove,mapkeys::attackMove);keyOf(Id::release,mapkeys::stop);keyOf(Id::withdraw,mapkeys::back);
-    keyOf(Id::fastMove,mapkeys::fastMove);keyOf(Id::reverseMove,mapkeys::reverse);keyOf(Id::unloadAt,mapkeys::unload);
+    keyOf(Id::reverseMove,mapkeys::reverse);keyOf(Id::dismount,mapkeys::unload);   // DISMOUNT: U (UNLOAD AT, its menu's row)
     keyOf(Id::holdFire,mapkeys::holdFire);keyOf(Id::altitude,mapkeys::altitude);keyOf(Id::sprint,mapkeys::sprint);
-    keyOf(Id::smoke,mapkeys::smoke);keyOf(Id::decoy,mapkeys::decoy);
-    {   // ALL OUT: the unload key twice
-        wchar_t u[24];ControlKeyName(mapkeys::Of(Cfg()).vk[mapkeys::unload],u,24);
-        _snwprintf_s(kKey[static_cast<int>(Id::dismountAll)],32,_TRUNCATE,L"%ls %ls",u,u);
-    }
-    const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
-    const bool tools=c.allowed && c.selectedSquads>0;
+    keyOf(Id::decoy,mapkeys::decoy);
+    // Each button's state for the selection (map_buttons.h StateOf): hidden, or drawn greyed with its reason when it
+    // cannot be used now (its click and key refused: mapcmd.cpp Refuse). Off line (the NPC orders not allowed): none.
+    const mapbtn::CardSelection card=c.allowed ? c.card : mapbtn::CardSelection{};
     const float scale=kLineScale*0.7f;
     int shownIds[n];float w[n];int shown=0;
     const wchar_t* word[n]{};
     for(const Id b:mapbtn::kCardOrder) {
         const int i=static_cast<int>(b);
-        if(!mapbtn::Shown(b,orders,tools))continue;
-        word[shown]=b==Id::sweep && c.sweepOn ? Tr(Tx::btnSweepStop) : b==Id::altitude ? Tr(AltitudeWord(c.altitudes)) : Tr(kWord[i]);
+        if(!mapbtn::Shown(b,card))continue;
+        word[shown]=b==Id::sweep && c.sweepOn ? Tr(Tx::btnSweepStop) : b==Id::altitude ? Tr(AltitudeWord(c.altitudes)) : CardWordText(b);
         Line probe{};Format(probe,L"%ls",word[shown]);probe.scale=scale;
         if(text)MeasureAll(*text,&probe,1);
         const float textW=text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s;
@@ -1100,9 +1095,10 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         if(!(q.x1>q.x0))continue;   // no room for its row
         const Id b=static_cast<Id>(shownIds[k]);
         const bool lit=(c.armedOrder && mapbtn::IsOrder(b) && mapbtn::Arms(b) && c.armed==mapbtn::OrderOf(b)) ||
-                       (b==Id::sweep && c.sweepOn) || (b==Id::health && c.healthOn) || (b==Id::holdFire && c.holdFireOn) ||
-                       (b==Id::altitude && c.highOn) || (b==Id::pace && c.paced);
-        const bool available=mapbtn::Available(b,orders);   // SMOKE / DECOY with none of it: greyed
+                       (b==Id::sweep && c.sweepOn) || (b==Id::holdFire && c.holdFireOn) || (b==Id::altitude && c.highOn) ||
+                       (b==Id::dismount && c.dismountMenu) || (b==Id::formation && c.formationMenu);
+        const mapbtn::Why why=mapbtn::StateOf(b,card);
+        const bool available=why==mapbtn::Why::none;
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
         Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : hover ? kMapBoxFill : kBtnFill);
         const float t=1.5f*s;
@@ -1122,9 +1118,9 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         // The tooltip: the full word (the formation's name, the health boxes' state) and how to give it.
         wchar_t full[96];
         if(b==Id::formation)_snwprintf_s(full,_countof(full),_TRUNCATE,Tr(Tx::btnFormation),FormationText(c.march,false));
-        else if(b==Id::health)_snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
         else _snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",word[k]);
-        if(b==Id::move)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipRightClick),full);
+        if(!available)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipUnavailable),full,CardWhyText(why));
+        else if(b==Id::move)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipRightClick),full);
         else if(b==Id::altitude)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipAltitude),Tr(Tx::orderAltitude),kKey[shownIds[k]],
                                           c.altitudes.high,c.altitudes.low,c.altitudes.unknown);
         else if(mapbtn::Arms(b))MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipArms),full,kKey[shownIds[k]]);
@@ -1696,7 +1692,7 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
                                   {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
                                   {MapKind::marker,0,Tx::legendObjective}};
     // The order paths' colours (MapPathColour) after them, a row each.
-    static const Order kPaths[]={Order::move,Order::attackMove,Order::fastMove,Order::reverseMove,Order::unloadAt,Order::guard};
+    static const Order kPaths[]={Order::move,Order::attackMove,Order::reverseMove,Order::unloadAt,Order::guard};
     constexpr int kPathRows=static_cast<int>(sizeof(kPaths)/sizeof(kPaths[0]));
     constexpr int kItems=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5+kPathRows;   // the player, the dots, the brackets, the paths
     constexpr int kCols=3,kRows=(kItems+kCols-1)/kCols;
@@ -2075,7 +2071,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     else if(m.pad)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(Tx::npcPadKeys),sel);
     else {
         wchar_t key[6][24];
-        const mapkeys::Key shown[6]={mapkeys::attackMove,mapkeys::fastMove,mapkeys::reverse,mapkeys::stop,mapkeys::holdFire,mapkeys::subgroup};
+        const mapkeys::Key shown[6]={mapkeys::attackMove,mapkeys::back,mapkeys::reverse,mapkeys::stop,mapkeys::holdFire,mapkeys::subgroup};
         for(int i=0;i<6;++i)ControlKeyName(mapkeys::Of(Cfg()).vk[shown[i]],key[i],24);
         Label(text,lines,at,width*0.5f,y-11.0f*s,1,kLineScale*0.75f,kWhite,Tr(Tx::npcMouseKeys),sel);
         Label(text,lines,at,width*0.5f,y+11.0f*s,1,kLineScale*0.75f,kWhite,Tr(Tx::npcMouseKeys2),key[0],key[1],key[2],key[3],key[4],key[5]);

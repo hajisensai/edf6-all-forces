@@ -21,62 +21,132 @@ enum class Id : int {
     withdraw,                                                                                    // ...a squad's transport sent off
     dismountAll,                                                                                 // ...every rider off, its crew too
     hold,                                                                                        // ...each unit where it stands
-    fastMove, reverseMove, unloadAt, holdFire, altitude, sprint, smoke, decoy,                   // ...Broken Arrow's (2026-11-27)
-    formation,                                                                                   // the squads' shape
+    reverseMove, unloadAt, holdFire, altitude, sprint, decoy,                                    // ...Broken Arrow's (2026-11-27)
+    formation,                                                                                   // the squads' shape (a menu)
     sweep, health,                                                                               // the box sweep, its health-box switch
     pace,                                                                                        // the paced march's switch
     count
 };
 constexpr int kCount=static_cast<int>(Id::count);
-// The card's order (the user, 2026-10-09: "解散解除交战集火是不是重叠了"; "看看还有什么指令能砍一砍…感觉还是有点复杂了"):
-// moving, vehicles, membership, STOP, then the squads' tools. Not on it (their keys and orders stay, the wire's values
-// unchanged): GUARD (an attack-move turns into one at its point; G gives an attack-move), ENGAGE AT WILL (an attack-move
-// on the spot), FOCUS FIRE (the right button on an enemy, or H). RECRUIT and DISMISS never both show (mapcmd.cpp Takes):
-// one button that reads as the squad's state. STOP (release) apart from DISMISS it was mistaken for.
-// SPLIT / JOIN went on 2026-10-19 (the user: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): the RTS
-// groups (Ctrl+number) put any units together without changing the squads (mapcmd_logic.h GroupKey). HOLD came.
-// Broken Arrow's (the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」): its orders on the keys (map_keys.h) and
-// on the card too, GUARD back as the card's (an attack-move's guard at a point clicked), the paced march's switch a
-// button. SMOKE and DECOY shown greyed for a selection that has none (mapcmd.cpp Takes: the order unavailable).
-constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::guard,Id::fastMove,Id::reverseMove,Id::unloadAt,Id::hold,Id::holdFire,
-                           Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,Id::dismiss,Id::release,
-                           Id::altitude,Id::sprint,Id::smoke,Id::decoy,Id::formation,Id::sweep,Id::health,Id::pace};
+// The card (the user, 2026-11-27: 「感觉很多没用的指令。删一点或者整合一下，不然太复杂了」; Broken Arrow's card: the
+// moves, one switch a rule of engagement, the vehicles' orders folded into one, a kind's own only with that kind
+// selected): one row of at most kCardMostUsual for a usual selection (squads on foot: MOVE, ATTACK-MOVE, HOLD, HOLD FIRE,
+// STOP, FOLLOW, BOARD, DISMOUNT, WITHDRAW, SPRINT, FORMATION, SWEEP). Off it, their abilities kept (README 「指挥面板」):
+//  - GUARD: an attack-move guards its point once there (G gives one);
+//  - FAST MOVE: retired, a move judges its own pace (mapcmd_logic.h MoveRushes);
+//  - UNLOAD AT, ALL OUT: rows of DISMOUNT's menu (kDismountMenu below; U + a click unloads there, U twice everyone off
+//    where they stand: map_keys.h);
+//  - RECRUIT: FOLLOW (an unrecruited squad told to follow the player is recruited: npcai.cpp NpcSquadCommandForRequester);
+//  - DISMISS: WITHDRAW (a recruited squad's withdrawal is its dismissal unless its transport is a support vehicle that
+//    leaves: npcai.cpp NpcSquadCommandForRequester, transport.cpp TransportWithdrawable; B stays);
+//  - SMOKE: retired (no unit of the plugin carries smoke);
+//  - the health boxes' and the paced march's switches: rows of FORMATION's menu (kMenuHealth / kMenuPace).
+// ENGAGE AT WILL and FOCUS FIRE were never on it (an attack-move on the spot; the right button on an enemy, H).
+constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::reverseMove,Id::hold,Id::holdFire,Id::release,Id::follow,Id::board,
+                           Id::dismount,Id::withdraw,Id::altitude,Id::sprint,Id::decoy,Id::formation,Id::sweep};
 constexpr int kCardCount=static_cast<int>(sizeof(kCardOrder)/sizeof(kCardOrder[0]));
+constexpr int kCardMostUsual=12;   // the most a usual selection shows (tools/map_buttons_check.cpp)
 constexpr int kOrders=static_cast<int>(Id::formation);
 struct Rect { float x0,y0,x1,y1; };
 
-// The order a button gives (an order button: Id below formation).
+// The order a button gives (an order button: Id below formation). DISMOUNT's button opens its menu instead.
 inline mapcmd::Order OrderOf(Id b) noexcept {
     using mapcmd::Order;
     static const Order kOrder[kOrders]={Order::move,Order::attackMove,Order::guard,Order::follow,Order::none,Order::engage,
                                          Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit,Order::withdraw,
-                                         Order::dismountAll,Order::hold,Order::fastMove,Order::reverseMove,Order::unloadAt,
-                                         Order::holdFire,Order::altitude,Order::sprint,Order::smoke,Order::decoy};
+                                         Order::dismountAll,Order::hold,Order::reverseMove,Order::unloadAt,
+                                         Order::holdFire,Order::altitude,Order::sprint,Order::decoy};
     const int i=static_cast<int>(b);
     return i>=0 && i<kOrders ? kOrder[i] : Order::none;
 }
 inline bool IsOrder(Id b) noexcept { return static_cast<int>(b)>=0 && static_cast<int>(b)<kOrders; }
-// Whether `b` is a button of the card at all (GUARD, ENGAGE AT WILL and FOCUS FIRE are orders with no button).
+// Whether `b` is a button of the card at all.
 inline bool OnCard(Id b) noexcept {
     for(const Id c:kCardOrder)if(c==b)return true;
     return false;
 }
+// A button that opens a menu (its rows the choices: kDismountMenu, the formation menu) instead of acting.
+inline bool OpensMenu(Id b) noexcept { return b==Id::dismount || b==Id::formation; }
 // An order button arms a click on the map (its point) instead of acting at once.
-inline bool Arms(Id b) noexcept { return IsOrder(b) && mapcmd::PointOrder(OrderOf(b)); }
-// Shown on the card: an order the selection takes (`allowedOrders`: Order bits), a squad tool with squads selected,
-// the sweep and its switch always (they work on the recruited squads with nothing selected). SMOKE and DECOY with any
-// order taken (a selection), greyed (Available) when it has none of them.
-inline bool Shown(Id b,std::uint32_t allowedOrders,bool squadTools) noexcept {
-    if(!OnCard(b))return false;
-    if(b==Id::smoke || b==Id::decoy)return allowedOrders!=0;
-    if(IsOrder(b))return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
-    if(b==Id::sweep || b==Id::health)return true;
-    return squadTools;
+inline bool Arms(Id b) noexcept { return IsOrder(b) && !OpensMenu(b) && mapcmd::PointOrder(OrderOf(b)); }
+
+// --- Each button's state for the selection (the user, 2026-11-27: 「各种按钮只在能操作的时候点亮。车上都是满人怎么上车」) ---
+// The card's summary of the selection (mapcmd.cpp Publish): its counts and the orders any of it takes (`takes`: Order
+// bits, mapcmd.cpp Takes). `boardRoom`: the seats its squads on foot could take now (npcai.cpp NpcBoardRoom) -- in the
+// selected carriers when any is selected (BOARD goes into those), else in the one BOARD would pick. `carriers`: the
+// selected vehicles squads get into at all (mapcmd.cpp Carrier: not a jet; `vehicles` counts every non-squad unit).
+// `boardOff`: a squad of this machine's selected while its squads do not board (npcai.h NpcBoardingOn).
+struct CardSelection {
+    int units=0,squads=0,onFoot=0,riding=0,scripted=0,vehicles=0,aircraft=0,jets=0;
+    int boardRoom=0;
+    std::uint32_t takes=0;
+    int carriers=0;
+    bool boardOff=false;
+};
+// Why a button cannot be used now (none: it can; hidden: not on the card for this selection). Its hover text
+// (hudtext.inc whyCannot...).
+enum class Why : std::uint8_t { none, hidden, cannot, scripted, allRiding, noneRiding, noRoom, noRoomSelected, noDecoys, noWithdraw,
+                                noRoomThat,     // noRoomThat: the vehicle the right button was let go on is full (mapcmd.cpp)
+                                boardOff };     // squads do not board here (NpcBoarding=0, or the native ride not as read)
+inline bool TakesAny(const CardSelection& c,mapcmd::Order o) noexcept { return (c.takes>>static_cast<unsigned>(o))&1u; }
+// A button's state: shown or not by what is selected (a kind's own only with that kind), then whether it works (drawn
+// greyed with its reason when not; its click and key do nothing but say why, map_refuse). With nothing selected only
+// SWEEP (it sends the recruited squads).
+inline Why StateOf(Id b,const CardSelection& c) noexcept {
+    using mapcmd::Order;
+    if(!OnCard(b))return Why::hidden;
+    if(b==Id::sweep)return c.units==0 || c.squads>0 ? Why::none : Why::hidden;
+    if(c.units<=0)return Why::hidden;
+    const bool allScripted=c.scripted>=c.units;
+    const Why refused=allScripted ? Why::scripted : Why::cannot;
+    switch(b) {
+    // The tanks', the transports' (a ground vehicle selected, or squads riding: their transport's driver). Squads on foot
+    // take it too (a move walked backing off) but by R alone: its button would push their usual card past one row.
+    case Id::reverseMove:
+        return (c.vehicles>c.aircraft || c.riding>0) && TakesAny(c,Order::reverseMove) ? Why::none : Why::hidden;
+    case Id::board:
+        if(c.squads<=0)return Why::hidden;
+        if(allScripted)return Why::scripted;
+        if(c.onFoot<=0)return Why::allRiding;
+        if(!TakesAny(c,Order::board))return Why::cannot;
+        return c.boardRoom>0 ? Why::none : c.boardOff ? Why::boardOff : c.carriers>0 ? Why::noRoomSelected : Why::noRoom;
+    case Id::dismount:
+        if(c.squads<=0 && c.vehicles<=0)return Why::hidden;
+        if(TakesAny(c,Order::dismountAll) || TakesAny(c,Order::unloadAt) || TakesAny(c,Order::dismount))return Why::none;
+        return allScripted ? Why::scripted : Why::noneRiding;
+    case Id::withdraw:
+        if(c.squads<=0 && c.aircraft<=0)return Why::hidden;
+        return TakesAny(c,Order::withdraw) || TakesAny(c,Order::dismiss) ? Why::none : allScripted ? Why::scripted : Why::noWithdraw;
+    case Id::follow:
+        return TakesAny(c,Order::follow) || TakesAny(c,Order::recruit) ? Why::none : refused;
+    case Id::altitude: return c.aircraft<=0 ? Why::hidden : TakesAny(c,Order::altitude) ? Why::none : refused;
+    case Id::sprint: return c.squads<=0 && c.jets<=0 ? Why::hidden : TakesAny(c,Order::sprint) ? Why::none : refused;
+    case Id::decoy: return c.jets<=0 ? Why::hidden : TakesAny(c,Order::decoy) ? Why::none : allScripted ? Why::scripted : Why::noDecoys;
+    case Id::formation:
+        if(c.squads<=0)return Why::hidden;
+        if(TakesAny(c,Order::formation))return Why::none;
+        return allScripted ? Why::scripted : c.onFoot<=0 ? Why::allRiding : Why::cannot;
+    default: return TakesAny(c,OrderOf(b)) ? Why::none : refused;   // the moves, HOLD, HOLD FIRE, STOP
+    }
 }
-// A shown button that does something for the selection (SMOKE / DECOY with none of it: drawn greyed, its click says so).
-inline bool Available(Id b,std::uint32_t allowedOrders) noexcept {
-    if(!IsOrder(b))return true;
-    return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
+inline bool Shown(Id b,const CardSelection& c) noexcept { return StateOf(b,c)!=Why::hidden; }
+inline bool Available(Id b,const CardSelection& c) noexcept { return StateOf(b,c)==Why::none; }
+// A key's order (map_keys.h) against the selection: the state of its button when one shows, else whether any of the
+// selection takes it (the keys of orders off the card: G, U, H...). Why::hidden never: a key always answers.
+inline Why OrderState(mapcmd::Order o,const CardSelection& c) noexcept {
+    using mapcmd::Order;
+    for(int i=0;i<kOrders;++i) {
+        const Id b=static_cast<Id>(i);
+        if(OrderOf(b)==o && OnCard(b) && !OpensMenu(b)) {
+            const Why w=StateOf(b,c);
+            if(w!=Why::hidden)return w;
+        }
+    }
+    if(TakesAny(c,o))return Why::none;
+    if(c.units>0 && c.scripted>=c.units)return Why::scripted;
+    if(o==Order::dismountAll || o==Order::dismount || o==Order::unloadAt)return c.units>0 ? Why::noneRiding : Why::cannot;
+    if(o==Order::board && c.squads>0 && c.onFoot<=0)return Why::allRiding;
+    return Why::cannot;
 }
 
 // Lays `n` buttons of widths `w[i]` (px, the label's own plus its padding) out in rows `rowH` high, `gap` apart, each
@@ -182,8 +252,11 @@ inline int Hit(const Rect* r,int n,float x,float y) noexcept {
 // The formation button opens a column of the shapes to pick from (before, each click stepped to the next one: the log's
 // "formation: … the march column / staggered column / wedge / …" nine clicks in a row to get round to one). Its entries:
 // a guarding squad's defences (formation.h kGuard) and the march's shapes (kMarch), as MenuEntry codes.
-constexpr int kMenuGuard=0x100;
+// Its last rows (2026-11-27, the card trimmed) are the squads' two switches that were buttons of their own: the paced
+// march (kMenuPace) and the health boxes on a sweep (kMenuHealth), each lit when on.
+constexpr int kMenuGuard=0x100,kMenuPace=0x200,kMenuHealth=0x400;
 inline int MenuEntry(bool guard,int shape) noexcept { return (guard ? kMenuGuard : 0)|(shape&0xFF); }
+inline bool MenuSwitch(int entry) noexcept { return entry==kMenuPace || entry==kMenuHealth; }
 inline bool MenuGuard(int entry) noexcept { return (entry&kMenuGuard)!=0; }
 inline int MenuShape(int entry) noexcept { return entry&0xFF; }
 // The column of `n` rows `rowW` x `rowH`, `gap` apart, over `button` (its bottom row on the button's top; under the button
@@ -210,7 +283,7 @@ inline int MenuColumn(const Rect& button,int n,float rowW,float rowH,float gap,f
 // --- The ALL OUT button's menu (test site #45, 2026-11-10: 「如何让某个角色单独下车」; #44: 「预设下车指令：全体下车只留司机等」) ---
 // The button opens a column like the formation menu's (MenuColumn, drawn over the same rows: one menu at a time): every
 // rider off, every rider but the driver, one class's riders (the driver kept). Each row is DISMOUNT ALL with its choice
-// (mapcmd_logic.h DismountParamValid), its entry code kMenuDismount | the choice. Shift+N gives every rider off at once.
+// (mapcmd_logic.h DismountParamValid), its entry code kMenuDismount | the choice. U twice gives every rider off at once.
 constexpr int kMenuDismount=0x10000;
 constexpr std::uint32_t kDismountMenu[]={0u,mapcmd::kDismountKeepDriver,mapcmd::kDismountKeepDriver|mapcmd::kDismountRanger,
                                          mapcmd::kDismountKeepDriver|mapcmd::kDismountWingDiver,
@@ -220,6 +293,15 @@ constexpr int kDismountMenuRows=static_cast<int>(sizeof(kDismountMenu)/sizeof(kD
 inline int DismountEntry(std::uint32_t param) noexcept { return kMenuDismount|static_cast<int>(param&0xFFFFu); }
 inline bool MenuDismount(int entry) noexcept { return (entry&kMenuDismount)!=0; }
 inline std::uint32_t MenuDismountParam(int entry) noexcept { return static_cast<std::uint32_t>(entry)&0xFFFFu; }
+// 2026-11-27 (the card trimmed) the button is DISMOUNT and its menu has the dismount orders all: its first row the selected
+// squads off their rides (DISMOUNT: kMenuDismountSquads), then ALL OUT's rows above (a vehicle's riders), and last
+// UNLOAD AT (kMenuUnloadAt: arms the point a transport drives to and unloads). A row shows when some of the selection takes
+// its order (mapcmd.cpp Takes). Their codes are outside a dismount param's bits (DismountParamValid: below 0x1000).
+constexpr int kMenuDismountSquads=kMenuDismount|0x1000,kMenuUnloadAt=kMenuDismount|0x2000;
+inline mapcmd::Order MenuDismountOrder(int entry) noexcept {
+    return entry==kMenuDismountSquads ? mapcmd::Order::dismount : entry==kMenuUnloadAt ? mapcmd::Order::unloadAt
+                                                                                        : mapcmd::Order::dismountAll;
+}
 
 // --- The support bar ---
 // The catalog's entries a row (`names`, in catalog order): the consecutive ones whose names share what is before

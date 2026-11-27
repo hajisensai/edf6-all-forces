@@ -38,6 +38,7 @@
 
 namespace crew {
 bool SupportWithdrawVehicle(const void* vehicle) noexcept;   // support_dispatch.cpp: a support vehicle sent off the field
+bool SupportWithdrawable(const void* vehicle) noexcept;      // ...whether it is one (this machine's support vehicle, live)
 namespace {
 using transport::Act;
 using transport::Carrier;
@@ -595,11 +596,19 @@ void TransportCancel(const void* top) noexcept {
     __try {LeaveTrips(top);} __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
+bool TransportWithdrawable(const void* top) noexcept {
+    __try {
+        const Pair* p=PairOf(top);
+        return p && Alive(p->vehicle) && SupportWithdrawable(p->vehicle.obj);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 NpcCommandReason TransportWithdraw(const void* top) noexcept {
     __try {
         Pair* p=PairOf(top);
         if(!p || !Alive(p->vehicle))return NpcCommandReason::noTransport;
         unsigned char* const v=Vehicle(p->vehicle);
+        if(!SupportWithdrawable(v))return NpcCommandReason::noTransport;   // only a support vehicle leaves the field
         if(!IsOnlineAuthority(v))return NpcCommandReason::notAuthority;
         // Its riders off first, at rest only (a vehicle under way would leave with them: refused).
         Trip* t=TripOf(v);

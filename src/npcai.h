@@ -92,6 +92,15 @@ struct SweepCue { bool on; int left,taken,key; };
 // take them); the states and the march's formation for the buttons' labels.
 bool NpcSweepToggle(const void* const* tops,int n) noexcept;
 bool NpcSweepOn() noexcept;
+// The map card's BOARD (mapcmd.cpp Publish): the seats squad `leader`'s members on foot could take now in `vehicle`
+// (null: the one BOARD would pick, the player's ride or any near with room; npcai.cpp BoardTarget); 0 none. The same
+// seats BoardTarget picks by (npcai.cpp OpenSeats), so a lit button is one this machine's BOARD takes.
+int NpcBoardRoom(const void* leader,const void* vehicle) noexcept;
+// Whether squads board vehicles at all here (NpcBoarding on, the native ride as read): off, the card says so (Why::boardOff).
+bool NpcBoardingOn() noexcept;
+// Whether `vehicle` is one a squad gets into at all (a vehicle the plugin knows with a seat a soldier fits, not a fighter):
+// the map's BOARD names, counts and right-clicks only these (mapcmd.cpp Entry::u.boards). Not whether a seat is free.
+bool NpcBoardable(const void* vehicle) noexcept;
 bool NpcPickupHealthToggle() noexcept;
 bool NpcPickupHealthOn() noexcept;
 int NpcMarchShape() noexcept;

@@ -1159,9 +1159,10 @@ int main() {
     aircraftLeft=true;fixtureMs+=1;SupportDispatchTick();aircraftLeft=false;
     check(deleted==1,"left: its pilot deleted, the four who got off left alone");
     heliHull=true;
+    check(SupportWithdrawable(objects[0]) && heliLeaves==0,"a support helicopter is one WITHDRAW sends off (asking sends nothing)");
     check(SupportWithdrawVehicle(objects[0]) && heliLeaves==1,"WITHDRAW: a support helicopter flies off");
     heliHull=false;
-    check(!SupportWithdrawVehicle(objects[3]),"a soldier is no support vehicle");
+    check(!SupportWithdrawable(objects[3]) && !SupportWithdrawVehicle(objects[3]),"a soldier is no support vehicle");
     // Left with the squad it delivered still seated (2026-10-11 review): the pilot deleted, the four put off, not deleted.
     ResetSupportDispatch();made=deleted=unseated=0;fixtureMs+=40000;
     SupportCallAt(29,target,note,128);SupportDispatchTick();
@@ -1820,7 +1821,8 @@ int main() {
     check(SupportRescueAt(sea,note,128) && made==3,"measured: the rescue comes");
     // A map order never sends the rescue heli off (it is the rescue's, heli.cpp flies it to the swimmer).
     heliHull=true;heliLeaves=0;
-    check(!SupportWithdrawVehicle(objects[0]) && heliLeaves==0,"WITHDRAW: the rescue heli is not a map's support vehicle to send off");
+    check(!SupportWithdrawable(objects[0]) && !SupportWithdrawVehicle(objects[0]) && heliLeaves==0,
+          "WITHDRAW: the rescue heli is not a map's support vehicle to send off");
     heliHull=false;
     // A composed load in planning for a map call is not the rescue's (it plans no load and touches no planning).
     ResetSupportDispatch();fixtureMs+=40000;made=0;routeResult=npc::navigation::Result::pending;

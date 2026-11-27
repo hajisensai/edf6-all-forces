@@ -29,7 +29,11 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
     if(!executor || !Cfg().enabled || !Cfg().customNpcAi){Reject(out,request.count,NpcCommandReason::disabled);return;}
     if(!InSession() || !OnlineHostOnly()){Reject(out,request.count,NpcCommandReason::notAuthority);return;}
     CommandIdentities ids{};
-    const unsigned char* focus=request.command.order==mapcmd::Order::focus ? request.focus : nullptr;
+    // The focus: FOCUS's target, BOARD's vehicle when one was picked (v12; none: the nearest with room).
+    bool named=false;
+    for(unsigned char b:request.focus)named=named || b!=0;
+    const unsigned char* focus=request.command.order==mapcmd::Order::focus || (request.command.order==mapcmd::Order::board && named) ?
+                               request.focus : nullptr;
     if(!ResolveCommandIdentities(request.requester,request.units,request.count,focus,&ids)) {
         Reject(out,request.count,NpcCommandReason::notFound);return;
     }
@@ -146,6 +150,9 @@ std::uint32_t SubmitMapCommand(const ObjRef& requester,const ObjRef* units,unsig
     }
     if(command.order==mapcmd::Order::focus && !Id(focus,request.focus,false)) {
         Note(note,noteSize,L"攻击目标已失效或没有联机身份，请重新标记");return 0;
+    }
+    if(command.order==mapcmd::Order::board && focus.obj && !Id(focus,request.focus,true)) {
+        Note(note,noteSize,L"要上的载具已失效或没有联机身份，请重新选择");return 0;
     }
     if(!command_net::ValidRequest(request)) {Note(note,noteSize,L"命令目标或单位选择无效");return 0;}
     const auto id=commands.Submit(request,localPuid,GetTickCount64());

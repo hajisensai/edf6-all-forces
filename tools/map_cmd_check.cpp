@@ -572,22 +572,40 @@ int main() {
               static_cast<int>(Order::holdFire)==18 && static_cast<int>(Order::altitude)==19 && static_cast<int>(Order::sprint)==20 &&
               static_cast<int>(Order::smoke)==21 && static_cast<int>(Order::decoy)==22,
               "the Broken Arrow orders on the wire after FORMATION (v11): fast, reverse, unload at, hold fire, altitude, sprint, smoke, decoy");
-        // The moves: points, walked to and guarded once there; FAST quiet on the way; the states no place.
-        for(Order o:{Order::fastMove,Order::reverseMove,Order::unloadAt})
+        // FAST MOVE and SMOKE retired (2026-11-27, command protocol v12): their wire values kept, no order of them.
+        Check(Retired(Order::fastMove) && Retired(Order::smoke) && !Retired(Order::move) && !Retired(Order::decoy) &&
+              !PointOrder(Order::fastMove) && !MoveOrder(Order::fastMove) && !JudgedMove(Order::fastMove),
+              "FAST MOVE / SMOKE retired: no point, no move");
+        // The moves: points, walked to and guarded once there; the states no place.
+        for(Order o:{Order::move,Order::reverseMove,Order::unloadAt})
             Check(PointOrder(o) && MoveOrder(o) && PlaceOrder(o) && Arrive(o,1.0f,5.0f)==Order::guard && Arrive(o,9.0f,5.0f)==o &&
-                  PursuitOf(o).forced && !PursuitOf(o).fightFirst,"FAST / REVERSE / UNLOAD AT: a point walked to, a guard once there",
+                  JudgedMove(o) && PursuitOf(o,true).forced && !PursuitOf(o,true).fightFirst && !PursuitOf(o,false).forced &&
+                  PursuitOf(o,false).fightFirst,"MOVE / REVERSE / UNLOAD AT: a point walked to, pushed on or fought by the squad's judgement",
                   static_cast<int>(o));
-        Check(PursuitOf(Order::fastMove).quiet && !PursuitOf(Order::move).quiet && !PursuitOf(Order::reverseMove).quiet &&
-              !PursuitOf(Order::attackMove).quiet,"only FAST MOVE holds its fire on the way");
+        Check(!JudgedMove(Order::attackMove) && PursuitOf(Order::attackMove,true).fightFirst && !PursuitOf(Order::attackMove,true).forced &&
+              PursuitOf(Order::attackMove,false).fightFirst,"ATTACK-MOVE: always the fight first, whatever the judgement");
+        // A move's judgement (the user, 2026-11-27: 「感觉像是快速移动可以交给npc自己判断？」): blocked fights; a long way
+        // or under fire pushes on; near the point it fights a threat ahead, walks past a weak one.
+        {
+            const unsigned long long calm=~0ull;
+            Check(!MoveRushes({kMoveRushFarM*3.0f,true,0,0.0f}),"blocked on the way: it fights, however far and hurt");
+            Check(MoveRushes({kMoveRushFarM+1.0f,false,calm,kMoveRushThreat*4.0f}),"a long way to go: it pushes on past a threat");
+            Check(MoveRushes({40.0f,false,kMoveRushHurtMs-1,kMoveRushThreat*4.0f}) && !MoveRushes({40.0f,false,kMoveRushHurtMs,kMoveRushThreat*4.0f}),
+                  "under fire (hurt within kMoveRushHurtMs): it pushes on; the fire past, it fights");
+            Check(MoveRushes({40.0f,false,calm,kMoveRushThreat-0.5f}) && !MoveRushes({40.0f,false,calm,kMoveRushThreat}),
+                  "near the point: a weak lot ahead walked past, a threat fought");
+            Check(MoveRushes({kMoveRushFarM,false,calm,0.0f}) && kMoveJudgeMs>0 && kMoveBlockM<kMoveThreatM && kMoveThreatM<kMoveRushFarM,
+                  "the judgement's distances: blocked < threat < a long way");
+        }
         Check(!MoveOrder(Order::guard) && !MoveOrder(Order::hold) && MoveOrder(Order::move) && MoveOrder(Order::attackMove),
               "guard and hold are no moves");
-        for(Order o:{Order::holdFire,Order::altitude,Order::sprint,Order::smoke,Order::decoy})
+        for(Order o:{Order::holdFire,Order::altitude,Order::sprint,Order::decoy})
             Check(!PointOrder(o) && !PlaceOrder(o),"a state order has no place",static_cast<int>(o));
         Check(StateOrder(Order::holdFire) && VehicleOrder(Order::holdFire) && AirOrder(Order::holdFire) &&
               !VehicleOrder(Order::altitude) && AirOrder(Order::altitude) && !VehicleOrder(Order::sprint),
               "HOLD FIRE every unit's; ALTITUDE the aircraft's");
         Check(VehicleCommandOf(Order::reverseMove)==Order::guard && VehicleCommandOf(Order::reverseMove,true)==Order::reverseMove &&
-              VehicleCommandOf(Order::fastMove,true)==Order::guard && VehicleCommandOf(Order::holdFire)==Order::holdFire,
+              VehicleCommandOf(Order::move,true)==Order::guard && VehicleCommandOf(Order::holdFire)==Order::holdFire,
               "REVERSE MOVE reaches a module that backs as itself, others as their post's guard");
         // The states' rules.
         Check(Hurt(100.0f,90.0f) && !Hurt(100.0f,100.0f) && !Hurt(0.0f,0.0f) && !Hurt(90.0f,100.0f),"hurt: health down since the last look");
@@ -607,7 +625,7 @@ int main() {
             Check(IsLine(p) && LineParamValid(p) && std::fabs(LineLength(p)-40.0f)<0.5f && std::fabs(LineHeading(p)-1.5707963f)<1e-3f,
                   "a line's param: its length and facing");
             Check(LineParamValid(0) && !LineParamValid(0x1234u) && !LineParamValid(kLineFlag) && OrderParamValid(Order::move,p) &&
-                  OrderParamValid(Order::fastMove,p) && !OrderParamValid(Order::holdFire,p),"a point order takes a line or none");
+                  OrderParamValid(Order::reverseMove,p) && !OrderParamValid(Order::holdFire,p),"a point order takes a line or none");
             const float la[3]={0,0,0},lb[3]={40,0,0},look[2]={0,1};float mid[3];
             const std::uint32_t q=LineOf(la,lb,look,mid);
             float fwd[2];LineFacing(q,fwd);
@@ -632,15 +650,13 @@ int main() {
         // The keys' presses.
         {
             Order o{};
-            Press p{};p.fastMove=true;Check(Wanted(p,&o) && o==Order::fastMove,"F: fast move");
-            p=Press{};p.reverseMove=true;Check(Wanted(p,&o) && o==Order::reverseMove,"R: reverse move");
+            Press p{};p.reverseMove=true;Check(Wanted(p,&o) && o==Order::reverseMove,"R: reverse move");
             p=Press{};p.unloadAt=true;Check(Wanted(p,&o) && o==Order::unloadAt,"U and a click: unload at");
             p=Press{};p.unloadNow=true;Check(Wanted(p,&o) && o==Order::dismountAll,"U twice: everyone off where they are");
             p=Press{};p.back=true;Check(Wanted(p,&o) && o==Order::withdraw,"B: back to base");
             p=Press{};p.holdFire=true;Check(Wanted(p,&o) && o==Order::holdFire,"H: hold fire");
             p=Press{};p.altitude=true;Check(Wanted(p,&o) && o==Order::altitude,"V: altitude");
             p=Press{};p.sprint=true;Check(Wanted(p,&o) && o==Order::sprint,"Z: sprint");
-            p=Press{};p.smoke=true;Check(Wanted(p,&o) && o==Order::smoke,"X: smoke");
             p=Press{};p.decoy=true;Check(Wanted(p,&o) && o==Order::decoy,"C: decoys");
             p=Press{};p.guardAt=true;p.attackMove=true;Check(Wanted(p,&o) && o==Order::guard,"the card's GUARD and a click: a guard, not an attack-move");
         }

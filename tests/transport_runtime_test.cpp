@@ -167,6 +167,7 @@ bool SupportWithdrawVehicle(const void* v) noexcept {
     }
     return withdrawOk;
 }
+bool SupportWithdrawable(const void*) noexcept {return withdrawOk;}
 int heliLeaves=0;
 bool HeliStartLeaving(const void* v) noexcept {if(v==heli.m)++heliLeaves;return v==heli.m;}
 }  // namespace crew
@@ -435,6 +436,7 @@ void Withdraw() {
     MakeVehicle(heli,heliSeats,13);Place(heli,0,0,0);heliGround=true;MakeObj(soldier[0]);
     squads[0]={&soldier[0],4,4,&heli,{},0,0,0};
     TransportPair(soldier[0].m,heli.m);
+    Check(TransportWithdrawable(soldier[0].m),"a support helicopter is a transport WITHDRAW sends off");
     Check(TransportWithdraw(soldier[0].m)==NpcCommandReason::none,"WITHDRAW with the squad aboard a landed helicopter");
     Check(squads[0].aboard==0 && withdrawals==1 && !TransportOf(soldier[0].m),"they got off first, it left, the pair is gone");
     Reset();
@@ -444,9 +446,11 @@ void Withdraw() {
     Check(TransportWithdraw(soldier[0].m)==NpcCommandReason::noTransport && withdrawals==0 && squads[0].aboard==4,
           "aloft with the squad aboard: refused (it would fly off with them)");
     heliGround=true;withdrawOk=false;
-    Check(TransportWithdraw(soldier[0].m)==NpcCommandReason::noTransport && TransportOf(soldier[0].m)==heli.m,
-          "not a support vehicle: refused, the pair kept");
-    Check(TransportWithdraw(soldier[1].m)==NpcCommandReason::noTransport,"no transport: refused");
+    Check(!TransportWithdrawable(soldier[0].m) && TransportOf(soldier[0].m)==heli.m,
+          "not a support vehicle: paired, but no transport WITHDRAW sends off (a recruited squad's WITHDRAW dismisses it)");
+    Check(TransportWithdraw(soldier[0].m)==NpcCommandReason::noTransport && TransportOf(soldier[0].m)==heli.m && withdrawals==0,
+          "not a support vehicle: refused before anything is sent off, the pair kept");
+    Check(TransportWithdraw(soldier[1].m)==NpcCommandReason::noTransport && !TransportWithdrawable(soldier[1].m),"no transport: refused");
 }
 
 void Succession() {

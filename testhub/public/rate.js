@@ -69,8 +69,15 @@ let busy = false;
 let token = store.get('token') || null;
 let memo = null;    // the token when localStorage is unavailable
 
+// The link decides first: /rate/en (the suffix), then ?lang=en; else the reader's last choice, else the browser's.
+function urlLang() {
+  const m = /^\/rate\/([a-z]{2})$/.exec(location.pathname);
+  const asked = m ? m[1] : new URLSearchParams(location.search).get('lang');
+  return asked && LANGS[asked] ? asked : null;
+}
+
 function pickLang() {
-  const asked = new URLSearchParams(location.search).get('lang') || store.get('lang');
+  const asked = urlLang() || store.get('lang');
   if (asked && LANGS[asked]) return asked;
   for (const l of navigator.languages || [navigator.language || '']) {
     const p = String(l).toLowerCase().slice(0, 2);
@@ -182,7 +189,14 @@ function renderChrome() {
   $('intro').textContent = t().intro;
   $('langs').replaceChildren(...Object.entries(LANGS).map(([k, name]) => h('button', {
     type: 'button', class: 'chip', lang: HTML_LANG[k], 'aria-pressed': k === lang ? 'true' : 'false',
-    onclick: () => { if (k === lang) return; lang = k; store.set('lang', k); render(); },
+    onclick: () => {
+      if (k === lang) return;
+      lang = k;
+      store.set('lang', k);
+      // Keep the address in step, so a link copied from the bar opens in the language on screen.
+      if (urlLang()) history.replaceState(null, '', '/rate/' + k + location.hash);
+      render();
+    },
   }, name)));
   $('prev').textContent = t().prev;
   $('next').textContent = t().next;
