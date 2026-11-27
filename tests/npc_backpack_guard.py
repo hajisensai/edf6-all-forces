@@ -107,7 +107,7 @@ def main() -> int:
                   'npcpack::AimOn(', 'NpcPackUse(h,slots[i].slot)'):
         fail('Backpack: the look before native readiness / its whole arc checked, or the use before its look')
     checks += 1
-    if 'ShotClearOf(h,eye,t->aim,0.0f)' not in backpack:
+    if 'ShotClearOf(h,t->object,eye,t->aim,0.0f)' not in backpack:
         fail('Backpack: a direct weapon\'s line not tested for friends')
     arc = body(npcai, 'bool PackArcClearOf(const void* self,')
     checks += 1
