@@ -65,6 +65,12 @@ constexpr unsigned kMesh=0x10FF4E0;
 // whole buffer), called from the LOD draw 0x1104100 once a pass at 0x1104131.
 constexpr unsigned kQueryCall=0x11E4244,kQuery=0x1631790;
 constexpr unsigned kPaletteCall=0x1104131,kPalette=0x11009A0;
+// Umbra's Commander callback 0x11E2120 (rcx the commander, kept in r13; edx the command, its table at 0x11E435C): its
+// command 3 (0x11E3E1C) asks how many objects the query found (Umbra::Commander::getDataCount, the import thunk
+// 0x12D61C4, called at 0x11E3E1F with rcx = r13) and walks them (getObjectData / getUserPointer) to the draw; the
+// commander's view at +0xE4 (1: the second view the callback treats apart, cmp [r13+0xE4], 1 at 0x11E21C6).
+constexpr unsigned kVisibleCall=0x11E3E1F,kDataCount=0x12D61C4;
+constexpr std::size_t kCommanderView=0xE4;
 // The renderer (lea 0x2136FF0, the Present command's rcx) and its swap chain: the render thread's Present command
 // 0x1118AF0 calls [[renderer+0x90]]+0x40 (IDXGISwapChain::Present, slot 8) at 0x1118B45.
 constexpr std::size_t kRenderer=0x2136FF0,kSwapChain=0x90;
@@ -82,6 +88,7 @@ using SubmitFn=void(__fastcall*)(void*,void*,int);
 using MeshFn=void(__fastcall*)(void*,void*,int,std::uint8_t,void*);
 using PresentFn=HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*,UINT,UINT);
 using QueryFn=bool(__fastcall*)(void*,void*,void*,void*,std::uint8_t);
+using DataCountFn=int(__fastcall*)(const void*);
 using HavokStepFn=void(__fastcall*)(void*,void*,void*,float);
 using HavokBuildFn=void(__fastcall*)(void*,void*,void*);
 using HavokFinishFn=void(__fastcall*)(void*,void*);
@@ -97,6 +104,7 @@ MeshFn nextMesh[std::size(kMeshCalls)]={};
 PresentFn nextPresent=nullptr;
 QueryFn nextQuery=nullptr;
 PassFn nextPalette=nullptr;
+DataCountFn nextDataCount=nullptr;
 HavokStepFn nextHavokStep[2]{};
 HavokBuildFn nextHavokBuild=nullptr;
 HavokFinishFn nextHavokFinish=nullptr;
@@ -658,6 +666,15 @@ std::atomic<unsigned> submits[kPasses]={},meshes{0};
 // The occlusion query reads (calls, not in yet, the waiting ones and their time) and the skin palettes (calls, time).
 std::atomic<unsigned> queries{0},queriesPending{0},queryWaits{0},palettes{0};
 std::atomic<long long> queryTicks{0},queryWaitTicks{0},queryWorst{0},paletteTicks{0};
+// Umbra's found objects (command 3): the batches and the objects in them, by the commander's view (0, 1, other).
+std::atomic<unsigned> collects{0};
+std::atomic<unsigned long long> visible[3]={};
+// The skinned instances a frame: the distinct poses (the palette's r8) a frame anchor's generation saw, in an
+// open-addressed table of (generation << 48 | pointer): a slot of an older generation is free, so a frame starts empty
+// without clearing it. A pose past the probe limit counts as new (an over-count, at most the probe misses).
+constexpr unsigned kSkinSlots=1u<<14,kSkinProbe=64;
+std::atomic<unsigned long long> skinSlots[kSkinSlots]={};
+std::atomic<unsigned> skinGen{1},skinned{0};
 
 void Max(std::atomic<long long>& m,long long v) noexcept {
     long long was=m.load(std::memory_order_relaxed);
@@ -731,6 +748,10 @@ void __fastcall InputHook(void* input) {
     const SceneStep s=SceneStepNow();
     cur=Frame{};cur.begin=now;cur.scene=s.scene;cur.step=s.count;cur.open=true;
     inputs[2]=inputs[1];inputs[1]=inputs[0];inputs[0]=now;
+    {   // a new frame's skinned instances (generation 0 is the empty slot's)
+        unsigned g=(skinGen.load(std::memory_order_relaxed)+1)&0xFFFF;
+        skinGen.store(g ? g : 1,std::memory_order_relaxed);
+    }
     nextInput(input);
     cur.inputEnd=Qpc();
     if(split && !presentTried)TryPresentHook();
@@ -790,12 +811,40 @@ bool __fastcall QueryHook(void* renderer,void* query,void* c,void* result,std::u
     if(wait){queryWaits.fetch_add(1,std::memory_order_relaxed);queryWaitTicks.fetch_add(d,std::memory_order_relaxed);}
     return in;
 }
+void CountSkinned(const void* pose) noexcept {
+    if(!pose)return;
+    const unsigned long long ptr=reinterpret_cast<std::uintptr_t>(pose)&0xFFFFFFFFFFFFull;
+    const unsigned long long gen=skinGen.load(std::memory_order_relaxed);
+    const unsigned long long key=gen<<48|ptr;
+    unsigned at=static_cast<unsigned>((ptr>>4)*0x9E3779B1u)&(kSkinSlots-1);
+    for(unsigned k=0;k<kSkinProbe;++k,at=(at+1)&(kSkinSlots-1)) {
+        unsigned long long v=skinSlots[at].load(std::memory_order_relaxed);
+        for(;;) {
+            if(v==key)return;                    // seen this frame
+            if(v>>48==gen)break;                 // another pose's this frame: the next slot
+            if(skinSlots[at].compare_exchange_weak(v,key,std::memory_order_relaxed)) {
+                skinned.fetch_add(1,std::memory_order_relaxed);
+                return;
+            }
+        }
+    }
+    skinned.fetch_add(1,std::memory_order_relaxed);
+}
 void* __fastcall PaletteHook(void* a,void* b,void* c,void* d) {
+    CountSkinned(c);
     const LONGLONG t=Qpc();
     void* const r=nextPalette(a,b,c,d);
     paletteTicks.fetch_add(Qpc()-t,std::memory_order_relaxed);
     palettes.fetch_add(1,std::memory_order_relaxed);
     return r;
+}
+int __fastcall DataCountHook(const void* commander) {
+    const int n=nextDataCount(commander);
+    const std::uint32_t view=*reinterpret_cast<const std::uint32_t*>(static_cast<const unsigned char*>(commander)+
+                                                                       kCommanderView);
+    collects.fetch_add(1,std::memory_order_relaxed);
+    if(n>0)visible[view<2 ? view : 2].fetch_add(static_cast<unsigned>(n),std::memory_order_relaxed);
+    return n;
 }
 
 // --- The render thread's Present ---
@@ -911,7 +960,10 @@ void Install() noexcept {
         std::size(kSubmitCalls),mesh,std::size(kMeshCalls));
     const bool query=Chain(kQueryCall,kQuery,reinterpret_cast<void*>(&QueryHook),reinterpret_cast<void**>(&nextQuery));
     const bool palette=Chain(kPaletteCall,kPalette,reinterpret_cast<void*>(&PaletteHook),reinterpret_cast<void**>(&nextPalette));
-    Log("HOOK perf queries=%d palettes=%d (PerfProbe=1: the occlusion query reads, the skin palettes)",query,palette);
+    const bool found=Chain(kVisibleCall,kDataCount,reinterpret_cast<void*>(&DataCountHook),
+                           reinterpret_cast<void**>(&nextDataCount));
+    Log("HOOK perf queries=%d palettes=%d visible=%d (PerfProbe=1: the occlusion query reads, the skin palettes, Umbra's "
+        "found objects)",query,palette,found);
     const bool build=Chain(kHavokBuildCall,kHavokBuild,reinterpret_cast<void*>(&HavokBuildHook),reinterpret_cast<void**>(&nextHavokBuild));
     const bool finish=Chain(kHavokFinishCall,kHavokFinish,reinterpret_cast<void*>(&HavokFinishHook),reinterpret_cast<void**>(&nextHavokFinish));
     havokTiming=build && finish;
@@ -1011,6 +1063,15 @@ void Report(unsigned frames) noexcept {
         const double f=frames ? frames : 1.0;
         Log("PERF GPU a frame: occlusion query reads %.1f (%.1f not in yet, %.1f waiting), %.3f ms (waiting %.3f, worst "
             "call %.2f); skin palettes %.1f, %.3f ms",q/f,qp/f,qw/f,qt/f,qwt/f,qx,pa/f,pat/f);
+    }
+    const unsigned co=collects.exchange(0,std::memory_order_relaxed),sk=skinned.exchange(0,std::memory_order_relaxed);
+    unsigned long long vis[3];
+    for(unsigned i=0;i<3;++i)vis[i]=visible[i].exchange(0,std::memory_order_relaxed);
+    if(Cfg().debug && (co || sk)) {
+        const double f=frames ? frames : 1.0;
+        Log("PERF VISIBLE a frame: umbra collects %.1f, visible %.0f (view 0 %.0f, view 1 %.0f, other %.0f), skinned "
+            "instances %.0f",co/f,static_cast<double>(vis[0]+vis[1]+vis[2])/f,static_cast<double>(vis[0])/f,
+            static_cast<double>(vis[1])/f,static_cast<double>(vis[2])/f,sk/f);
     }
     char out[700],in[700];
     const int no=NetRows(netcount::out,"head 0x%08X",out,sizeof(out)),ni=NetRows(netcount::in,"head 0x%08X",in,sizeof(in));
