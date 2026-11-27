@@ -13,6 +13,7 @@
 //   jet_obstacle_sim --withdraw-suite (withdrawing jets leave the map and are reaped: WithdrawSuite; withdraw_suite.log here)
 //   jet_obstacle_sim --player-rotor-suite (real Hover: player/hail goals in the NPC band remain reachable)
 //   jet_obstacle_sim --ground-settle-suite (real HoldOffGround: a craft standing on the ground is not thrown up)
+//   jet_obstacle_sim --wobble-suite [--out DIR] (real Wing / SortieGuide flown level: no bank left swinging; DIR: CSVs)
 //
 //   a   level 60 m over the ground at cruise, heading +z, a 150 m tall 60x60 building 1500 m ahead
 //   b   the same at a 400 m tall 80x80 tower (too steep to climb: it must turn)
@@ -932,6 +933,98 @@ int PlayerRotorSuite() {
     return failures ? 1 : 0;
 }
 
+// --wobble-suite (the user, 2026-11-27: 「飞机会左右摇摆，即便是在平飞的时候」): the production Wing (and SortieGuide's level
+// passes) flown level after a heading step or onto a line offset to one side; what it rolls once settled. Its bank (the
+// body's roll about its nose) is sampled every frame: after `settle` s, the largest bank and the bank's reversals (a sign
+// change past kWobbleBank each way) and, on a line, its cross-track swing. A level flight settled holds its wings level.
+constexpr float kWobbleBank=0.035f;   // rad (2 deg): a roll past this either way is a bank, not trim
+struct WobbleResult { float bank=0.0f,off=0.0f,heading=0.0f;int reversals=0; };
+float BankOf(const unsigned char* v) {
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    return -std::asin(Clamp(m[1],-1.0f,1.0f));
+}
+WobbleResult WobbleCase(Role role,float stepDeg,float cross,SortiePass pass,bool sortie,float seconds,float settle,FILE* csv) {
+    boxes.clear();
+    const Kind& k=KindOf(role);
+    const float speed=role==Role::gunship ? k.cruise : k.attack;
+    const float alt=sortie ? (pass==SortiePass::carpet ? sortie::kCarpetAlt : sortie::kMissilePassAlt) : 400.0f;
+    const float off=stepDeg*kPi/180.0f;
+    const float at[3]={cross,alt,-9000.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
+    const float mark[3]={0.0f,0.0f,0.0f},heading[3]={0.0f,0.0f,1.0f};
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    Place(j,v,ctrl.data(),role,at,dir,speed,0.0f);
+    j.launched=true;j.burden=Burden{1.0f,0.0f};
+    Arms arms{};arms.pick=-1;
+    if(sortie)SortieBegin(j,pass,mark,at,heading,nowMs,sortie::RunSpec{0.0f,1.0f,0.0f});
+    WobbleResult r;
+    int sign=0;
+    for(int f=0;f<static_cast<int>(seconds*60.0f);++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3]={0.0f,0.0f,1.0f},go=speed;
+        if(sortie) {
+            bool gunsOk=false,missileOk=false;
+            SortieGuide(j,k,arms,pos,nose,mark,mark[1]+k.alt,nowMs,want,&go,&gunsOk,&missileOk);
+        } else {
+            const float level[3]={0.0f,0.0f,1.0f};Level(pos,level,alt,want);
+        }
+        Wing(j,k,v,pos,clear,nose,want,go,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        const float t=static_cast<float>(f)*kDt,bank=BankOf(v);
+        if(csv)std::fprintf(csv,"%.3f,%.1f,%.1f,%.1f,%.4f,%.4f\n",t,pos[0],pos[1],pos[2],bank,std::atan2(j.m.vel[0],j.m.vel[2]));
+        if(t>=settle && pos[2]<-200.0f) {   // settled, and short of the mark (a sortie's pass ends past it)
+            r.bank=std::fmax(r.bank,std::fabs(bank));
+            r.off=std::fmax(r.off,std::fabs(pos[0]));
+            r.heading=std::fmax(r.heading,std::fabs(std::atan2(j.m.vel[0],j.m.vel[2])));
+            const int now=bank>kWobbleBank ? 1 : bank< -kWobbleBank ? -1 : 0;
+            if(now && sign && now!=sign)++r.reversals;
+            if(now)sign=now;
+        }
+        Move(j,v);
+        if(j.sortie.done)break;
+    }
+    return r;
+}
+int WobbleSuite(const char* out) {
+    config=Config{};config.jetPilot=true;
+    config.bigWorld=20000.0f;   // no case near the play edge (the edge suite's business)
+    int failures=0,cases=0;
+    const struct { const char* name;Role role; } roles[]={{"strike",Role::strike},{"fighter",Role::fighter},
+        {"interceptor",Role::interceptor},{"multirole",Role::multirole},{"gunship",Role::gunship}};
+    const struct { const char* name;float step,cross;bool sortie;SortiePass pass;float settle; } cs[]={
+        {"level, on its heading",0.0f,0.0f,false,SortiePass::carpet,5.0f},
+        {"level, 30 deg heading step",30.0f,0.0f,false,SortiePass::carpet,20.0f},
+        {"level, 120 deg heading step",120.0f,0.0f,false,SortiePass::carpet,30.0f},
+        {"carpet line 150 m aside",0.0f,150.0f,true,SortiePass::carpet,25.0f},
+        {"missile pass line 300 m aside",0.0f,300.0f,true,SortiePass::missilePass,25.0f}};
+    for(const auto& ro:roles)for(const auto& c:cs) {
+        if(c.sortie && ro.role==Role::gunship)continue;
+        FILE* csv=nullptr;
+        if(out && std::strcmp(out,".")){
+            char path[512];std::snprintf(path,sizeof(path),"%s/wobble_%s_%d.csv",out,ro.name,static_cast<int>(&c-cs));
+            csv=std::fopen(path,"w");
+            if(csv)std::fprintf(csv,"t,x,y,z,bank,yaw\n");
+        }
+        const WobbleResult r=WobbleCase(ro.role,c.step,c.cross,c.pass,c.sortie,60.0f,c.settle,csv);
+        if(csv)std::fclose(csv);
+        const bool ok=r.reversals==0 && r.bank<0.09f;
+        failures+=!ok;++cases;
+        std::printf("wobble %-12s %-32s settled: bank <= %5.1f deg, %2d reversals, off <= %5.1f m, heading <= %4.1f deg (%s)\n",ro.name,c.name,
+                    r.bank*180.0f/kPi,r.reversals,r.off,r.heading*180.0f/kPi,ok ? "ok" : "FAIL");
+    }
+    std::printf("wobble suite: %d cases, %d failed\n",cases,failures);
+    return failures ? 1 : 0;
+}
+
 // --ground-settle-suite (CTest jet_ground_settle): the production HoldOffGround with a player rotor craft's bottom
 // clearance (playerjet FloorClear, `rest` its position over its bottom: the carrier's 8.516 m) standing on the ground,
 // its bottom a few cm under a bump or over it, settling or still: never thrown up (the user, 2026-10-07: "the aircraft
@@ -1373,7 +1466,7 @@ int main(int argc,char** argv) {
     const char* outDir=".";
     std::string tag;
     float seconds=0.0f;
-    bool selftest=false,playerRotors=false,strikeRoom=false,extendFlip=false;
+    bool selftest=false,playerRotors=false,strikeRoom=false,extendFlip=false,wobble=false;
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--withdraw-suite"))return WithdrawSuite();
     for(int a=1;a<argc;++a) {
@@ -1384,6 +1477,7 @@ int main(int argc,char** argv) {
         else if(!std::strcmp(argv[a],"--tag") && a+1<argc)tag=argv[++a];
         else if(!std::strcmp(argv[a],"--selftest"))selftest=true;
         else if(!std::strcmp(argv[a],"--ground-settle-suite"))return GroundSettleSuite();
+        else if(!std::strcmp(argv[a],"--wobble-suite"))wobble=true;
         else if(!std::strcmp(argv[a],"--player-rotor-suite"))playerRotors=true;
         else if(!std::strcmp(argv[a],"--strike-room-suite"))strikeRoom=true;
         else if(!std::strcmp(argv[a],"--extend-flip-suite"))extendFlip=true;
@@ -1397,6 +1491,7 @@ int main(int argc,char** argv) {
     if(selftest)return SelfTest(outDir);
     if(strikeRoom)return StrikeRoomSuite(outDir);
     if(extendFlip)return ExtendFlipSuite(outDir);
+    if(wobble)return WobbleSuite(outDir);
     if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     const std::string csvPath=std::string(outDir)+"/"+tag+".csv",logPath=std::string(outDir)+"/"+tag+".log";
     logFile=std::fopen(logPath.c_str(),"w");

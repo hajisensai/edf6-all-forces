@@ -1446,6 +1446,9 @@ add_test(NAME jet_strike_room COMMAND jet_obstacle_sim --strike-room-suite --out
 # An extend Strike begins is flown, not ended the next frame and planned again (jet_obstacle_sim --extend-flip-suite;
 # the 2026-11-26 perfrun log's fighter: 245 approach / extend flips and teardrop lines in a minute).
 add_test(NAME jet_extend_flip COMMAND jet_obstacle_sim --extend-flip-suite --out "${CMAKE_BINARY_DIR}")
+# A wing flown level holds its wings level once on its heading or its pass line (jet_obstacle_sim --wobble-suite; the
+# user, 2026-11-27: 「飞机会左右摇摆，即便是在平飞的时候」: JetSteer's acos snap, the gunship's roll-out).
+add_test(NAME jet_wobble COMMAND jet_obstacle_sim --wobble-suite)
 # The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
 # offline (tools/play_area_check.cpp). Not part of the plugin build:
 # cmake --build build --target play_area_check && build\play_area_check.exe

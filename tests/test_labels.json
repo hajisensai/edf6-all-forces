@@ -3517,6 +3517,12 @@
    ],
    "scripts": []
   },
+  "jet_wobble": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "jetsound_check": {
    "labels": [
     "plugin-native"
