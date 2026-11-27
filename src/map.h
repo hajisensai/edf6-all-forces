@@ -57,3 +57,12 @@ bool MapOwnsView() noexcept;
 // The map holds this camera's stock HUD off in the current mission: only its follower gauge bars give way too.
 bool MapHidesStockHud(const void* camera) noexcept;
 }  // namespace crew
+
+namespace crew {
+// map.cpp: the game window's mouse wheel for the magnified sight's range (`hold` while it is up: the wheel's notches are
+// swallowed and counted, up +; the count since the last call), and the first XInput pad's buttons now (false: none).
+int TakeScopeWheel(bool hold) noexcept;
+bool MapPadButtons(std::uint16_t* buttons) noexcept;
+// The same pad with its analog triggers (0..255), for the controlled enemy's attack keys.
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept;
+}  // namespace crew

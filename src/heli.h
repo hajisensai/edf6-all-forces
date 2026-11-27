@@ -117,3 +117,7 @@ void RescueTick() noexcept;
 struct RescueCue { wchar_t text[128]; bool bad; };
 bool PlayerRescueCue(RescueCue* out) noexcept;
 }  // namespace crew
+
+namespace crew {
+void ResetHelis() noexcept;       // heli.cpp (and the player track, the rescue)
+}  // namespace crew

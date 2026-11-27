@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <cstdint>
 #include "firecontrol.h"
+#include "playerjet.h"
 #include "gunsight.h"
 #include "reticle.h"
 #include "roundaim.h"

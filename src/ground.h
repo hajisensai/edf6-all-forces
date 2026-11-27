@@ -5,3 +5,7 @@ bool IsGroundRobo(const void* vehicle) noexcept;
 void GroundFrame(unsigned char* vehicle) noexcept;   // after its stock pre-update, NPC-driven crawlers only
 bool CheckGroundProfile() noexcept;
 }  // namespace crew
+
+namespace crew {
+void ResetGround() noexcept;      // ground.cpp
+}  // namespace crew

@@ -6,6 +6,7 @@
 // Included by crew.h.
 #pragma once
 #include "pvp_match.h"
+#include "objref.h"
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
