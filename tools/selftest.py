@@ -6681,7 +6681,9 @@ def map_commands_wired() -> None:
     # Keys come through the plugin's input source (common/edf/input_source.h), so a background host's keyboard is read.
     assert code.count('edf::AsyncKey(') == 1 and 'GetAsyncKeyState' not in code
     reader = code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
-    assert 'Down(VK_TAB)' in reader
+    # The order keys are the ini's (map_keys.h, Broken Arrow's set: Tab the sub-selection among them), read in one loop.
+    assert 'for(int i=0;i<mapkeys::count;++i)k.order[i]=keys.vk[i]>0 && Down(keys.vk[i]);' in reader
+    assert "int vk[count]={'Q','E','R','T','U','F','H','Z','X','C','V','B',0x09," in src('src/map_keys.h')
     # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range; enemy placement also works online): on any other map
     # they stay the game's and never switch the input back from the pad.
     assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn();' in code
@@ -6690,10 +6692,12 @@ def map_commands_wired() -> None:
     assert 'placeHoldsPad.store(placeKeys && ' in code and '(placeKeys && ((k.padUp && !g.was.padUp)' in code
     frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
     assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
-    # The box never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧"; RTS since
-    # 2026-10-19: a plain left drag boxes whenever there is a unit to box, the middle button's drag pans).
-    assert 'if(Down(VK_MBUTTON) || (Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured())){mapcam::Drag(v,dx,dy);' in mapc
-    assert 'else if(k.ctrl || (boxes && !armed)){g.boxing=true;' in code, 'a plain left drag over the map is the box'
+    # The box never pans: the map's left drag is always the box (the user, 2026-10-06: "操作 需要一个框选吧"; Broken
+    # Arrow's since 2026-11-27: WASD pans, the middle drag turns, the right drag lays a line).
+    steer = mapc.split('void Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(Down(VK_MBUTTON) && !MapCommandPointerCaptured()){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}' in steer
+    assert 'Down(VK_LBUTTON)' not in steer and 'Down(VK_RBUTTON)' not in steer, 'no left / right drag moves the camera'
+    assert 'else if(k.ctrl || !armed){g.boxing=true;' in code, 'a plain left drag over the map is the box'
     # The RTS groups, the Shift queue and HOLD (2026-10-19: 「合并分组经常无效，分开也是」): SPLIT / JOIN are gone, the
     # queue goes on with the map shut (map.cpp Frame ticks it before its open test), a group follows a squad's hand-over.
     assert 'SplitSquad' not in code and 'MergeSquads' not in code and 'SplitSquad' not in src('src/npcai.cpp')
@@ -6706,8 +6710,10 @@ def map_commands_wired() -> None:
     assert 'crew::AuthorityQueue();' in src('tools/map_command_runtime_check.cpp')
     assert 'NpcSquadSuccessor(' in code and 'AddHandover(Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()});' in src('src/npcai.cpp')
     assert 'crew::RtsGroups();' in src('tools/map_command_runtime_check.cpp')
-    assert frame.index('MapCommandEats(front)') < frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture and mark edges precede camera drag; map requests pump while native inputs are held'
-    assert 'Down(VK_RBUTTON) && !MapCommandPointerCaptured()' in mapc
+    # Q is the attack-move now (no mark key on the map: the right button focuses an enemy), so nothing latches it first.
+    assert frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture precedes camera drag; map requests pump while native inputs are held'
+    assert 'MapCommandEats' not in mapc and 'MapCommandEats' not in code
+    assert 'Down(VK_MBUTTON) && !MapCommandPointerCaptured()' in mapc
     assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
     assert 'ResetMapCommands();' in mapc.split('void ResetMap()', 1)[1].split('\n}', 1)[0]
     assert 'const bool allowed=Cfg().enabled;' in code, 'online requests must reach per-unit authority checks, not a global offline veto'
@@ -7204,12 +7210,14 @@ def npc_pickup_wired() -> None:
     assert 'npc::Dist(pos,at)>npc::pickup::kReach' in pick
     assert '!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
     assert 'healthPick<0 ? Cfg().npcPickupHealth' in code, 'the ini is the default until the map flips it'
-    # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; Y and O keys.
+    # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; sweep and health
+    # the card's buttons alone (Y / O were dropped with Broken Arrow's keys, 2026-11-27).
     mapcmd, hud = src('src/mapcmd.cpp'), src('src/hud.cpp')
     assert 'mapbtn::Hit(v.button,v.buttons,x,y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
     assert 'SameUi(g.uiPress,UiAt(' in mapcmd and 'MapCommandUiPanels(mapUiPanels,mapUiPanelCount);' in hud
     assert 'PlayerSelectablePayload(&r)' in hud and 'MapCommandPayloadButtons(rects,r.selectionToken,r.seat,entries,hits);' in hud
-    assert "k.sweep=Down('Y');k.health=Down('O');" in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
+    assert 'const bool sweep=clicked(Id::sweep),health=clicked(Id::health);' in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
+    assert "Down('Y')" not in mapcmd and "Down('O')" not in mapcmd
     assert 'EXCLUDE_FROM_ALL tools/map_buttons_check.cpp' in cmake and 'map_buttons_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
     assert 'kNotifyBoxSig' in code and 'kApplyBoxSig' in code and 'InstallBoxes();' in code
     for key, default in (('NpcPickupKey', '89'), ('NpcPickupRange', '80'), ('NpcPickupSec', '90'), ('NpcPickupHealth', '0')):
@@ -7238,7 +7246,9 @@ def npc_formation_wired() -> None:
         assert f'L"{key}"' in plugin and (f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin), key
         assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
         assert key in readme and key in doc, key
-    assert 'FormationTick();' in code and 'k.formation=Down(\'T\')' in src('src/mapcmd.cpp')
+    # The map's formation: the card's button and its menu (T is Broken Arrow's fire mission since 2026-11-27).
+    assert 'FormationTick();' in code and 'if(clicked(Id::formation)){g.formationMenu=!g.formationMenu;' in src('src/mapcmd.cpp')
+    assert 'fireMission,  // T' in src('src/map_keys.h')
     table = src('src/hudtext.inc')
     shapes = re.findall(r'^\s*(\w+),\s*//', src('src/formation.h').split('enum class Shape', 1)[1].split('};', 1)[0], re.M)
     assert len(shapes) == 11, shapes
@@ -7286,7 +7296,8 @@ def npc_ai_wired() -> None:
         assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
     # The soldiers' own dashes (docs/npc-mobility-re.md): after Drive, never for a script's unit; each feature behind its
     # own signatures; keys read, range-checked, shipped and documented; the offline check runs under CTest.
-    assert 'if(!npc::Scripted(control))Mobility(*s,h,kSoldiers[cls],pos,p,ms);' in think, 'Mobility: after Drive, not for a script unit'
+    # SPRINT (the map's Z, 2026-11-27) shortens its rests while the squad's sprint lasts.
+    assert 'if(!npc::Scripted(control))   // a script\'s unit keeps its stock moves\n        Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil ? mapcmd::kSprintRestShare : 1.0f);' in think, 'Mobility: after Drive, not for a script unit'
     assert 'Mobility(' not in scripted and 'kDashPress' not in scripted and 'kSecondary' not in scripted
     assert 'InstallMobility();' in code and 'MobilitySigs(kWingDashSigs' in code and 'MobilitySigs(kFencerMoveSigs' in code
     assert 'npc_mobility_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1] and 'tests/npc_mobility_native_audit.py' in cmake
@@ -7344,7 +7355,8 @@ def npc_ai_wired() -> None:
     # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
     # last write never read as the stock AI driving, taken back when the drive ends.
     assert 'f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot' in body and '(image+kBargaWalk)(v,block,point,1.0f,' in body
-    assert 'if(!s.active){TakeBack(v,f,*p);return;}' in body
+    # A REVERSE MOVE (the map's R, 2026-11-27) is a guard of its point once there.
+    assert 'if(!s.active){if(backing)p->cmd.order=Order::guard;TakeBack(v,f,*p);return;}' in body
     stock = post.split('bool StockDriving(unsigned char* v,Family f,const Post& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'p.wrote && c0==p.last[0] && c1==p.last[1]' in stock
     assert 'kBargaWalkSig[]={0x40,0x53,' in post, 'the Barga walk prologue (push rbx with REX)'
@@ -7389,7 +7401,8 @@ def npc_ai_wired() -> None:
     assert 'inbox.Point(p,now)' in qframe and 't.slot<0' in qframe, "a teammate's point mark goes unnamed"
     assert re.search(r'inline bool MarkOn\(\) noexcept \{ return Cfg\(\)\.enabled && Cfg\(\)\.npcMarkKey>0; \}', src('src/npc_mark.h'))
     assert 'QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
-    assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
+    # Decided for the units the orders reach: Tab's sub-selection, else the whole selection (2026-11-27).
+    assert 'mapcmd::Decide(active,p,allowed,point,pointOk,NpcMarked())' in mapc
     for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     # Boarding (§7): real soldiers may drive seat 0 only through the verified native driver path; one strong reference
@@ -7440,7 +7453,9 @@ def npc_ai_wired() -> None:
     assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!VanillaRecruitInEffect()' in walk, \
         'the walk-up stays when the map cannot recruit (AI off, SetFollow not as read) or VanillaRecruit=1'
     assert '!(joinOrder && NativeJoinable(top))' in cmd.split('switch', 1)[0]
-    assert 'if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
+    # (before the Broken Arrow orders' rules, 2026-11-27: a joinable script squad takes none of them either)
+    assert 'if(e.owner==Owner::squad && e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
+    assert takes.index('e.u.joinOnly)return (o==Order::recruit') < takes.index('if(o==Order::holdFire)return true;')
     assert 'L"VanillaRecruit"' in plugin and re.search(r'^VanillaRecruit=0\s*$', ini, re.M) and 'VanillaRecruit' in readme and 'VanillaRecruit' in doc
 
 

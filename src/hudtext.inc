@@ -311,7 +311,7 @@ HUDTEXT(legendNearestEnemy,L"NEAREST ENEMY",L"最近的敌人",L"最近的敵人
 HUDTEXT(cmdOfflineOnly,L"COMMANDS: OFFLINE ONLY",L"指挥：仅限离线",L"指揮：僅限離線",L"指揮：オフライン専用")
 HUDTEXT(cmdSelectFirst,L"SELECT UNITS FIRST (%ls)",L"请先选择单位（%ls）",L"請先選擇單位（%ls）",L"先にユニットを選択（%ls）")
 HUDTEXT(cmdNoUnit,L"NO UNIT TO COMMAND",L"没有可指挥的单位",L"沒有可指揮的單位",L"指揮できるユニットなし")
-HUDTEXT(cmdSelectHowMouse,L"DRAG / CLICK / 1-9 / TAB",L"拖动框选 / 点击 / 1-9 / Tab",L"拖曳框選 / 點擊 / 1-9 / Tab",L"ドラッグ / クリック / 1-9 / Tab")
+HUDTEXT(cmdSelectHowMouse,L"DRAG / CLICK / 1-9 / CTRL+A",L"拖动框选 / 点击 / 1-9 / Ctrl+A",L"拖曳框選 / 點擊 / 1-9 / Ctrl+A",L"ドラッグ / クリック / 1-9 / Ctrl+A")
 HUDTEXT(cmdNoGround,L"NO GROUND THERE",L"那里没有地面",L"那裡沒有地面",L"そこに地面がない")
 HUDTEXT(cmdGuardOne,L"%ls (%.0f, %.0f): %d UNIT",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
 HUDTEXT(cmdGuardMany,L"%ls (%.0f, %.0f): %d UNITS",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")

@@ -2,38 +2,36 @@
 // npc", "操作 需要一个框选吧"). While the map (map.cpp) is open:
 //  - the units: the helis the plugin flies (heli.cpp), its jets, rotor carriers and drones with no carrier (jet.cpp), the
 //    Depth Crawlers it drives (ground.cpp) -- each module lists the ones that take an order now (mapcmd.h);
-//  - the mouse moves a pointer the HUD draws (the game's own mouse delta: the game has no cursor of its own there). RTS
-//    since 2026-10-19 (the user: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): a left drag boxes the
-//    units (Shift adds; with no unit to box, or a point armed, it pans the map as before), the middle drag and WASD pan,
-//    a right drag turns, the wheel zooms; a left click selects the unit under the pointer (Shift adds / takes it out,
-//    twice or Ctrl: every unit of its kind on the screen) or, on empty ground, clears the selection (mapcmd_logic.h Box,
-//    Click, SelectKind); Ctrl+A every unit;
+//  - the controls are Broken Arrow's (the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」; the keys map_keys.h,
+//    each rebindable in the ini as Map*Key). The mouse moves a pointer the HUD draws (the game's own mouse delta: the
+//    game has no cursor of its own there): a left click selects the unit under it (Shift adds / takes it out; twice:
+//    every unit of its kind on the screen) or, on empty ground, clears the selection; a left drag boxes (mapcmd_logic.h
+//    Box, Click, SelectKind); Ctrl+A every unit. WASD and the middle drag move the camera, the wheel zooms;
 //  - the RTS groups (mapcmd_logic.h GroupKey): Ctrl+1-9 keeps the selection as a group, 1-9 selects it again (twice: the
 //    map centres on it), held by every member's identity (mapcmd_logic.h UnitRef) and found again through any member
 //    alive after its leader's death, on a guest too (npcai.cpp NpcSquadTopOf; NpcSquadSuccessor on the host);
-//    the pad's D-pad groups 1-4. They replace SPLIT / JOIN (P / L), which rearranged the native follow trees;
-//  - Tab / Shift+Tab (pad X) step through one unit at a time, then ALL (mapcmd_logic.h Cycle); the map centres on a unit
-//    selected so;
-//  - Z (pad Y): every selected unit attack-moves to the point under the pointer (with a pad: the screen's centre) and
-//    guards it there; several stand round it in a formation (mapcmd_logic.h Formation; guard helis share one orbit round
-//    the point instead: heli.cpp GuardOrbit spaces them). H (pad Y held): HOLD, each unit where it stands. V (pad RB):
-//    follow the player; X (pad LB): stop (back to what it did before any command).
-//  - the right button let go without a drag (a right drag still turns the map), by what is under it: an enemy: focus
-//    fire on it; the player's own mark: FOLLOW; the ground: a move there (mapcmd_logic.h RightClickOrder). Shift with it
-//    (or with Z) queues the point after the ones before it (mapcmd_logic.h Waypoints), kept by the unit's authority
-//    (MapCommandAuthority: this machine's for its own units, the host's for the others through command protocol v7's
-//    queued flag) and advanced by the scene's tick (MapCommandQueueTick: every frame, any map shut, the player dead or
-//    watching). A point order's button (move, attack-move) or a support's row arms the next left click on the map as its
-//    point; the right button cancels that instead.
-//  - an enemy under the pointer (the user, 2026-10-07: "应该在地图里面也能按q标记"): the mark key (NpcMarkKey, Q) marks it
-//    for the NPCs (npcai.cpp NpcMarkEnemy; the same one again: let go) instead of turning the map. With no enemy under the
-//    pointer Q turns the map.
+//    the pad's D-pad groups 1-4;
+//  - Tab steps the selection's kinds (mapcmd_logic.h SubKinds / NextSub: the orders reach that kind alone), then all
+//    again; the pad's X steps one unit at a time (mapcmd_logic.h Cycle);
+//  - the right button let go, by what is under it (mapcmd_logic.h RightClickOrder): an enemy: focus fire on it; the
+//    player's own mark: FOLLOW; a friendly vehicle: BOARD; the ground: a move there. A right drag lays a line across its
+//    length, the units spread on it facing away from the eye (mapcmd_logic.h LineOf / LineSlot; v11's line param).
+//    Shift with any point order queues it after the ones before it (mapcmd_logic.h Waypoints), kept by the unit's
+//    authority (MapCommandAuthority: this machine's for its own units, the host's for the others through the queued
+//    flag) and advanced by the scene's tick (MapCommandQueueTick: every frame, any map shut, the player dead or
+//    watching);
+//  - Q attack-move, F fast move, R reverse, U unload at (U twice: everyone off now), T fire mission (the support picked
+//    with [ ]) arm the next left click on the map as their point (the pad: A at the screen's centre; the right button or
+//    the pad's B leaves it); E stops (the queue too); H hold fire, V altitude switch for the active units; Z sprint,
+//    X smoke, C decoys, B back to base at once; F1-F4 pings seen by everyone in the room. The card's buttons: guard,
+//    hold, formation, sweep, health, pace. The pad: Y tapped an attack-move at the screen's centre, held HOLD; RB
+//    follow; LB stop;
 // The pointer's point: the map ray under it (mapcmd_logic.h ScreenRay on the view the HUD last drew), else that ray's
 // meeting with the level ground through the focus (RayLevel).
 // Online, owned units execute through their real AI authority. Replica squads are selected by native identity and
 // requested through command_net; accepted transport is displayed separately from the correlated authority result.
 // Remote vehicle commands are not fabricated by writing a local copy. Every order goes one way (Dispatch: this machine's
-// units through MapCommandAuthority, the others' in one request), the formation (T and its menu) too.
+// units through MapCommandAuthority, the others' in one request), the formation (its card button and menu) too.
 #include "crew.h"
 #include "formation.h"
 #include "map_buttons.h"
@@ -118,7 +116,7 @@ struct Game {
     bool armedClick=false;
     int supportPick;
     int supportTab=0;          // the bar's tab shown (a click on a tab; [ ] picking into another tab: that tab)
-    int marchPace=-1;           // the paced march (P): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
+    int marchPace=-1;           // the paced march (the card's PACE): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
     bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
     bool dismountMenu=false;    // the ALL OUT button's menu open (map_buttons.h kDismountMenu): one menu at a time
