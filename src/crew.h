@@ -15,6 +15,7 @@
 #include "mission_packs.h"
 #include "step_fresh.h"   // handoff freshness by the scene step (GameFrame), any thread
 #include "sound_place.h"
+#include "map_keys.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -372,6 +373,7 @@ struct Config {
     bool enemyControl=true;         // native enemy player mode, entered from the map; disabling releases control
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
+    mapkeys::Keys mapKeys{};        // the map's order keys (map_keys.h: Broken Arrow's Q E R T U F H Z X C V B Tab F1-F4)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
     bool mapMarchPace=false;        // ...a move / attack-move given together keeps to the slowest unit's pace (P toggles; march_pace.h)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)

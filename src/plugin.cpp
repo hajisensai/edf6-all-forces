@@ -400,6 +400,7 @@ void Validate(Config& n) noexcept {
     n.sightRangeDownKey=static_cast<int>(FixInt("SightRangeDownKey",n.sightRangeDownKey,0,254));
     n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
+    for(int i=0;i<mapkeys::count;++i)n.mapKeys.vk[i]=static_cast<int>(FixInt(mapkeys::kIni[i],n.mapKeys.vk[i],0,254));
     n.thermalKey=static_cast<int>(FixInt("VehicleThermalKey",n.thermalKey,0,254));
     n.thermalButton=static_cast<int>(FixInt("VehicleThermalButton",n.thermalButton,0,255));
     n.nightVisionButton=static_cast<int>(FixInt("InfantryNightVisionButton",n.nightVisionButton,0,0xFFFF));
@@ -930,6 +931,7 @@ void LoadConfig() noexcept {
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
+    for(int i=0;i<mapkeys::count;++i)n.mapKeys.vk[i]=ReadInt(mapkeys::kIniW[i],static_cast<DWORD>(n.mapKeys.vk[i]));
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
     n.mapMarchPace=ReadBool(L"MapMarchPace",n.mapMarchPace);
@@ -1164,6 +1166,11 @@ void LoadConfig() noexcept {
     Log("CONFIG firstPerson muzzle flash scale %.2f (of the gun as drawn) bright %.2f",n.fpFlashScale,n.fpFlashBright);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f marchPace=%d",n.map,n.mapKey,n.mapButton,n.mapViewDistance,n.mapMarchPace);
+    {
+        const auto& k=n.mapKeys.vk;
+        Log("CONFIG map order keys attackMove=0x%X stop=0x%X reverse=0x%X fireMission=0x%X unload=0x%X fastMove=0x%X holdFire=0x%X sprint=0x%X smoke=0x%X decoy=0x%X altitude=0x%X back=0x%X subgroup=0x%X pings=0x%X 0x%X 0x%X 0x%X",
+            k[0],k[1],k[2],k[3],k[4],k[5],k[6],k[7],k[8],k[9],k[10],k[11],k[12],k[13],k[14],k[15],k[16]);
+    }
     Log("CONFIG vehicle secondary switch key=0x%X button=0x%X (the primary's rounds: PlayerJetSwitchKey / LB)",
         n.vehicleSecondarySwitchKey,n.vehicleSecondarySwitchButton);
     Log("CONFIG vehicle fire keys 0x%X 0x%X 0x%X 0x%X buttons 0x%X 0x%X 0x%X 0x%X; auto turrets %d key=0x%X button=0x%X",
