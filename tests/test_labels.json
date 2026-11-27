@@ -5568,6 +5568,23 @@
    ],
    "scripts": []
   },
+  "object_update_mt": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "object_update_mt_sigs": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/object_update_mt_sig_audit.py"
+   ]
+  },
   "objref": {
    "labels": [
     "plugin-core",
