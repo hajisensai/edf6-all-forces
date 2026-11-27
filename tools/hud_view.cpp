@@ -859,7 +859,9 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // Wing Diver and a Fencer one, of its twelve seats.
     sceneCmd.composeEntry=-1;sceneCmd.composeSeats=0;sceneCmd.compose=SupportLoadout{};
     if(payload) {
-        sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=10;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
+        int platoon=0;   // the platoon's entry, by its name (the catalog above changes)
+        while(platoon<sceneCmd.supports && std::wcscmp(kCatalog[platoon].name,L"步兵大队（12人）")!=0)++platoon;
+        sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=platoon;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
         sceneCmd.supportTab=static_cast<int>(SupportTab::ground);   // the platoon's tab shown
         for(int i=0;i<4;++i){sceneCmd.compose.soldier[i]=SupportWeapon::wingLance;sceneCmd.compose.soldier[4+i]=SupportWeapon::fencerCannon;}
     }
