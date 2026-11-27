@@ -72,42 +72,63 @@ def source_modules(root: str) -> dict[str, Path]:
     return modules
 
 
-def source_recipes(root: str) -> dict[str, str]:
-    """Fingerprint each generator's dependency closure, without importing or executing it."""
+def _imports(raw: bytes) -> set[str]:
+    """The top-level names a module imports (also function-local imports and importlib.import_module of a constant or
+    of a module-level table's values)."""
+    imports: set[str] = set()
+    tree = ast.parse(raw)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(a.name.split('.')[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module.split('.')[0])
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'import_module' and node.args:
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                imports.add(arg.value)
+            elif isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name):
+                for assignment in tree.body:
+                    targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target] if isinstance(assignment, ast.AnnAssign) else []
+                    if any(isinstance(t, ast.Name) and t.id == arg.value.id for t in targets):
+                        imports.update(ast.literal_eval(assignment.value).values())
+    return imports
+
+
+def _recipes(root: str, groups: tuple[str, ...]) -> dict[str, str]:
+    """Each of `groups`' recipe: the digest of its generator's local dependency closure. Only the modules some closure
+    reaches are read and parsed, each once (a module outside every closure cannot change a recipe)."""
     modules = source_modules(root)
-    dependencies: dict[str, set[str]] = {}
     digests: dict[str, str] = {}
-    for name, path in modules.items():
-        raw = path.read_bytes()
-        digests[name] = sha256(raw)
-        imports: set[str] = set()
-        tree = ast.parse(raw)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imports.update(a.name.split('.')[0] for a in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imports.add(node.module.split('.')[0])
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'import_module' and node.args:
-                arg = node.args[0]
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    imports.add(arg.value)
-                elif isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name):
-                    for assignment in tree.body:
-                        targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target] if isinstance(assignment, ast.AnnAssign) else []
-                        if any(isinstance(t, ast.Name) and t.id == arg.value.id for t in targets):
-                            imports.update(ast.literal_eval(assignment.value).values())
-        dependencies[name] = imports & modules.keys()
+    dependencies: dict[str, set[str]] = {}
+
+    def read(name: str) -> set[str]:
+        if name not in dependencies:
+            raw = modules[name].read_bytes()
+            digests[name] = sha256(raw)
+            dependencies[name] = _imports(raw) & modules.keys()
+        return dependencies[name]
+
     out = {}
-    for group in GROUPS:
+    for group in groups:
         seen: set[str] = set()
         pending = [generator(group)]
         while pending:
             name = pending.pop()
             if name not in seen:
                 seen.add(name)
-                pending.extend(dependencies[name] - seen)
+                pending.extend(read(name) - seen)
         out[group] = sha256(json.dumps({n: digests[n] for n in sorted(seen)}, sort_keys=True).encode())
     return out
+
+
+def source_recipes(root: str) -> dict[str, str]:
+    """Fingerprint each generator's dependency closure, without importing or executing it."""
+    return _recipes(root, GROUPS)
+
+
+def source_recipe(root: str, group: str) -> str:
+    """source_recipes(root)[group], reading only that generator's closure."""
+    return _recipes(root, (group,))[group]
 
 
 def recipes() -> dict[str, str]:

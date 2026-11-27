@@ -45,6 +45,9 @@ ROOT = os.path.normpath(os.path.join(HERE, '..'))
 # The installer's messages in Chinese whatever this machine's display language (pylib/i18n.py; CI's windows-latest is
 # English): the tests below compare its Chinese words. installer_speaks_english checks the English side.
 os.environ['EDF6_LANG'] = 'zh'
+# The tests' one store of the game-derived builds (pylib/derivedcache.py), the folder ctest gives its tests: the workers
+# (fresh interpreters) built the same tracked vehicles from Root.cpk again, test after test. The installer never sets it.
+os.environ.setdefault('EDF6_DERIVED_CACHE', os.path.join(ROOT, 'build', 'derived-cache'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'autoturret', 'tools'))

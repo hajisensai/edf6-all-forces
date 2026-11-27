@@ -2479,6 +2479,9 @@ add_dependencies(offline_checks edf41_sound_bank_test)
 add_test(NAME edf41_sound_bank COMMAND edf41_sound_bank_test)
 add_test(NAME edf41_sound_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_sound_lifecycle_test.py")
 add_test(NAME tracked_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_install.py")
+# The test processes' shared store of the tracked vehicles' builds (pylib/derivedcache.py): off for the installer, a hit
+# only for the same key, a torn entry built again, a stored build the same as a fresh one.
+add_test(NAME derived_cache COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_derivedcache.py")
 # Its lifecycle classes in one test, NativeRangeTests (a ~2 min build a vehicle) one vehicle a shard (EDF6_TEST_SHARD;
 # all in one run took ~330 s).
 add_test(NAME tracked_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_range.py"
@@ -3135,13 +3138,16 @@ add_test(NAME aura_vehicles_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.
 # And the installer's messages in Chinese (pylib/i18n.py EDF6_LANG) whatever the machine's display language: CI's
 # windows-latest is English, and the tests compare the Chinese words (tools/selftest.py installer_speaks_english: English).
+# And one store of the game-derived builds for every test process (pylib/derivedcache.py EDF6_DERIVED_CACHE): each test
+# built the same tracked vehicles from Root.cpk again (tools/selftest.py gives its workers the same folder).
 get_property(_all_tests DIRECTORY PROPERTY TESTS)
 foreach(_test IN LISTS _all_tests)
   get_test_property(${_test} ENVIRONMENT _env)
   if(NOT _env)
     set(_env)
   endif()
-  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh)
+  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh
+       "EDF6_DERIVED_CACHE=${CMAKE_BINARY_DIR}/derived-cache")
   set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${_env}")
 endforeach()
 
