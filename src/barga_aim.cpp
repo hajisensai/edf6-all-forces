@@ -49,6 +49,12 @@ constexpr std::uint64_t kMostMuzzles=8;
 constexpr float kGroundBelow=60.0f;      // m under a sphere a ground ray looks
 constexpr ULONGLONG kLogMs=500;
 constexpr std::size_t kBoneEnd=edf::kBoneRows+64;   // a bone's world rows
+// An object-layer body's object (docs/bullet-pass-re.md; npcai.cpp's): which enemy a reach ray met.
+constexpr unsigned kBodyObject=0x108260;
+const unsigned char kBodyObjectSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x05};
+const unsigned char kBodyObjectSig2[]={0x8B,0xD1,0x48,0x8D,0x48,0x10,0xE8};   // at +11
+constexpr int kMostEnemies=256,kReachRayHits=6;
+constexpr float kReachRayPast=0.05f;   // m past a body that is not an enemy's (the Balam's own arm) the ray goes on from
 
 bargaaim::Readout latest{};
 stepfresh::Step latestStep=0;
@@ -191,6 +197,35 @@ void SphereContacts(const unsigned char* v,bargaaim::Readout& r) noexcept {
     VisitEnemies(v,&EnemyHit,&ctx);
 }
 
+struct EnemyList { bargaaim::Readout* r; float best[2]; const void* objects[kMostEnemies]; int count; };
+const void* BodyObject(std::uint32_t body) noexcept {
+    static const bool ok=Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) &&
+                         Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2));
+    if(!ok)return nullptr;
+    const void* owner=nullptr;
+    __try { owner=reinterpret_cast<const void*(__fastcall*)(std::uint32_t)>(image+kBodyObject)(body); }
+    __except(EXCEPTION_EXECUTE_HANDLER){owner=nullptr;}
+    return owner;
+}
+// Whether a->b meets a body of one of `enemies` (past any other's, at most kReachRayHits); `at` where.
+bool ReachRay(const EnemyList& enemies,const float* a,const float* b,float* at) noexcept {
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    const float length=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    if(!(length>1e-3f) || !std::isfinite(length))return false;
+    const float unit[3]={d[0]/length,d[1]/length,d[2]/length};
+    float from[3]={a[0],a[1],a[2]};
+    for(int n=0;n<kReachRayHits;++n) {
+        float hit[3]{};std::uint32_t body=0;
+        if(ObjectRay(from,b,hit,&body)<0.0f || !std::isfinite(hit[0]+hit[1]+hit[2]))return false;
+        const void* owner=BodyObject(body);
+        for(int i=0;owner && i<enemies.count;++i)
+            if(enemies.objects[i]==owner){for(int k=0;k<3;++k)at[k]=hit[k];return true;}
+        for(int k=0;k<3;++k)from[k]=hit[k]+unit[k]*kReachRayPast;
+        if((b[0]-from[0])*unit[0]+(b[1]-from[1])*unit[1]+(b[2]-from[2])*unit[2]<=0.0f)return false;
+    }
+    return false;
+}
+
 // The fists' marks: each side's attack that may start now, else its opening one.
 void ReadFists(const unsigned char* v,const bargaaim::Variant& variant,unsigned flags,bargaaim::Readout& r) noexcept {
     const auto rows=reinterpret_cast<const float*>(v+kMatrix);
@@ -205,10 +240,14 @@ void ReadFists(const unsigned char* v,const bargaaim::Variant& variant,unsigned 
         bargaaim::ModelToWorld(rows,attack.reach,a.at);
         a.r=attack.radius;
     }
-    // The enemies already in a fist's reach: the reticle turns red only then.
-    struct Ctx { bargaaim::Readout* r; float best[2]; } ctx{&r,{1e30f,1e30f}};
-    VisitEnemies(v,[](void* p,const void*,const float* aim) {
-        auto& c=*static_cast<Ctx*>(p);
+    // The enemies already in a fist's reach: the reticle turns red only then. Their lock points first; then, since a
+    // big enemy's lock point can be far from the part in reach (2026-11-27: an Erginus' face in both spheres, punched
+    // for 428, its lock point outside), three rays across each sphere (its x, y, z diameters) on the bullets' object
+    // layer, a body of one of these enemies met counting too.
+    EnemyList ctx{&r,{1e30f,1e30f},{},0};
+    VisitEnemies(v,[](void* p,const void* object,const float* aim) {
+        auto& c=*static_cast<EnemyList*>(p);
+        if(c.count<kMostEnemies && (c.count==0 || c.objects[c.count-1]!=object))c.objects[c.count++]=object;
         for(int side=0;side<2;++side) {
             auto& f=c.r->fist[side];
             if(!bargaaim::InReach(f,aim,&c.best[side]))continue;
@@ -216,6 +255,16 @@ void ReadFists(const unsigned char* v,const bargaaim::Variant& variant,unsigned 
             for(int k=0;k<3;++k)f.targetAt[k]=aim[k];
         }
     },&ctx);
+    if(!ctx.count)return;
+    for(int side=0;side<2;++side) {
+        auto& f=r.fist[side];
+        if(!f.on || f.target)continue;
+        for(int axis=0;axis<3 && !f.target;++axis) {
+            float a[3]={f.at[0],f.at[1],f.at[2]},b[3]={f.at[0],f.at[1],f.at[2]};
+            a[axis]-=f.r;b[axis]+=f.r;
+            f.target=ReachRay(ctx,a,b,f.targetAt);
+        }
+    }
 }
 
 bargaaim::SweepState SweepStateOf(const unsigned char* w) noexcept {
