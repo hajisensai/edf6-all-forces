@@ -26,24 +26,14 @@ bool InSession() noexcept { return session; }
 // online_authority's answer for a registered object that is not a vehicle: another machine's when bit 0 is set (online::RunsHere)
 bool OnlineRunsHere(const void* object) noexcept { return !session || (At<std::uint16_t>(object,0x128)&1)==0; }
 namespace edf41c {
-void WeakReset(WeakRef& w) noexcept {
-    if(w.control)reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(w.control)+0xC)->fetch_sub(1);
-    w=WeakRef{};
-}
-void WeakSet(WeakRef& w,const void* object) noexcept {
-    WeakReset(w);
-    if(!object)return;
-    w.object=At<void*>(object,0x28);
-    w.control=At<void*>(object,0x30);
-    if(w.control)reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(w.control)+0xC)->fetch_add(1);
-}
-bool WeakAlive(const WeakRef& w) noexcept { return w.control && At<std::int32_t>(w.control,8)>0; }
+// edf41classes.cpp WeakOut: the object's own weak-this handed out with one weak count (crew::WeakRef, objref.h).
 bool WeakOut(const void* object,void* out) noexcept {
-    WeakRef w;
-    WeakSet(w,object);
-    if(!w.control)return false;
-    std::memcpy(out,&w.object,8);
-    std::memcpy(static_cast<char*>(out)+8,&w.control,8);
+    if(!object)return false;
+    WeakRef w=ObjRef::Of(object);
+    if(!w.ctrl)return false;
+    const ObjRef given=w.Give();
+    std::memcpy(out,&given.obj,8);
+    std::memcpy(static_cast<char*>(out)+8,&given.ctrl,8);
     return true;
 }
 }  // namespace edf41c

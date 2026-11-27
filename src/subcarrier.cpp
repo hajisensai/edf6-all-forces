@@ -392,9 +392,7 @@ void Bay(Sub& s,const float* m,ULONGLONG ms) noexcept {
     for(int i=0;i<kBayDrones;++i) {
         const auto& d=s.drone[i];
         if(d) {
-            const auto* control=static_cast<const unsigned char*>(d.ctrl);
-            const bool live=Readable(control,16) && At<LONG>(control,8)>0 && Readable(d.obj,kDead+1) &&
-                d.Is(d.obj) && !(At<unsigned char>(d.obj,kObjFlags)&kObjDeleted) && !At<unsigned char>(d.obj,kDead);
+            const bool live=objref::Alive(d);
             if(!live || (!InSession() && !JetFlying(d.obj,d.ctrl)))DropDrone(s,i);
         }
         out+=s.drone[i] ? 1 : 0;
@@ -1401,8 +1399,7 @@ bool SnapshotSub(const Sub& s,SubSupportState* out) noexcept {
         std::memcpy(next.turretAim,s.remoteTurretAim,sizeof(next.turretAim));
     } else {
         for(const auto& drone:s.drone) {
-            if(drone && Readable(drone.ctrl,16) && At<LONG>(drone.ctrl,8)>0 && Readable(drone.obj,kDead+1) &&
-               drone.Is(drone.obj) && !At<unsigned char>(drone.obj,kDead) && !(At<unsigned char>(drone.obj,kObjFlags)&kObjDeleted))++next.droneCount;
+            if(objref::Alive(drone))++next.droneCount;
         }
         for(int t=0;t<kTurrets;++t)if(s.turret[t].rec && s.turret[t].posed) {
             next.turretMask|=static_cast<std::uint8_t>(1u<<t);std::memcpy(next.turretAim[t],s.turret[t].aim,12);
@@ -1479,7 +1476,7 @@ bool DeleteSupportSubmarine(const ObjRef& ref) noexcept {
         for(auto& entry:subs)if(entry.ref.obj==ref.obj && entry.ref.ctrl==ref.ctrl){s=&entry;break;}
         if(!s)return !ref.obj;
         auto* v=s->vehicle;
-        if(Readable(ref.ctrl,16) && At<LONG>(ref.ctrl,8)>0 && Readable(v,kSelfCtrl+8) && ref.Is(v)) {
+        if(ref.obj==v && objref::Identity(ref)>=objref::Life::removed) {
             for(unsigned seat=0;seat<SeatCount(v);++seat)if(AnyPlayerIn(SeatAt(v,seat)))return false;
             PvpForgetSupportObject(ref);
             if(!(v[kObjFlags]&kObjDeleted))reinterpret_cast<DeleteFn>(image+kDelete)(v);

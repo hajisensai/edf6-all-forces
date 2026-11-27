@@ -11,7 +11,8 @@ constexpr unsigned kEnumAllTeams=0x5E0C80,kTeamManager=0x20B2978;
 constexpr unsigned char kEnumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,
     0x56,0x57,0x41,0x56,0x48,0x83};
 bool LiveSource(const unsigned char* object,ObjRef* out) noexcept {
-    if(!object || !Readable(object,kSelfCtrl+8))return false;
+    // 本地自引用 +0x28 必须是对象自己（伪造的别名控制块不算来源身份）；其余判定走 objref::Alive。
+    if(!object || !Readable(object,kSelfCtrl+8) || At<const void*>(object,kSelf)!=object)return false;
     const ObjRef ref=ObjRef::Of(object);
     if(!objref::Alive(ref))return false;
     *out=ref;return true;

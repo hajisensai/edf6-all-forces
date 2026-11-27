@@ -103,7 +103,6 @@ void* AddLockPoint(void*) noexcept {return nullptr;}
 void SetLockPoint(void*,const float*) noexcept {}
 void Smoke(const float*,float) noexcept {}
 void Quake(const float*,float,float) noexcept {}
-void WeakSet(WeakRef&,const void*) noexcept {}
 bool FireSe(void* owner,const float*,const Bullet& bullet,const void*,const wchar_t*) noexcept {++fixture::bullets;fixture::lastBullet=&bullet;fixture::lastOwner=owner;return true;}
 bool FillSePreset(unsigned char*,const void*,const wchar_t*) noexcept {return false;}
 void AtGameShutdown(void(*)() noexcept) noexcept {}
@@ -111,8 +110,6 @@ void AtGameShutdown(void(*)() noexcept) noexcept {}
 bool ShuttingDown() noexcept {return false;}
 bool Particle(const float*,int,float,const float*,const wchar_t*) noexcept {return true;}
 bool LocatorMatrix(const LocatorHandle&,float* out) noexcept {for(int i=0;i<16;++i)out[i]=(i%5==0) ? 1.0f : 0.0f;return true;}
-bool WeakAlive(const WeakRef&) noexcept {return false;}
-void WeakReset(WeakRef& ref) noexcept {ref={};}
 void StopSound(SoundHandle& sound,int) noexcept {sound={};}
 bool PlaySe(const void*,const wchar_t*,const float*,SoundHandle*) noexcept {return false;}
 bool PlayStateIndex(void*,int state) noexcept {fixture::played=state;return true;}

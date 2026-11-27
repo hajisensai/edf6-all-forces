@@ -204,7 +204,7 @@ void DropWeak(unsigned char* ctrl) noexcept {
 }
 // The body's object still there (its use count; the weak count keeps the block), the same, not being deleted.
 bool Alive(const Body& b) noexcept {
-    return objref::Exists(ObjRef{b.object,b.ctrl});
+    return objref::ExistsHeld(ObjRef{b.object,b.ctrl});   // TakeWeak 持有这块的 weak count
 }
 
 // A live vehicle's seat count (edf::SeatCount's bound, read without Readable).

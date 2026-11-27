@@ -44,12 +44,14 @@ Life MemberLife(const ObjRef& ref) noexcept {
     if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;
     if(At<LONG>(ref.ctrl,8)<=0)return Life::gone;
     if(!Readable(ref.obj,kObjectFlags+4))return Life::invalid;
-    return objref::Exists(ref) ? Life::live : Life::gone;
+    // 三态（invalid / gone / live）是成员存储的契约，和 StorageLife 一样每步只读一次控制块；live 的条件与
+    // objref::Exists 相同（docs/objref-re.md），这里不再调它，免得 use count 读两次、两次之间对象死掉时前后不一致。
+    if(At<const void*>(ref.obj,kSelfCtrl)!=ref.ctrl || (At<unsigned char>(ref.obj,objref::kObjectFlags)&objref::kRemoved))return Life::gone;
+    return Life::live;
 }
 bool Live(const ObjRef& ref) noexcept {return MemberLife(ref)==Life::live;}
 bool CurrentIdentity(const ObjRef& ref) noexcept {
-    return ref.obj && ref.ctrl && Readable(ref.ctrl,16) && At<LONG>(ref.ctrl,8)>0 &&
-        Readable(ref.obj,kSelfCtrl+sizeof(void*)) && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl && At<const void*>(ref.obj,kSelf)==ref.obj;
+    return objref::Identity(ref)>=objref::Life::removed && At<const void*>(ref.obj,kSelf)==ref.obj;
 }
 Life StorageLife(const ObjRef& ref) noexcept {
     if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;

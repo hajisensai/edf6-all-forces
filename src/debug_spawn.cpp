@@ -176,8 +176,7 @@ int netAskNext=0;
 
 bool NetworkEnemyLive(const NetworkEnemy& e) noexcept {
     // Weak control blocks are retained until transaction teardown: test the strong count before the actor pointer.
-    return e.ref.ctrl && At<LONG>(e.ref.ctrl,8)>0 && e.ref.Is(e.ref.obj) &&
-        !(At<unsigned char>(e.ref.obj,0x18)&4);
+    return objref::Exists(e.ref);
 }
 // A dead actor: the byte the native walks skip one by (kDead, 0x5E0FB6).
 bool NetworkEnemyDead(const NetworkEnemy& e) noexcept {

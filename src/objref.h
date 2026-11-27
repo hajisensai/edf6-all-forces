@@ -50,6 +50,12 @@ inline Life Identity(const ObjRef& r) noexcept {
 }
 // 对象还在场景里（未 Delete）：任何场景对象都可以问。
 inline bool Exists(const ObjRef& r) noexcept { return Identity(r)==Life::present; }
+// 同一判定，给调用方自己持有这块 weak count 的引用（WeakRef / Retain 过的块）：块因此一直可读，use count > 0
+// 时对象内存也还在，所以不问 Readable。每帧逐对象走的热路径（frame_rate_objects 的姿态）用它；没持有 weak 的引用不许用。
+inline bool ExistsHeld(const ObjRef& r) noexcept {
+    return r.obj && r.ctrl && edf::At<std::int32_t>(r.ctrl,kCtrlUses)>0 && edf::At<const void*>(r.obj,edf::kSelfCtrl)==r.ctrl &&
+           !(edf::At<unsigned char>(r.obj,kObjectFlags)&kRemoved);
+}
 // 存在且没死：只对有耐久的 GameObject（士兵、载具、敌人、建筑）问。
 inline bool Alive(const ObjRef& r) noexcept {
     return Exists(r) && edf::Readable(r.obj,kDeadByte+1) && !edf::At<unsigned char>(r.obj,kDeadByte);
