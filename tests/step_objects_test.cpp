@@ -149,6 +149,20 @@ int main() {
     bool all=true;
     for(Obj& o:many)all=all && stepobj::Has(o.bytes);
     Check(all,"5,000 objects, all found");
+    bool own=true;
+    for(Obj& o:many)own=own && stepobj::ControlOf(o.bytes)==o.ctrl && !stepobj::ControlOf(o.bytes+16);
+    Check(own,"5,000 objects: each its own control block, an inner pointer none");
+    {   // The asks of a frame: a Lookup's cost (bench:4000, 2026-11-28: Lookup ~6 ms a frame of its own, Period ~2.4).
+        LARGE_INTEGER f,t0,t1;QueryPerformanceFrequency(&f);
+        constexpr int kRounds=40;
+        int yes=0;
+        QueryPerformanceCounter(&t0);
+        for(int r=0;r<kRounds;++r)for(Obj& o:many)yes+=stepobj::Trusted(o.bytes);
+        QueryPerformanceCounter(&t1);
+        const double ns=static_cast<double>(t1.QuadPart-t0.QuadPart)*1e9/static_cast<double>(f.QuadPart)/(kRounds*5000.0);
+        std::printf("Trusted over 5,000 objects: %.1f ns an ask\n",ns);
+        Check(yes==kRounds*5000,"every ask of the timed rounds found");
+    }
     const stepobj::Stats s=stepobj::TakeStats();
     Check(s.copies>0 && s.copied>=5000,"the copies are counted");
 

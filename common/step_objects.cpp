@@ -3,7 +3,9 @@
 #include "edf/hash_index.h"
 #include "edf/layout.h"
 #include <Windows.h>
+#include <intrin.h>
 #include <atomic>
+#include <cstring>
 #include <new>
 #include <vector>
 
@@ -14,10 +16,16 @@ std::atomic<std::uint64_t> period{0};      // 0: no period yet
 std::atomic<bool> open{false};             // a frame's release seen and no Close since
 std::atomic<DWORD> gameThread{0};
 std::atomic<int> releasing{0};           // inside a release or a teardown: its objects are going
+// GetCurrentThreadId's own read (the TEB's ClientId.UniqueThread, gs:[0x48] on x64) without the call into kernel32:
+// Period is asked once a Lookup (bench:4000: ~2.4 ms a frame of its own).
+DWORD ThisThread() noexcept { return __readgsdword(0x48); }
 
 // The copy (game thread only): made for `copiedFor`, of the System `system` with its scene `scene`, `count` objects.
-edf::PtrIndex index;
-std::vector<const void*> ctrls;
+// One open-addressed table of {object, control block} (an ask reads one cell run, not an index and then a second array:
+// bench:4000, 2026-11-28, Lookup ~6 ms a frame of its own), at most half full, emptied once a period.
+struct Slot { const void* object; const void* ctrl; };
+std::vector<Slot> slots;
+std::size_t slotMask=0,slotCount=0;
 std::uint64_t copiedFor=0;
 bool copyOk=false;
 const unsigned char* copySystem=nullptr;
@@ -40,9 +48,10 @@ bool CopyList(const ListHead& l) noexcept {
         if(node==l.head)return true;
         const void* o=edf::At<const void*>(node,kNodeObject);
         const void* c=edf::At<const void*>(node,kNodeCtrl);
-        if(o && c && index.Find(o)<0) {
-            index.Set(o,static_cast<int>(ctrls.size()));
-            ctrls.push_back(c);
+        if(o && c) {
+            std::size_t s=edf::HashOf(o)&slotMask;
+            while(slots[s].object && slots[s].object!=o)s=(s+1)&slotMask;
+            if(!slots[s].object){slots[s]={o,c};++slotCount;}
         }
         node=edf::At<const unsigned char*>(node,0);
     }
@@ -53,16 +62,24 @@ bool CopyUnderLock(const ListHead& objects,const ListHead& added) noexcept {
         return CopyList(objects) && CopyList(added);
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+// Room for `n` objects at most half full, every cell empty.
 bool Reserve(std::size_t n) noexcept {
+    std::size_t size=64;
+    while(size<n*2+2)size*=2;
     try {
-        index.Reserve(n);
-        ctrls.reserve(n);
-        return true;
+        if(slots.size()<size)slots.resize(size);
     } catch(const std::bad_alloc&) { return false; }
+    std::memset(slots.data(),0,slots.size()*sizeof(Slot));
+    slotMask=slots.size()-1;slotCount=0;
+    return true;
+}
+void Empty() noexcept {
+    if(slotCount)std::memset(slots.data(),0,slots.size()*sizeof(Slot));
+    slotCount=0;
 }
 // This period's copy, made now.
 void Copy(const unsigned char* system,const void* scene) noexcept {
-    index.Clear();ctrls.clear();
+    Empty();
     copyOk=false;copySystem=system;copyScene=scene;copyCount=0;
     auto* lock=reinterpret_cast<CRITICAL_SECTION*>(const_cast<unsigned char*>(system)+kLock);
     if(!TryEnterCriticalSection(lock))return;   // another thread holds the lists: no copy this period
@@ -78,8 +95,8 @@ void Copy(const unsigned char* system,const void* scene) noexcept {
     copyOk=ok;
     copyCount=objects.size;
     ++stats.copies;
-    if(ok)stats.copied+=ctrls.size();
-    else{index.Clear();ctrls.clear();}
+    if(ok)stats.copied+=slotCount;
+    else Empty();
 }
 // The copy's control block of `object` when the period's copy is good and still the System's, else null.
 const void* Lookup(const void* object) noexcept {
@@ -97,10 +114,11 @@ const void* Lookup(const void* object) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
     if(copiedFor!=p){copiedFor=p;Copy(system,scene);}
     if(!copyOk || system!=copySystem || scene!=copyScene || count<copyCount)return nullptr;
-    const int at=index.Find(object);
-    if(at<0){++stats.no;return nullptr;}
-    ++stats.yes;
-    return ctrls[static_cast<std::size_t>(at)];
+    for(std::size_t i=edf::HashOf(object)&slotMask;;i=(i+1)&slotMask) {
+        const Slot& c=slots[i];
+        if(c.object==object){++stats.yes;return c.ctrl;}
+        if(!c.object){++stats.no;return nullptr;}
+    }
 }
 }  // namespace
 
@@ -117,7 +135,7 @@ void Releasing() noexcept {
 void Released(bool frame) noexcept {
     if(releasing.load()>0)releasing.fetch_sub(1);
     if(frame) {
-        gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
+        gameThread.store(ThisThread(),std::memory_order_relaxed);
         open.store(true);
     }
     period.fetch_add(1);
@@ -128,7 +146,7 @@ void Close() noexcept {
 }
 std::uint64_t Period() noexcept {
     if(!global.load(std::memory_order_acquire) || !open.load(std::memory_order_acquire) || releasing.load()>0 ||
-       GetCurrentThreadId()!=gameThread.load(std::memory_order_relaxed))return 0;
+       ThisThread()!=gameThread.load(std::memory_order_relaxed))return 0;
     return period.load(std::memory_order_acquire);
 }
 bool Trusted(const void* object) noexcept { return Lookup(object)!=nullptr; }
