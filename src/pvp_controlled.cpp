@@ -3,6 +3,7 @@
 #include "pvp_controlled.h"
 #include "pvp.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cstring>
 
 namespace crew::controlled_pvp {
@@ -22,7 +23,7 @@ struct State {
 struct Collection { ObjRef members[kMaxMembers]{};unsigned memberGroups[kMaxMembers]{};unsigned count=0;
     Emitter emitters[kMaxEmitters]{};unsigned emitterGroups[kMaxEmitters]{};unsigned emitted=0;int teams[kMaxEmitters]{}; };
 struct Reservation {std::uint64_t id=0,lease=0;ObjRef parent{};SpawnProof proof{};unsigned remaining=0;bool accepted=false;};
-State leases[kMaxLeases]{};
+LazyRows<State,kMaxLeases> leases;   // heap from the first Acquire (plugin_image_size_guard: no image table)
 std::uint64_t serial=0,spawnSerial=0;
 Reservation reservations[kMaxSpawnReservations]{};
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
@@ -370,6 +371,7 @@ bool Acquire(const ObjRef& root,const char* authenticatedSourcePuid,const Hooks&
     __try {
         if(PvpSupportTeam(authenticatedSourcePuid)<0)return false;
         Collection collection{};if(!Gather(root,hooks,collection))return false;
+        if(!leases.Allocate("PVP controlled leases"))return false;
         State* state=nullptr;
         for(auto& s:leases) {
             if(s.id && Same(s.root,root))return false;
