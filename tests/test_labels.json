@@ -971,8 +971,14 @@
   },
   "coop_attr_guard": {
    "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/coop_attr_guard.py"
@@ -1046,6 +1052,7 @@
   "debug_spawn_launch_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -1081,6 +1088,7 @@
   "debug_spawn_vehicle_level_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -1101,8 +1109,14 @@
   },
   "doll_follow_guard": {
    "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/doll_follow_guard.py"
@@ -1141,6 +1155,7 @@
   "dreadnought_slot_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -2218,6 +2233,7 @@
   "enemy_control_native_pose_audit": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -2730,6 +2746,7 @@
   "frame_pacing_install_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -2754,8 +2771,14 @@
   },
   "frame_rate_net_guard": {
    "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/frame_rate_net_guard.py"
@@ -3372,8 +3395,14 @@
   },
   "input_source_guard": {
    "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/input_source_guard_test.py"
@@ -4016,6 +4045,7 @@
   "module_registry_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -4180,6 +4210,7 @@
   "npc_car_aim_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -4329,8 +4360,14 @@
   },
   "online_gate_bridge_guard": {
    "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/online_gate_bridge_guard_test.py",
@@ -4339,8 +4376,14 @@
   },
   "online_gate_guard": {
    "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/online_gate_guard.py"
@@ -4573,8 +4616,14 @@
   "player_identity_guard": {
    "labels": [
     "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/player_identity_guard.py"
@@ -4783,10 +4832,10 @@
   "proteus_net_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
-    "tests/online_gate_guard.py",
     "tests/proteus_net_guard.py"
    ]
   },
@@ -5020,8 +5069,14 @@
   "redirect_owner_guard": {
    "labels": [
     "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
     "tests/redirect_owner_guard.py"
@@ -5048,11 +5103,16 @@
   },
   "rescue_support_guard": {
    "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "worldmap"
    ],
    "scripts": [
-    "tests/online_gate_guard.py",
     "tests/rescue_support_guard.py"
    ]
   },
@@ -5311,10 +5371,10 @@
   "sazabi_net_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
-    "tests/online_gate_guard.py",
     "tests/sazabi_net_guard.py"
    ]
   },
@@ -5611,6 +5671,16 @@
     "tests/spot_ray_native_audit.py"
    ]
   },
+  "srcscan": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/srcscan_test.py"
+   ]
+  },
   "stab_check": {
    "labels": [
     "plugin-native"
@@ -5760,6 +5830,7 @@
   "support_exit_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -6327,6 +6398,7 @@
   "unmanned_launch_guard": {
    "labels": [
     "plugin-native",
+    "pylib-model",
     "test-data"
    ],
    "scripts": [
@@ -7001,7 +7073,8 @@
     "registry",
     "registry_index",
     "resets",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "air_support_arrival_is_the_flight_controls": {
@@ -7019,7 +7092,8 @@
     "air_support_arrival_is_the_flight_controls",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "andryusha_fuse_online": {
@@ -7044,7 +7118,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "andryusha_marks_agree": {
@@ -7163,6 +7238,7 @@
     "make_artillery",
     "os",
     "src",
+    "srcscan",
     "vc"
    ]
   },
@@ -7337,6 +7413,7 @@
     "registry_index",
     "resets",
     "src",
+    "srcscan",
     "ticks",
     "vc"
    ]
@@ -7473,7 +7550,8 @@
     "ROOT",
     "boarding_only_after_collision",
     "os",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "boarding_tag_in_plugin": {
@@ -7775,7 +7853,8 @@
     "ROOT",
     "cockpit_fields_current",
     "os",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "cockpit_warnings_wired": {
@@ -7799,7 +7878,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "collision_box_codec_holds_its_child": {
@@ -7895,7 +7975,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "damage_stats_wired": {
@@ -7922,7 +8003,8 @@
     "registry",
     "registry_index",
     "resets",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "dreadnought_agrees": {
@@ -7948,6 +8030,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "vc"
    ]
   },
@@ -7976,6 +8059,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "vc"
    ]
   },
@@ -8067,7 +8151,8 @@
     "edf41_anthill_voxel_body",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_asset_pack": {
@@ -8236,6 +8321,7 @@
     "shutil",
     "spawn_catalog_archives",
     "src",
+    "srcscan",
     "sys",
     "tempfile",
     "ticks",
@@ -8270,7 +8356,8 @@
     "edf41_big_dragon_ragdoll_mass",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_big_dragon_sounds": {
@@ -8297,7 +8384,8 @@
     "edf41_big_dragon_sounds",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_calls_convert": {
@@ -8385,7 +8473,8 @@
     "edf41_class_keys",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_class_names": {
@@ -8416,7 +8505,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_clone_destructor_slot": {
@@ -8435,7 +8525,8 @@
     "edf41_clone_destructor_slot",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_dlc_insects": {
@@ -8464,7 +8555,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_dlc_objects": {
@@ -8492,7 +8584,8 @@
     "edf41_dlc_objects",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_dlc_packs": {
@@ -8519,7 +8612,8 @@
     "edf41_dlc_packs",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_dragon_catalog_names": {
@@ -8566,7 +8660,8 @@
     "edf41_fortress_object_actions",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_friend_climb_shipped": {
@@ -8592,7 +8687,8 @@
     "edf41_friend_climb_shipped",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_friend_grip_matches_weapons": {
@@ -8639,7 +8735,8 @@
     "edf41_friend_grip_shipped",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_friend_looks_shipped": {
@@ -8664,7 +8761,8 @@
     "edf41_friend_looks_shipped",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_friends_load_in_edf6": {
@@ -8780,7 +8878,8 @@
     "edf41_hector_gait",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_hector_guns": {
@@ -8851,7 +8950,8 @@
     "ROOT",
     "edf41_hector_weapons",
     "os",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_kill_counters_plugin_table": {
@@ -8875,7 +8975,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_kill_counters_save_slots": {
@@ -8926,7 +9027,8 @@
     "edf41_kill_counters_shipped",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_map_wires_real": {
@@ -9133,7 +9235,8 @@
     "edf41_mother301_finish_contract",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_mother401_data": {
@@ -9158,7 +9261,8 @@
     "edf41_mother401_data",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_mother401_parts_collision_layer": {
@@ -9184,7 +9288,8 @@
     "edf41_mother401_parts_collision_layer",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_mother401_parts_take_the_hull_level": {
@@ -9211,7 +9316,8 @@
     "json",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_mother401_plugin_contract": {
@@ -9241,6 +9347,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "ticks"
    ]
   },
@@ -9267,7 +9374,8 @@
     "edf41_mother_parts_default_migrates",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_mother_plugin_contract": {
@@ -9297,7 +9405,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_motherships_not_faked": {
@@ -9323,7 +9432,8 @@
     "edf41_motherships_not_faked",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_net_contract": {
@@ -9341,7 +9451,8 @@
     "edf41_net_contract",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_objects_after_weapons": {
@@ -9386,6 +9497,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "tempfile"
    ]
   },
@@ -9413,7 +9525,8 @@
     "json",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_outfit_item_label": {
@@ -9470,6 +9583,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "tempfile"
    ]
   },
@@ -9508,7 +9622,8 @@
     "edf41_outfits_reproducible",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_outfits_shipped": {
@@ -9533,7 +9648,8 @@
     "json",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_rest_behaviour_real": {
@@ -9572,7 +9688,8 @@
     "edf41_robo_finish",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_robo_plugin_contract": {
@@ -9601,7 +9718,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_robo_registered": {
@@ -9627,7 +9745,8 @@
     "edf41_robo_registered",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_shared_asset_backed_up_by_older_install": {
@@ -9765,7 +9884,8 @@
     "edf41_shipped_textures_load_before_models",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_sk_grass_real": {
@@ -9879,7 +9999,8 @@
     "edf41_stale_stock",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_stat_lines": {
@@ -9949,7 +10070,8 @@
     "edf41_story_small_dragons",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf41_story_small_dragons_upgrade": {
@@ -9978,6 +10100,7 @@
     "patched",
     "re",
     "src",
+    "srcscan",
     "tempfile"
    ]
   },
@@ -10433,7 +10556,8 @@
     "edf5_campaign_plugin_sites",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf5_campaign_refusals": {
@@ -10546,6 +10670,7 @@
     "patched",
     "re",
     "src",
+    "srcscan",
     "tempfile"
    ]
   },
@@ -10592,6 +10717,7 @@
     "patched",
     "re",
     "src",
+    "srcscan",
     "tempfile"
    ]
   },
@@ -10674,6 +10800,7 @@
     "patched",
     "re",
     "src",
+    "srcscan",
     "tempfile"
    ]
   },
@@ -10698,7 +10825,8 @@
     "edf5_dlc_shipped",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "edf5_found_by_gamedir": {
@@ -10936,6 +11064,7 @@
     "resets",
     "runs_when_disabled",
     "src",
+    "srcscan",
     "vc",
     "vehicle_phase"
    ]
@@ -10990,6 +11119,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "vc"
    ]
   },
@@ -11150,7 +11280,8 @@
     "fire4_pad_default_migrates",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "fmb_build_real": {
@@ -11259,7 +11390,8 @@
     "frame_rate_cap_default_off",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "free_look_key_default_migrates": {
@@ -11285,7 +11417,8 @@
     "free_look_key_default_migrates",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "frozen_collision_consumer": {
@@ -11416,6 +11549,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "ticks"
    ]
   },
@@ -11467,6 +11601,7 @@
     "registry_index",
     "resets",
     "src",
+    "srcscan",
     "vehicle_step"
    ]
   },
@@ -11524,7 +11659,8 @@
     "make_jets",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "gunship_muzzle_wired": {
@@ -11552,7 +11688,8 @@
     "make_jets",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "hand_copies_agree": {
@@ -11580,6 +11717,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "vc",
     "xm_units"
    ]
@@ -11656,6 +11794,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "sys"
    ]
   },
@@ -11674,7 +11813,8 @@
     "heli_store_flies_its_own_arc",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "high_cam_default_migrates": {
@@ -11700,7 +11840,8 @@
     "high_cam_default_migrates",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "high_cam_wired": {
@@ -11826,6 +11967,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "sys"
    ]
   },
@@ -11853,7 +11995,8 @@
     "impact_charges_agree",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "incremental_install_regressions": {
@@ -11877,6 +12020,33 @@
    ],
    "uses": [
     "incremental_install_regressions"
+   ]
+  },
+  "infantry_scope_pip_default_migrates": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "ROOT",
+    "infantry_scope_pip_default_migrates",
+    "os",
+    "re",
+    "src",
+    "srcscan"
    ]
   },
   "ini_merge_adds_room_presync": {
@@ -12148,6 +12318,7 @@
     "shutil",
     "spawn_catalog_archives",
     "src",
+    "srcscan",
     "sys",
     "tempfile",
     "ticks",
@@ -12403,7 +12574,8 @@
     "ROOT",
     "katyusha_fires_over_its_cab",
     "os",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "katyusha_pose_agrees": {
@@ -12428,7 +12600,8 @@
     "katyusha_pose_agrees",
     "make_katyusha",
     "os",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "ledger_committed_writer": {
@@ -12712,6 +12885,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "ticks"
    ]
   },
@@ -12787,7 +12961,8 @@
     "registry",
     "registry_index",
     "resets",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "max_frame_latency_default_back_to_0": {
@@ -12813,7 +12988,8 @@
     "max_frame_latency_default_back_to_0",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "mdb_graft_rigid": {
@@ -12898,7 +13074,8 @@
     "e5c",
     "mission_pack_ids_agree",
     "os",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "new_defaults_on_once": {
@@ -12984,7 +13161,8 @@
     "ROOT",
     "npc_ai_asks_less",
     "os",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "npc_ai_wired": {
@@ -13013,6 +13191,7 @@
     "resets",
     "runs_when_disabled",
     "src",
+    "srcscan",
     "vehicle_phase"
    ]
   },
@@ -13034,7 +13213,8 @@
     "npc_formation_wired",
     "os",
     "re",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "npc_pickup_wired": {
@@ -13321,6 +13501,7 @@
     "registry_index",
     "resets",
     "src",
+    "srcscan",
     "ticks"
    ]
   },
@@ -13454,7 +13635,8 @@
     "re",
     "registry",
     "registry_index",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "ported_weapon_locators_fit": {
@@ -13571,7 +13753,8 @@
     "registry_index",
     "resets",
     "runs_when_disabled",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "prune_members_keeps_what_the_model_uses": {
@@ -13610,6 +13793,7 @@
     "os",
     "pvp_presets_agree",
     "src",
+    "srcscan",
     "sys"
    ]
   },
@@ -13747,7 +13931,8 @@
     "e5c",
     "os",
     "range_weapon_cap_in_pack_definition",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "range_writes_every_generated_sgo_its_script_creates": {
@@ -14036,6 +14221,7 @@
     "re",
     "sazabi_bones_agree",
     "src",
+    "srcscan",
     "vc"
    ]
   },
@@ -14150,7 +14336,8 @@
     "resets",
     "runs_when_disabled",
     "sazabi_sound_wired",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "seam_field_makes_the_block_periodic": {
@@ -14331,6 +14518,7 @@
     "shutil",
     "spawn_catalog_archives",
     "src",
+    "srcscan",
     "sys",
     "tempfile",
     "ticks",
@@ -14425,6 +14613,7 @@
     "resets",
     "sidecar_copies_agree",
     "src",
+    "srcscan",
     "vehicle_phase"
    ]
   },
@@ -14471,6 +14660,7 @@
     "resets",
     "sight_zoom_wired",
     "src",
+    "srcscan",
     "vehicle_step"
    ]
   },
@@ -14534,7 +14724,8 @@
     "os",
     "re",
     "soft_edge_wired",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "sortie_copies_agree": {
@@ -14566,6 +14757,7 @@
     "resets",
     "sortie_copies_agree",
     "src",
+    "srcscan",
     "ticks",
     "vc"
    ]
@@ -14585,7 +14777,8 @@
     "os",
     "re",
     "sound_at_takes_a_still_sound",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "spawn_catalog_archives_counted": {
@@ -14611,6 +14804,7 @@
     "os",
     "spawn_catalog_archives_counted",
     "src",
+    "srcscan",
     "sys"
    ]
   },
@@ -14894,6 +15088,7 @@
     "re",
     "spawn_catalog_rows_check_their_files",
     "src",
+    "srcscan",
     "sys"
    ]
   },
@@ -14917,7 +15112,8 @@
     "registry",
     "registry_index",
     "split_missile_wired",
-    "src"
+    "src",
+    "srcscan"
    ]
   },
   "stock_gauges_wired": {
@@ -14942,6 +15138,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "stock_gauges_wired"
    ]
   },
@@ -14967,6 +15164,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "stock_guidance_wired"
    ]
   },
@@ -15067,6 +15265,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "stock_payload_and_seats_wired",
     "vc",
     "vehicle_phase"
@@ -15118,6 +15317,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "stock_vehicle_hud_wired"
    ]
   },
@@ -15191,6 +15391,7 @@
     "registry",
     "registry_index",
     "src",
+    "srcscan",
     "support_arrives_from_off_the_map",
     "vehicle_phase",
     "vehicle_step"
@@ -15219,6 +15420,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "support_c130_models",
     "vc"
    ]
@@ -15245,6 +15447,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "support_helicarrier_models",
     "vc"
    ]
@@ -15492,6 +15695,7 @@
     "registry_index",
     "resets",
     "src",
+    "srcscan",
     "turret_aim_wired"
    ]
   },
@@ -15518,6 +15722,7 @@
     "registry_index",
     "resets",
     "src",
+    "srcscan",
     "turret_cam_wired",
     "vehicle_step"
    ]
@@ -15552,6 +15757,7 @@
     "registry_index",
     "resets",
     "src",
+    "srcscan",
     "ticks",
     "ultimate_copies_agree",
     "vc"
@@ -15633,6 +15839,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "vc",
     "vehicle_gun_calibres_wired"
    ]
@@ -15661,6 +15868,7 @@
     "registry_index",
     "resets",
     "src",
+    "srcscan",
     "vehicle_phase",
     "vehicle_ram_wired",
     "vehicle_step"
@@ -15690,6 +15898,7 @@
     "resets",
     "runs_when_disabled",
     "src",
+    "srcscan",
     "vehicle_phase",
     "vehicle_sound_wired"
    ]
@@ -15709,6 +15918,7 @@
     "os",
     "re",
     "src",
+    "srcscan",
     "view_distance_keeps_far_pass_start"
    ]
   },

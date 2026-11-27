@@ -32,19 +32,11 @@ _TOKENS = re.compile(
     re.S)
 
 
-def read(rel: str, root: str = ROOT, expand: bool = True) -> str:
-    """A source's text (`rel` from the repo root, / separated); crew.h's and plugin.cpp's with the config.inc sections
-    they include written out (tools/gen_config.py expand), as the compiler sees them, unless expand=False."""
+def read(rel: str, root: str = ROOT) -> str:
+    """A source's text (`rel` from the repo root, / separated), as it is on disk (tools/selftest.py src() writes the
+    config.inc sections out; this module imports nothing of the repo, so a guard using it depends on no generator)."""
     with open(os.path.join(root, *rel.split('/')), encoding='utf-8-sig') as f:
-        text = f.read()
-    if expand and '#include "config.inc"' in text:
-        import sys
-        tools = os.path.join(root, 'tools')
-        if tools not in sys.path:
-            sys.path.insert(0, tools)
-        import gen_config
-        text = gen_config.expand(text)
-    return text
+        return f.read()
 
 
 @functools.lru_cache(maxsize=256)
@@ -234,6 +226,31 @@ def order(text: str, *names: str) -> bool:
             return False
         at = m.start()
     return True
+
+
+_PHRASE_TOKEN = re.compile(r'[LuU]?8?"(?:\\.|[^"\\])*"?|\'(?:\\.|[^\'\\])*\'?|\w+|\S')
+
+
+@functools.lru_cache(maxsize=4096)
+def _phrase(phrase: str) -> re.Pattern:
+    """`phrase` as a pattern over code: its tokens in order, any whitespace between two (some between two words, as
+    the phrase has); a literal token matched exactly."""
+    out, prev = [], None
+    for m in _PHRASE_TOKEN.finditer(phrase):
+        tok = m.group(0)
+        if prev is not None:
+            gap = phrase[prev.end():m.start()]
+            word = prev.group(0)[-1:].isalnum() or prev.group(0)[-1:] == '_'
+            out.append(r'\s+' if gap and word and (tok[0].isalnum() or tok[0] == '_') else r'\s*')
+        out.append(re.escape(tok))
+        prev = m
+    return re.compile(''.join(out))
+
+
+def has(text: str, phrase: str) -> bool:
+    """The code of `text` (comments out) has `phrase`, whitespace between its tokens free: what `phrase in text` asked,
+    without a comment or a reformatted line deciding it."""
+    return _phrase(phrase).search(code(text)) is not None
 
 
 def before(text: str, *parts: str) -> bool:

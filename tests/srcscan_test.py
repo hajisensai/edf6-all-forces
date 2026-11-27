@@ -91,6 +91,16 @@ class SrcScan(unittest.TestCase):
         self.assertEqual(srcscan.value(SAMPLE, 'kC'), '7')
         self.assertIsNone(srcscan.value(SAMPLE, 'kNope'))
 
+    def test_has_a_phrase_of_the_code(self) -> None:
+        text = ('void F() {\n    if(!ok)   return;  // Run(a,b);\n    const bool  done = Run( a, b );\n'
+                '    Log("x  y; Run(c);");\n}\n')
+        self.assertTrue(srcscan.has(text, 'if(!ok)return;'))            # whitespace between tokens free
+        self.assertTrue(srcscan.has(text, 'const bool done=Run(a,b);'))
+        self.assertFalse(srcscan.has(text, 'constbool'))                 # ...but two words stay two
+        self.assertFalse(srcscan.has(text, 'Run(a,b);  //'))             # a comment is not code
+        self.assertTrue(srcscan.has(text, 'Log("x  y; Run(c);")'))     # a literal is matched as it is
+        self.assertFalse(srcscan.has(text, 'Log("x y; Run(c);")'))
+
     def test_takes_the_generated_constant(self) -> None:
         text = ('constexpr float kKeel=pyconst::kKeel,kReach=0.44f*kLength;\n'
                 'using pyconst::kBone;\nconst wchar_t kHand[]=L"pyconst::kHand";\nconstexpr int kN=8;   // pyconst::kN\n')
