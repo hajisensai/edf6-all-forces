@@ -3,7 +3,7 @@
 // enemy, the enemies' attacks, the heals, the timeline), the scope (mine / everyone), a bar chart (or the timeline's
 // columns) whose bar under the pointer has its figures in a box by it, and a click on a bar opening its breakdown on the
 // right: whom a weapon hit (friendly fire marked) or healed (an enemy marked), which weapons hit an enemy, whom an enemy hit.
-// Included by hud.cpp (its primitives: Rect, Seg, Tri, Label, MapUiBox, MapFitLabel), just before MapScreen.
+// Included by hud.cpp (its primitives: Rect, Seg, Tri, Label, MapUiBox, FitLine), just before MapScreen.
 
 alignas(16) const float kStatsShade[4]={0.0f,0.0f,0.0f,0.35f};
 alignas(16) const float kStatsPanel[4]={0.03f,0.05f,0.08f,0.9f};
@@ -173,7 +173,7 @@ void ListRow(void* drawer,void* ctx,Text* text,float x0,float x1,float y,float h
     const float nameW=(x1-x0)*0.42f,figW=(x1-x0)*0.24f,mid=y+h*0.5f;
     Rect(drawer,ctx,x0,mid-4.0f*s,x0+8.0f*s,mid+4.0f*s,colour);
     Label(text,lines,at,x0+14.0f*s,mid,0,kLineScale*0.62f,kWhite,L"%ls",name);
-    if(*at>0)MapFitLabel(text,lines[*at-1],x0+14.0f*s,x0+nameW-6.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],x0+14.0f*s,x0+nameW-6.0f*s);
     StatsBar(drawer,ctx,dmgstat::Box{x0+nameW,y+h*0.25f,x1-figW,y+h*0.75f},most>0.0f ? value/most : 0.0f,colour);
     Label(text,lines,at,x1,mid,2,kLineScale*0.6f,kStatsDim,L"%ls%ls",Amount(value).t,tail ? tail : L"");
 }
@@ -191,7 +191,7 @@ float DetailFrame(void* drawer,void* ctx,Text* text,const dmgstat::Box& d,float 
 float DetailHead(Text* text,const dmgstat::Box& d,float y,float s,const StatsTip& head,Line* lines,int* at) noexcept {
     for(int k=0;k<head.n;++k) {
         Label(text,lines,at,d.x0,y,0,kLineScale*(k ? 0.66f : 0.82f),k ? kWhite : kTitle,L"%ls",head.line[k]);
-        if(*at>0)MapFitLabel(text,lines[*at-1],d.x0,d.x1-(k ? 0.0f : 84.0f*s));
+        if(*at>0)FitLine(text,lines[*at-1],d.x0,d.x1-(k ? 0.0f : 84.0f*s));
         y+=(k ? 22.0f : 28.0f)*s;
     }
     return y+8.0f*s;
@@ -291,7 +291,7 @@ int StatsBars(void* drawer,void* ctx,Text* text,const dmgstat::Frame& f,float s,
         const float mid=(row.row.y0+row.row.y1)*0.5f;
         Rect(drawer,ctx,row.label.x0+2.0f*s,mid-5.0f*s,row.label.x0+12.0f*s,mid+5.0f*s,RowColour(b,v.tab,i));
         Label(text,lines,at,row.label.x0+18.0f*s,mid,0,kLineScale*0.7f,kWhite,L"%ls",RowName(b,v.tab,i));
-        if(*at>0)MapFitLabel(text,lines[*at-1],row.label.x0+18.0f*s,row.label.x1-4.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],row.label.x0+18.0f*s,row.label.x1-4.0f*s);
         RowBar(drawer,ctx,row.track,value[i]/most,b,v.tab,i);
         Label(text,lines,at,row.track.x1+8.0f*s,mid,0,kLineScale*0.64f,kWhite,L"%ls  %.0f%%",Amount(value[i]).t,Share(value[i],total));
         Target(tg,row.row,dmgstat::Ui::row,i);
@@ -412,7 +412,7 @@ void StatsHead(void* drawer,void* ctx,Text* text,const dmgstat::Frame& f,float s
         Rect(drawer,ctx,r.x0,r.y0,r.x1,r.y1,on ? kStatsOn : Over(p,r) ? kStatsHover : kStatsOff);
         if(on)Rect(drawer,ctx,r.x0,r.y1-2.0f*s,r.x1,r.y1,kCyan);
         Label(text,lines,at,(r.x0+r.x1)*0.5f,(r.y0+r.y1)*0.5f,1,kLineScale*0.66f,on ? kWhite : kStatsDim,L"%ls",word);
-        if(*at>0)MapFitLabel(text,lines[*at-1],r.x0+4.0f*s,r.x1-4.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],r.x0+4.0f*s,r.x1-4.0f*s);
         Target(tg,r,what,which);
     };
     float x=t.x0+titleW;
@@ -435,10 +435,10 @@ void StatsHead(void* drawer,void* ctx,Text* text,const dmgstat::Frame& f,float s
     for(const float d:b.taken)taken+=d;
     Label(text,lines,at,t.x0,t.y1+20.0f*s,0,kLineScale*0.7f,kWhite,Tr(Tx::statsSummary),Amount(dealt).t,kills,Amount(taken).t,
           Amount(healed).t,Amount(ff).t,When(missionMs).t);
-    if(*at>0)MapFitLabel(text,lines[*at-1],t.x0,t.x1);
+    if(*at>0)FitLine(text,lines[*at-1],t.x0,t.x1);
     // The hint in the footer's left (the scroll, when there is one, at its right).
     Label(text,lines,at,f.footer.x0,(f.footer.y0+f.footer.y1)*0.5f,0,kLineScale*0.58f,kStatsDim,L"%ls",Tr(pad ? Tx::statsPadHint : Tx::statsHint));
-    if(*at>0)MapFitLabel(text,lines[*at-1],f.footer.x0,f.footer.x0+(f.footer.x1-f.footer.x0)*0.6f);
+    if(*at>0)FitLine(text,lines[*at-1],f.footer.x0,f.footer.x0+(f.footer.x1-f.footer.x0)*0.6f);
 }
 
 // The page over the map (MapScreen while it is shown): the screen shaded, the panel, its head and chart, the tooltip; its

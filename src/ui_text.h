@@ -10,6 +10,7 @@
 //    glyph cache is not safe from another thread (glyphs.cpp locks it for that).
 //  - Sprites: an antialiased disc and ring (the pins, the current mission's ring), made once per device.
 #include "hudtext.h"
+#include "text_fit.h"
 #include "ui_gpu.h"
 
 #include <cstdint>
@@ -26,10 +27,11 @@ struct Label {
     float w=0.f,h=0.f;                        // design units
 };
 
-// How a line goes into a width (src/text_fit.h): maxW 0 not fitted; minSize 0 text_fit's floor (MinSizeOf); size2 > 0:
-// when one row does not fit it may take two, `size2` tall (then shrunk / cut as one row would be), their tops at
-// rowY[0] / rowY[1].
-struct Fit { float maxW=0.f,minSize=0.f,size2=0.f; float rowY[2]{}; };
+// How a line goes into a width (src/text_fit.h): maxW 0 not fitted; `policy` text_fit's (shrink: smaller then cut;
+// ellipsis: cut at its size; wrap: two rows before smaller, `size2` tall or the line's size); minSize 0 text_fit's floor
+// (MinSizeOf); size2 > 0 with shrink: when one row does not fit even shrunk it may take two, `size2` tall. Two rows:
+// their tops at rowY[0] / rowY[1].
+struct Fit { float maxW=0.f,minSize=0.f,size2=0.f; float rowY[2]{}; textfit::Policy policy=textfit::Policy::shrink; };
 
 class Labels {
 public:

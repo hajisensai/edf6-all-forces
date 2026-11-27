@@ -507,12 +507,12 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
     Rect(drawer,ctx,x-8.0f*s,top-8.0f*s,right,top+statusH*s,kMapBand);
     Rect(drawer,ctx,x-8.0f*s,top-8.0f*s,x-5.0f*s,top+statusH*s,kCyan);
     Label(text,lines,at,x,top+8.0f*s,0,kLineScale*0.72f,kCyan,Tr(Tx::enemyControlActive),snapshot.name);
-    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],x,right-8.0f*s);
     float y=top+24.0f*s;
     if(!active) {
         Label(text,lines,at,x,y+12.0f*s,0,kLineScale*0.58f,kAmber,L"%ls",
             Tr(snapshot.phase==Phase::restoring ? Tx::enemyControlRestoring : Tx::enemyControlPending));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],x,right-8.0f*s);
         return;
     }
     if(hp) {
@@ -522,15 +522,15 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
     }
     wchar_t health[128]{};
     Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.6f,kWhite,L"%ls",EnemyHealthText(snapshot,health,_countof(health)));
-    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],x,right-8.0f*s);
     y+=22.0f*s;
     Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.52f,kAmber,
         Tr(snapshot.followsOwnerTeam ? Tx::enemyControlTeamOwner : Tx::enemyControlTeamOriginal),snapshot.controlledTeam);
-    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],x,right-8.0f*s);
     y+=20.0f*s;
     if(snapshot.sourceProtected) {
         Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.52f,kTeal,L"%ls",Tr(Tx::enemyControlSourceSafe));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],x,right-8.0f*s);
     }
     const float statusBottom=top+statusH*s;
     // --- Bottom right: key -> attack ---
@@ -551,7 +551,7 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
     Rect(drawer,ctx,x0-8.0f*s,ry,x1+8.0f*s,bottom,kMapBand);
     Rect(drawer,ctx,x1+5.0f*s,ry,x1+8.0f*s,bottom,kCyan);
     Label(text,lines,at,x0,ry+13.0f*s,0,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlAttacks));
-    if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+    if(*at>0)FitLine(text,lines[*at-1],x0,x1);
     ry+=26.0f*s;
     const float chip=std::fmin(130.0f*s,(x1-x0)*0.34f);
     for(unsigned i=0;i<shown;++i) {
@@ -567,7 +567,7 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
         Rect(drawer,ctx,x0,ry+2.0f*s,x0+chip,ry+rowH-3.0f*s,running ? kBtnLit : kBtnFill);
         Label(text,lines,at,x0+chip*0.5f,ry+rowH*0.47f,1,kLineScale*0.52f,unavailable ? kMapOrderDim : kWhite,L"%ls",chipText);
         if(*at>0) {
-            Line& l=lines[*at-1];MapFitLabel(text,l,x0+3.0f*s,x0+chip-3.0f*s);l.x=x0+(chip-l.w)*0.5f;
+            Line& l=lines[*at-1];FitLine(text,l,x0+3.0f*s,x0+chip-3.0f*s);l.x=x0+(chip-l.w)*0.5f;
         }
         const float nameLeft=x0+chip+8.0f*s;
         float nameRight=x1;
@@ -575,25 +575,25 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
             Label(text,lines,at,x1,ry+rowH*0.47f,2,kLineScale*0.48f,cooling ? kAmber : running ? kCyan : kMapOrderDim,L"%ls",
                 EnemyAbilityState(ability,state,_countof(state)));
             if(*at>0) {
-                Line& l=lines[*at-1];MapFitLabel(text,l,nameLeft+(x1-nameLeft)*0.5f,x1);nameRight=l.x-6.0f*s;
+                Line& l=lines[*at-1];FitLine(text,l,nameLeft+(x1-nameLeft)*0.5f,x1);nameRight=l.x-6.0f*s;
             }
         }
         Label(text,lines,at,nameLeft,ry+rowH*0.47f,0,kLineScale*0.6f,unavailable ? kMapOrderDim : kWhite,L"%ls",ability.name);
-        if(*at>0)MapFitLabel(text,lines[*at-1],nameLeft,nameRight);
+        if(*at>0)FitLine(text,lines[*at-1],nameLeft,nameRight);
         ry+=rowH;
     }
     if(more) {
         Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kTeal,Tr(shown ? Tx::enemyControlMoreOnCard : Tx::enemyControlAllOnCard),
             static_cast<unsigned>(snapshot.abilityCount-shown));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+        if(*at>0)FitLine(text,lines[*at-1],x0,x1);
         ry+=22.0f*s;
     } else if(!shown) {
         Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kAmber,L"%ls",Tr(Tx::enemyControlNoKeys));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+        if(*at>0)FitLine(text,lines[*at-1],x0,x1);
         ry+=22.0f*s;
     }
     Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kTeal,L"%ls",Tr(Tx::enemyControlPlayHint));
-    if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+    if(*at>0)FitLine(text,lines[*at-1],x0,x1);
 }
 }  // namespace hudi
 

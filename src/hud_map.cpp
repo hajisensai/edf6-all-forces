@@ -351,15 +351,6 @@ void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* l
         auto* r=mapUiPanels+4*mapUiPanelCount++;r[0]=x0;r[1]=y0;r[2]=x1;r[3]=y1;
     }
 }
-void MapFitLabel(Text* text,Line& row,float left,float right) noexcept {
-    if(!text || !(row.w>right-left))return;
-    const float mid=row.y+row.h*0.5f;
-    // Native fonts quantize pixel sizes; remeasure instead of assuming one proportional shrink fits.
-    for(int pass=0;pass<4 && row.w>right-left;++pass) {
-        row.scale*=std::fmax(0.01f,(right-left)/row.w)*0.96f;MeasureAll(*text,&row,1);
-    }
-    row.x=std::fmax(left,std::fmin(row.x,right-row.w));row.y=mid-row.h*0.5f;
-}
 alignas(16) const float kMapBoxFill[4]={0.3f,0.9f,1.0f,0.08f};
 alignas(16) const float kMapLocked[4]={0.6f,0.6f,0.6f,0.6f};   // a squad a mission script drives: shown, takes no order
 alignas(16) const float kMapPathReverse[4]={0.85f,0.5f,1.0f,1.0f};   // a reverse move's path (violet)
@@ -509,14 +500,14 @@ float MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool
     const float right=dock.x1-8.0f*s,left=dock.x0+8.0f*s,top=216.0f*s,rowH=30.0f*s;
     MapUiBox(drawer,ctx,left-8.0f*s,top-14.0f*s,right+8.0f*s,top+rowH*static_cast<float>(count+1),lines,*at);
     Label(text,lines,at,left,top,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::mapPayloadTitle));
-    if(*at)MapFitLabel(text,lines[*at-1],left,right);
+    if(*at)FitLine(text,lines[*at-1],left,right);
     float rects[kMostPayload*4]{};int entries[kMostPayload]{};int hits=0;
     for(int i=0;i<count;++i) {
         const auto& e=r.entry[i];const float y=top+rowH*static_cast<float>(i+1);
         const bool hover=!pad && commands.pointer && commands.px>=left && commands.px<right && commands.py>=y-12*s && commands.py<y+12*s;
         if(e.picked || (e.selectable && hover))Rect(drawer,ctx,left-3*s,y-12*s,right+3*s,y+12*s,kMapBoxFill);
         Label(text,lines,at,left+10*s,y,0,kLineScale*0.70f,e.selectable ? kWhite : kMapLocked,L"%ls  %d/%d",e.name,e.rounds,e.capacity);
-        if(*at)MapFitLabel(text,lines[*at-1],left+10*s,right);
+        if(*at)FitLine(text,lines[*at-1],left+10*s,right);
         if(e.picked)Rect(drawer,ctx,left,y-7*s,left+3*s,y+7*s,kCyan);
         if(!pad && e.selectable && r.selectionToken) {
             auto* hit=rects+4*hits;hit[0]=left;hit[1]=y-12*s;hit[2]=right;hit[3]=y+12*s;entries[hits++]=i;
@@ -763,7 +754,7 @@ void MapDismountMenu(void* drawer,void* ctx,Text* text,float width,float height,
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
         Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,hover ? kMapBoxFill : kBtnFill);
         Label(text,lines,at,q.x0+pad,(q.y0+q.y1)*0.5f,0,scale,kMapOrder,L"%ls",word[i]);
-        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+pad,q.x1-pad);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+pad,q.x1-pad);
         rects[i*4]=q.x0;rects[i*4+1]=q.y0;rects[i*4+2]=q.x1;rects[i*4+3]=q.y1;
     }
     MapCommandFormationButtons(rects,entries,placed);
@@ -807,7 +798,7 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
         Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : hover ? kMapBoxFill : kBtnFill);
         Label(text,lines,at,q.x0+pad,(q.y0+q.y1)*0.5f,0,scale,lit ? kWhite : kMapOrder,L"%ls",word[i]);
-        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+pad,q.x1-pad);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+pad,q.x1-pad);
         rects[i*4]=q.x0;rects[i*4+1]=q.y0;rects[i*4+2]=q.x1;rects[i*4+3]=q.y1;
     }
     MapCommandFormationButtons(rects,entries,placed);
@@ -872,7 +863,7 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         const float iconX=q.x0+(kBtnPad+kBtnIcon*0.5f)*s,mid=(q.y0+q.y1)*0.5f;
         MapOrderIcon(drawer,ctx,b,iconX,mid,kBtnIcon*s,s,available ? kWhite : kMapLocked);
         Label(text,lines,at,q.x0+(kBtnPad+kBtnIcon+6.0f)*s,mid,0,scale,available ? kWhite : kMapLocked,L"%ls",word[k]);
-        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+(kBtnPad+kBtnIcon+6.0f)*s,q.x1-kBtnPad*s);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+(kBtnPad+kBtnIcon+6.0f)*s,q.x1-kBtnPad*s);
         // The tooltip: the full word (the formation's name, the health boxes' state) and how to give it.
         wchar_t full[96];
         if(b==Id::formation)_snwprintf_s(full,_countof(full),_TRUNCATE,Tr(Tx::btnFormation),FormationText(c.march,false));
@@ -918,7 +909,7 @@ void MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandR
     const bool room=mapbtn::ComposeRoom(load,c.composeSeats);
     Label(text,lines,at,L.title.x0,(L.title.y0+L.title.y1)*0.5f,0,kLineScale*0.7f,kWhite,Tr(Tx::composeSeats),name,load.count,
           c.composeSeats<kSupportLoadoutMost ? c.composeSeats : kSupportLoadoutMost);
-    if(*at>0)MapFitLabel(text,lines[*at-1],L.title.x0,L.title.x1);
+    if(*at>0)FitLine(text,lines[*at-1],L.title.x0,L.title.x1);
     float rects[mapbtn::kComposeItems*4];int codes[mapbtn::kComposeItems];int hits=0;
     auto hit=[&](const mapbtn::Rect& q,int code){
         if(hits>=mapbtn::kComposeItems)return;
@@ -940,13 +931,13 @@ void MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandR
         const int members=load.count-j*mapbtn::kSquad<mapbtn::kSquad ? load.count-j*mapbtn::kSquad : mapbtn::kSquad;
         const SupportWeapon kind=mapbtn::ComposeSquadKind(load,j);
         Label(text,lines,at,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,1,kLineScale*0.6f,kWhite,Tr(Tx::composeSquad),KindText(kind),members);
-        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
         MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::composeSquadTip),j+1,KindText(load.soldier[j*mapbtn::kSquad]),KindText(kind),members);
         hit(q,mapbtn::ComposeSquadCode(j));
     }
     for(int k=0;k<mapbtn::kComposeClasses;++k) {
         Label(text,lines,at,L.classLabel[k].x0,(L.classLabel[k].y0+L.classLabel[k].y1)*0.5f,0,kLineScale*0.6f,kMapOrder,L"%ls",Tr(kClassText[k]));
-        if(*at>0)MapFitLabel(text,lines[*at-1],L.classLabel[k].x0,L.classLabel[k].x1-2.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],L.classLabel[k].x0,L.classLabel[k].x1-2.0f*s);
     }
     for(int k=0;k<L.kinds;++k) {
         const mapbtn::Rect& q=L.kind[k];
@@ -955,13 +946,13 @@ void MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandR
         Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,hover ? kBtnLit : kBtnFill);
         frame(q,room ? kMapOrder : kMapOrderDim);
         Label(text,lines,at,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,1,kLineScale*0.6f,room ? kWhite : kMapOrderDim,L"%ls",KindText(kind));
-        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
         if(room)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::composeAddTip),KindText(kind),mapbtn::kSquad,c.composeSeats-load.count);
         else MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::composeFullTip),KindText(kind),mapbtn::kSquad);
         hit(q,L.kindCode[k]);
     }
     Label(text,lines,at,L.hint.x0,(L.hint.y0+L.hint.y1)*0.5f,0,kLineScale*0.55f,kMapOrderDim,L"%ls",Tr(Tx::composeHint));
-    if(*at>0)MapFitLabel(text,lines[*at-1],L.hint.x0,L.hint.x1);
+    if(*at>0)FitLine(text,lines[*at-1],L.hint.x0,L.hint.x1);
     MapCommandComposeButtons(rects,codes,hits);
 }
 void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
@@ -1009,7 +1000,7 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
          Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,w,edge);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,w,edge);
          Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,w,edge);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,w,edge);}
         Label(text,lines,at,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,1,kLineScale*0.6f,lit ? kWhite : kMapOrder,L"%ls",Tr(kTabText[t]));
-        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
         hit(q,mapbtn::SupportTabHit(t));
     }
     // An entry the mission forbids, or one the pool cannot pay for now: dimmed (a click on it still says why).
@@ -1039,7 +1030,7 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
         Label(text,lines,at,chipsLeft,mid,2,kLineScale*0.6f,c.support[pick].afford ? kAmber : kRed,L"%d",c.support[pick].price);
         const float textRight=chipsLeft-kSupPriceW*s;
         Label(text,lines,at,q.x0+(8.0f+kSupIcon)*s,mid,0,kLineScale*0.7f,rowTint,L"%ls",base);
-        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+(8.0f+kSupIcon)*s,textRight);
+        if(*at>0)FitLine(text,lines[*at-1],q.x0+(8.0f+kSupIcon)*s,textRight);
         body[k]=mapbtn::Rect{q.x0,q.y0,chipsLeft,q.y1};
         MapTipSet(c,body[k].x0,body[k].y0,body[k].x1,body[k].y1,Tr(Tx::supportTip),c.support[pick].name,c.support[pick].price);
     }
@@ -1148,7 +1139,7 @@ float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float 
         hitbox(x0,top,x1,top+titleH,enemyui::kFold);
     }
     Label(text,lines,at,left,top+titleH*0.5f,0,kLineScale*0.68f,kCyan,L"%ls",Tr(Tx::enemyControlTitle));
-    if(*at>0)MapFitLabel(text,lines[*at-1],left,right-110.0f*z);
+    if(*at>0)FitLine(text,lines[*at-1],left,right-110.0f*z);
     Label(text,lines,at,right,top+titleH*0.5f,2,kLineScale*0.5f,kMapOrderDim,L"%ls",
         Tr(engaged ? Tx::enemyControlToggle : open ? Tx::enemyControlFoldOpen : Tx::enemyControlFoldClosed));
     if(!open) {
@@ -1169,18 +1160,18 @@ float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float 
         }
         Label(text,lines,at,(left+right)*0.5f,y+10.0f*z,1,kLineScale*0.6f,candidate ? kWhite : kAmber,L"%ls",candidate ? snapshot.name : Tr(Tx::enemyControlEmpty));
         if(*at>0) {
-            Line& row=lines[*at-1];MapFitLabel(text,row,left+arrow+4.0f*z,right-arrow-4.0f*z);
+            Line& row=lines[*at-1];FitLine(text,row,left+arrow+4.0f*z,right-arrow-4.0f*z);
             row.x=(left+right-row.w)*0.5f;
         }
     } else {
         Label(text,lines,at,left,y+10.0f*z,0,kLineScale*0.6f,active ? kWhite : kAmber,L"%ls",candidate ? snapshot.name : Tr(Tx::enemyControlEmpty));
-        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+        if(*at>0)FitLine(text,lines[*at-1],left,right);
     }
     y+=22.0f*z;
     if(active) {
         wchar_t health[128]{};
         Label(text,lines,at,left,y+10.0f*z,0,kLineScale*0.6f,kWhite,L"%ls",EnemyHealthText(snapshot,health,_countof(health)));
-        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+        if(*at>0)FitLine(text,lines[*at-1],left,right);
         y+=22.0f*z;
     }
     const auto button=[&](int code,int row,const wchar_t* label,bool allowed,bool selected) {
@@ -1189,7 +1180,7 @@ float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float 
         Rect(drawer,ctx,left,y,right,y+rowH-2.0f*z,focus || (hover && allowed) ? kBtnLit : kBtnFill);
         if(selected)Rect(drawer,ctx,left,y+4.0f*z,left+3.0f*z,y+rowH-6.0f*z,kMapOrder);
         Label(text,lines,at,left+8.0f*z,y+rowH*0.46f,0,kLineScale*0.6f,allowed ? kWhite : kMapOrderDim,L"%ls",label);
-        if(*at>0)MapFitLabel(text,lines[*at-1],left+8.0f*z,right-4.0f*z);
+        if(*at>0)FitLine(text,lines[*at-1],left+8.0f*z,right-4.0f*z);
         if(allowed)hitbox(left,y,right,y+rowH-2.0f*z,code);
         y+=rowH;
     };
@@ -1218,7 +1209,7 @@ float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float 
         const wchar_t* reason=pending ? Tr(snapshot.phase==Phase::restoring ? Tx::enemyControlRestoring : Tx::enemyControlPending) :
             candidate ? (snapshot.reason==enemy_control::Reason::networkCapacity ? Tr(Tx::enemyControlCapacity) : enemy_control::ReasonText(snapshot.reason)) : Tr(Tx::enemyControlEmpty);
         Label(text,lines,at,left,y+9.0f*z,0,kLineScale*0.52f,kAmber,L"%ls",reason);
-        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+        if(*at>0)FitLine(text,lines[*at-1],left,right);
         MapTipSet(c,left,y,right,y+20.0f*z,L"%ls",reason);y+=20.0f*z;
         button(pending ? enemyui::kExit : enemyui::kBegin,0,Tr(pending ? Tx::enemyControlReturn : Tx::enemyControlBegin),
             pending || (candidate && snapshot.reason==enemy_control::Reason::none),false);
@@ -1226,15 +1217,15 @@ float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float 
     if(active) {
         Label(text,lines,at,left,panelBottom-(snapshot.sourceProtected ? 46.0f : 28.0f)*z,0,kLineScale*0.5f,kAmber,
             Tr(snapshot.followsOwnerTeam ? Tx::enemyControlTeamOwner : Tx::enemyControlTeamOriginal),snapshot.controlledTeam);
-        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+        if(*at>0)FitLine(text,lines[*at-1],left,right);
     }
     if(active && snapshot.sourceProtected) {
         Label(text,lines,at,left,panelBottom-28.0f*z,0,kLineScale*0.5f,kCyan,L"%ls",Tr(Tx::enemyControlSourceSafe));
-        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+        if(*at>0)FitLine(text,lines[*at-1],left,right);
     }
     Label(text,lines,at,left,panelBottom-10.0f*z,0,kLineScale*0.48f,kTeal,L"%ls",
         Tr(active ? (pad ? Tx::enemyControlPadHint : Tx::enemyControlMouseHint) : pad ? Tx::enemyControlPadPickHint : Tx::enemyControlPickHint));
-    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    if(*at>0)FitLine(text,lines[*at-1],left,right);
     MapCommandEnemyButtons(rects,codes,hits,&snapshot);
     return panelBottom;
 }
@@ -1300,10 +1291,10 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     Label(text,lines,at,x0+8.0f*s,top+titleH*0.5f,0,kLineScale*0.7f,stateTint,
           Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),Tr(PvpFactionName(status.local.faction)));
     const float hintLeft=x1-108.0f*s;
-    if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,hintLeft-8.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],x0+8.0f*s,hintLeft-8.0f*s);
     Label(text,lines,at,x1-22.0f*s,top+titleH*0.5f,2,kLineScale*0.55f,kMapOrderDim,L"%ls",
           Tr(pad ? Tx::pvpFocusPad : Tx::pvpExpand));
-    if(*at>0)MapFitLabel(text,lines[*at-1],hintLeft,x1-22.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],hintLeft,x1-22.0f*s);
     Tri(drawer,ctx,x1-11.0f*s,top+titleH*0.5f+(open ? 3.0f : -3.0f)*s,
         x1-11.0f*s,top+titleH*0.5f+(open ? -4.0f : 4.0f)*s,4.0f*s,kMapOrder);
     MapTipSet(c,x0,top,x1,top+titleH,L"%ls",Tr(Tx::pvpMouseHint));
@@ -1338,19 +1329,19 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
             Label(text,lines,at,cellLeft+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,tint,L"%ls",Tr(PvpFactionName(faction)));
             MapTipSet(c,cellLeft,y,cellRight,y+rowH,Tr(Tx::pvpJoinFaction),Tr(PvpFactionName(faction)));
         }
-        if(*at>0)MapFitLabel(text,lines[*at-1],cellLeft+10.0f*s,cellRight-18.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],cellLeft+10.0f*s,cellRight-18.0f*s);
         if(code==kPvpModeToggle || code==kPvpPreset)MapTipSet(c,left,y,right,y+rowH,L"%ls",Tr(Tx::pvpHostOnly));
         if(allowed){float* q=rects+4*hits;q[0]=cellLeft;q[1]=y;q[2]=cellRight;q[3]=y+rowH-3.0f*s;codes[hits++]=code;}
     }
     float y=rowsTop+static_cast<float>(kRows)*rowH;
     const Tx result=status.pending ? Tx::pvpPending : !status.ready ? Tx::pvpNotReady : MapPvpResult(status.result);
     Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.56f,stateTint,L"%ls",Tr(result));
-    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    if(*at>0)FitLine(text,lines[*at-1],left,right);
     const wchar_t* details=hudtext::InUse()==hudtext::Lang::zhCN && status.note[0] ? status.note : Tr(result);
     MapTipSet(c,left,y,right,y+footH,L"%ls",details);
     y+=footH;
     Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.55f,kTeal,L"%ls",Tr(pad ? Tx::pvpPadHint : Tx::pvpMouseHint));
-    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    if(*at>0)FitLine(text,lines[*at-1],left,right);
     MapCommandPvpButtons(rects,codes,hits,&status);
     return panelBottom;
 }
@@ -1441,7 +1432,7 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
     for(int i=first;i<*at;++i) {
         Line& row=lines[i];
         const float col=std::floor((row.x-lx0)/colW);
-        MapFitLabel(text,row,row.x,col<static_cast<float>(kCols-1) ? lx0+colW*(col+1.0f)-4.0f*s : lx1-6.0f*s);
+        FitLine(text,row,row.x,col<static_cast<float>(kCols-1) ? lx0+colW*(col+1.0f)-4.0f*s : lx1-6.0f*s);
     }
     return y0;
 }
@@ -1477,7 +1468,7 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
         const float titleRight=*at>0 ? lines[*at-1].x+lines[*at-1].w+12.0f*s : x0+90.0f*s;
         if(open)Label(text,lines,at,x1-30.0f*s,mid,2,kLineScale*0.62f,kMapOrderDim,L"%ls  %d/%d",Tr(words[cat]),count ? pick+1 : 0,count);
         else Label(text,lines,at,x1-30.0f*s,mid,2,kLineScale*0.58f,kMapOrderDim,L"%ls",Tr(pad ? Tx::placeOpenPad : Tx::placeOpenMouse));
-        if(*at>0)MapFitLabel(text,lines[*at-1],titleRight,x1-30.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],titleRight,x1-30.0f*s);
         Tri(drawer,ctx,x1-15.0f*s,mid+(open ? 4.0f : -4.0f)*s,x1-15.0f*s,mid+(open ? -4.0f : 4.0f)*s,5.0f*s,kMapOrder);
         MapTipSet(c,x0,top,x1,top+titleH,L"%ls",Tr(Tx::placeTabTip));
         hit(x0,top,x1,top+titleH,kPlaceToggle);
@@ -1506,7 +1497,7 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
     float y=top+titleH;
     if(c.placeOnline) {
         Label(text,lines,at,x0+8.0f*s,y+footH*0.5f,0,kLineScale*0.58f,kAmber,L"%ls",Tr(Tx::placeOnline));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
         y+=footH;
     }
     // The tabs, three a row, each with its count.
@@ -1518,7 +1509,7 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
         MapFrame(drawer,ctx,a,b,r,d,s,lit ? kWhite : kMapOrderDim);
         Label(text,lines,at,(a+r)*0.5f,(b+d)*0.5f,1,kLineScale*0.6f,lit ? kWhite : kMapOrder,L"%ls %d",Tr(words[k]),
               debugspawn::CountIn(static_cast<debugspawn::Category>(k)));
-        if(*at>0)MapFitLabel(text,lines[*at-1],a+3.0f*s,r-3.0f*s);
+        if(*at>0)FitLine(text,lines[*at-1],a+3.0f*s,r-3.0f*s);
         hit(a,b,r,d,kPlaceTab+k);
     }
     y+=tabH*static_cast<float>(tabRows)+pad6;
@@ -1541,10 +1532,10 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
                 st==RowState::broken ? Tr(Tx::placeBroken) : Tr(Tx::debugSpawnUnavailable);
             Label(text,lines,at,right,mid,2,kLineScale*0.56f,st==RowState::broken ? kAmber : st==RowState::loading ? kGreen : kMapOrderDim,
                   L"%ls",why);
-            if(*at>0){Line& w=lines[*at-1];MapFitLabel(text,w,x1-160.0f*s,right);w.x=right-w.w;right=w.x-6.0f*s;}
+            if(*at>0){Line& w=lines[*at-1];FitLine(text,w,x1-160.0f*s,right);w.x=right-w.w;right=w.x-6.0f*s;}
         }
         Label(text,lines,at,x0+20.0f*s,mid,0,kLineScale*0.68f,armed || usable ? kWhite : kMapOrderDim,L"%ls",debugspawn::kEntries[row].name);
-        if(*at>0)MapFitLabel(text,lines[*at-1],x0+20.0f*s,right);
+        if(*at>0)FitLine(text,lines[*at-1],x0+20.0f*s,right);
         if(picked)Tri(drawer,ctx,x0+6.0f*s,mid,x0+14.0f*s,mid,4.5f*s,armed ? kWhite : kMapOrder);
         hit(x0,b,x1,d,row);
     }
@@ -1559,13 +1550,13 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
     Rect(drawer,ctx,da,ab,dr,ad,down && over(da,ab,dr,ad) ? kBtnLit : kBtnFill);MapFrame(drawer,ctx,da,ab,dr,ad,s,down ? kMapOrder : kMapOrderDim);
     Tri(drawer,ctx,(da+dr)*0.5f,amid-5.0f*s,(da+dr)*0.5f,amid+5.0f*s,7.0f*s,down ? kWhite : kMapOrderDim);
     Label(text,lines,at,(x0+x1)*0.5f,amid,1,kLineScale*0.6f,kMapOrder,Tr(Tx::placePage),page,pages);
-    if(*at>0)MapFitLabel(text,lines[*at-1],ur+4.0f*s,da-4.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],ur+4.0f*s,da-4.0f*s);
     if(up){hit(ua,ab,ur,ad,kPlacePageUp);MapTipSet(c,ua,ab,ur,ad,L"%ls",Tr(Tx::placePageUpTip));}
     if(down){hit(da,ab,dr,ad,kPlacePageDown);MapTipSet(c,da,ab,dr,ad,L"%ls",Tr(Tx::placePageDownTip));}
     y+=arrowH;
     // One line of what to press (the keyboard's keys in the title's tooltip).
     Label(text,lines,at,x0+8.0f*s,y+footH*0.5f,0,kLineScale*0.56f,kTeal,L"%ls",Tr(pad ? Tx::placeHintPad : Tx::placeHintMouse));
-    if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
+    if(*at>0)FitLine(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
     MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,window);
 }
 
@@ -1744,7 +1735,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
     if(c.noteFresh)Label(text,lines,at,width*0.5f,height-124.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
     for(int i=footerFirst;i<*at;++i) {
-        Line& row=lines[i];MapFitLabel(text,row,16.0f*s,width-16.0f*s);row.x=(width-row.w)*0.5f;
+        Line& row=lines[i];FitLine(text,row,16.0f*s,width-16.0f*s);row.x=(width-row.w)*0.5f;
     }
     // Tab's sub-selection: the kind the orders go to, over the band's left.
     if(c.subKind[0] && c.selected>0) {
@@ -1777,7 +1768,7 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
         wchar_t key[32];KeyName(m.mapKey,key,32);
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapMouseKeys),key);
     }
-    for(int i=bandsFirst;i<*at;++i)MapFitLabel(text,lines[i],16.0f*s,width-16.0f*s);
+    for(int i=bandsFirst;i<*at;++i)FitLine(text,lines[i],16.0f*s,width-16.0f*s);
 }
 
 #include "hud_stats.inc"

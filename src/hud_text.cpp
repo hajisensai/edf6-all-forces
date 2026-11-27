@@ -187,6 +187,37 @@ void MeasureAll(Text& t,Line* lines,int n) noexcept {
     __except(TextFault(GetExceptionInformation())) {}
     EndOwed(t);
 }
+void FitLine(Text* text,Line& row,float left,float right,bool shrink) noexcept {
+    const float room=right-left;
+    if(!text || !textOk || !(room>0.0f) || !(row.w>room))return;
+    const float mid=row.y+row.h*0.5f;
+    if(shrink) {
+        const float floor=row.scale*textfit::kMinScale;
+        for(int pass=0;pass<4 && row.w>room && row.scale>floor;++pass) {
+            row.scale=std::fmax(floor,row.scale*room/row.w*0.96f);MeasureAll(*text,&row,1);
+        }
+    }
+    if(row.w>room) {   // past the floor: the longest start that fits with the dots
+        wchar_t whole[kLineChars];
+        wcscpy_s(whole,row.text);
+        const int n=static_cast<int>(std::wcslen(whole));
+        const auto cut=[&](int k) noexcept {
+            if(k>0 && k<n && textfit::HighSurrogate(whole[k-1]))--k;
+            while(k>0 && textfit::Space(whole[k-1]))--k;
+            wmemcpy(row.text,whole,static_cast<std::size_t>(k));
+            wcscpy_s(row.text+k,static_cast<std::size_t>(kLineChars-k),L"...");
+            MeasureAll(*text,&row,1);
+        };
+        int lo=0,hi=n-1<kLineChars-4 ? n-1 : kLineChars-4;   // lo: fits (the dots alone kept whatever they measure)
+        while(lo<hi) {
+            const int k=(lo+hi+1)/2;
+            cut(k);
+            if(row.w<=room)lo=k; else hi=k-1;
+        }
+        cut(lo);
+    }
+    row.x=std::fmax(left,std::fmin(row.x,right-row.w));row.y=mid-row.h*0.5f;
+}
 alignas(16) const float kClear[4]={0.0f,0.0f,0.0f,0.0f};
 std::uint64_t worldDrawingKey=0;   // the key of the world line being drawn (for tools/hud_view's stand-in to tell plates apart)
 // A world line (docs/world-text-re.md §5.1 / §6): its plate laid out for the camera (from behind: the face the back side,

@@ -21,6 +21,7 @@
 #include "map_marks.h"
 #include "hud_cue.h"
 #include "hudtext.h"
+#include "text_fit.h"
 #include "module.h"   // ModuleNotice
 #include "layout.h"
 #include "memory.h"
@@ -187,6 +188,11 @@ struct Text {
 void Draw(Text& t,const Line& l) noexcept;
 bool MakeText(Text& t) noexcept;
 void MeasureAll(Text& t,Line* lines,int n) noexcept;
+// A measured line into [left, right] (text_fit.h's order, by the game's own measure): `shrink` smaller as far as
+// textfit::kMinScale of its scale (the font's quantized sizes remeasured), then cut with "..." at the longest start
+// that fits (a binary search, a measure a step; never a surrogate pair split, no space before the dots). A HUD line is
+// one row: a text that must wrap is laid by its caller as two lines (MapScreen's band). Kept inside, its centre height.
+void FitLine(Text* text,Line& row,float left,float right,bool shrink=true) noexcept;
 void DrawAll(Text& t,const Line* lines,int n) noexcept;
 void FreeText(Text& t) noexcept;
 bool Project(const float* vp,const float* p,float width,float height,float* sx,float* sy,float* depth) noexcept;
@@ -398,7 +404,6 @@ bool CameraRay(float* eye,float* dir) noexcept;
 namespace hudi {
 alignas(16) const float kMapBand[4]={0.0f,0.0f,0.0f,0.45f};
 void HideLinesUnder(Line* lines,int prior,float x0,float y0,float x1,float y1) noexcept;
-void MapFitLabel(Text* text,Line& row,float left,float right) noexcept;
 
 // The NPC commands (mapcmd.cpp, README 地图 → 指挥 NPC): the mouse pointer (where G sends the selection; with a pad a
 // crosshair at the screen's centre) and the box being dragged from it, each commandable unit ringed (white brackets:

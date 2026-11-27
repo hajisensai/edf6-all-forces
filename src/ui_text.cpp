@@ -84,6 +84,7 @@ struct Labels::Impl {
     struct Laying {
         std::wstring text;
         float size,maxW,minSize,size2,scale;
+        textfit::Policy policy;
         bool bold;
         int lang;
         unsigned used;
@@ -129,14 +130,15 @@ struct Labels::Impl {
     const textfit::Laid* Lay(const wchar_t* text,float size,bool bold,hudtext::Lang lang,float scale,const Fit& fit,
                              unsigned frame) noexcept {
         for(Laying& l:layings)
-            if(l.size==size && l.maxW==fit.maxW && l.minSize==fit.minSize && l.size2==fit.size2 && l.scale==scale &&
+            if(l.size==size && l.maxW==fit.maxW && l.minSize==fit.minSize && l.size2==fit.size2 && l.policy==fit.policy &&
+               l.scale==scale &&
                l.bold==bold && l.lang==static_cast<int>(lang) && l.text==text) {
                 l.used=frame;
                 return &l.laid;
             }
         Laying l{};
         try { l.text=text; } catch(...) { return nullptr; }
-        l.size=size;l.maxW=fit.maxW;l.minSize=fit.minSize;l.size2=fit.size2;l.scale=scale;l.bold=bold;
+        l.size=size;l.maxW=fit.maxW;l.minSize=fit.minSize;l.size2=fit.size2;l.policy=fit.policy;l.scale=scale;l.bold=bold;
         l.lang=static_cast<int>(lang);l.used=frame;
         const auto measure=[&](const wchar_t* s,int n,float at,float* ends) noexcept -> bool {
             int px[textfit::kMostChars];
@@ -144,7 +146,7 @@ struct Labels::Impl {
             for(int i=0;i<n;++i)ends[i]=static_cast<float>(px[i])/scale;
             return true;
         };
-        const textfit::Request r{size,fit.maxW,fit.minSize,fit.size2};
+        const textfit::Request r=textfit::RequestOf(size,fit.maxW,fit.policy,fit.minSize,fit.size2);
         if(!textfit::Lay(text,static_cast<int>(std::wcslen(text)),r,measure,&l.laid))return nullptr;
         std::size_t at=layings.size();
         if(at>=kLayings) {
