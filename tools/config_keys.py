@@ -1347,7 +1347,7 @@ K('MapAttackMoveKey', 'mapAttackMoveKey', INT, '0x51',
   lo='0', hi='254',
   note=("the map's order keys (map_keys.h, Broken Arrow's set; a virtual-key code, 0 none)",),
   ini=(
-      '; 地图指挥的命令键（断箭的操作方式；虚拟键码，0 = 不用这个键）。带点的命令（攻击移动、快速移动、倒车、卸载、火力任务）按下后',
+      '; 地图指挥的命令键（断箭的操作方式；虚拟键码，0 = 不用这个键）。带点的命令（攻击移动、倒车、卸载、火力任务）按下后',
       '; 下一次左键点地图即落点（手柄：A 落在屏幕中心），右键 / 手柄 B 取消；Shift 排队。',
       '; 攻击移动（默认 0x51 = Q）',)),
 K('MapStopKey', 'mapStopKey', INT, '0x45',

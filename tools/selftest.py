@@ -7416,9 +7416,7 @@ def npc_ai_wired() -> None:
     # is rolled with the stock side roll (the user, 2026-11-27: 「冲刺支持翻滚」): d76 and the stick, never a moved position.
     assert 'if(!npc::Scripted(control))   // a script\'s unit keeps its stock moves\n        Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil);' in think, 'Mobility: after Drive, not for a script unit'
     assert 'Mobility(' not in scripted and 'kDashPress' not in scripted and 'kSecondary' not in scripted
-    roll = code.split('void SprintRoll(', 1)[1].split('
-}
-', 1)[0]
+    roll = code.split('void SprintRoll(', 1)[1].split('\n}\n', 1)[0]
     assert 'h[kJumpPress]=1;' in roll and 'SprintRollBlock(g)' in roll and 'kPosition' not in roll and 'Teleport' not in roll
     assert 'else if(c.agility==Agility::roll)SprintRoll(s,h,pos,p,ms,sprinting);' in code
     assert 'agility==Agility::roll)return CommandResult(Reason::unsupported)' not in code, 'every class takes SPRINT'

@@ -284,7 +284,7 @@ HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack / board (drag: line; Shif
         L"%ls   右键 移动 / 攻击 / 上车（拖动：横队；Shift 排队）",
         L"%ls   右鍵 移動 / 攻擊 / 上車（拖曳：橫隊；Shift 排隊）",
         L"%ls   右クリック 移動 / 攻撃 / 乗車（ドラッグ：横隊、Shift で予約）")
-HUDTEXT(npcMouseKeys2,L"%ls attack-move  %ls withdraw  %ls reverse  %ls stop  %ls hold fire  %ls sub-group  Ctrl+1-9 group",
+HUDTEXT(npcMouseKeys2,L"%ls attack-move  %ls back  %ls reverse  %ls stop  %ls hold fire  %ls sub-group  Ctrl+1-9 group",
         L"%ls 攻击移动   %ls 撤离   %ls 倒车   %ls 停止   %ls 停火   %ls 子选择   Ctrl+1-9 编队",
         L"%ls 攻擊移動   %ls 撤離   %ls 倒車   %ls 停止   %ls 停火   %ls 子選擇   Ctrl+1-9 編隊",
         L"%ls 攻撃移動   %ls 撤収   %ls 後退   %ls 停止   %ls 射撃停止   %ls サブ選択   Ctrl+1-9 グループ")

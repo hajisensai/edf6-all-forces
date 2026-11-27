@@ -44,7 +44,8 @@ inline constexpr unsigned kMaxFormationUnits=96;
 //  - unloadAt (U + point): a move, then DISMOUNT ALL at the point (the queue's trailing order: Waypoints, Trail);
 //  - holdFire (H): `param` 1 on / 0 off -- the unit aims but fires only once hurt (HoldsFire), a state not a place;
 //  - altitude (V): `param` kAltitudeLow / kAltitudeHigh, the helicopters' and the jets' flight height;
-//  - sprint (Z): the soldiers' dashes without their rest (Wing Diver / Fencer), the jets' afterburner, for kSprintMs;
+//  - sprint (Z): the soldiers' dashes without their rest (Wing Diver / Fencer), the rollers' vanilla rolls along the
+//    route (Ranger / Air Raider: npcai.cpp SprintRoll), the jets' afterburner, for kSprintMs;
 //  - decoy (C): a jet's own decoys (flares) where it has them; no unit fakes one. smoke (X) retired 2026-11-27 with
 //    the card's trim (no unit carries smoke of its own: it was never lit), its wire value stays, refused.
 enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw,
