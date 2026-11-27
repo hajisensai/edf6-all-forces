@@ -67,8 +67,7 @@ def check_table() -> None:
             assert k.read in ('gen', 'hand'), f'{k.name}: a member is read here (gen / hand), not {k.read}'
         else:
             assert k.read != 'gen' and k.lo is None and not k.old, f'{k.name}: no member to read into'
-        assert k.name not in retired or k.read == 'retired', f'{k.name}: retired but read'
-        assert k.read != 'retired' or k.name in retired, f'{k.name}: read=retired but not in RETIRED'
+        assert k.name not in retired, f'{k.name}: retired (RETIRED) but still a key'
 
 
 def render_inc() -> str:

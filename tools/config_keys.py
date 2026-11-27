@@ -16,8 +16,8 @@ A key (Key, K for short), in the shipped ini's order:
   check     'clamp' a value out of range is clamped and logged (Fix / FixInt); 'nonzero' the same, 0 left alone (off);
             'reset' a value out of range is logged and the default used; 'hand' plugin.cpp Validate checks it itself
   read      'gen' read by the generated LoadConfig code; 'hand' plugin.cpp LoadConfig reads it itself (a parser of its
-            own, a fallback key, a bit of a mask); 'retired' shipped but no longer read (IgnoreRetired says so); else
-            the file that reads it (support_config.cpp's own section reader, the installer)
+            own, a fallback key, a bit of a mask); else the file that reads it (support_config.cpp's own section
+            reader, the installer)
   old       an older key read as the default when this one is missing
   cxx       the member's initialiser when it differs from default's text
   shipped   False: read but not in the shipped ini (developer and test keys)
@@ -2248,21 +2248,6 @@ K('SupportPtScale', 'supportPtScale', FLOAT, '1',
   lo='0.0f', hi='100.0f', check='reset',
   note=('every price times this (0: free)',),
   ini=('; 所有支援的价格乘这个倍数（0~100；0 = 全部免费）',)),
-K('HeliMoveGain', None, TEXT, '0.04',
-  read='retired',
-  ini=(
-      '',
-      '; ---- 直升机飞控参数（一般不用动；飞得晃/上下起伏/冲过头时再调）----',
-      '; 水平：每偏离目标点 1 米给多少摇杆量（大=更急）')),
-K('HeliBrakeGain', None, TEXT, '0.12',
-  read='retired',
-  ini=('; 水平：每 1 m/s 速度给多少反向摇杆（大=刹得更稳，太大会肉）',)),
-K('HeliClimbGain', None, TEXT, '0.08',
-  read='retired',
-  ini=('; 高度：爬升速度误差 1 m/s 对应多少油门（上下起伏就调小）',)),
-K('HeliHoverLearn', None, TEXT, '0.03',
-  read='retired',
-  ini=('; 高度：学习悬停油门的速度（长期偏高/偏低就调大）',)),
 K('Sazabi', 'sazabi', BOOL, True,
   doc=('// The Sazabi (sazabi.cpp, docs/gundam-plan.md): walked and flown by the plugin with the player in it.',),
   ini=(
