@@ -34,7 +34,11 @@ the one picked (src/payload.cpp). Into <game>/Mods:
                                             with that vehicle, its weapon list the stores after the stock ones, and the
                                             stores among the files it preloads
 
-Only these copies change: the stock vehicles keep their files (a mission's own vehicles, another mod's requests that
+  Mods/WEAPON/<STOCK GUN>.SGO              the stock guns of these vehicles that have a real counterpart, at its real
+                                            muzzle velocity and reach as before (vcobjects.MUZZLE_VELOCITY; the user,
+                                            2026-11-26: 「真实初速」「一块改」): every vehicle firing them, a mission's own too
+
+Only these copies change (and those guns): the stock vehicles keep their files (a mission's own vehicles, another mod's requests that
 name them are as they were), and the weapon table is not touched (the requests keep their names and rows). A request
 another mod already put into Mods/WEAPON is left as it is (said); this tool never writes over a file it did not write.
 EDF6AutoTurret's flak and Bohr requests (autoturret/tools/build.py) are its own: the installer hands them here first
@@ -583,6 +587,10 @@ def check(files: dict[str, bytes], rows: dict[str, int]) -> None:
             continue
         if not rel.startswith('WEAPON/') or rel.upper().endswith(COAX_MG) or rel.upper().endswith('.RAB'):
             continue
+        if rel.split('/')[-1].upper() in vc.MUZZLE_VELOCITY:   # a stock gun at its real speed (stock_gun_sgo)
+            got, stock = dsgo.to_py(dsgo.parse(data).root), vc.MUZZLE_VELOCITY[rel.split('/')[-1].upper()]
+            assert abs(got['AmmoSpeed'] * 60.0 - stock[0]) < 0.1, (rel, got['AmmoSpeed'])
+            continue
         d = dsgo.to_py(dsgo.parse(data).root)
         entry = next(x for x in d['Ammo_CustomParameter'] if isinstance(x, list) and len(x) >= 4 and isinstance(x[2], str)
                      and x[2].lower().startswith('app:/object/edf6vc_'))
@@ -645,6 +653,12 @@ def build(root: str, overlay: dict[str, bytes] | None = None
         stems.add(stem)
     for stem in sorted(stems):
         out[f'OBJECT/{derived_name(stem)}'] = derived_vehicle(game, stem)
+    for f in sorted(vc.MUZZLE_VELOCITY):   # the stock guns at their real speed (never over another's file)
+        rel = f'WEAPON/{f}'
+        if os.path.isfile(led.disk(rel)) and OWNER not in led.owners(rel):
+            skipped.append(rel)
+            continue
+        out[rel] = vc.stock_gun_sgo(game, f)
     for f in own_store_files():   # the rounds no jet carries: this tool's (never over another's file)
         rel = f'WEAPON/{f}'
         if os.path.isfile(led.disk(rel)) and OWNER not in led.owners(rel):

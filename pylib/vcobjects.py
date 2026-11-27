@@ -237,6 +237,62 @@ def wt_tracer(r: dsgo.Node, where: str) -> None:
         cp.items[i] = value
 
 
+# Real muzzle velocities (the user, 2026-11-26: 「真实初速」, the stock vehicles' own guns too: 「一块改」). The stock guns of
+# the vehicles with a real prototype (docs/feedback-2026-10-19-vehicle-ammo.md) leave at the speed of the real round of
+# their class; the setting's own weapons (lasers, the railgun, acid, napalm, the Titan, the Varius' EfsBullet gun, the
+# DLC grenade cannons) keep theirs. Each round keeps its reach (AmmoSpeed x AmmoAlive: the AI's fire gates and the sights
+# read it) and its gravity: it gets there sooner and flatter. {the stock WEAPON file: (m/s, the real round, its tracer:
+# 'ap' AP_TRACER, 'he' wt_tracer, None the stock's)}. The stock files are written over in Mods/WEAPON (stock_gun_sgo,
+# tools/make_stock_stores.py), so every one of these vehicles fires them, a mission's own and a call's; the stores of the
+# same gun take the same speed (_shell_sgo). EDF6AutoTurret's flak guns are its own (autoturret/tools/build.py).
+_TANK_HE = (1140.0, '120 mm M830 HEAT-MP-T (M256)', 'he')
+_TANK_AP = (1575.0, '120 mm M829A1 APFSDS-T (M256)', 'ap')
+_M134 = (853.0, '7.62 mm M80 ball (M240 / M134)', None)
+MUZZLE_VELOCITY: dict[str, tuple[float, str, str | None]] = {
+    **{f'V_505TANK_{g}.SGO': _TANK_HE for g in ('CANNON01', 'CANNON02', 'CANNON02L', 'CANNON03', 'CANNON03L',
+                                                 'CANNON04', 'CANNON04L', 'DLC_CANNON04L')},
+    'V_505_TANK_AI_CANNON01.SGO': _TANK_HE,
+    'V_505TANK_CANNON01S.SGO': _TANK_AP, 'V_505TANK_CANNON02S.SGO': _TANK_AP,
+    # The Grape (an M242 25 mm IFV): M792 HEI-T, M791 APDS-T.
+    'V_401STRIKER_CANNON.SGO': (1100.0, '25 mm M792 HEI-T (M242)', 'he'),
+    'V_401STRIKER_CANNON02.SGO': (1100.0, '25 mm M792 HEI-T (M242)', 'he'),
+    'V_401STRIKER_CANNONS01.SGO': (1345.0, '25 mm M791 APDS-T (M242)', 'ap'),
+    'V_401STRIKER_CANNONS02.SGO': (1345.0, '25 mm M791 APDS-T (M242)', 'ap'),
+    'V_403TANK_MACHINEGUN.SGO': _M134,
+    'V_409HELI_GATLING01.SGO': _M134,
+    'V_506HELI_GATLING01_L.SGO': _M134, 'V_506HELI_GATLING01_R.SGO': _M134,
+    'V_602HELI_GATLING01_L.SGO': _M134, 'V_602HELI_GATLING01_R.SGO': _M134,
+    'V_503_BIKE_GUN_L.SGO': _M134, 'V_503_BIKE_GUN_R.SGO': _M134,
+}
+
+
+def real_muzzle(r: dsgo.Node, mps: float, where: str) -> None:
+    """Weapon root `r` made to leave at `mps` (m/s), in place: AmmoSpeed that a frame, AmmoAlive the frames to its old
+    reach (rounded up); ValueError without the two."""
+    speed, alive = r.get('AmmoSpeed'), r.get('AmmoAlive')
+    if not isinstance(speed, float) or not isinstance(alive, float) or speed <= 0.0:
+        raise ValueError(f'{where} 缺少 AmmoSpeed / AmmoAlive')
+    step = round(mps / 60.0, 3)
+    r.set('AmmoSpeed', step)
+    r.set('AmmoAlive', float(math.ceil(speed * alive / step - 1e-6)))
+
+
+def stock_gun_sgo(game: Game, name: str) -> bytes:
+    """Stock WEAPON file `name` (MUZZLE_VELOCITY) at its real muzzle velocity and with its War Thunder tracer."""
+    mps, _, tracer = MUZZLE_VELOCITY[name]
+    doc = dsgo.parse(game.read('WEAPON', name))
+    r = doc.root
+    real_muzzle(r, mps, name)
+    if tracer == 'he':
+        wt_tracer(r, name)
+    elif tracer == 'ap':
+        colour = r.get('AmmoColor')
+        if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
+            raise ValueError(f'{name} 的 AmmoColor 不是 4 个数')
+        colour.items[:] = list(AP_TRACER)
+    return dsgo.write(doc)
+
+
 @dataclass(frozen=True)
 class Shell:
     """A gun's round for a stock vehicle (the user, 2026-10-09: 「坦克应该有ap和he」「机炮车 AP/HE」「防空车高爆近炸」): a
@@ -510,12 +566,14 @@ STORES: dict[str, Store] = {
                  burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, spread=0.006, guided=False),
                  per_pylon=19, pylon_mass=40.0, pylon_drag=0.0247),
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
-    # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
-    # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
+    # A main battle tank's armour-piercing round: the Blacker A's smooth-bore round (V_505TANK_CANNON01S:
+    # SolidBullet01Rail, a tenth of gravity, penetrating, no blast, 350): the stock A series; at the M829A1's 1575 m/s
+    # (MUZZLE_VELOCITY: the stock's 18 m a frame was 1080).
     'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap', colour=AP_TRACER),
                 _local('APFSDS', 'APFSDS（徹甲弾）', 'APFSDS（穿甲彈）', 'APFSDS（穿甲弹）', 'APFSDS（철갑탄）')),
-    # Its high-explosive round: the Blacker E's 105 mm round (V_505TANK_CANNON01: RocketBullet01, 3 m a frame rising to
-    # its top speed, full gravity, an 8 m blast, 350): the stock E series.
+    # Its high-explosive round: the Blacker E's round (V_505TANK_CANNON01: RocketBullet01, no motor (CP[0] 1), full
+    # gravity, an 8 m blast, 350): the stock E series; at the M830's 1140 m/s (MUZZLE_VELOCITY: the stock's 3 m a frame
+    # was 180).
     'HE': Store('HE', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'he'),
                 _local('HE', 'HE（榴弾）', 'HE（高爆彈）', 'HE（高爆弹）', 'HE（고폭탄）')),
     # --- rounds the tanks' real prototypes fire and the stock game lacks (the user, 2026-10-19: 「坦克好像还有串联破甲弹
@@ -525,23 +583,24 @@ STORES: dict[str, Store] = {
     # HEAT-MP: the multi-purpose shaped-charge round of a 120 mm smooth-bore (the Abrams' M830 / M830A1, the Type 10's
     # JM12A1). The Blacker E's bursting round (RocketBullet01) made one: a shaped charge's jet stops on the one thing
     # it hits (no penetration through a line of enemies as the APFSDS), so it puts more on that target (450 to the
-    # stock rounds' 350) with a small fragmentation burst (3 m to the howitzer's 8-18); it leaves at 780 m/s (M830
-    # 1140 against M829's 1575: 0.72 of the APFSDS' 18 m a frame), flat (gravity 0.15 against the howitzer's 1),
-    # reaching as far as the APFSDS (140 frames: 1820 m); a contact sphere of 0.8 m (the HE's 1.6); orange-red.
+    # stock rounds' 350) with a small fragmentation burst (3 m to the howitzer's 8-18); it leaves at the M830's
+    # 1140 m/s (19 m a frame; the M829A1 APFSDS' 1575), flat (gravity 0.15 against the howitzer's 1), reaching as far
+    # as before (96 frames: 1824 m); a contact sphere of 0.8 m (the HE's 1.6); orange-red.
     'HEAT': Store('HEAT-MP', 'gun', 0.0, 0.0,
                   Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'heat',
-                        (('AmmoSpeed', 13.0), ('AmmoGravityFactor', 0.15), ('AmmoAlive', 140.0), ('AmmoDamage', 450.0),
+                        (('AmmoSpeed', 19.0), ('AmmoGravityFactor', 0.15), ('AmmoAlive', 96.0), ('AmmoDamage', 450.0),
                          ('AmmoExplosion', 3.0), ('AmmoIsPenetration', 0.0), ('AmmoHitSizeAdjust', 0.5)),
                         colour=(3.2, 1.3, 0.5, 1.0)),
                   _local('HEAT-MP', 'HEAT-MP（多目的対戦車榴弾）', 'HEAT-MP（多用途破甲彈）', 'HEAT-MP（多用途破甲弹）',
                          'HEAT-MP（다목적 대전차고폭탄）')),
     # Canister (the Abrams' M1028: about 1100 tungsten balls, against infantry in the open at up to ~500 m): the
     # Blacker A's penetrating round made a cloud: 12 pellets a shot in a 0.07 cone, 40 each (480 on a big target at
-    # close range), 840 m/s, gone after 36 frames (~500 m), penetrating soft targets as the template does; no blast.
+    # close range), the M1028's 1410 m/s, gone after 22 frames (~520 m), penetrating soft targets as the template does;
+    # no blast.
     # Only the Blacker's: the Type 10 (the 601's prototype) has no canister round.
     'CANISTER': Store('Canister', 'gun', 0.0, 0.0,
                       Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'canister',
-                            (('FireCount', 12.0), ('FireAccuracy', 0.07), ('AmmoSpeed', 14.0), ('AmmoAlive', 36.0),
+                            (('FireCount', 12.0), ('FireAccuracy', 0.07), ('AmmoSpeed', 23.5), ('AmmoAlive', 22.0),
                              ('AmmoDamage', 40.0), ('AmmoGravityFactor', 0.5), ('AmmoSize', 0.5),
                              ('AmmoHitSizeAdjust', 0.6)),
                             colour=(2.6, 2.2, 1.4, 1.0)),
@@ -558,7 +617,7 @@ STORES: dict[str, Store] = {
                         'LAHAT（포발사 미사일）')),
     # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
     # (V_401STRIKER_CANNONS01: SolidBullet01, penetrating, 40), its HE the Grape's own bursting round
-    # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32).
+    # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32); at the M242's M791 / M792 speeds (MUZZLE_VELOCITY).
     'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap', colour=AP_TRACER),
                    _local('AP belt', 'AP弾帯（徹甲）', 'AP彈鏈（穿甲）', 'AP弹链（穿甲）', 'AP 탄띠（철갑）')),
     'AC_HE': Store('HE belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNON.SGO', 'RocketBullet01', 'he'),
@@ -667,8 +726,8 @@ class Plume:
     """How a missile store's round looks in flight (the user, 2026-11-26: 「所有导弹、炮弹之类都换得了。抄抄战雷、皇牌空战之类的
     游戏」; docs/feature-projectile-look.md): Ace Combat's rail drop, white-hot motor and long white trail, on the stock
     class's own fields (docs/missile-re.md, MissileBullet01):
-      - `ignite`: frames off the rail before the motor lights (CP[7][0]; CP[7][1] 1: the launcher's velocity kept while
-        it drops). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
+      - `ignite`: frames an ejected round falls clear before its motor lights (CP[7][0]; CP[7][1] 1: the launcher's
+        velocity kept while it drops); 0 for a rail or tube launch, lit at once (PLUMES). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
         whole flight); the motor's flame and trail emitters open at ignition (0x26AA02).
       - `trail`: frames a trail node lives (CP[2], a single int: each node 0.9..1.1 of it, 0x268D31; the trail stays
         where it was laid, it does not drift).
@@ -685,21 +744,23 @@ class Plume:
 
 
 PLUME_IGNITE_MOST = 20.0   # frames: src/missile.cpp neither guides nor fuses-by-proximity it before ignition
-# A jet's (or a helicopter's) rail missile drops 0.2 s clear before it lights, its trail 5-8 s; a ground or ship launcher's
-# tube or cell kicks it out lit almost at once; a gun- or tube-launched anti-tank missile and a rocket light in the tube
-# and trail short and grey. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
+# When the motor lights is the real launcher's (the user, 2026-11-26: 「导弹不一定全是下坠的吧……至少应该和现实一样吧，有些可能
+#直接射出去」): a rail launcher (LAU-7 / LAU-127 / LAU-117 / M299, a rocket pod, a tube) lights the motor on the rail and
+# the round flies straight off it; a hot-launch cell or canister (Mk 41 for the ESSM, the PAC-3's, the 9M311's tube)
+# lights in it; only an ejector launcher (the AIM-54's LAU-93 under an F-14) kicks the round clear to fall before it
+# lights: AAM_L alone drops. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
 _HOT = (1.5, 1.4, 1.3, 0.85)       # flame (6.0, 2.8, 1.3): white-hot; trail a bright white
 _SAM = (1.6, 1.5, 1.4, 0.9)
 _ATGM = (1.2, 1.1, 1.0, 0.6)       # flame (4.8, 2.2, 1.0), a thinner grey trail
 _ROCKET = (1.25, 1.15, 1.0, 0.7)
 PLUMES: dict[str, Plume] = {
-    'AAM_S': Plume(12.0, 420.0, _HOT), 'AAM_M': Plume(12.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
-    'AGM': Plume(12.0, 300.0, _HOT), 'AGM_L': Plume(10.0, 240.0, _HOT),
-    'ESSM': Plume(4.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(3.0, 360.0, _SAM), 'APOC_SAM': Plume(4.0, 420.0, _SAM),
-    'PATRIOT_SAM': Plume(4.0, 480.0, _SAM),
+    'AAM_S': Plume(0.0, 420.0, _HOT), 'AAM_M': Plume(0.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
+    'AGM': Plume(0.0, 300.0, _HOT), 'AGM_L': Plume(0.0, 240.0, _HOT),
+    'ESSM': Plume(0.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(0.0, 360.0, _SAM), 'APOC_SAM': Plume(0.0, 420.0, _SAM),
+    'PATRIOT_SAM': Plume(0.0, 480.0, _SAM),
     'GLM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGMF': Plume(0.0, 180.0, _ATGM),
     'RKT': Plume(0.0, 150.0, _ROCKET),
-    'SAZABI_MISSILE': Plume(6.0, 240.0, _HOT),   # SAZABI_MISSILE below: the shield's missiles pop out, then light
+    'SAZABI_MISSILE': Plume(0.0, 240.0, _HOT),   # SAZABI_MISSILE below: from the shield's launcher, lit
 }
 
 
@@ -2397,6 +2458,8 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
     _check_round(shell, r, made=True)
+    if shell.template in MUZZLE_VELOCITY and 'AmmoSpeed' not in dict(shell.extra):   # the stock gun's real speed
+        real_muzzle(r, MUZZLE_VELOCITY[shell.template][0], shell.template)
     if shell.ammo_class == 'RocketBullet01':
         wt_tracer(r, shell.template)
     if shell.colour is not None:
