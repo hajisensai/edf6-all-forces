@@ -3135,6 +3135,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
                            SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr,
                            SquadRiding(q) ? At<const void*>(q.top.obj,kHumanRiding) : nullptr};
         out[n].joinOnly=joinOnly;
+        out[n].withdraws=TransportWithdrawable(q.top.obj);   // WITHDRAW sends its transport off (else it dismisses a recruited one)
         out[n].sprints=true;   // every class: the dashes unrested, the rollers' walk rolled (Mobility)
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
@@ -4346,7 +4347,11 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             npcmark::Assign(q->commandFocus,{});q->routeActive=false;q->routeCancelled=true;
             return CommandResult(Reason::none,static_cast<unsigned>(count));
         }
-        if(c.order==Order::withdraw && TransportOf(top)) {
+        // WITHDRAW goes to the transport only when it is one that leaves (a support vehicle, transport.cpp
+        // TransportWithdrawable): BOARD pairs a squad with any vehicle it got into (a mission's truck, a player's
+        // helicopter), which no order sends off -- a recruited squad paired with one is dismissed (the card's B is its
+        // only way out of the player's command).
+        if(c.order==Order::withdraw && TransportWithdrawable(top)) {
             const Reason why=TransportWithdraw(top);
             return why==Reason::none ? CommandResult(Reason::none,1) : CommandResult(why);
         }
@@ -4394,9 +4399,9 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             // stretch), so it takes its slot in the march afresh.
             for(int i=0;i<count;++i)if(Soldier* m=FindSoldier(members[i]))m->keep=npc::formation::Keep{};
             q->cmd={};break;
-        case Order::withdraw:   // a recruited squad's BACK TO BASE with no transport: dismissed (released where it stands)
+        case Order::withdraw:   // a recruited squad's BACK TO BASE with no transport that leaves: dismissed (released where it stands)
         case Order::dismiss:
-            if(!recruited)return CommandResult(Reason::notOwner);
+            if(!recruited)return CommandResult(c.order==Order::withdraw && TransportOf(top) ? Reason::noTransport : Reason::notOwner);
             q->autoFollow=top[kAutoFollow];top[kAutoFollow]=0;Follow(top,nullptr);
             cooldowns.Start(SquadKey(top),ms,static_cast<std::uint64_t>(Cfg().npcRecruitCooldownSec*1000.0f));
             q->dismissed=true;++dismissedCount;

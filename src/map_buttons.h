@@ -34,9 +34,11 @@ constexpr int kCount=static_cast<int>(Id::count);
 // STOP, FOLLOW, BOARD, DISMOUNT, WITHDRAW, SPRINT, FORMATION, SWEEP). Off it, their abilities kept (README 「指挥面板」):
 //  - GUARD: an attack-move guards its point once there (G gives one);
 //  - FAST MOVE: retired, a move judges its own pace (mapcmd_logic.h MoveRushes);
-//  - UNLOAD AT, ALL OUT: rows of DISMOUNT's menu (kDismountMenu below; U and Shift+N stay);
-//  - RECRUIT: FOLLOW (an unrecruited squad told to follow the player is recruited: mapcmd.cpp CardOrder);
-//  - DISMISS: WITHDRAW (a recruited squad's withdrawal is its dismissal: mapcmd.cpp CardOrder; B stays);
+//  - UNLOAD AT, ALL OUT: rows of DISMOUNT's menu (kDismountMenu below; U + a click unloads there, U twice everyone off
+//    where they stand: map_keys.h);
+//  - RECRUIT: FOLLOW (an unrecruited squad told to follow the player is recruited: npcai.cpp NpcSquadCommandForRequester);
+//  - DISMISS: WITHDRAW (a recruited squad's withdrawal is its dismissal unless its transport is a support vehicle that
+//    leaves: npcai.cpp NpcSquadCommandForRequester, transport.cpp TransportWithdrawable; B stays);
 //  - SMOKE: retired (no unit of the plugin carries smoke);
 //  - the health boxes' and the paced march's switches: rows of FORMATION's menu (kMenuHealth / kMenuPace).
 // ENGAGE AT WILL and FOCUS FIRE were never on it (an attack-move on the spot; the right button on an enemy, H).
@@ -125,7 +127,7 @@ inline Why StateOf(Id b,const CardSelection& c) noexcept {
 inline bool Shown(Id b,const CardSelection& c) noexcept { return StateOf(b,c)!=Why::hidden; }
 inline bool Available(Id b,const CardSelection& c) noexcept { return StateOf(b,c)==Why::none; }
 // A key's order (map_keys.h) against the selection: the state of its button when one shows, else whether any of the
-// selection takes it (the keys of orders off the card: G, U, Shift+N, H...). Why::hidden never: a key always answers.
+// selection takes it (the keys of orders off the card: G, U, H...). Why::hidden never: a key always answers.
 inline Why OrderState(mapcmd::Order o,const CardSelection& c) noexcept {
     using mapcmd::Order;
     for(int i=0;i<kOrders;++i) {
@@ -276,7 +278,7 @@ inline int MenuColumn(const Rect& button,int n,float rowW,float rowH,float gap,f
 // --- The ALL OUT button's menu (test site #45, 2026-11-10: 「如何让某个角色单独下车」; #44: 「预设下车指令：全体下车只留司机等」) ---
 // The button opens a column like the formation menu's (MenuColumn, drawn over the same rows: one menu at a time): every
 // rider off, every rider but the driver, one class's riders (the driver kept). Each row is DISMOUNT ALL with its choice
-// (mapcmd_logic.h DismountParamValid), its entry code kMenuDismount | the choice. Shift+N gives every rider off at once.
+// (mapcmd_logic.h DismountParamValid), its entry code kMenuDismount | the choice. U twice gives every rider off at once.
 constexpr int kMenuDismount=0x10000;
 constexpr std::uint32_t kDismountMenu[]={0u,mapcmd::kDismountKeepDriver,mapcmd::kDismountKeepDriver|mapcmd::kDismountRanger,
                                          mapcmd::kDismountKeepDriver|mapcmd::kDismountWingDiver,

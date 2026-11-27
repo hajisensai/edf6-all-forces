@@ -56,11 +56,13 @@ bool SupportSoldierHeld(const void* h) noexcept {return h && h==heldSupportActor
 bool transportTakes=false;int transportOrders=0,transportCancels=0,transportPairs=0;
 const void* transportPaired=nullptr;const void* transportPairTop=nullptr;const void* transportSucceededTo=nullptr;
 NpcCommandReason transportWithdraw=NpcCommandReason::noTransport;
+bool transportWithdrawable=false;   // the paired vehicle is a support vehicle WITHDRAW sends off
 bool TransportPair(const void* top,const void* v) noexcept {++transportPairs;transportPairTop=top;transportPaired=v;return v!=nullptr;}
 const void* TransportOf(const void*) noexcept {return transportPaired;}
 bool TransportOrder(const void*,const mapcmd::Command&) noexcept {++transportOrders;return transportTakes;}
 void TransportCancel(const void*) noexcept {++transportCancels;}
 NpcCommandReason TransportWithdraw(const void*) noexcept {return transportWithdraw;}
+bool TransportWithdrawable(const void*) noexcept {return transportPaired && transportWithdrawable;}
 void TransportSucceed(const void*,const void* lead) noexcept {transportSucceededTo=lead;}
 void TransportJumperIntent(unsigned char*) noexcept {}
 namespace {
@@ -180,7 +182,7 @@ void Reset() {
     mapHeld=true;rayOn=false;markEnemy=nullptr;pointOrders=0;markinput::down=false;
     ok=followOk=rideOk=true;world.frame=frame;config.npcSquadSuccession=true;
     transportTakes=false;transportOrders=transportCancels=transportPairs=0;transportPaired=transportPairTop=transportSucceededTo=nullptr;
-    transportWithdraw=NpcCommandReason::noTransport;
+    transportWithdraw=NpcCommandReason::noTransport;transportWithdrawable=false;
 }
 }
 const Config& Cfg() noexcept { return config; }
@@ -598,6 +600,15 @@ int main() {
         Expect(!SquadCommand(human,Command{Order::dismount,{}}) && kicks==k0+2 && !HumanOnFoot(human),"DISMOUNT leaves the driver aboard");
         Expect(SquadCommand(human,Command{Order::dismountAll,{}}) && kicks==k0+3 && HumanOnFoot(human),"ALL OUT takes the driver off");
     }
+    // A recruited squad BOARD paired with a vehicle no order sends off (a mission's truck, a player's helicopter:
+    // TransportPair takes any it got into): its WITHDRAW (the card's B, its only way out of command) dismisses it, as
+    // with no transport at all -- not refused as "no transport".
+    Reset();playerObj=other;Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);
+    Put<void*>(human,kLeader,other);q=SeeSquad(human,human,0,npc::Control::recruited,now);
+    transportPaired=other;transportWithdrawable=false;transportWithdraw=NpcCommandReason::noTransport;
+    Expect(SquadCommand(human,Command{Order::withdraw,{}}) && q->dismissed && q->cmd.order==Order::guard,
+           "a recruited squad paired with a non-support vehicle: WITHDRAW dismisses it");
+    transportPaired=nullptr;
     // A panel order lives only under the lead it was given in (npc::LeadOf).
     Reset();playerObj=other;Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);
     Put<void*>(human,kLeader,other);q=SeeSquad(human,human,0,npc::Control::recruited,now);
@@ -893,12 +904,18 @@ int main() {
                    "a seated paired squad's far order goes by its transport, its own order untouched");
             // WITHDRAW (B, BACK TO BASE) goes to the squad's transport when it has one (with none it is a dismissal).
             const void* pairedWas=transportPaired;transportPaired=vehicle;
-            transportTakes=false;transportWithdraw=NpcCommandReason::none;
+            transportTakes=false;transportWithdraw=NpcCommandReason::none;transportWithdrawable=true;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
             Expect(result.Accepted(),"WITHDRAW answered by its transport");
             transportWithdraw=NpcCommandReason::noTransport;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
             Expect(result.reason==NpcCommandReason::noTransport,"...and its refusal passed on");
+            // Paired with a vehicle no order sends off, not recruited: nothing of its to withdraw (and not dismissed).
+            transportWithdrawable=false;transportWithdraw=NpcCommandReason::none;
+            result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
+            Expect(result.reason==NpcCommandReason::noTransport && !commandSquad->dismissed,
+                   "a free squad paired with a non-support vehicle: WITHDRAW refused as no transport, not sent to it");
+            transportWithdraw=NpcCommandReason::noTransport;
             transportPaired=pairedWas;
             const int cancels=transportCancels;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::none,{}},ObjRef::Of(other),{});

@@ -30,6 +30,10 @@ void TransportCancel(const void* top) noexcept;
 // WITHDRAW: the squad's transport leaves the field (support_dispatch.cpp SupportWithdrawVehicle: a support vehicle out of
 // the field is removed with its own crew). With the squad aboard a vehicle at rest it gets off first. none, or why not.
 NpcCommandReason TransportWithdraw(const void* top) noexcept;
+// Whether the squad's transport is one WITHDRAW sends off (a support vehicle of this machine's, live: support_dispatch.cpp
+// SupportWithdrawable). A squad paired with any other vehicle it boarded (a mission's truck, a player's helicopter) has
+// no transport to withdraw: its WITHDRAW is a recruited squad's dismissal (npcai.cpp NpcSquadCommandForRequester).
+bool TransportWithdrawable(const void* top) noexcept;
 // npcai.cpp: a squad's top died and `lead` leads it now (nullptr: it joined another squad, its pair goes).
 void TransportSucceed(const void* dead,const void* lead) noexcept;
 // support_dispatch.cpp: a deployment's soldiers aboard their transport, the squads' tops `tops` (a crewed APC / truck

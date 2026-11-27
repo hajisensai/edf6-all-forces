@@ -514,9 +514,10 @@ bool Takes(const Entry& e,Order o) noexcept {
         if(o==Order::dismiss)return e.u.recruited;
         if(o==Order::board)return !e.u.riding;
         if(mapcmd::DismountOrder(o))return e.u.riding;
-        // Its transport (transport.cpp): WITHDRAW sends it off; aboard it the point orders take it there (it gets off short
-        // of the point and carries them out on foot).
-        if(o==Order::withdraw)return e.u.transport || e.u.recruited;
+        // Its transport (transport.cpp): WITHDRAW sends it off when it is one that leaves (`withdraws`: a support vehicle),
+        // else it dismisses a recruited squad; aboard it the point orders take it there (it gets off short of the point
+        // and carries them out on foot).
+        if(o==Order::withdraw)return e.u.withdraws || e.u.recruited;
         if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && o!=Order::hold &&
                              (e.u.transport || !mapcmd::PointOrder(o));
         return true;

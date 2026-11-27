@@ -40,7 +40,7 @@ inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,c
 // `recruited`: a squad the player recruited (the only kind DISMISS lets go: npcai.cpp answers others "not its owner").
 struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]{}; bool locked=false; const char* status=nullptr;
     bool riding=false; bool recruitable=false; bool recruited=false;
-    bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard and WITHDRAW
+    bool transport=false; // a squad paired with a transport (transport.cpp): it takes point orders aboard
     const void* vehicle=nullptr; // a riding squad's vehicle (its top's): a DISMOUNT / DISMOUNT ALL given to that vehicle is its
     bool carries=false;          // a vehicle unit with a riding squad that takes orders aboard (mapcmd.cpp List): it takes them
     bool joinOnly=false;         // a script's squad the stock walk-up would have let in (VanillaRecruit=0, npcai.cpp
@@ -50,7 +50,8 @@ struct CommandUnit { const void* v; const char* name; Command now; bool air; flo
     // Fencer's dashes unrested, a Ranger's / Air Raider's walk rolled, npcai.cpp Mobility; a jet's afterburner),
     // `decoys` it has decoys left (DECOY: a jet's flares). SMOKE retired (no unit has smoke of its own).
     bool holdFire=false,high=false,sprints=false,decoys=false;
-    bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field
+    bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field; a
+                            // squad paired with a support vehicle (transport.cpp TransportWithdrawable): WITHDRAW sends that
 };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;

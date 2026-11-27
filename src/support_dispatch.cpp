@@ -1555,26 +1555,39 @@ void Configure() noexcept {
 // transport.cpp's WITHDRAW: a support vehicle of a deployment this machine made leaves the field. A helicopter or a plane
 // flies off (StartLeave / JetWithdrawNow; Retire deletes it out there with its crew still aboard), a ground vehicle drives
 // back to its entry (WithdrawGround). False: not a support vehicle of this machine's.
+namespace {
+// The deployment whose support vehicle (a hull or an aircraft, not a soldier) `vehicle` is, live, of this machine's; its
+// unit's index in `*unit`. The rescue's heli is the rescue's (heli.cpp flies it to the swimmer and on): no map order sends
+// it off, so it is none.
+Deployment* WithdrawableDeployment(const void* vehicle,unsigned* unit) noexcept {
+    for(auto& deployed:deployments) {
+        if(!deployed.used || deployed.remote)continue;
+        for(unsigned i=0;i<deployed.plan.count;++i) {
+            const auto resource=deployed.plan.units[i].resourceId;
+            if(deployed.plan.units[i].role || resource<kAircraft || !deployed.objects[i].Is(vehicle) || !Alive(deployed.objects[i]))continue;
+            if(IsRescue(deployed.plan.catalogId))return nullptr;
+            *unit=i;return &deployed;
+        }
+    }
+    return nullptr;
+}
+}  // namespace
+bool SupportWithdrawable(const void* vehicle) noexcept {
+    __try {unsigned unit=0;return vehicle && WithdrawableDeployment(vehicle,&unit);} __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 bool SupportWithdrawVehicle(const void* vehicle) noexcept {
     __try {
-        for(auto& deployed:deployments) {
-            if(!deployed.used || deployed.remote)continue;
-            for(unsigned i=0;i<deployed.plan.count;++i) {
-                const auto resource=deployed.plan.units[i].resourceId;
-                if(deployed.plan.units[i].role || resource<kAircraft || !deployed.objects[i].Is(vehicle) || !Alive(deployed.objects[i]))continue;
-                // The rescue heli is the rescue's (heli.cpp flies it to the swimmer and on): no map order sends it off.
-                if(IsRescue(deployed.plan.catalogId))return false;
-                if(resource>=kVehicle) {
-                    deployed.withdrawing=true;deployed.delivered=true;deployed.retiredFrame[0]=0;deployed.navigation.initialized=false;
-                    Log("SUPPORT deployment %llu: its vehicle withdrawn by order: back to its entry",static_cast<unsigned long long>(deployed.id));
-                    Status(L"支援车辆撤离中：返回入场点后离开战场");
-                    return true;
-                }
-                Status(L"支援飞机撤离中：飞离战场");
-                return IsHelicopter(vehicle) ? HeliStartLeaving(vehicle) : JetWithdrawNow(vehicle,"withdrawn by a map order");
-            }
+        unsigned unit=0;
+        Deployment* const deployed=vehicle ? WithdrawableDeployment(vehicle,&unit) : nullptr;
+        if(!deployed)return false;
+        if(deployed->plan.units[unit].resourceId>=kVehicle) {
+            deployed->withdrawing=true;deployed->delivered=true;deployed->retiredFrame[0]=0;deployed->navigation.initialized=false;
+            Log("SUPPORT deployment %llu: its vehicle withdrawn by order: back to its entry",static_cast<unsigned long long>(deployed->id));
+            Status(L"支援车辆撤离中：返回入场点后离开战场");
+            return true;
         }
-        return false;
+        Status(L"支援飞机撤离中：飞离战场");
+        return IsHelicopter(vehicle) ? HeliStartLeaving(vehicle) : JetWithdrawNow(vehicle,"withdrawn by a map order");
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool SupportCatalogReachOf(int index,SupportCatalogReach& out) noexcept {

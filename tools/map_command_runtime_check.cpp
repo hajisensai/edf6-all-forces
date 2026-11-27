@@ -1084,11 +1084,16 @@ void RtsClicks() noexcept {
           "a riding squad: no recruit / follow / point order, dismount and release");
     Check(!Takes(g.list[0],Order::withdraw),"a squad with no transport: no WITHDRAW");
     // Its transport (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): aboard its own vehicle a
-    // squad takes the point orders (it rides there and gets off short of the point) and WITHDRAW; still no follow.
+    // squad takes the point orders (it rides there and gets off short of the point) and WITHDRAW when that vehicle is one
+    // that leaves (a support vehicle: `withdraws`); still no follow.
     g.list[0].u.transport=true;
     Check(Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove) && Takes(g.list[0],Order::guard) &&
-          Takes(g.list[0],Order::withdraw) && Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::follow) &&
-          !Takes(g.list[0],Order::recruit),"a riding squad with its transport: point orders and WITHDRAW, no follow / recruit");
+          !Takes(g.list[0],Order::withdraw) && Takes(g.list[0],Order::dismount) && !Takes(g.list[0],Order::follow) &&
+          !Takes(g.list[0],Order::recruit),"a riding squad paired with a vehicle no order sends off: point orders, no WITHDRAW");
+    g.list[0].u.recruited=true;
+    Check(Takes(g.list[0],Order::withdraw),"...recruited: WITHDRAW (its dismissal: the card's only way out of command)");
+    g.list[0].u.recruited=false;g.list[0].u.withdraws=true;
+    Check(Takes(g.list[0],Order::withdraw),"a squad paired with a support vehicle: WITHDRAW sends it off");
     CommandUnit free{squadObj,"squad",Command{},false,{0,0,0}};free.recruitable=true;g.list[0]=Entry{free,Owner::squad};
     Check(Takes(g.list[0],Order::recruit) && Takes(g.list[0],Order::move) && Takes(g.list[0],Order::attackMove),"a free squad on foot: all of them");
     CommandUnit tank{squadObj,"tank",Command{},false,{0,0,0}};g.list[0]=Entry{tank,Owner::tank};
