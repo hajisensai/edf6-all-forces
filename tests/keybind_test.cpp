@@ -88,8 +88,8 @@ void Catalog(const char* crewIni,const char* turretIni) {
         "DebugSpawnKey","DebugSpawnPrevKey","DebugSpawnNextKey","DebugSpawnCategoryKey","DebugSpawnSpawnKey",   // a dev tool, off by default
         "SeatNumberKeys",   // on / off of the number keys
         // the map's command keys (src/map_keys.h): read only while the map is open, the ini's alone
-        "MapAttackMoveKey","MapStopKey","MapReverseMoveKey","MapFireMissionKey","MapUnloadKey","MapFastMoveKey",
-        "MapHoldFireKey","MapSprintKey","MapSmokeKey","MapDecoyKey","MapAltitudeKey","MapBackKey","MapSubgroupKey",
+        "MapAttackMoveKey","MapStopKey","MapReverseMoveKey","MapFireMissionKey","MapUnloadKey",
+        "MapHoldFireKey","MapSprintKey","MapDecoyKey","MapAltitudeKey","MapBackKey","MapSubgroupKey",
         "MapPing1Key","MapPing2Key","MapPing3Key","MapPing4Key"};
     for(const auto* ini:{&crew,&turret})
         for(const auto& [key,value]:*ini) {

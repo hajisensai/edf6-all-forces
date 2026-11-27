@@ -86,6 +86,9 @@ struct SweepCue { bool on; int left,taken,key; };
 // take them); the states and the march's formation for the buttons' labels.
 bool NpcSweepToggle(const void* const* tops,int n) noexcept;
 bool NpcSweepOn() noexcept;
+// The map card's BOARD (mapcmd.cpp Publish): the seats squad `leader`'s members on foot could take now in `vehicle`
+// (null: the one BOARD would pick, the player's ride or any near with room; npcai.cpp BoardTarget); 0 none.
+int NpcBoardRoom(const void* leader,const void* vehicle) noexcept;
 bool NpcPickupHealthToggle() noexcept;
 bool NpcPickupHealthOn() noexcept;
 int NpcMarchShape() noexcept;

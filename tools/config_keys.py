@@ -1370,11 +1370,6 @@ K('MapUnloadKey', 'mapUnloadKey', INT, '0x55',
   note=('...MapUnloadKey',),
   ini=(
       '; 卸载：再点地图 = 开到那里卸人，连按两下 = 原地卸人（默认 0x55 = U）',)),
-K('MapFastMoveKey', 'mapFastMoveKey', INT, '0x46',
-  lo='0', hi='254',
-  note=('...MapFastMoveKey',),
-  ini=(
-      '; 快速移动（路上不停下打仗；默认 0x46 = F）',)),
 K('MapHoldFireKey', 'mapHoldFireKey', INT, '0x48',
   lo='0', hi='254',
   note=('...MapHoldFireKey',),
@@ -1385,11 +1380,6 @@ K('MapSprintKey', 'mapSprintKey', INT, '0x5A',
   note=('...MapSprintKey',),
   ini=(
       '; 冲刺（步兵连续冲刺、战机加力；默认 0x5A = Z）',)),
-K('MapSmokeKey', 'mapSmokeKey', INT, '0x58',
-  lo='0', hi='254',
-  note=('...MapSmokeKey',),
-  ini=(
-      '; 烟幕（单位自带的；默认 0x58 = X）',)),
 K('MapDecoyKey', 'mapDecoyKey', INT, '0x43',
   lo='0', hi='254',
   note=('...MapDecoyKey',),

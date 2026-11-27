@@ -16,6 +16,7 @@
 #include "support_call.h"
 #include "transport.h"
 #include "map_loadout_row.h"
+#include "map_buttons.h"
 
 namespace crew {
 using mapcmd::Command;
@@ -205,6 +206,7 @@ struct MapCommandReadout {
     bool all;                  // every unit selected (more than one)
     int selected;              // how many are
     std::uint32_t allowedOrders=0; // union of this selection's supported Order bits (keyboard still explains refusals)
+    mapbtn::CardSelection card{};  // the card's summary of the selection (map_buttons.h StateOf: what shows, what is greyed and why)
     int selectedSquads=0;      // selected, unlocked NPC squads for formation/team controls
     bool pointOk;
     float point[3];            // where G sends them (the pointer's ground point; the screen centre's with a pad)
@@ -223,7 +225,7 @@ struct MapCommandReadout {
     // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
     // first one's shape lit) and its march (a selected squad follows the player; `march` lit).
     bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
-    bool dismountMenu=false;   // the ALL OUT button's menu open (map_buttons.h kDismountMenu)
+    bool dismountMenu=false;   // the DISMOUNT button's menu open (map_buttons.h kDismountMenu)
     SquadRow squad[kMapSquadRows];
     bool squadSelected[kMapSquadRows];
     std::uint16_t squadGroups[kMapSquadRows]{}; // each row's RTS groups (CmdMark::groups)
@@ -277,6 +279,9 @@ struct MapCommandReadout {
     Ping ping[kPings]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
+// A card button's word (hudtext.inc) and why one is greyed (map_buttons.h Why: its hover text, the refusal's note).
+const wchar_t* CardWordText(mapbtn::Id b) noexcept;
+const wchar_t* CardWhyText(mapbtn::Why why) noexcept;
 // hud.cpp: the 「摆放」 panel's click targets as drawn (`codes`: map_buttons.h-style codes, kPlace* below), for the clicks.
 constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePageDown=0x2002;   // a row's code: its kEntries index
 constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;

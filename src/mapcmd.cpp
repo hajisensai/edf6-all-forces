@@ -153,7 +153,8 @@ struct Game {
     // units, `cardCentre` taken by MapCommandFrame).
     std::uint64_t cardClickOf=0;ULONGLONG cardClickAt=0;bool cardCentre=false;float cardCentreAt[3]{};
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
-    bool dismountMenu=false;    // the ALL OUT button's menu open (map_buttons.h kDismountMenu): one menu at a time
+    bool dismountMenu=false;    // the DISMOUNT button's menu open (map_buttons.h kDismountMenu): one menu at a time
+    ObjRef boardInto{};         // this frame's BOARD into this vehicle (the right button on its mark), else BoardFocus's
     bool rpressing=false,rOnUi=false;float rmoved=0.0f; // a right press (a click unless it moves kClickMove), begun on UI
     bool rightClick=false,rightOnUi=false;               // ...let go without a drag this frame
     ObjRef hover;               // original identity under the pointer; never recaptured from a cached address
@@ -450,13 +451,13 @@ const char* OrderName(Order o) noexcept {
     case Order::withdraw: return "WITHDRAW";
     case Order::hold: return "HOLD";
     case Order::formation: return "FORMATION";
-    case Order::fastMove: return "FAST MOVE";
+    case Order::fastMove: return "FAST MOVE (retired)";
     case Order::reverseMove: return "REVERSE MOVE";
     case Order::unloadAt: return "UNLOAD AT";
     case Order::holdFire: return "HOLD FIRE";
     case Order::altitude: return "ALTITUDE";
     case Order::sprint: return "SPRINT";
-    case Order::smoke: return "SMOKE";
+    case Order::smoke: return "SMOKE (retired)";
     case Order::decoy: return "DECOY";
     default: return "RELEASE";
     }
@@ -478,13 +479,11 @@ const wchar_t* OrderText(Order o) noexcept {
     case Order::withdraw: return hudtext::Tr(Tx::orderWithdraw);
     case Order::hold: return hudtext::Tr(Tx::orderHold);
     case Order::formation: return hudtext::Tr(Tx::btnFormationShort);
-    case Order::fastMove: return hudtext::Tr(Tx::orderFastMove);
     case Order::reverseMove: return hudtext::Tr(Tx::orderReverseMove);
     case Order::unloadAt: return hudtext::Tr(Tx::orderUnloadAt);
     case Order::holdFire: return hudtext::Tr(Tx::orderHoldFire);
     case Order::altitude: return hudtext::Tr(Tx::orderAltitude);
     case Order::sprint: return hudtext::Tr(Tx::orderSprint);
-    case Order::smoke: return hudtext::Tr(Tx::orderSmoke);
     case Order::decoy: return hudtext::Tr(Tx::orderDecoy);
     default: return hudtext::Tr(Tx::orderRelease);
     }
@@ -501,7 +500,7 @@ const wchar_t* OrderText(Order o) noexcept {
 bool Takes(const Entry& e,Order o) noexcept {
     if(e.u.locked)return false;
     if(o==Order::formation)return e.owner==Owner::squad && !e.u.joinOnly && !e.u.riding;   // a squad on foot's (the card)
-    if(o==Order::smoke)return false;
+    if(mapcmd::Retired(o))return false;   // FAST MOVE, SMOKE: no unit takes them (mapcmd_logic.h)
     if(e.owner==Owner::squad && e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;   // the script keeps the rest
     if(o==Order::holdFire)return true;
     if(o==Order::sprint)return e.u.sprints;
@@ -566,6 +565,69 @@ void PlayCue(mapcue::Cue cue) noexcept {
 bool AnyTakes(const Game& g,Order o) noexcept {
     for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],o))return true;
     return false;
+}
+// The seats squad `e` (on foot) could take now in vehicle `v` (npcai.cpp NpcBoardRoom; null: the one BOARD would pick).
+// Another machine's squad: its authority knows its members and refuses a full vehicle itself (command_net Execute), so it
+// counts as having room here.
+int SquadBoardRoom(const Entry& e,const void* v) noexcept {
+    if(e.owner!=Owner::squad || e.u.locked || e.u.riding)return 0;
+    if(!IsOnlineAuthority(e.u.v))return 1;
+    return NpcBoardRoom(e.u.v,v);
+}
+// The vehicle BOARD sends squad `e` into (command protocol v12: the request's focus; npcai.cpp BoardTarget's `named`):
+// the one the right button was let go on; else the first selected vehicle with room for it (BOARD with vehicles selected
+// goes into those: the first of them when none has room, which its authority refuses as full); else none (the nearest
+// with room, as BoardTarget picks).
+ObjRef BoardFocus(const Game& g,const Entry& e) noexcept {
+    if(g.boardInto.obj)return g.boardInto;
+    ObjRef first{};
+    for(int i=0;i<g.count;++i) {
+        const Entry& v=g.list[i];
+        if(!Active(g,v) || v.owner==Owner::squad)continue;
+        if(!first.obj)first=v.id;
+        if(SquadBoardRoom(e,v.u.v)>0)return v.id;
+    }
+    return first;
+}
+// The card's summary of the active selection (map_buttons.h CardSelection; StateOf greys a button by it). Game thread
+// (NpcBoardRoom reads the vehicles' seats).
+mapbtn::CardSelection CardOf(const Game& g) noexcept {
+    mapbtn::CardSelection c;
+    if(!Cfg().enabled)return c;
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(!Active(g,e))continue;
+        ++c.units;
+        const bool squad=e.owner==Owner::squad;
+        if(e.u.locked || (squad && e.u.joinOnly))++c.scripted;
+        if(squad){++c.squads;++(e.u.riding ? c.riding : c.onFoot);}
+        else ++c.vehicles;
+        if(e.owner==Owner::heli || e.owner==Owner::jet)++c.aircraft;
+        if(e.owner==Owner::jet)++c.jets;
+        for(unsigned o=0;o<=static_cast<unsigned>(mapcmd::kLastOrder);++o)
+            if(Takes(e,static_cast<Order>(o)))c.takes|=std::uint32_t{1}<<o;
+    }
+    // FOCUS FIRE with an enemy marked (Q, or the right button on one: that gives the order itself).
+    if(!NpcMarked())c.takes&=~(std::uint32_t{1}<<static_cast<unsigned>(Order::focus));
+    // BOARD's seats: with vehicles selected those in them, else in the vehicle each squad would pick; the most any squad
+    // on foot has (StateOf only asks whether there are any).
+    if(c.squads>0 && c.onFoot>0)for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(!Active(g,e) || e.owner!=Owner::squad || e.u.riding || e.u.locked)continue;
+        int room=0;
+        if(c.vehicles>0) {
+            for(int k=0;k<g.count;++k)
+                if(Active(g,g.list[k]) && g.list[k].owner!=Owner::squad)room+=SquadBoardRoom(e,g.list[k].u.v);
+        } else room=SquadBoardRoom(e,nullptr);
+        if(room>c.boardRoom)c.boardRoom=room;
+    }
+    return c;
+}
+// A button's or key's refusal (map_buttons.h StateOf / OrderState): nothing given, the note says why, map_refuse.
+void Note(Game& g,const wchar_t* fmt,...) noexcept;
+void Refuse(Game& g,const wchar_t* what,mapbtn::Why why) noexcept {
+    Note(g,hudtext::Tr(hudtext::Tx::cmdRefused),what,CardWhyText(why));
+    PlayCue(mapcue::Cue::refuse);
 }
 // Whether the map's box, click and Tab take `e` (mapcmd_logic.h Mark::pick): not a squad a script drives, not a squad
 // riding a vehicle (its vehicle is the unit on the map; its row in the panel picks it).
@@ -756,8 +818,18 @@ void PickLoadout(Game& g,int row) noexcept {
 // of the player's squads; the menu closed.
 int Dispatch(Game& g,const Command& cmd,int* skipped,DispatchFlags flags) noexcept;
 void FormationNote(Game& g,int given,int shape) noexcept;
+void Health(Game& g) noexcept;
 void PickFormation(Game& g,int entry) noexcept {
     using hudtext::Tr;using hudtext::Tx;
+    // Its switches' rows (the card trimmed, 2026-11-27): turned, the menu kept open (it lights the state).
+    if(entry==mapbtn::kMenuHealth){Health(g);return;}
+    if(entry==mapbtn::kMenuPace) {
+        if(g.marchPace<0)g.marchPace=Cfg().mapMarchPace ? 1 : 0;
+        g.marchPace=g.marchPace ? 0 : 1;
+        Note(g,L"%ls",Tr(g.marchPace ? Tx::cmdPaceSlowest : Tx::cmdPaceFull));
+        Log("MAPCMD the march's pace: %s",g.marchPace ? "the slowest unit's" : "each at full speed");
+        return;
+    }
     g.formationMenu=false;
     const int shape=mapbtn::MenuShape(entry);
     if(!Cfg().enabled){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
@@ -772,14 +844,19 @@ void PickFormation(Game& g,int entry) noexcept {
     Log("MAPCMD formation menu: %s %s, %d given, %d not",mapbtn::MenuGuard(entry) ? "defence" : "march",
         npc::formation::Name(npc::formation::FromInt(shape)),given,skipped);
 }
-// The ALL OUT menu's pick (map_buttons.h kDismountMenu): DISMOUNT ALL with its choice to the selection (a vehicle's: its
-// riding squads'), online their authority's (command protocol v10); the menu closed.
+// The DISMOUNT menu's pick (map_buttons.h kDismountMenu): the squads' DISMOUNT, DISMOUNT ALL with its choice (a
+// vehicle's: its riding squads'), or UNLOAD AT armed (its point the next left click); online their authority's (command
+// protocol v10); the menu closed. A row whose order none of the selection takes now: refused (StateOf's reasons).
 void PickDismount(Game& g,int entry) noexcept {
     using hudtext::Tr;using hudtext::Tx;
     g.dismountMenu=false;
     if(!Cfg().enabled){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
-    const Command c{Order::dismountAll,{0.0f,0.0f,0.0f},mapbtn::MenuDismountParam(entry)};
-    if(!mapcmd::DismountParamValid(c.order,c.param))return;
+    const Order order=mapbtn::MenuDismountOrder(entry);
+    const mapbtn::Why why=mapbtn::OrderState(order,CardOf(g));
+    if(why!=mapbtn::Why::none){Refuse(g,OrderText(order),why);return;}
+    if(order==Order::unloadAt){Arm(g,true,Order::unloadAt,-1);Note(g,Tr(Tx::cmdOrderArmed),OrderText(order));return;}
+    const Command c{order,{0.0f,0.0f,0.0f},order==Order::dismountAll ? mapbtn::MenuDismountParam(entry) : 0u};
+    if(order==Order::dismountAll && !mapcmd::DismountParamValid(c.order,c.param))return;
     int skipped=0;
     const int given=Dispatch(g,c,&skipped,{});
     wchar_t tail[40]{};
@@ -788,7 +865,7 @@ void PickDismount(Game& g,int entry) noexcept {
     else if(!given && g.networkMessage[0])Note(g,L"%ls",g.networkMessage);
     else if(!given && g.failure!=NpcCommandReason::none)Note(g,L"%ls",CommandFailureText(g.failure));
     else Note(g,Tr(Tx::cmdOrderResult),OrderText(c.order),given,tail);
-    Log("MAPCMD ALL OUT menu: choice 0x%X, %d given, %d not (%s)",c.param,given,skipped,ReasonName(g.failure));
+    Log("MAPCMD DISMOUNT menu: %s choice 0x%X, %d given, %d not (%s)",OrderName(order),c.param,given,skipped,ReasonName(g.failure));
 }
 void CycleEnemy(Game& g,int direction) noexcept;
 // A roster header (hud.cpp MapSquadPanel): its arrow folds / unfolds its group; the rest of it selects every squad of
@@ -1348,7 +1425,13 @@ int Dispatch(Game& g,const Command& cmd,int* skipped,DispatchFlags flags) noexce
         _snwprintf_s(g.networkMessage,_countof(g.networkMessage),_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::cmdNpcNetworkLimit));return 0;
     }
     if(remotes) {
-        const auto request=SubmitMapCommand(g.requester,remote,remotes,cmd,g.focus,g.networkMessage,_countof(g.networkMessage),
+        // BOARD names its vehicle (command protocol v12): the one for the first of them (one request for them all).
+        ObjRef focus=g.focus;
+        if(cmd.order==Order::board) {
+            focus={};
+            for(int i=0;i<g.count && !focus.obj;++i)if(g.list[i].u.v==remote[0].obj)focus=BoardFocus(g,g.list[i]);
+        }
+        const auto request=SubmitMapCommand(g.requester,remote,remotes,cmd,focus,g.networkMessage,_countof(g.networkMessage),
             mapcmd::PointOrder(cmd.order) ? remoteSlots : nullptr,mapcmd::PointOrder(cmd.order) ? static_cast<std::uint32_t>(k) : 0,queue);
         if(request){g.networkRequest=request;g.networkQueued=remotes;g.networkOrder=cmd.order;}
     }
@@ -1385,8 +1468,9 @@ int Dispatch(Game& g,const Command& cmd,int* skipped,DispatchFlags flags) noexce
             c.at[0]=e.u.pos[0];c.at[1]=ground;c.at[2]=e.u.pos[2];
         }
         bool stored=false;
+        const ObjRef focus=cmd.order==Order::board ? BoardFocus(g,e) : g.focus;   // BOARD: its vehicle (npcai.cpp BoardTarget)
         const auto result=Authority(e,c,g.requester,queue,&stored,[&]{
-            return GiveUnit(e,c,g.requester,g.focus,g.list,g.count,&g.sel);
+            return GiveUnit(e,c,g.requester,focus,g.list,g.count,&g.sel);
         });
         if(stored){++given;continue;}
         if(!result.Accepted()) {
@@ -1498,13 +1582,13 @@ bool OnRequester(const Game& g,const View* v) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-// Whether the pointer (right button let go) is on one of our vehicles' marks (not a squad's): BOARD for the active
-// squads on foot (Broken Arrow's right click on a transport).
-bool OnVehicle(const Game& g,const View& v) noexcept {
+// The vehicle mark of ours (not a squad's, not selected) the pointer is on (the right button let go), -1 none: BOARD for
+// the active squads on foot into that vehicle (Broken Arrow's right click on a transport).
+int VehicleUnder(const Game& g,const View& v) noexcept {
     mapcmd::Mark marks[kCmdUnits];
     const int n=Marks(g,v,marks);
     const int i=mapcmd::Nearest(marks,n,g.pointer.x,g.pointer.y,kClickRadius*v.h/1080.0f);
-    return i>=0 && g.list[i].owner!=Owner::squad && !Active(g,g.list[i]);
+    return i>=0 && g.list[i].owner!=Owner::squad && !Active(g,g.list[i]) ? i : -1;
 }
 
 // Y / the sweep button: the selected squads (none: the player's recruited squads) out for the boxes, or called back.
@@ -1562,10 +1646,12 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     // must not leave the lock held, which would block the draw thread for good.
     // The formation menu's sections: the defences when a selected squad guards a point (its shape lit), the march when
     // one follows the player; no squad selected: closed.
+    // Its switches' rows (the paced march, the health boxes) whenever it is open on a squad on foot.
     struct { bool open,guard,march;int guardShape; } menu{false,false,false,-1};
     for(int i=0;i<g.count && g.formationMenu;++i) {
         const Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v) || e.owner!=Owner::squad || e.u.locked || e.u.riding)continue;
+        menu.open=true;
         // Another machine's squad (online): whether it guards or marches is its authority's (this machine lists it
         // with no order): both sections offered, the authority applies the one that fits it (else says unsupported).
         if(!IsOnlineAuthority(e.u.v)){menu.guard=menu.march=true;continue;}
@@ -1573,7 +1659,6 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         if(shape>=0){if(!menu.guard)menu.guardShape=shape;menu.guard=true;}
         else if(shape==-1)menu.march=true;
     }
-    menu.open=menu.guard || menu.march;
     SquadRow rows[kMapSquadRows]{};
     SquadTally tally{};
     const int squads=SquadRows(rows,kMapSquadRows,&tally);
@@ -1608,6 +1693,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
             hostWayCount[i]=ReadMapCommandWays(g.list[i].id,&hostNow[i],hostWays[i],mapcmd::kWaypointsMost);
     // The aircraft's altitude (the map's tags): this machine's high / low and their height over the ground below.
     const mapcue::Altitudes altitudes=ActiveAltitudes(g);
+    const mapbtn::CardSelection card=CardOf(g);   // reads the vehicles' seats (BOARD's room): before the lock
     std::int8_t high[kCmdUnits];float agl[kCmdUnits];std::uint32_t altSince[kCmdUnits];
     const ULONGLONG nowMs=GetTickCount64();
     for(int i=0;i<g.count;++i) {
@@ -1635,8 +1721,9 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     }
     // FOCUS FIRE's button with an enemy marked (Q, or the right button on one: that gives the order itself).
     if(!marked)r.allowedOrders&=~(std::uint32_t{1}<<static_cast<unsigned>(Order::focus));
-    // The ALL OUT menu while the selection still takes ALL OUT (a riding squad, a vehicle carrying one).
-    r.dismountMenu=g.dismountMenu && (r.allowedOrders&(std::uint32_t{1}<<static_cast<unsigned>(Order::dismountAll)))!=0;
+    // The card's states (map_buttons.h StateOf, the HUD greys by it); the DISMOUNT menu while its button works.
+    r.card=card;
+    r.dismountMenu=g.dismountMenu && mapbtn::Available(mapbtn::Id::dismount,card);
     std::memcpy(r.point,point,12);
     r.pointer=pointer;r.px=g.pointer.x;r.py=g.pointer.y;r.boxing=pointer && g.boxing;r.bx=g.bx;r.by=g.by;
     r.count=g.count;
@@ -1790,10 +1877,21 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     const void* ids[kCmdUnits];
     Refresh(g,ids);
-    g.button=-1;g.armedClick=g.rightClick=g.rightOnUi=g.rightLine=false;g.rowPicked=false;g.placePress={};
+    g.button=-1;g.armedClick=g.rightClick=g.rightOnUi=g.rightLine=false;g.rowPicked=false;g.placePress={};g.boardInto={};
     Pointer(g,in,k,haveView ? &v : nullptr);
     if(padArmedClick && (g.armedOrder || g.armedSupport>=0))g.armedClick=true;
     using mapbtn::Id;
+    // Each button's state for the selection (map_buttons.h StateOf): a click on one greyed does nothing but say why.
+    const mapbtn::CardSelection card=CardOf(g);
+    if(g.button>=0 && g.button<mapbtn::kCount) {
+        const Id b=static_cast<Id>(g.button);
+        const mapbtn::Why why=mapbtn::StateOf(b,card);
+        if(why!=mapbtn::Why::none) {
+            Refuse(g,CardWordText(b),why);
+            Log("MAPCMD button %d refused: why %d",g.button,static_cast<int>(why));
+            g.button=-1;
+        }
+    }
     const auto clicked=[&](Id b){return g.button==static_cast<int>(b);};
     // A point order's button: armed for the next click on the ground; clicked again (or the right button): not.
     if(g.button>=0 && mapbtn::Arms(static_cast<Id>(g.button))) {
@@ -1881,21 +1979,21 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // Broken Arrow's keys (map_keys.h). Q F R U arm a point order (the next left click its point; again: not), U twice
     // unloads where they are; H V switch (the param from the active units' state); Z X C B at once. A key for an order
     // none of the active units has does nothing but say so.
-    const auto unavailable=[&](Order o){Note(g,hudtext::Tr(hudtext::Tx::cmdUnavailable),OrderText(o));PlayCue(mapcue::Cue::refuse);};
+    const auto unavailable=[&](Order o){Refuse(g,OrderText(o),mapbtn::OrderState(o,card));};
     const auto armKey=[&](mapkeys::Key key,Order o) {
         if(!edge(key))return;
         if(g.armedOrder && g.armed==o){Arm(g,false,Order::none,-1);Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
-        else if(!AnyTakes(g,o))unavailable(o);
+        else if(mapbtn::OrderState(o,card)!=mapbtn::Why::none)unavailable(o);
         else{Arm(g,true,o,-1);Note(g,hudtext::Tr(hudtext::Tx::cmdOrderArmed),OrderText(o));}
     };
-    armKey(mapkeys::attackMove,Order::attackMove);armKey(mapkeys::fastMove,Order::fastMove);armKey(mapkeys::reverse,Order::reverseMove);
+    armKey(mapkeys::attackMove,Order::attackMove);armKey(mapkeys::reverse,Order::reverseMove);
     if(edge(mapkeys::unload)) {
         if(g.armedOrder && g.armed==Order::unloadAt){Arm(g,false,Order::none,-1);p.unloadNow=true;}
         else armKey(mapkeys::unload,Order::unloadAt);
     }
     const auto now1=[&](mapkeys::Key key,Order o)->bool {
         if(!edge(key))return false;
-        if(!AnyTakes(g,o)){unavailable(o);return false;}
+        if(mapbtn::OrderState(o,card)!=mapbtn::Why::none){unavailable(o);return false;}
         return true;
     };
     std::uint32_t holdParam=0,altitudeParam=0;
@@ -1908,7 +2006,6 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         p.altitude=true;altitudeParam=mapcue::VGoesHigh(ActiveAltitudes(g)) ? mapcmd::kAltitudeHigh : mapcmd::kAltitudeLow;
     }
     p.sprint=now1(mapkeys::sprint,Order::sprint);
-    p.smoke=now1(mapkeys::smoke,Order::smoke);
     p.decoy=now1(mapkeys::decoy,Order::decoy);
     p.back=now1(mapkeys::back,Order::withdraw);
     // T (FIRE MISSION): the support picked ([ ]) armed, its point the next left click; again: not.
@@ -1935,7 +2032,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     SupportLoadout load{};   // the armed support's composed load, taken before disarming closes it
     if(g.armedClick && g.armedOrder) {
         p.move=p.move || g.armed==Order::move;p.attackMove=p.attackMove || g.armed==Order::attackMove;
-        p.guardAt=p.guardAt || g.armed==Order::guard;p.fastMove=p.fastMove || g.armed==Order::fastMove;
+        p.guardAt=p.guardAt || g.armed==Order::guard;
         p.reverseMove=p.reverseMove || g.armed==Order::reverseMove;p.unloadAt=p.unloadAt || g.armed==Order::unloadAt;
         Arm(g,false,Order::none,-1);
     } else if(g.armedClick && g.armedSupport>=0) {
@@ -1977,28 +2074,31 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // mark, BOARD on our vehicle's (the active squads on foot), else a move to the ground there. A right drag: a move
     // laid along its line (after Decide).
     const bool rightMap=g.rightClick && !g.rightOnUi;
+    const int rightVehicle=rightMap && haveView && AnyTakes(g,Order::board) ? VehicleUnder(g,v) : -1;
     const mapcmd::RightClick right=mapcmd::RightClickOrder(rightMap ? ActiveCount(g) : 0,npcmark::Alive(g.hover),true,
-                                                           rightMap && OnRequester(g,haveView ? &v : nullptr),
-                                                           rightMap && haveView && OnVehicle(g,v) && AnyTakes(g,Order::board));
+                                                           rightMap && OnRequester(g,haveView ? &v : nullptr),rightVehicle>=0);
     p.move=p.move || (right.issue && right.order==Order::move) || (g.rightLine && ActiveCount(g)>0);
     p.follow=p.follow || (right.issue && right.order==Order::follow);
-    p.board=p.board || (right.issue && right.order==Order::board);
+    if(right.issue && right.order==Order::board) {
+        // Into that vehicle (BoardFocus); full for every squad on foot selected: refused here (「车上都是满人怎么上车」).
+        int room=0;
+        for(int i=0;i<g.count;++i)if(Active(g,g.list[i]))room+=SquadBoardRoom(g.list[i],g.list[rightVehicle].u.v);
+        if(room>0){p.board=true;g.boardInto=g.list[rightVehicle].id;}
+        else Refuse(g,OrderText(Order::board),mapbtn::Why::noRoomThat);
+    }
     const bool rightFocus=right.issue && right.order==Order::focus;
     p.focus=p.focus || rightFocus;
     p.follow=p.follow || clicked(Id::follow);p.release=p.release || clicked(Id::release);p.engage=p.engage || clicked(Id::engage);
-    p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);p.dismount=p.dismount || clicked(Id::dismount);
-    // The ALL OUT button opens its menu (who gets out: kDismountMenu); Shift+N is every rider at once.
-    if(clicked(Id::dismountAll)){g.dismountMenu=!g.dismountMenu;if(g.dismountMenu){Arm(g,false,Order::none,-1);g.formationMenu=false;}}
+    p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);
+    // The DISMOUNT button opens its menu (the squads off, who gets out of a vehicle, UNLOAD AT: kDismountMenu).
+    if(clicked(Id::dismount)){g.dismountMenu=!g.dismountMenu;if(g.dismountMenu){Arm(g,false,Order::none,-1);g.formationMenu=false;}}
     p.withdraw=clicked(Id::withdraw);p.hold=p.hold || clicked(Id::hold);
     // The Broken Arrow orders' buttons: the switches as their keys (the param from the active units), the rest at once.
     if(clicked(Id::holdFire)){p.holdFire=true;for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && !g.list[i].u.holdFire)holdParam=1;}
     if(clicked(Id::altitude)) {
         p.altitude=true;altitudeParam=mapcue::VGoesHigh(ActiveAltitudes(g)) ? mapcmd::kAltitudeHigh : mapcmd::kAltitudeLow;
     }
-    if(clicked(Id::sprint)){if(AnyTakes(g,Order::sprint))p.sprint=true;else unavailable(Order::sprint);}
-    if(clicked(Id::smoke)){if(AnyTakes(g,Order::smoke))p.smoke=true;else unavailable(Order::smoke);}
-    if(clicked(Id::decoy)){if(AnyTakes(g,Order::decoy))p.decoy=true;else unavailable(Order::decoy);}
-    p.dismiss=p.dismiss || clicked(Id::dismiss);p.recruit=p.recruit || clicked(Id::recruit);
+    p.sprint=p.sprint || clicked(Id::sprint);p.decoy=p.decoy || clicked(Id::decoy);
     // The formation menu and an armed order or support (its composition panel) are one at a time, as Arm keeps them.
     if(clicked(Id::formation)){g.formationMenu=!g.formationMenu;if(g.formationMenu){Arm(g,false,Order::none,-1);g.dismountMenu=false;}}
     if(g.formationMenu) {   // no squad that takes orders selected any more: nothing to arrange
@@ -2006,13 +2106,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         for(int i=0;i<g.count && !squads;++i)squads=g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad && Picked(g.list[i]);
         g.formationMenu=squads;
     }
-    const bool sweep=clicked(Id::sweep),health=clicked(Id::health);
+    const bool sweep=clicked(Id::sweep);
     if(g.marchPace<0)g.marchPace=Cfg().mapMarchPace ? 1 : 0;
-    if(clicked(Id::pace)) {
-        g.marchPace=g.marchPace ? 0 : 1;
-        Note(g,L"%ls",hudtext::Tr(g.marchPace ? hudtext::Tx::cmdPaceSlowest : hudtext::Tx::cmdPaceFull));
-        Log("MAPCMD the march's pace: %s",g.marchPace ? "the slowest unit's" : "each at full speed");
-    }
     g.was=rawKeys;
     float point[3]{};
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
@@ -2110,6 +2205,12 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     else if(s.why==mapcmd::Refusal::noPoint)Note(g,L"%ls",Tr(Tx::cmdNoGround));
     else if(s.why==mapcmd::Refusal::noMark)Note(g,L"%ls",Tr(Tx::cmdNoMark));
     if(s.why!=mapcmd::Refusal::none)PlayCue(mapcue::Cue::refuse);
+    // An order none of the active selection can carry out now (map_buttons.h OrderState: the card greys its button): not
+    // given, the note says why (the buttons' and keys' own refusals above came first; this is the rest's: N, Y...).
+    if(s.issue && !g.boardInto.obj) {
+        const mapbtn::Why why=mapbtn::OrderState(s.cmd.order,CardOf(g));
+        if(why!=mapbtn::Why::none){Refuse(g,OrderText(s.cmd.order),why);s.issue=false;}
+    }
     if(s.issue) {
         int skipped=0;
         const bool queued=queue && mapcmd::PointOrder(s.cmd.order);
@@ -2140,7 +2241,6 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
             g.skipScript,g.skipRiding,g.skipCannot,g.skipRemote,g.skipFailed,ReasonName(g.failure));
     }
     if(sweep)Sweep(g);
-    if(health)Health(g);
     RememberSelection(g);
     LoadoutRows(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
@@ -2434,6 +2534,30 @@ bool PlayerMapCommands(MapCommandReadout* out) noexcept {
     if(fresh)*out=readout;
     ReleaseSRWLockShared(&lock);
     return fresh;
+}
+// The card's words (map_buttons.h Id order) and its refusals' reasons (Why), for the HUD's tooltips and the notes.
+const wchar_t* CardWordText(mapbtn::Id b) noexcept {
+    using hudtext::Tx;
+    static constexpr Tx kWord[mapbtn::kCount]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,
+        Tx::orderEngage,Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::orderWithdraw,
+        Tx::orderDismountAll,Tx::orderHold,Tx::orderReverseMove,Tx::orderUnloadAt,Tx::orderHoldFire,Tx::orderAltitude,
+        Tx::orderSprint,Tx::orderDecoy,Tx::btnFormationShort,Tx::btnSweep,Tx::btnHealth,Tx::btnPace};
+    const int i=static_cast<int>(b);
+    return i>=0 && i<mapbtn::kCount ? hudtext::Tr(kWord[i]) : L"?";
+}
+const wchar_t* CardWhyText(mapbtn::Why why) noexcept {
+    using hudtext::Tx;using mapbtn::Why;
+    switch(why) {
+    case Why::scripted: return hudtext::Tr(Tx::whyScripted);
+    case Why::allRiding: return hudtext::Tr(Tx::whyAllRiding);
+    case Why::noneRiding: return hudtext::Tr(Tx::whyNoneRiding);
+    case Why::noRoom: return hudtext::Tr(Tx::whyNoRoom);
+    case Why::noRoomSelected: return hudtext::Tr(Tx::whyNoRoomSelected);
+    case Why::noRoomThat: return hudtext::Tr(Tx::whyNoRoomThat);
+    case Why::noDecoys: return hudtext::Tr(Tx::whyNoDecoys);
+    case Why::noWithdraw: return hudtext::Tr(Tx::whyNoWithdraw);
+    default: return hudtext::Tr(Tx::whyCannot);
+    }
 }
 }  // namespace crew
 static_assert(crew::kPvpModeToggle==crew::pvpmenu::kMode && crew::kPvpPreset==crew::pvpmenu::kPreset &&

@@ -37,19 +37,23 @@ inline constexpr unsigned kMaxFormationUnits=96;
 // order's `param` (FormationParam below): a guarding squad's defence cycled or set, the march of the requester's own
 // recruited squads set. No point; the authority reads each squad's state (guarding or marching) itself.
 // The Broken Arrow set (the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」; command protocol v11):
-//  - fastMove (F): a move that does not stop to fight -- no shot on the way (the squads' trigger off: PursuitOf quiet),
-//    a guard of its point once there as a move;
+//  - fastMove (F) retired 2026-11-27 (the user: 「感觉像是快速移动可以交给npc自己判断？」, command protocol v12): a plain
+//    move judges for itself whether it pushes on or stops to fight (MoveRushes below); its wire value stays, refused;
 //  - reverseMove (R): a move the tanks drive in reverse (npcpost.cpp: the tail onto the point, the front kept towards
 //    where it came from); the others take it as a move;
 //  - unloadAt (U + point): a move, then DISMOUNT ALL at the point (the queue's trailing order: Waypoints, Trail);
 //  - holdFire (H): `param` 1 on / 0 off -- the unit aims but fires only once hurt (HoldsFire), a state not a place;
 //  - altitude (V): `param` kAltitudeLow / kAltitudeHigh, the helicopters' and the jets' flight height;
 //  - sprint (Z): the soldiers' dashes without their rest (Wing Diver / Fencer), the jets' afterburner, for kSprintMs;
-//  - smoke (X), decoy (C): a unit's own smoke / decoys where it has them (a jet's flares); no unit fakes one.
+//  - decoy (C): a jet's own decoys (flares) where it has them; no unit fakes one. smoke (X) retired 2026-11-27 with
+//    the card's trim (no unit carries smoke of its own: it was never lit), its wire value stays, refused.
 enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw,
                                   dismountAll, hold, formation, fastMove, reverseMove, unloadAt, holdFire, altitude, sprint, smoke,
                                   decoy };
 inline constexpr Order kLastOrder=Order::decoy;
+// The orders kept only for their wire values (append-only): no key, button or unit takes them, the wire refuses them
+// (command_protocol.cpp ValidRequest).
+inline constexpr bool Retired(Order o) noexcept { return o==Order::fastMove || o==Order::smoke; }
 // The seats a dismount empties, by the seat's role (npcai.cpp SeatPriority: 0 the driver's, 1 an armed seat, 2 a
 // passenger's): DISMOUNT the passengers', DISMOUNT ALL every one.
 inline constexpr int kSeatDriver=0,kSeatGunner=1,kSeatPassenger=2;
@@ -76,12 +80,11 @@ inline bool DismountLeaves(int seatRole,bool all,std::uint32_t param,int cls) no
 }
 // The orders that take the ground point under the pointer (and stand round it in a formation).
 inline bool PointOrder(Order o) noexcept {
-    return o==Order::guard || o==Order::move || o==Order::attackMove || o==Order::fastMove || o==Order::reverseMove ||
-           o==Order::unloadAt;
+    return o==Order::guard || o==Order::move || o==Order::attackMove || o==Order::reverseMove || o==Order::unloadAt;
 }
 // The moves that walk / drive to their point and guard it once there (Arrive).
 inline bool MoveOrder(Order o) noexcept {
-    return o==Order::move || o==Order::attackMove || o==Order::fastMove || o==Order::reverseMove || o==Order::unloadAt;
+    return o==Order::move || o==Order::attackMove || o==Order::reverseMove || o==Order::unloadAt;
 }
 // HOLD FIRE: a state of the unit (no place, no move): every kind of unit takes it.
 inline bool StateOrder(Order o) noexcept { return o==Order::holdFire; }
@@ -192,11 +195,32 @@ inline bool OrderParamValid(Order o,std::uint32_t p) noexcept {
 //    (AttackMoveHolds), not each soldier on its own target, so it does not string out between those fighting and
 //    those walking on;
 //  - neither: the order's anchor as before (guard holds its point's radius, engage / focus their reach).
-// quiet (FAST MOVE): forced, and no shot on the way (the trigger off till it is there).
-struct Pursuit { bool forced,fightFirst,quiet; };
-inline Pursuit PursuitOf(Order o) noexcept {
-    return Pursuit{o==Order::move || o==Order::fastMove || o==Order::reverseMove || o==Order::unloadAt,o==Order::attackMove,
-                   o==Order::fastMove};
+// A move (MOVE, REVERSE MOVE, UNLOAD AT) is either of the two by its squad's own judgement (MoveRushes, `rushes`); an
+// attack-move always fights first (the player asked for the fight).
+struct Pursuit { bool forced,fightFirst; };
+inline bool JudgedMove(Order o) noexcept { return o==Order::move || o==Order::reverseMove || o==Order::unloadAt; }
+inline Pursuit PursuitOf(Order o,bool rushes=true) noexcept {
+    return Pursuit{JudgedMove(o) && rushes,o==Order::attackMove || (JudgedMove(o) && !rushes)};
+}
+// A move's own judgement (FAST MOVE retired, the user 2026-11-27: 「感觉像是快速移动可以交给npc自己判断？」): each squad
+// on a move weighs its way every kMoveJudgeMs (npcai.cpp Drive, from its top) and either pushes on (rush: forced, firing
+// at what is in reach as it walks, no stop) or stops to fight what it meets as an attack-move does, then walks on.
+// In this order:
+//  1. blocked -- an enemy within kMoveBlockM of the top on the way ahead (the cosine to it over kMoveAheadCos): it
+//     fights (it cannot walk through it);
+//  2. a long way -- more than kMoveRushFarM to the point: it pushes on (the fight is for when it is there);
+//  3. under fire -- a member hurt within kMoveRushHurtMs: it pushes on (out of the fire, not stood in it);
+//  4. the enemies ahead within kMoveThreatM weigh under kMoveRushThreat (a large one 3, npcai.cpp ThreatsNear): no
+//     threat, it pushes on; else it fights.
+// Once there it guards the point (Arrive), a guard's fight as ever.
+inline constexpr unsigned long long kMoveJudgeMs=1000,kMoveRushHurtMs=3000;
+inline constexpr float kMoveBlockM=20.0f,kMoveRushFarM=150.0f,kMoveThreatM=80.0f,kMoveRushThreat=3.0f,kMoveAheadCos=0.3f;
+struct MoveSense { float left; bool blocked; unsigned long long sinceHurt; float threatAhead; };
+inline bool MoveRushes(const MoveSense& m) noexcept {
+    if(m.blocked)return false;
+    if(m.left>kMoveRushFarM)return true;
+    if(m.sinceHurt<kMoveRushHurtMs)return true;
+    return m.threatAhead<kMoveRushThreat;
 }
 // An attack-move's squad holds to fight while any member had a target last frame or this one (`target`: what it looks
 // for round itself, its leash plus its weapons' reach) -- the ground round it is clear when none has. A target none of
@@ -426,10 +450,11 @@ inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float 
 // The keys' presses this frame (edges).
 // guard (G, pad Y) is an attack-move since 2026-10-09 (the user: "看看还有什么指令能砍一砍"): an attack-move turns
 // into a guard of its point once there, so the two buttons were one; the key is kept.
-// The Broken Arrow keys (2026-11-27) after them: F fast move, R reverse move, U unload at a point (unloadNow: U twice,
-// DISMOUNT ALL where it is), H hold fire, V altitude, Z sprint, X smoke, C decoys, B back to base (WITHDRAW).
+// The Broken Arrow keys (2026-11-27) after them: R reverse move, U unload at a point (unloadNow: U twice, DISMOUNT ALL
+// where it is), H hold fire, V altitude, Z sprint, C decoys, B back to base (WITHDRAW). F (fast move) and X (smoke) are
+// gone with their orders (Retired).
 struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove,dismountAll,withdraw,hold,
-               fastMove,reverseMove,unloadAt,unloadNow,holdFire,altitude,sprint,smoke,decoy,back,
+               reverseMove,unloadAt,unloadNow,holdFire,altitude,sprint,decoy,back,
                guardAt; };   // guardAt: the card's GUARD button armed and its point clicked (a guard there, not an attack-move)
 enum class Refusal : std::uint8_t { none, noUnit, noPoint, online, noMark };
 // What a frame's presses come to: a command to the selection (issue), or why not (why). The cycle (next / prev) has
@@ -441,7 +466,6 @@ inline bool Wanted(const Press& p,Order* o) noexcept {
     if(p.move)*o=Order::move;
     else if(p.guardAt)*o=Order::guard;
     else if(p.attackMove || p.guard)*o=Order::attackMove;
-    else if(p.fastMove)*o=Order::fastMove;
     else if(p.reverseMove)*o=Order::reverseMove;
     else if(p.unloadAt)*o=Order::unloadAt;
     else if(p.hold)*o=Order::hold;
@@ -459,7 +483,6 @@ inline bool Wanted(const Press& p,Order* o) noexcept {
     else if(p.holdFire)*o=Order::holdFire;
     else if(p.altitude)*o=Order::altitude;
     else if(p.sprint)*o=Order::sprint;
-    else if(p.smoke)*o=Order::smoke;
     else if(p.decoy)*o=Order::decoy;
     else return false;
     return true;

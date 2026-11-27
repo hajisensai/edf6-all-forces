@@ -11,10 +11,9 @@ enum Key : int {
     reverse,      // R: reverse move (the tanks back onto the point), its point the next left click
     fireMission,  // T: the support picked ([ ]) armed, its point the next left click
     unload,       // U: unload at the next left click's point; U twice: unload where they are
-    fastMove,     // F: fast move (no stop to fight on the way), its point the next left click
+    // (F fast move and X smoke retired 2026-11-27: a move judges its own pace, mapcmd_logic.h MoveRushes; no unit has smoke)
     holdFire,     // H: hold fire on / off (fire back once hurt)
     sprint,       // Z: the soldiers' dashes unrested, the jets' afterburner
-    smoke,        // X: smoke (a unit's own; none has one now: the card shows it unavailable)
     decoy,        // C: decoys (the jets' flares)
     altitude,     // V: the aircraft's flight height high / low
     back,         // B: back to base (a support withdraws, a recruited squad is dismissed)
@@ -28,8 +27,8 @@ struct Keys {
     int operator[](Key k) const noexcept { return vk[k]; }
 };
 template<class C> Keys Of(const C& c) noexcept {
-    return Keys{{c.mapAttackMoveKey,c.mapStopKey,c.mapReverseMoveKey,c.mapFireMissionKey,c.mapUnloadKey,c.mapFastMoveKey,
-                 c.mapHoldFireKey,c.mapSprintKey,c.mapSmokeKey,c.mapDecoyKey,c.mapAltitudeKey,c.mapBackKey,c.mapSubgroupKey,
+    return Keys{{c.mapAttackMoveKey,c.mapStopKey,c.mapReverseMoveKey,c.mapFireMissionKey,c.mapUnloadKey,
+                 c.mapHoldFireKey,c.mapSprintKey,c.mapDecoyKey,c.mapAltitudeKey,c.mapBackKey,c.mapSubgroupKey,
                  c.mapPing1Key,c.mapPing2Key,c.mapPing3Key,c.mapPing4Key}};
 }
 }  // namespace mapkeys

@@ -85,8 +85,10 @@ namespace crew {
 //      beside its airframe's guard / follow, the carpet, pop-up, missile hunter and hammer sorties retired (their rows kept
 //      as placeholders), no second waves, SortiePass renumbered (jet.h). An older build would read another catalog id and
 //      pass under each entry.
+//  26 (2026-11-27): the map command card trimmed (command protocol v12: FAST MOVE / SMOKE retired, BOARD's vehicle in
+//      the request's focus). An older build would send orders the host refuses and board another vehicle.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=25;  // the sorties folded into their airframes' rows: catalog and passes renumbered
+constexpr std::int64_t kAllForcesRoomProtocol=26;  // the map card trimmed: FAST MOVE / SMOKE retired, BOARD names its vehicle
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

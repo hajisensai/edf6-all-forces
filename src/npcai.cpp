@@ -1147,6 +1147,9 @@ struct Squad {
     // An attack-move's stand (mapcmd_logic.h AttackMoveHolds): the last frame a member had a target, when the stand
     // began, when a member last fired. Reset by every new point order (GuardOrder).
     ULONGLONG attackSeenFrame=0,attackHoldAt=0,attackShotAt=0;
+    // A move's own pace (mapcmd_logic.h MoveRushes): when it was last weighed and how, when a member was last hurt.
+    ULONGLONG moveJudgedAt=0,hurtAt=0;
+    bool moveRushes=true;
     // Riding along with the player it follows (ride_along.h; test site #45): the vehicle that player rides, the one the
     // squad was sent into with them, whether a map order has taken the ride over.
     ridealong::Follow along{};
@@ -1515,6 +1518,38 @@ bool Pursue(Soldier& s,unsigned char* h,const float* pos,Squad* q,const unsigned
                                  q->cmd.at[0],q->cmd.at[1],q->cmd.at[2]);
     }
     return true;
+}
+
+// A move's own pace (mapcmd_logic.h MoveRushes: the rules in their order there), weighed from its top every
+// kMoveJudgeMs and the same for every member: true pushes on (forced), false stops to fight what it meets (as an
+// attack-move). Any other order: true (PursuitOf reads it only for a move).
+bool MoveJudged(Squad& q,ULONGLONG ms) noexcept {
+    if(!mapcmd::JudgedMove(q.cmd.order))return true;
+    if(q.moveJudgedAt && ms-q.moveJudgedAt<mapcmd::kMoveJudgeMs)return q.moveRushes;
+    q.moveJudgedAt=ms;
+    const auto* top=static_cast<const unsigned char*>(q.top.obj);
+    if(!top || top[kDead])return q.moveRushes;
+    const float* at=Pos(top);
+    float ahead[3]{};
+    const bool way=npc::HorizDir(at,q.cmd.at,ahead);
+    mapcmd::MoveSense m{npc::Horiz(at,q.cmd.at),false,q.hurtAt ? ms-q.hurtAt : ~0ull,0.0f};
+    npc::Threat threats[kMaxThreats];
+    const int n=ThreatsNear(at,mapcmd::kMoveThreatM,threats);
+    for(int i=0;i<n;++i) {
+        float to[3];
+        const float d=npc::Horiz(at,threats[i].pos);
+        // On the way: ahead of the top (or round it with no way left) and short of the point's far side.
+        const bool front=!way || (npc::HorizDir(at,threats[i].pos,to) && to[0]*ahead[0]+to[2]*ahead[2]>mapcmd::kMoveAheadCos);
+        if(!front || d>m.left+mapcmd::kMoveBlockM)continue;
+        m.threatAhead+=threats[i].radius;   // ThreatsNear's weight: a large one 3
+        if(d<mapcmd::kMoveBlockM)m.blocked=true;
+    }
+    const bool rushes=mapcmd::MoveRushes(m);
+    if(rushes!=q.moveRushes && Cfg().debug)
+        Log("NPCAI squad %p: its move %s (%.0f m left, threat ahead %.1f%s%s)",top,rushes ? "pushes on" : "stops to fight",m.left,
+            m.threatAhead,m.blocked ? ", blocked" : "",m.sinceHurt<mapcmd::kMoveRushHurtMs ? ", under fire" : "");
+    q.moveRushes=rushes;
+    return rushes;
 }
 
 // One member's frame under an attack-move (its target, its shot) folded into its squad's stand; whether the squad holds
@@ -1926,11 +1961,11 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     Orders o=OrdersOf(q,s.control==npc::Control::recruited && served.at ? served.at :
                          s.control==npc::Control::squad && root ? Pos(root) : s.home);
     // On the way under a move / attack-move it looks for targets round itself (its leash), not round the point ahead.
-    const mapcmd::Pursuit pursuit=mapcmd::PursuitOf(q ? q->cmd.order : Order::none);
+    // A move pushes on or stops to fight by its squad's own judgement (MoveJudged); an attack-move always fights first.
+    const mapcmd::Pursuit pursuit=mapcmd::PursuitOf(q ? q->cmd.order : Order::none,q ? MoveJudged(*q,ms) : true);
     if(pursuit.forced || pursuit.fightFirst){o.anchor=pos;o.leash=Cfg().npcLeash;o.hold=false;}
-    // Nothing leaves it (it aims as ever): its squad under HOLD FIRE (mapcmd.h UnitHoldsFire: till it is hurt), or on a
-    // FAST MOVE's way (Pursuit::quiet).
-    const bool silent=pursuit.quiet || (q && UnitHoldsFire(q->top.obj));
+    // Nothing leaves it (it aims as ever): its squad under HOLD FIRE (mapcmd.h UnitHoldsFire: till it is hurt).
+    const bool silent=q && UnitHoldsFire(q->top.obj);
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
     Pick t=engage>0.0f ? PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
@@ -2093,7 +2128,7 @@ void Think(unsigned char* h,int cls) noexcept {
     s->unarmedSaid=false;
     // A member hurt: its squad under HOLD FIRE returns fire (mapcmd.h UnitStruck; the table asks only the top's own health).
     const float hpNow=At<float>(h,kHumanHp);
-    if(q && mapcmd::Hurt(s->hpSeen,hpNow))UnitStruck(q->top.obj);
+    if(q && mapcmd::Hurt(s->hpSeen,hpNow)){UnitStruck(q->top.obj);q->hurtAt=ms;}   // ...and a move pushes on (MoveJudged)
     s->hpSeen=hpNow;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
     if(!npc::Scripted(control))   // a script's unit keeps its stock moves
@@ -3491,9 +3526,17 @@ float BoardDistance(unsigned char* v,unsigned char* const* members,int count,ULO
     }
     return nearest<=kBoardFar ? nearest : -1;
 }
-unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULONGLONG ms,bool* sawVehicle=nullptr) noexcept {
+// `named`: the vehicle the player picked (BOARD's focus, command protocol v12: a selected vehicle with room, the one
+// right clicked): that one alone, none when it has no seat for them (not another one nearby instead).
+unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULONGLONG ms,bool* sawVehicle=nullptr,
+                           unsigned char* named=nullptr) noexcept {
     unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
     if(sawVehicle)*sawVehicle=false;
+    if(named) {
+        if(!Readable(named,kSeatCount+8) || !KnownVehicle(named) || named[kDead])return nullptr;
+        if(sawVehicle)*sawVehicle=true;
+        return BoardDistance(named,members,count,ms)>=0 ? named : nullptr;
+    }
     if(requester && !HumanOnFoot(requester)) {
         auto* v=At<unsigned char*>(requester,kHumanRiding);
         if(v && Readable(v,kSeatCount+8) && !v[kDead]) {
@@ -3600,9 +3643,9 @@ int BoardInto(unsigned char* v,unsigned char* top,ULONGLONG ms,const int* roles,
 
 // Driver first, then actual armed seats, then passengers. Assignment never creates a rider.
 bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=nullptr,int* affected=nullptr,NpcCommandReason* why=nullptr,
-                unsigned char** boarded=nullptr) noexcept {
+                unsigned char** boarded=nullptr,unsigned char* named=nullptr) noexcept {
     bool saw=false;
-    unsigned char* const v=BoardTarget(top,requester ? requester : PlayerHuman(),ms,&saw);
+    unsigned char* const v=BoardTarget(top,requester ? requester : PlayerHuman(),ms,&saw,named);
     if(boarded)*boarded=v;
     if(affected)*affected=0;
     if(why)*why=saw ? NpcCommandReason::noSeat : NpcCommandReason::noVehicle;
@@ -3614,6 +3657,23 @@ bool BoardSquad(unsigned char* top,ULONGLONG ms,const unsigned char* requester=n
     if(affected)*affected=given;
     if(given && why)*why=NpcCommandReason::none;
     return given>0;
+}
+
+// The seats of `v` a member of the squad of `members` on foot could take now (free, its class's, not walked to by
+// another), `v` within kBoardFar of `at`. No authority asked: the map's card counts another machine's squads as well
+// (their host seats them, BoardTarget).
+int BoardRoomIn(unsigned char* v,unsigned char* const* members,int count,const float* at,ULONGLONG ms) noexcept {
+    if(!v || !Readable(v,kSeatCount+8) || !KnownVehicle(v) || v[kDead] || !OnlineMaySeatNpc(v) || npc::Horiz(at,Pos(v))>kBoardFar)return 0;
+    int room=0;
+    for(unsigned seat=0;seat<SeatCount(v);++seat) {
+        bool takes=false;
+        for(int m=0;m<count && !takes;++m) {
+            unsigned char* h=members[m];
+            takes=HumanOnFoot(h) && FriendlyVehicle(v,h) && SeatTakes(v,seat,h) && !Reserved(v,seat,ms,h);
+        }
+        room+=takes ? 1 : 0;
+    }
+    return room;
 }
 
 // The riding members off (SeatKick: the get-off message, a real soldier lands and walks on; a dummy rider would die,
@@ -3898,6 +3958,25 @@ bool NpcSweepToggle(const void* const* tops,int n) noexcept {
     return sweep.on;
 }
 bool NpcSweepOn() noexcept { return sweep.on; }
+int NpcBoardRoom(const void* leader,const void* vehicle) noexcept {
+    if(!ok || !Cfg().customNpcAi || !Cfg().npcBoarding || !rideOk || !leader)return 0;
+    __try {
+        auto* top=static_cast<unsigned char*>(const_cast<void*>(leader));
+        if(!Readable(top,kDead+1) || !Readable(top,kPosition+12) || top[kDead])return 0;
+        unsigned char* members[kMaxSquad];const int count=Members(top,members,kMaxSquad);
+        const ULONGLONG ms=GameMs();
+        const float* at=Pos(top);
+        if(vehicle)return BoardRoomIn(static_cast<unsigned char*>(const_cast<void*>(vehicle)),members,count,at,ms);
+        // As BoardTarget picks: the player's ride, else any friendly or empty vehicle near.
+        int most=0;
+        if(const unsigned char* me=PlayerHuman(); me && !HumanOnFoot(me))most=BoardRoomIn(At<unsigned char*>(me,kHumanRiding),members,count,at,ms);
+        for(int i=0;i<world.friends && !most;++i)
+            most=BoardRoomIn(static_cast<unsigned char*>(const_cast<void*>(world.frObject[i])),members,count,at,ms);
+        for(int i=0;i<world.nobodys && !most;++i)
+            most=BoardRoomIn(static_cast<unsigned char*>(const_cast<void*>(world.nobody[i])),members,count,at,ms);
+        return most;
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
+}
 bool NpcPickupHealthToggle() noexcept {
     healthPick=PickupHealth() ? 0 : 1;
     Log("NPCAI health boxes: %s (the map)",healthPick ? "hurt soldiers may take them" : "left for the player");
@@ -3921,6 +4000,7 @@ namespace {
 void GuardOrder(Squad& q,const Command& c,const unsigned char* requester=nullptr) noexcept {
     q.cmd=c;q.cmdLead=npc::LeadOf(q.control);
     q.attackSeenFrame=q.attackHoldAt=q.attackShotAt=0;
+    q.moveJudgedAt=0;q.moveRushes=true;
     const auto g=npc::formation::FromInt(Cfg().npcGuardFormation);
     if(q.guardShape==npc::formation::Shape::stock)q.guardShape=npc::formation::GuardShape(g) ? g : npc::formation::Shape::stock;
     float dir[3];const auto* me=requester ? requester : PlayerHuman();
@@ -4242,7 +4322,6 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         case Order::guard:
         case Order::move:
         case Order::attackMove:   // the guard's point and formation; Drive walks there first (Pursue)
-        case Order::fastMove:     // ...without a shot on the way (Pursuit::quiet)
         case Order::reverseMove:  // on foot: a move (backing off is walking there)
             if(!std::isfinite(c.at[0]+c.at[1]+c.at[2]))return CommandResult(Reason::noTarget);
             GuardOrder(*q,c,caller);break;
@@ -4278,7 +4357,10 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         case Order::board: {
             if(!Cfg().npcBoarding || !rideOk)return CommandResult(Reason::boardingUnavailable);
             Reason why=Reason::noVehicle;unsigned char* vehicle=nullptr;
-            if(!BoardSquad(top,ms,caller,&affected,&why,&vehicle))return CommandResult(why);
+            // The vehicle picked on the map (the request's focus), else the nearest with room (BoardTarget).
+            auto* named=static_cast<unsigned char*>(const_cast<void*>(focus.obj));
+            if(named && (!Readable(named,kSelfCtrl+8) || !focus.Is(named)))return CommandResult(Reason::noVehicle);
+            if(!BoardSquad(top,ms,caller,&affected,&why,&vehicle,named))return CommandResult(why);
             TransportPair(top,vehicle);   // its transport from now on, when it is one (transport.cpp)
             break;
         }

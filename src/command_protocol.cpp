@@ -61,13 +61,15 @@ bool CanonicalId(const unsigned char* id,bool allowEmpty) noexcept {
 bool ValidRequest(const Request& r) noexcept {
     // The requester: a player's reference (net_object_ref.h); the units: NPCs by their NetId; the focus: any object's (a
     // player's too: an enemy player in PvP).
-    if(!r.count || r.count>kCommandNetUnits || r.command.order>mapcmd::kLastOrder ||
+    if(!r.count || r.count>kCommandNetUnits || r.command.order>mapcmd::kLastOrder || mapcmd::Retired(r.command.order) ||
        !netref::IsPlayer(r.requester))return false;
     if(r.flags&~kQueued)return false;
     if((r.flags&kQueued) && !mapcmd::PointOrder(r.command.order))return false;   // only a point goes after the others
     if(!mapcmd::OrderParamValid(r.command.order,r.command.param))return false;   // the formation's, DISMOUNT ALL's, a line's, a switch's
     for(float f:r.command.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
+    // BOARD's focus (v12): the vehicle picked to board, or none (the nearest with room, as before).
     if(r.command.order==mapcmd::Order::focus) {if(!netref::Valid(r.focus,false) || !std::memcmp(r.focus,r.requester,32))return false;}
+    else if(r.command.order==mapcmd::Order::board) {if(!Empty(r.focus) && (!netref::ValidNative(r.focus,false) || !std::memcmp(r.focus,r.requester,32)))return false;}
     else if(!Empty(r.focus))return false;
     for(std::uint32_t i=0;i<r.count;++i) {
         if(!netref::ValidNative(r.units[i],false) || !std::memcmp(r.units[i],r.requester,32) ||
