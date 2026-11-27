@@ -213,6 +213,37 @@ int main() {
         Check(!pc.CloseNow(true),"a new mission drops a pause seen in the last one");
         cases+=9;
     }
+    // The scale bar: a round length (1, 2, 5 x 10^n m), at most the room and at least 0.4 of it, and the length it reads
+    // spans that many px at the focus through the camera's projection (a 1080 px tall screen, its vertical field of view
+    // pi/4: its focal length 540 / tan(pi/8) px).
+    {
+        constexpr float kScreenH=1080.0f,kRoom=180.0f;
+        const float focal=kScreenH*0.5f/std::tan(kPi/8.0f);
+        for(float height=kMinHeight;height<=kMaxHeight;height*=1.07f)
+            for(float pitch=kMinPitch;pitch<=kMaxPitch;pitch+=0.07f) {
+                const View v{{120.0f,15.0f,-340.0f},0.7f,pitch,height};
+                float r[3];Right(v.yaw,r);
+                // pxPerMetre as the HUD measures it: the focus +- half a grid step across, projected.
+                const float half=GridStep(height)*0.5f;
+                const float a[3]={v.focus[0]-r[0]*half,v.focus[1],v.focus[2]-r[2]*half};
+                const float b[3]={v.focus[0]+r[0]*half,v.focus[1],v.focus[2]+r[2]*half};
+                float ra,ua,rb,ub;ScreenOf(v,a,&ra,&ua);ScreenOf(v,b,&rb,&ub);
+                const float ppm=(rb-ra)*focal/(2.0f*half);
+                Check(Near(ppm,focal/Distance(v),ppm*1e-3f),"scale: px a metre at the focus is focal / distance",ppm,focal/Distance(v));
+                const Scale sc=ScaleFor(ppm,kRoom);
+                const float lead=sc.metres/std::pow(10.0f,std::floor(std::log10(sc.metres)+1e-4f));
+                Check(Near(lead,1.0f,1e-3f) || Near(lead,2.0f,1e-3f) || Near(lead,5.0f,1e-3f),"scale: a round length",sc.metres,lead);
+                Check(sc.px<=kRoom+0.01f && sc.px>=kRoom*0.4f-0.01f,"scale: fills 0.4..1 of its room",sc.px,height);
+                // The length it reads, laid across at the focus, spans the bar's px on the screen.
+                const float e[3]={v.focus[0]+r[0]*sc.metres,v.focus[1],v.focus[2]+r[2]*sc.metres};
+                float re,ue,rf,uf;ScreenOf(v,v.focus,&rf,&uf);ScreenOf(v,e,&re,&ue);
+                Check(Near((re-rf)*focal,sc.px,sc.px*2e-3f),"scale: the bar's metres span its px",(re-rf)*focal,sc.px);
+                ++cases;
+            }
+        Check(ScaleFor(0.0f,100.0f).metres==0.0f && ScaleFor(1.0f,0.0f).px==0.0f,"scale: none without a projection or room");
+        Check(ScaleFor(1.0f,100.0f).metres==100.0f && ScaleFor(1.0f,99.0f).metres==50.0f && ScaleFor(0.1f,250.0f).metres==2000.0f,
+              "scale: the round steps");
+    }
     std::printf("%d views checked: %s\n",cases,failures ? "FAILED" : "all ok");
     return failures ? 1 : 0;
 }

@@ -78,10 +78,10 @@ void MapDistance(wchar_t* out,std::size_t size,float m) noexcept {
     else _snwprintf_s(out,size,_TRUNCATE,L"%.1f km",m*0.001f);
 }
 
-// Whether a grid label at (x, y) keeps clear of the bands (title, keys), the legend and the scale bar.
+// Whether a grid label at (x, y) keeps clear of the bands (title, keys, the scale bar), the legend and the cards.
 bool MapLabelFree(float x,float y,float width,float height,float s) noexcept {
     if(y<60.0f*s || y>height-90.0f*s || x>width-140.0f*s)return false;   // the bands (and MapCommands' over the keys)
-    return !(x<420.0f*s && y>height-140.0f*s);                                             // the scale bar (MapScale)
+    return !(x<420.0f*s && y>height-140.0f*s);                                             // the selection cards
 }
 
 // The grid, its axes through the player, its labels (where each line meets the other axis through the focus; one at
@@ -130,22 +130,27 @@ void MapCompass(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     Label(text,lines,at,cx+dx*(r+14.0f*s),cy+dy*(r+14.0f*s),1,kLineScale*0.8f,kWhite,L"%ls",Tr(Tx::compassN));
 }
 
-// The scale bar (bottom left): one grid step across the screen at the focus.
+// The scale bar (the user, 2026-11-27: 「这个比例尺有问题」): in the bottom band's right end, on its own (no band of its own
+// across the screen), the longest round length (mapcam::ScaleFor) at most kMapScaleRoom px across, at the focus (the
+// screen's centre: the metres a px are measured there, the focus +- half a grid step across projected through the view).
+constexpr float kMapScaleRoom=180.0f;   // px (x s): the longest the bar is; the key help keeps clear of kMapScaleKeep
+constexpr float kMapScaleKeep=kMapScaleRoom+40.0f;
 void MapScale(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
-    const float step=mapcam::GridStep(m.height);
+    const float half=mapcam::GridStep(m.height)*0.5f;
     float r[3];mapcam::Right(m.yaw,r);
-    const float b[3]={m.focus[0]+r[0]*step,m.focus[1],m.focus[2]+r[2]*step};
+    const float a[3]={m.focus[0]-r[0]*half,m.focus[1],m.focus[2]-r[2]*half};
+    const float b[3]={m.focus[0]+r[0]*half,m.focus[1],m.focus[2]+r[2]*half};
     float x0,y0,x1,y1,depth;
-    if(!Project(vp,m.focus,width,height,&x0,&y0,&depth) || !Project(vp,b,width,height,&x1,&y1,&depth))return;
-    const float len=std::sqrt((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0));
-    if(!(len>4.0f) || len>width*0.5f)return;
-    const float drawn=std::fmin(len,width*0.40f-20.0f*s);
-    const float x=width*0.55f,y=184.0f*s;
-    Rect(drawer,ctx,x,y-2.0f*s,x+drawn,y+2.0f*s,kWhite);
-    Rect(drawer,ctx,x-1.0f*s,y-8.0f*s,x+1.0f*s,y+8.0f*s,kWhite);
-    Rect(drawer,ctx,x+drawn-1.0f*s,y-8.0f*s,x+drawn+1.0f*s,y+8.0f*s,kWhite);
-    wchar_t d[24];MapDistance(d,_countof(d),step*drawn/len);
-    Label(text,lines,at,x+drawn*0.5f,y-18.0f*s,1,kLineScale*0.75f,kWhite,L"%ls",d);
+    if(!Project(vp,a,width,height,&x0,&y0,&depth) || !Project(vp,b,width,height,&x1,&y1,&depth))return;
+    const float ppm=std::sqrt((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0))/(2.0f*half);
+    const mapcam::Scale sc=mapcam::ScaleFor(ppm,kMapScaleRoom*s);
+    if(!(sc.px>4.0f*s))return;
+    const float right=width-16.0f*s,left=right-sc.px,y=height-13.0f*s;
+    Rect(drawer,ctx,left,y-2.0f*s,right,y+2.0f*s,kWhite);
+    Rect(drawer,ctx,left-1.0f*s,y-7.0f*s,left+1.0f*s,y+2.0f*s,kWhite);
+    Rect(drawer,ctx,right-1.0f*s,y-7.0f*s,right+1.0f*s,y+2.0f*s,kWhite);
+    wchar_t d[24];MapDistance(d,_countof(d),sc.metres);
+    Label(text,lines,at,(left+right)*0.5f,y-17.0f*s,1,kLineScale*0.75f,kWhite,L"%ls",d);
 }
 
 // A hollow square / diamond of half size `h` round (x, y).
@@ -484,7 +489,7 @@ float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool p
 }
 
 // The map's right-hand dock (the user, 2026-10-19: 「m地图里面右边的操作太难受了」「操作区域和图例冲突了」): one column at
-// the right edge under the compass and the scale, from top to bottom the payload panel, the enemy control, PVP and the
+// the right edge under the compass, from top to bottom the payload panel, the enemy control, PVP and the
 // test range's 「摆放」, with the legend folded at its foot. Each panel has its own band of it: nothing opens over
 // another, nothing grows or shrinks under the pointer (every fold is a click), so a click lands where it was aimed.
 struct MapDock { float x0,x1; };
@@ -1971,12 +1976,12 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     const float barTop=c.squads>0 ? panelBottom+10.0f*s : panelBottom;
     const float barBottom=height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+40.0f)*s;
     MapSupportBar(drawer,ctx,text,width,s,barTop,barBottom,m.pad,c,lines,at);
-    // The right-hand dock (MapDock): under the scale / compass and the payload panel, the enemy control, PVP and the
+    // The right-hand dock (MapDock): under the compass and the payload panel, the enemy control, PVP and the
     // range's 「摆放」 down to the legend folded at its foot, each in its own band. A band changes only by the user's own
     // click on its panel's title (or L3 / R3 into it): a pick, a hover or a selection never folds or unfolds one
     // (mapcmd.cpp SetEnemyCandidate), so the panels under it never move on their own (the user, 2026-10-19: 「这个展开和
     // 收起会自动变，我不好点」). A folded panel keeps only its title's height: the 「摆放」 list keeps its rows.
-    const float dockTop=std::fmax(206.0f*s,payloadBottom+10.0f*s);
+    const float dockTop=std::fmax(182.0f*s,payloadBottom+10.0f*s);
     const float dockBottom=MapLegend(drawer,ctx,text,width,s,barBottom,m.pad,c,lines,at)-8.0f*s;
     const float enemyBottom=MapEnemyPanel(drawer,ctx,text,width,s,dockTop,dockBottom,m.pad,c,lines,at);
     const float pvpBottom=MapPvpPanel(drawer,ctx,text,width,s,enemyBottom+8.0f*s,dockBottom,m.pad,c,lines,at);
@@ -2015,9 +2020,10 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
 }
 
 // The title and the keys (top and bottom bands).
-void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+void MapText(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     MapUiBox(drawer,ctx,0,0,width,46.0f*s,lines,*at);
     MapUiBox(drawer,ctx,0,height-46.0f*s,width,height,lines,*at);
+    if(!m.watchCommander)MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     const int bandsFirst=*at;
     if(m.watchCommander)Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,L"%ls",Tr(Tx::mapCommanderView));
     else {
@@ -2038,7 +2044,11 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
         wchar_t key[32];KeyName(m.mapKey,key,32);
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapMouseKeys),key);
     }
-    for(int i=bandsFirst;i<*at;++i)FitLine(text,lines[i],16.0f*s,width-16.0f*s);
+    // The title across the top; the key help in the bottom band clear of the scale bar at its right end (centred still).
+    for(int i=bandsFirst;i<*at;++i) {
+        const float keep=lines[i].y>height*0.5f ? kMapScaleKeep*s : 16.0f*s;
+        FitLine(text,lines[i],keep,width-keep);
+    }
 }
 
 #include "hud_stats.inc"
@@ -2085,12 +2095,10 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     SupportWarnHud(drawer,ctx,text,vp,width,height,s,lines,at);   // the supports' areas and routes, the armed one's preview
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
     if(!m.watchCommander) {
-        MapUiBox(drawer,ctx,width*0.55f-8*s,146*s,width-12*s,198*s,lines,*at);
-        MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
         MapUiBox(drawer,ctx,width-134*s,54*s,width-6*s,174*s,lines,*at);
         MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     }
-    MapText(drawer,ctx,text,width,height,s,m,lines,at);
+    MapText(drawer,ctx,text,vp,width,height,s,m,lines,at);
     if(stats)StatsMapTab(drawer,ctx,text,width,height,s,lines,at);
     else DamageStatsUi(nullptr,nullptr,0,0,0);
     if(!m.pad)MapTipDraw(drawer,ctx,text,width,height,s,lines,at);   // over everything: drawn last
