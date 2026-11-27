@@ -255,6 +255,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kRescue,"rescue","heli.cpp's sea rescue: the heli module's reset (ResetHelis) drops it with the player's track") \
     M(kGround,"ground",nullptr) \
     M(kNpcGunners,"npc gunners",nullptr) \
+    M(kNpcParallel,"npc parallel think",nullptr) \
     M(kQMarks,"qmarks",nullptr) \
     M(kAutoTurret,"auto turret",nullptr) \
     M(kNpcPost,"npc post",nullptr) \
@@ -475,6 +476,7 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kHeli,&Call<&ResetHelis>},
     {RP::kMissionState,Id::kGround,&Call<&ResetGround>},
     {RP::kMissionState,Id::kNpcGunners,&Call<&ResetNpcAi>},
+    {RP::kMissionState,Id::kNpcParallel,&Call<&ResetNpcParallel>},   // the soldiers' parallel Decide: guesses, intents, counts (npcai.cpp mt)
     {RP::kMissionState,Id::kQMarks,&Call<&ResetQMarks>},   // the Q marks, ours and the teammates' (qmark.cpp)
     {RP::kMissionState,Id::kAutoTurret,&Call<&AutoTurretMissionReset>},   // EDF6AutoTurret's auto-aim back to its ini's (off), its lock let go (turretaim.cpp)
     {RP::kMissionState,Id::kNpcPost,&Call<&ResetNpcPosts>},

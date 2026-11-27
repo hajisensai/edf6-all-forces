@@ -69,6 +69,8 @@
 #include "loadout_store.h"
 #include "vhud.h"
 #include "edf/hash_index.h"
+#include "crash_dump.h"
+#include "worker_pool.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -757,6 +759,100 @@ Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept {
     return a;
 }
 
+// --- The parallel Decide (NpcParallelThink; docs/npc-ai-design.md「并行决策与串行提交」) ---
+// The soldiers' Think runs one by one inside the stock AI pass (ai_update, the list +0x488's slot 7), between the stock
+// nextThink calls: it cannot move off the game thread as a whole (the stock Think, every write to a soldier's block,
+// the weapon pick through d82+i, the routes' shared budget, the squads, the native calls are all the game thread's).
+// What costs its time are its read-only asks of the frame: the target pick over the enemy grid, the line-of-sight map
+// ray, the friends-in-the-shot capsules, the friends round the target (stress:100 2026-11-24: ShotOk 12-13 ms of a
+// 17.8 ms step). So at the frame's first Think (the world just gathered; nothing writes the scene until the pass ends:
+// Havok steps after it, the objects move after it, the wastedfire book changes only in the damage hook), every soldier
+// Drive saw lately has those asks made for it on the pool (Decide: worker_pool.h, the game thread working too) from what
+// it asked with last time (Guess: its anchor, its pick's scope and reach, its arms) and where it stands now. Each answer
+// is kept with its question's exact inputs (Intent). Then each soldier's Think runs as before, in the pass's order, and
+// every ask its Drive makes (Apply) takes the kept answer only when the inputs are the same bit for bit; any other ask is
+// made then, on the game thread (a miss: a new soldier, its arms or anchor changed, the stock Think turned it to another
+// target, a target whose fire the game decides with a plan of its own, a fault in its Decide). Each answer is a pure
+// function of its inputs and of a world that does not change in the pass, so a kept answer is the one the ask would get
+// now: the frame comes out the same as with every ask made on the game thread (NpcParallelThink=0), for any pool size.
+namespace mt {
+struct PickQ { float eye[3],anchor[3],scope,reach; int held,row; };
+struct ClearQ { float from[3],to[3],blast; bool clear; };
+struct RayQ { float a[3],b[3],hit[3],dist; };
+struct CloseQ { float at[3],r; bool yes; };
+struct HoldQ { const void* target; bool hold; };
+constexpr int kTargets=2,kClears=4,kRays=2,kCloses=2,kHolds=2;
+struct Intent {
+    const unsigned char* h;
+    ObjRef ref;
+    ULONGLONG frame;
+    std::uint64_t version;      // WastedFireVersion at the Decide: the pick and the holds stand only under it
+    bool done;                  // its Decide ran to its end (a fault: false, every ask made at Apply)
+    bool wantPick;              // the pick guessed (Drive picked last time, its anchor read by the fork)
+    bool pickOk;                // the pick known (no candidate needed the game thread's verdict)
+    PickQ pick;
+    int clears,rays,closes,holds;
+    ClearQ clear[kClears];
+    RayQ ray[kRays];
+    CloseQ close[kCloses];
+    HoldQ hold[kHolds];
+};
+// What Drive last asked with (Remember): the Decide's guess at this frame's questions.
+struct Guess {
+    ObjRef ref;                 // the soldier it is of (its slot may go to another)
+    bool set,pick;              // pick: Drive picked (some weapon has an engage range)
+    const float* anchor;        // where Drive read its anchor (a position an object, a squad, the world or the soldier holds)
+    float scope,reach;
+    Arms arms;
+    ULONGLONG intentFrame;      // the fork its intent is of, and its index there
+    int intentAt;
+};
+std::vector<Guess> guesses;     // by the soldier's slot in soldiers[]
+std::vector<Intent> intents;    // by the fork's index
+std::vector<int> forkSlots;     // the fork's index -> the soldier's slot
+std::vector<const void*> primeTargets;
+const Intent* applying=nullptr; // the soldier whose Drive runs now: its intent (game thread)
+ULONGLONG forkFrame=~0ull;
+struct Stats {
+    unsigned frames,decided,faults,applied,noIntent,hits,misses,stale,mismatches;
+    LONGLONG gather,decide,stock,think,sync;   // QPC ticks (PerfProbe>=1)
+};
+Stats stats{};
+unsigned shadowTick=0;
+ULONGLONG mismatchLogAt=0,faultLogAt=0;
+bool Same3(const float* a,const float* b) noexcept { return std::memcmp(a,b,12)==0; }
+bool Same1(float a,float b) noexcept { return std::memcmp(&a,&b,4)==0; }
+// The intent for `self`'s ask now, or null.
+const Intent* For(const void* self) noexcept {
+    const Intent* i=applying;
+    return i && i->h==self ? i : nullptr;
+}
+bool Fresh(const Intent& i) noexcept {
+    if(i.version==WastedFireVersion())return true;
+    ++stats.stale;
+    return false;
+}
+// Debug=1: one kept answer in 32 asked again on the game thread and compared (NPCMT MISMATCH: the kept one was not the
+// answer now; the game thread's is used).
+bool Shadow() noexcept { return Cfg().debug && (++shadowTick&31)==0; }
+void Mismatch(const char* what,const void* self) noexcept {
+    ++stats.mismatches;
+    const ULONGLONG ms=GetTickCount64();
+    if(mismatchLogAt && ms-mismatchLogAt<2000)return;
+    mismatchLogAt=ms;
+    Log("NPCMT MISMATCH %s: soldier %p's kept answer differs from the game thread's (%u so far)",what,self,stats.mismatches);
+}
+LONGLONG Ticks() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
+// An ask made at Apply (a miss when the soldier had an intent), timed under PerfProbe.
+struct Sync {
+    LONGLONG at;
+    explicit Sync(bool counted) noexcept : at(Cfg().perfProbe ? Ticks() : 0) { if(counted)++stats.misses; }
+    ~Sync() { if(at)stats.sync+=Ticks()-at; }
+    Sync(const Sync&)=delete;
+    Sync& operator=(const Sync&)=delete;
+};
+}  // namespace mt
+
 // --- The target ---
 // The row of the object `r` holds in this frame's enemies (the same object: ObjRef::Is), -1 when it is not among them.
 // One row an object (SeeEnemy), so it is the row the scans over enemy[] for r.Is(object) found.
@@ -772,11 +868,31 @@ struct Pick { const Enemy* e; float dist; };
 // looked up once by the index (one row an object): isCurrent is then an int compare for each enemy visited. (ObjRef::Is
 // compares the pointer first and reads memory only for the row that is the held object, so the scan's isCurrent read
 // once a frame too: what the row saves is the compares, not reads.)
+// The pick's row (-1 none) over the frame's enemies, `usable(k)` the fire-is-not-wasted ask of row k.
+template<class Usable>
+int PickRow(int held,const float* eye,const float* anchor,float scope,float reach,Usable usable) noexcept {
+    return npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
+                                 [held](int k) noexcept { return k==held; },usable,eye,anchor,scope,reach);
+}
+int PickRowNow(const void* self,int held,const float* eye,const float* anchor,float scope,float reach) noexcept {
+    return PickRow(held,eye,anchor,scope,reach,[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); });
+}
 Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* anchor,float scope,float reach) noexcept {
     const int held=EnemyRow(s.target);
-    const int i=npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
-                                      [held](int k) noexcept { return k==held; },
-                                      [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },eye,anchor,scope,reach);
+    int i=-1;
+    const mt::Intent* in=mt::For(self);
+    if(in && in->pickOk && in->pick.held==held && mt::Same3(in->pick.eye,eye) && mt::Same3(in->pick.anchor,anchor) &&
+       mt::Same1(in->pick.scope,scope) && mt::Same1(in->pick.reach,reach) && mt::Fresh(*in)) {
+        ++mt::stats.hits;
+        i=in->pick.row;
+        if(mt::Shadow()) {
+            const int now=PickRowNow(self,held,eye,anchor,scope,reach);
+            if(now!=i){mt::Mismatch("target pick",self);i=now;}
+        }
+    } else {
+        const mt::Sync sync(in!=nullptr);
+        i=PickRowNow(self,held,eye,anchor,scope,reach);
+    }
     return i<0 ? Pick{nullptr,0.0f} : Pick{&world.enemy[i],npc::Dist(eye,world.enemy[i].aim)};
 }
 const Enemy* StockTarget(const unsigned char* h) noexcept {
@@ -792,7 +908,7 @@ npc::TargetKind KindOf(const Enemy& e,const float* pos) noexcept {
     return e.points>=kLargePoints ? npc::TargetKind::large : npc::TargetKind::light;
 }
 // Veto a shot at the first blocker in the relevant cells.
-bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
+bool ShotClearNow(const void* self,const float* from,const float* to,float blast) noexcept {
     return npc::grid::ShotClear(world.friendGrid,npc::Shot(from,to,kSpread,blast),world.frRadius,
         [](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; },
         [self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; });
@@ -809,11 +925,97 @@ bool PackArcClearOf(const void* self,const npcpack::Weapon& pack,const float* fr
             return npc::grid::BlastClear(world.friendGrid,npc::Shot(landing,landing,0.0f,radius),world.frRadius,at,isSelf);
         },blocked);
 }
-bool FriendNear(const void* self,const float* at,float r) noexcept {
+bool FriendNearNow(const void* self,const float* at,float r) noexcept {
     return world.friendGrid.AnyAround(at,r,[&](int i) noexcept {
         const auto k=static_cast<std::size_t>(i);
         return world.frObject[k]!=self && npc::Dist(world.fr[k].pos,at)<r;
     });
+}
+
+// The asks as Drive makes them: the soldier's kept answer (its intent: the same inputs bit for bit), else made now.
+bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(in)for(int k=0;k<in->clears;++k) {
+        const mt::ClearQ& c=in->clear[k];
+        if(!mt::Same3(c.from,from) || !mt::Same3(c.to,to) || !mt::Same1(c.blast,blast))continue;
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=ShotClearNow(self,from,to,blast);
+            if(now!=c.clear){mt::Mismatch("shot clear",self);return now;}
+        }
+        return c.clear;
+    }
+    const mt::Sync sync(in!=nullptr);
+    return ShotClearNow(self,from,to,blast);
+}
+bool FriendNear(const void* self,const float* at,float r) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(in)for(int k=0;k<in->closes;++k) {
+        const mt::CloseQ& c=in->close[k];
+        if(!mt::Same3(c.at,at) || !mt::Same1(c.r,r))continue;
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=FriendNearNow(self,at,r);
+            if(now!=c.yes){mt::Mismatch("friend near",self);return now;}
+        }
+        return c.yes;
+    }
+    const mt::Sync sync(in!=nullptr);
+    return FriendNearNow(self,at,r);
+}
+// The map ray a->b (heli.h MapRay: metres to the hit, -1 none; `hit` written on a hit only).
+float MapRayQ(const void* self,const float* a,const float* b,float* hit) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(in)for(int k=0;k<in->rays;++k) {
+        const mt::RayQ& r=in->ray[k];
+        if(!mt::Same3(r.a,a) || !mt::Same3(r.b,b))continue;
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            float now[3];
+            const float d=MapRay(a,b,now);
+            if(!mt::Same1(d,r.dist) || (d>=0.0f && !mt::Same3(now,r.hit))) {
+                mt::Mismatch("map ray",self);
+                if(d>=0.0f)std::memcpy(hit,now,12);
+                return d;
+            }
+        }
+        if(r.dist>=0.0f)std::memcpy(hit,r.hit,12);
+        return r.dist;
+    }
+    const mt::Sync sync(in!=nullptr);
+    return MapRay(a,b,hit);
+}
+// WastedFire / HoldFire of an ordinary target (its verdict the invincible flag and the shooter's wasted hits: the same
+// answer to both, `aim` untouched), kept while the wastedfire book stands as it was at the Decide.
+const mt::HoldQ* KeptHold(const void* self,const void* target) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(!in || !target)return nullptr;
+    for(int k=0;k<in->holds;++k)if(in->hold[k].target==target)return mt::Fresh(*in) ? &in->hold[k] : nullptr;
+    return nullptr;
+}
+bool WastedFireQ(const void* self,const void* target) noexcept {
+    if(const mt::HoldQ* q=KeptHold(self,target)) {
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=WastedFire(self,target);
+            if(now!=q->hold){mt::Mismatch("wasted fire",self);return now;}
+        }
+        return q->hold;
+    }
+    const mt::Sync sync(mt::For(self)!=nullptr);
+    return WastedFire(self,target);
+}
+bool HoldFireQ(const void* self,const void* target,const float* from,float speed,float gravity,float* aim=nullptr) noexcept {
+    if(const mt::HoldQ* q=KeptHold(self,target)) {
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=HoldFire(self,target,from,speed,gravity,aim);
+            if(now!=q->hold){mt::Mismatch("hold fire",self);return now;}
+        }
+        return q->hold;
+    }
+    const mt::Sync sync(mt::For(self)!=nullptr);
+    return HoldFire(self,target,from,speed,gravity,aim);
 }
 
 // --- The block's writes ---
@@ -943,7 +1145,7 @@ bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const
     if(npc::AimError(At<float>(h,kViewPitch),At<float>(h,kViewYaw),dir)>(cone>kFireConeMin ? cone : kFireConeMin))return false;
     if(GameFrame()-s.losFrame>=kLosFrames || s.losObject!=t.object) {
         float hit[3];
-        const float wall=MapRay(eye,t.aim,hit);
+        const float wall=MapRayQ(h,eye,t.aim,hit);
         s.los=wall<0.0f || wall>dist-2.0f;s.losFrame=GameFrame();s.losObject=t.object;
     }
     if(!s.los)return false;
@@ -980,7 +1182,7 @@ void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a,int fir
         if(!h[kTrigger+k])continue;
         const int w=a.held[k];
         const bool known=w>=0 && w<a.n;
-        if(t && HoldFire(h,t->object,eye,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f))h[kTrigger+k]=0;
+        if(t && HoldFireQ(h,t->object,eye,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f))h[kTrigger+k]=0;
         if(!ShotSafe(h,t,eye,known ? a.arm[w].blast : LargestBlast(a),known ? a.arm[w].reach : LongestReach(a)))h[kTrigger+k]=0;
     }
 }
@@ -1574,7 +1776,7 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
             }))continue;
         } else {
             dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
-            const float wall=MapRay(eye,t->aim,hit);
+            const float wall=MapRayQ(h,eye,t->aim,hit);
             if(!ShotClearOf(h,eye,t->aim,0.0f) || (wall>=0.0f && wall<dist-2.0f))continue;
         }
         if(!(mask&kMaskLook))return;
@@ -1901,6 +2103,150 @@ void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos
     else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms,restShare);
 }
 
+// --- The parallel Decide: its guess, the fork, the soldier's intent at its Think (mt above) ---
+namespace mt {
+// What Drive asked with this frame (game thread): the next fork asks the same from where the soldier stands then.
+void Remember(const Soldier& s,const unsigned char* h,const float* anchor,float scope,float reach,bool pick,const Arms& a) noexcept {
+    const int i=soldierIndex.Find(h);
+    if(i<0)return;
+    if(guesses.size()<soldiers.size())guesses.resize(soldiers.size());
+    Guess& g=guesses[static_cast<std::size_t>(i)];
+    if(g.ref.obj!=s.ref.obj || g.ref.ctrl!=s.ref.ctrl){g=Guess{};g.intentFrame=~0ull;g.intentAt=-1;}
+    g.ref=s.ref;g.set=true;g.pick=pick && anchor;g.anchor=anchor;g.scope=scope;g.reach=reach;g.arms=a;
+}
+bool CopyAnchor(const float* from,float* to) noexcept {
+    __try {
+        if(!edf::Readable(from,12))return false;
+        std::memcpy(to,from,12);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void AddClear(Intent& in,const float* from,const float* to,float blast) noexcept {
+    for(int k=0;k<in.clears;++k)
+        if(Same3(in.clear[k].from,from) && Same3(in.clear[k].to,to) && Same1(in.clear[k].blast,blast))return;
+    if(in.clears>=kClears)return;
+    ClearQ& c=in.clear[in.clears];
+    std::memcpy(c.from,from,12);std::memcpy(c.to,to,12);c.blast=blast;
+    c.clear=ShotClearNow(in.h,from,to,blast);
+    ++in.clears;
+}
+struct ForkCtx { ULONGLONG frame; };
+// One soldier's Decide (a pool thread or the game thread, inside Run): Drive's read-only asks of this frame made from
+// what it asked last time and where it stands, each kept with its inputs. Reads the frame's world (written by Gather
+// alone, before the fork), the soldier's entry and guess (written by its Think alone: none runs during Run), the
+// soldier's and the targets' memory (the pass moves nothing: physics steps after it), the wastedfire memo (primed
+// before the fork, WastedFirePeek: no write) and the map (MapRay: a query of the Havok world, not stepping in the pass).
+// Writes its own intent only. No clock, config, log, random number or native object's virtual call.
+void Decide(void* ctx,int index) noexcept {
+    const ULONGLONG frame=static_cast<const ForkCtx*>(ctx)->frame;
+    Intent& in=intents[static_cast<std::size_t>(index)];
+    const std::size_t slot=static_cast<std::size_t>(forkSlots[static_cast<std::size_t>(index)]);
+    const Soldier& s=soldiers[slot];
+    const Guess& g=guesses[slot];
+    const float* pos=Pos(in.h);
+    const float eye[3]={pos[0],pos[1]+kEye,pos[2]};
+    const int held=EnemyRow(s.target);
+    int rows[kTargets],n=0;
+    if(in.wantPick) {   // its anchor copied by the fork (in.pick.anchor)
+        std::memcpy(in.pick.eye,eye,12);in.pick.scope=g.scope;in.pick.reach=g.reach;in.pick.held=held;
+        bool known=true;
+        const void* const self=in.h;
+        in.pick.row=PickRow(held,eye,in.pick.anchor,g.scope,g.reach,[self,&known](int k) noexcept {
+            const int w=WastedFirePeek(self,world.enemy[static_cast<std::size_t>(k)].object);
+            if(w<0)known=false;   // its verdict a plan's (PlanFor): the game thread's, so the pick is too
+            return w==0;
+        });
+        in.pickOk=known;
+        if(known && in.pick.row>=0)rows[n++]=in.pick.row;
+    }
+    if(held>=0 && (n==0 || rows[0]!=held))rows[n++]=held;
+    const Arms& a=g.arms;
+    const int w0=a.held[0],w1=a.held[1];
+    for(int r=0;r<n;++r) {
+        const Enemy& t=world.enemy[static_cast<std::size_t>(rows[r])];
+        if(in.holds<kHolds) {
+            const int w=WastedFirePeek(in.h,t.object);
+            if(w>=0){in.hold[in.holds].target=t.object;in.hold[in.holds].hold=w>0;++in.holds;}
+        }
+        if(in.closes<kCloses) {   // ChooseArm's friends round the target
+            CloseQ& c=in.close[in.closes];
+            std::memcpy(c.at,t.aim,12);c.r=kFriendNearTarget;c.yes=FriendNearNow(in.h,t.aim,kFriendNearTarget);
+            ++in.closes;
+        }
+        // ShotOk with the held weapon (ChooseArm fires only it): its map ray when the kept one is due, its line clear.
+        const float dist=npc::Dist(eye,t.aim);
+        if(w0>=0 && w0<a.n && a.arm[w0].ready && dist<=a.arm[w0].reach && dist>=npc::MinRange(a.arm[w0])) {
+            if((frame-s.losFrame>=kLosFrames || s.losObject!=t.object) && in.rays<kRays) {
+                RayQ& q=in.ray[in.rays];
+                std::memcpy(q.a,eye,12);std::memcpy(q.b,t.aim,12);
+                q.dist=MapRay(eye,t.aim,q.hit);
+                ++in.rays;
+            }
+            AddClear(in,eye,t.aim,a.arm[w0].blast);
+        }
+        AddClear(in,eye,t.aim,w1>=0 && w1<a.n ? a.arm[w1].blast : LargestBlast(a));   // Veto from hand 1
+    }
+    in.done=true;   // last: a fault before it leaves every ask to the game thread
+}
+// The frame's fork (the first soldier's Think after the world is gathered, game thread): every soldier Drive saw
+// lately (kStaleMs) and still the same object gets its Decide; the rest ask at their Think.
+void Fork(ULONGLONG frame,ULONGLONG ms) noexcept {
+    forkFrame=frame;applying=nullptr;
+    intents.clear();forkSlots.clear();
+    if(!Cfg().npcParallelThink)return;
+    const LONGLONG t0=Cfg().perfProbe ? Ticks() : 0;
+    const std::size_t n=guesses.size()<soldiers.size() ? guesses.size() : soldiers.size();
+    for(std::size_t i=0;i<n;++i) {
+        Guess& g=guesses[i];
+        const Soldier& s=soldiers[i];
+        if(!g.set || g.ref.obj!=s.ref.obj || g.ref.ctrl!=s.ref.ctrl || ms-s.seen>kStaleMs)continue;
+        const auto h=static_cast<const unsigned char*>(s.ref.obj);
+        if(!stepobj::Reads(h,kPosition+12) || !s.ref.Is(h))continue;
+        float anchor[3]{};
+        const bool pick=g.pick && CopyAnchor(g.anchor,anchor);
+        g.intentFrame=frame;g.intentAt=static_cast<int>(forkSlots.size());
+        forkSlots.push_back(static_cast<int>(i));
+        intents.emplace_back();
+        Intent& in=intents.back();
+        in.h=h;in.ref=s.ref;in.frame=frame;
+        if(pick)std::memcpy(in.pick.anchor,anchor,12);
+        in.wantPick=pick;   // an anchor not readable now: the pick made at its Think
+    }
+    if(intents.empty()){if(t0)stats.decide+=Ticks()-t0;return;}
+    primeTargets.clear();
+    for(int i=0;i<world.enemies;++i)primeTargets.push_back(world.enemy[static_cast<std::size_t>(i)].object);
+    WastedFirePrime(primeTargets.data(),static_cast<int>(primeTargets.size()));
+    const std::uint64_t version=WastedFireVersion();
+    for(auto& in:intents)in.version=version;
+    ForkCtx ctx{frame};
+    workers::Fault fault;
+    workers::Run(&Decide,&ctx,static_cast<int>(intents.size()),&fault);
+    ++stats.frames;stats.decided+=static_cast<unsigned>(intents.size());
+    if(fault.count) {
+        stats.faults+=static_cast<unsigned>(fault.count);
+        if(!faultLogAt || ms-faultLogAt>=10000) {
+            faultLogAt=ms;
+            Log("NPCMT fault %08lX at %p in soldier %p's Decide (%d this frame%s): its asks made on the game thread",
+                fault.code,fault.address,fault.index>=0 ? intents[static_cast<std::size_t>(fault.index)].h : nullptr,
+                fault.count,fault.dumped ? ", minidump written" : "");
+        }
+    }
+    if(t0)stats.decide+=Ticks()-t0;
+}
+// The soldier's intent for its Drive now (game thread, its Think), or none.
+void Begin(const unsigned char* h) noexcept {
+    applying=nullptr;
+    if(intents.empty())return;
+    const int i=soldierIndex.Find(h);
+    const Guess* g=i>=0 && static_cast<std::size_t>(i)<guesses.size() ? &guesses[static_cast<std::size_t>(i)] : nullptr;
+    if(!g || g->intentFrame!=forkFrame || forkFrame!=GameFrame() || g->intentAt<0 ||
+       static_cast<std::size_t>(g->intentAt)>=intents.size()){++stats.noIntent;return;}
+    const Intent& in=intents[static_cast<std::size_t>(g->intentAt)];
+    if(!in.done || in.h!=h || in.frame!=forkFrame || !in.ref.Is(h)){++stats.noIntent;return;}
+    applying=&in;++stats.applied;
+}
+}  // namespace mt
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -1918,6 +2264,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
     Pick t=engage>0.0f ? PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
+    mt::Remember(s,h,anchor,o.leash+engage,LongestReach(a),engage>0.0f,a);   // the next frame's Decide asks the same
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
     const Enemy* commandTarget=nullptr;
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
@@ -1925,7 +2272,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     }
     // A mark its fire is wasted on waits (the shut ship's hatch opens, it moves under it): the others fought meanwhile.
     const Enemy* const marked=commandTarget ? commandTarget : NearestMark(eye);
-    if(const Enemy* m=marked && !WastedFire(h,marked->object) ? marked : nullptr) {
+    if(const Enemy* m=marked && !WastedFireQ(h,marked->object) ? marked : nullptr) {
         float reach=0.0f;
         for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
         const bool focus=commandTarget!=nullptr;
@@ -1944,7 +2291,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         // would take none (its window shut or due to open: aimed at all the same, ready).
         Enemy at=*t.e;
         const bool armed=p.arm>=0 && p.arm<a.n;
-        const bool hold=HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
+        const bool hold=HoldFireQ(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
         const float dir[3]={at.aim[0]-eye[0],at.aim[1]-eye[1],at.aim[2]-eye[2]};
         if(mask&kMaskLook)Look(h,dir);
         p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
@@ -2040,7 +2387,13 @@ void Think(unsigned char* h,int cls) noexcept {
     }
     const ULONGLONG ms=GameMs();
     SeeFrame(h);   // first: the step's frame moved before h is listed in it (listed under the last step, the next Add drops it)
-    if(world.frame!=GameFrame())Gather(team);   // 0 and 2 have the same enemies (TeamManager's table, docs/swarm-team-re.md)
+    if(world.frame!=GameFrame()) {   // 0 and 2 have the same enemies (TeamManager's table, docs/swarm-team-re.md)
+        const LONGLONG g0=Cfg().perfProbe ? mt::Ticks() : 0;
+        Gather(team);
+        if(g0)mt::stats.gather+=mt::Ticks()-g0;
+    }
+    // The frame's parallel Decide, once, over the world just gathered (by this Think, PreThink or a vehicle's AI).
+    if(mt::forkFrame!=GameFrame())mt::Fork(GameFrame(),ms);
     const unsigned char* root=RootLeader(h);
     const npc::Control control=ControlOf(h,root);
     // Counted in its squad whether it walks or rides (a squad in a vehicle is listed and takes dismount, §7).
@@ -2078,7 +2431,9 @@ void Think(unsigned char* h,int cls) noexcept {
     const float hpNow=At<float>(h,kHumanHp);
     if(q && mapcmd::Hurt(s->hpSeen,hpNow))UnitStruck(q->top.obj);
     s->hpSeen=hpNow;
+    if(!npc::Scripted(control))mt::Begin(h);
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
+    mt::applying=nullptr;
     if(!npc::Scripted(control))   // a script's unit keeps its stock moves
         Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil ? mapcmd::kSprintRestShare : 1.0f);
     if(Cfg().verbose && ms-s->loggedAt>kLogMs) {   // every soldier every 2 s: the bulk of a Debug=1 log, so Debug=2
@@ -2828,13 +3183,20 @@ template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
     }
     std::uint8_t walkUp=0;   // +0x540 hidden from the stock walk-up for this Think (HideWalkUp)
     __try { walkUp=HideWalkUp(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {walkUp=0;}
+    mt::applying=nullptr;
+    const bool timed=Cfg().perfProbe!=0;
+    const LONGLONG s0=timed ? mt::Ticks() : 0;
     nextThink[I](human,dt);
+    if(timed)mt::stats.stock+=mt::Ticks()-s0;
     if(walkUp) {
         auto* h=static_cast<unsigned char*>(human);
         if(!h[kAutoFollow])h[kAutoFollow]=walkUp;   // put back, unless the Think itself set it meanwhile
     }
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return;
+    const LONGLONG t0=timed ? mt::Ticks() : 0;
     __try { Think(static_cast<unsigned char*>(human),I); } __except(Fault(GetExceptionInformation())) {}
+    mt::applying=nullptr;   // a fault in its Drive: the next soldier's asks are not this one's
+    if(timed)mt::stats.think+=mt::Ticks()-t0;
     // A jumper's own descent (transport.cpp: a Wing Diver's jets), over whatever the AI wrote this frame.
     __try { TransportJumperIntent(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {}
     __try { DriveVehicleAi(static_cast<unsigned char*>(human),dt); } __except(Fault(GetExceptionInformation())) {}
@@ -2893,6 +3255,7 @@ bool InstallNpcAi() noexcept {
     InstallBargaControlKind();
     InstallBoxes();
     InstallMobility();
+    workers::SetDumpWriter(MiniDumpWriter(),kDumpType);   // a Decide's fault: its minidump (worker_pool.h)
     int hooked=0;
     for(int i=0;i<kClasses;++i) {
         auto slot=reinterpret_cast<void**>(image+kSoldiers[i].vtable)+kSlotThink;
@@ -2908,6 +3271,26 @@ bool InstallNpcAi() noexcept {
     InstallVehicleTargetSearch();   // every CarBase AI driver, the stock's dummies too: not tied to the soldiers' Think
     ConfigureNpcCommandNetwork(ok ? &NpcMapCommandForRequester : nullptr);
     return ok;
+}
+
+void ResetNpcParallel() noexcept {
+    mt::guesses.clear();mt::intents.clear();mt::forkSlots.clear();mt::primeTargets.clear();
+    mt::applying=nullptr;mt::forkFrame=~0ull;
+    mt::stats=mt::Stats{};mt::shadowTick=0;mt::mismatchLogAt=mt::faultLogAt=0;
+}
+void NpcParallelReport(unsigned steps) noexcept {
+    const mt::Stats st=mt::stats;
+    mt::stats=mt::Stats{};
+    if(!steps || !Cfg().perfProbe)return;
+    LARGE_INTEGER hz;QueryPerformanceFrequency(&hz);
+    const double f=static_cast<double>(steps),ms=1000.0/static_cast<double>(hz.QuadPart)/f;
+    const LONGLONG apply=st.think-st.gather-st.decide;
+    Log("PERF NPCMT %s, %d threads: %.1f soldiers decided a step, %u faults; a step: gather %.3f ms, decide %.3f ms, "
+        "stock think %.3f ms, apply %.3f ms (asks made at apply %.3f ms); kept answers %u, asked at apply %u, "
+        "no intent %u, stale %u, mismatches %u",Cfg().npcParallelThink ? "on" : "off",workers::Threads(),
+        static_cast<double>(st.decided)/f,st.faults,static_cast<double>(st.gather)*ms,static_cast<double>(st.decide)*ms,
+        static_cast<double>(st.stock)*ms,static_cast<double>(apply>0 ? apply : 0)*ms,static_cast<double>(st.sync)*ms,
+        st.hits,st.misses,st.noIntent,st.stale,st.mismatches);
 }
 
 namespace {

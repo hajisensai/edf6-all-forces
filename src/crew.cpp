@@ -898,6 +898,7 @@ void PerfTick() noexcept {
             static_cast<double>(r.vqTicks)*tick/f);
     }
     perfprobe::Report(fr.frames);
+    NpcParallelReport(Cfg().debug ? perf.steps : 0);   // the soldiers' Think split and parallel Decide (PerfProbe>=1)
     perf.at=t;perf.worst=perf.sum=0.0;perf.steps=0;
 }
 
