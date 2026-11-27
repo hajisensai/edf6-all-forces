@@ -69,6 +69,12 @@ target_sources(EDF6VehicleCrew PRIVATE src/dmgnum.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)
 # Fire that cannot hurt its target (src/wastedfire.cpp, src/wasted_fire.h): fed by the damage hook, asked by the AI.
 target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
+# The soldiers' parallel Decide (src/worker_pool.h): a fork-join pool the game thread runs and waits for in one call.
+target_sources(EDF6VehicleCrew PRIVATE src/worker_pool.cpp)
+add_executable(worker_pool_test EXCLUDE_FROM_ALL tests/worker_pool_test.cpp src/worker_pool.cpp)
+target_include_directories(worker_pool_test PRIVATE src)
+target_compile_options(worker_pool_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME worker_pool COMMAND worker_pool_test)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h); HOLD FIRE's table every firing module asks
 # (src/unit_hold_fire.cpp: the tests of those modules link it as they are).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp src/unit_hold_fire.cpp src/map_signal.cpp)
@@ -1152,6 +1158,8 @@ add_test(NAME cockpit_panoramic COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_
 add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
+# The soldiers' parallel Decide reads only (tests/npc_parallel_guard.py: its call graph, the memo wrappers).
+add_test(NAME npc_parallel_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_parallel_guard.py")
 # The stock crosshair hidden while its player controls an enemy (tests/enemy_control_crosshair_guard.py).
 add_test(NAME enemy_control_crosshair_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_crosshair_guard.py")
 # Every channel names a player by its mission slot, never its NetId (tests/player_identity_guard.py).
@@ -1438,6 +1446,7 @@ set(EDF6_OFFLINE_CHECKS log_test common_host_check save_mode_check pjet_kinds he
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks objref_test)
+add_dependencies(offline_checks worker_pool_test)
 add_dependencies(offline_checks keybind_test)
 add_dependencies(offline_checks vehicle_weapons_test)
 add_dependencies(offline_checks rip_sampler)   # built in CI so it keeps compiling; never run there

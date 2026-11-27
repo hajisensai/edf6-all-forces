@@ -437,6 +437,29 @@ COLLIDE_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE constru
                           r'dispatch (\d+) calls ([\d.]+) ms, mode0 (\d+), sleep (\d+) calls ([\d.]+) ms')
 
 
+NPC_PARALLEL = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF NPCMT (on|off), (\d+) threads: ([\d.]+) soldiers decided '
+                          r'a step, (\d+) faults; a step: gather ([\d.]+) ms, decide ([\d.]+) ms, stock think ([\d.]+) ms, '
+                          r'apply ([\d.]+) ms \(asks made at apply ([\d.]+) ms\); kept answers (\d+), asked at apply (\d+), '
+                          r'no intent (\d+), stale (\d+), mismatches (\d+)')
+NPC_PARALLEL_TIMES = ('gather', 'decide', 'stock think', 'apply', 'asks at apply')
+NPC_PARALLEL_COUNTS = ('faults', 'kept', 'asked at apply', 'no intent', 'stale', 'mismatches')
+
+
+def read_npc_parallel(log: str, window: tuple[float, float]) -> dict:
+    """The soldiers' Think split (src/npcai.cpp NpcParallelReport, PerfProbe=1 and Debug=1): each part's ms a step
+    (the rows' mean: each row one PerfTick period), the soldiers decided a step, the counters summed; the switch and
+    the threads as the last row has them."""
+    rows = _rows(log, NPC_PARALLEL, window)
+    if not rows:
+        return {}
+    n = len(rows)
+    out: dict = {'rows': n, 'mode': rows[-1][4], 'threads': int(rows[-1][5]),
+                 'decided': sum(float(m[6]) for m in rows) / n}
+    out.update({key: sum(float(m[i]) for m in rows) / n for i, key in enumerate(NPC_PARALLEL_TIMES, 8)})
+    out.update({key: sum(int(m[i]) for m in rows) for i, key in zip((7, 13, 14, 15, 16, 17), NPC_PARALLEL_COUNTS)})
+    return out
+
+
 def read_collide(log: str, window: tuple[float, float]) -> dict:
     """Totals from the first Havok build; mode-0 sleep is included in dispatch."""
     rows = _rows(log, COLLIDE_TIME, window)
@@ -1022,6 +1045,14 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
         out += ['', '## Havok task graphs (direct timing, including waits)', '']
         out += [f'- {phase}: {count} calls, {mean:.2f} ms/call (worst {worst:.2f})'
                 for phase, (count, mean, worst) in havok.items()]
+    mt = read_npc_parallel(log, cw)
+    if mt:
+        out += ['', f"## Soldiers' Think (NpcParallelThink {mt['mode']}, {mt['threads']} threads)", '',
+                '| part | ms a step |', '|---|---|']
+        out += [f'| {k} | {mt[k]:.3f} |' for k in NPC_PARALLEL_TIMES]
+        out += ['', f"{mt['decided']:.1f} soldiers decided a step; kept answers {mt['kept']:,}, asked at apply "
+                f"{mt['asked at apply']:,} (stale {mt['stale']:,}, no intent {mt['no intent']:,}); "
+                f"faults {mt['faults']}, mismatches {mt['mismatches']}."]
     collide = read_collide(log, cw)
     if collide:
         n, construct_ms = collide['construct']

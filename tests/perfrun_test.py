@@ -317,6 +317,7 @@ def probe_parsing() -> None:
         frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
         havok = c_format('src/perf_probe.cpp', 'PERF HAVOK %sbuild')
         collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE construct')
+        npcmt = c_format('src/npcai.cpp', 'PERF NPCMT')
         graph = c_format('src/perf_probe.cpp', 'PERF COLLIDE GRAPH %u')
         node = c_format('src/perf_probe.cpp', 'PERF COLLIDE NODE')
         contact = c_format('src/perf_probe.cpp', 'PERF COLLIDE CONTACT')
@@ -339,6 +340,9 @@ def probe_parsing() -> None:
             f.write('[13:00:15.000] ' + collide % (100, 50.0, 60, 60.0, 60, 20, 10.0) + '\n')
             f.write('[13:00:20.000] ' + collide % (150, 80.0, 150, 150.0, 120, 0, 0.0) + '\n')
             f.write('[13:00:40.000] ' + collide % (9, 9.0, 9, 9.0, 9, 9, 9.0) + '\n')
+            f.write('[13:00:15.000] ' + npcmt % ('on', 9, 30.0, 0, 0.5, 1.0, 2.0, 4.0, 0.5, 900, 30, 3, 10, 0) + '\n')
+            f.write('[13:00:20.000] ' + npcmt % ('on', 9, 40.0, 1, 0.7, 2.0, 2.0, 6.0, 1.5, 1100, 50, 5, 20, 1) + '\n')
+            f.write('[13:00:40.000] ' + npcmt % ('off', 1, 0.0, 0, 9.0, 9.0, 9.0, 9.0, 9.0, 0, 0, 0, 0, 0) + '\n')
             f.write('[13:00:20.000] ' + graph % (1, 2, 2, 0, 1, 3.0) + '\n')
             f.write('[13:00:20.000] ' + graph % (2, 1, 2, 0, 0, 1.0) + '\n')
             f.write('[13:00:40.000] ' + graph % (3, 1, 1, 0, 0, 9.0) + '\n')
@@ -380,6 +384,12 @@ def probe_parsing() -> None:
         check(h['before objects build'] == (100, 1.0, 2.0) and h['after objects build'] == (100, 5.0, 6.0)
               and h['before objects finish'] == (100, 0.5, 1.0) and h['after objects finish'] == (100, 1.5, 4.0),
               'Havok reports the two steps separately without double counting the legacy totals')
+        mt = perf_report.read_npc_parallel(log, w)
+        check(mt.get('rows') == 2 and mt['mode'] == 'on' and mt['threads'] == 9 and abs(mt['decided'] - 35.0) < 1e-9 and
+              abs(mt['gather'] - 0.6) < 1e-9 and abs(mt['decide'] - 1.5) < 1e-9 and abs(mt['stock think'] - 2.0) < 1e-9 and
+              abs(mt['apply'] - 5.0) < 1e-9 and abs(mt['asks at apply'] - 1.0) < 1e-9 and mt['faults'] == 1 and
+              mt['kept'] == 2000 and mt['asked at apply'] == 80 and mt['no intent'] == 8 and mt['stale'] == 30 and
+              mt['mismatches'] == 1, "PERF NPCMT: the soldiers' Think split, its counters summed in the clean window")
         c = perf_report.read_collide(log, w)
         check(c == {'construct': (250, 130.0), 'dispatch': (210, 210.0), 'sleep': (20, 10.0), 'mode0': 180},
               'collision timing keeps empty graphs, non-mode-0 dispatches and waits distinct')

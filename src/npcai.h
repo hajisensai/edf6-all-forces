@@ -36,6 +36,12 @@ using NpcMissionCrewFn=bool(*)(const unsigned char* vehicle,const unsigned char*
 void SetNpcMissionCrew(NpcMissionCrewFn judge) noexcept;
 // A new mission (mission.cpp MissionStart): the last mission's soldiers are gone.
 void ResetNpcAi() noexcept;
+// The soldiers' parallel Decide (NpcParallelThink, docs/npc-ai-design.md「并行决策与串行提交」): its guesses and kept
+// answers dropped with the mission (the soldiers' slots they are by go with ResetNpcAi), its counts zeroed.
+void ResetNpcParallel() noexcept;
+// PerfTick (Debug=1 PerfProbe>=1): the "PERF NPCMT" line over its `steps` (the Decide's threads and share, the Think's
+// split: gather, decide, the stock Think, apply, the asks made at apply), the counts then zeroed.
+void NpcParallelReport(unsigned steps) noexcept;
 // Whether `human` is one of the four soldier classes (AssultSoldier, PaleWing, HeavyArmor, Engineer).
 bool IsSoldierClass(const void* human) noexcept;
 // The same of an object the caller knows is live and whole (one the game's own walk hands over, its Think's `this`):

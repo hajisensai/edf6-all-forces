@@ -438,6 +438,7 @@
     float npcLaneLength=150.0f;     // ...m along it (shorter where it meets the map)
     float npcFlankDeg=45.0f;        // ...their combat spot this many degrees off the player's own line to the target
     bool npcWeaponSwitch=true;      // ...they switch weapons for the target's range and kind
+    int npcParallelThink=1;         // ...the soldiers' combat queries (target pick, line of sight, friends in the shot) worked out on worker threads, applied on the game thread (npcai.cpp, docs/npc-ai-design.md)
     bool npcBackpack=true;          // ...a support soldier made with a backpack weapon uses it (npc_backpack.h, docs/npc-backpack-re.md)
     float npcEngageShare=0.85f;     // ...they fight at this share of their longest weapon's true reach (the stock: half, at least 25 m)
     bool npcEvade=true;             // ...crowded, they back off, side-step and roll
@@ -972,6 +973,7 @@
     n.npcLaneLength=ReadFloat(L"NpcLaneLength",n.npcLaneLength);
     n.npcFlankDeg=ReadFloat(L"NpcFlankDeg",n.npcFlankDeg);
     n.npcWeaponSwitch=ReadBool(L"NpcWeaponSwitch",n.npcWeaponSwitch);
+    n.npcParallelThink=ReadInt(L"NpcParallelThink",static_cast<DWORD>(n.npcParallelThink));
     n.npcBackpack=ReadBool(L"NpcBackpack",n.npcBackpack);
     n.npcEngageShare=ReadFloat(L"NpcEngageShare",n.npcEngageShare);
     n.npcEvade=ReadBool(L"NpcEvade",n.npcEvade);
@@ -1341,6 +1343,7 @@
     Fix("NpcLaneWidth",n.npcLaneWidth,0.5f,20.0f);
     Fix("NpcLaneLength",n.npcLaneLength,10.0f,1000.0f);
     Fix("NpcFlankDeg",n.npcFlankDeg,10.0f,80.0f);
+    n.npcParallelThink=static_cast<int>(FixInt("NpcParallelThink",n.npcParallelThink,0,1));
     Fix("NpcEngageShare",n.npcEngageShare,0.2f,1.0f);
     Fix("NpcDangerRange",n.npcDangerRange,2.0f,100.0f);
     Fix("NpcCrowd",n.npcCrowd,0.2f,20.0f);
