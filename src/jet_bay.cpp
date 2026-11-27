@@ -2,6 +2,7 @@
 // shells and its cannon, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "py_consts.inc"
 #include "preload_set.h"
 #include "online_authority.h"
 #include "vehicleram.h"
@@ -11,6 +12,10 @@
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "bay_rounds.h"
+#include "plugin_body.h"
 
 namespace crew {
 namespace jet {
@@ -28,7 +33,6 @@ namespace {
 constexpr unsigned kIfcCtor=0x2B3940,kIfcDtor=0x2B3C90,kIfcConfig=0x2B5F40,kIfcOwner=0x2B8390,kIfcDamage=0x2B82E0,
                    kIfcSpread=0x2B8460,kIfcFrames=0x2B8470,kIfcOpen=0x2B4340,kIfcStep=0x2B95A0,kIfcDone=0x2B7B90;
 constexpr std::size_t kIfcSize=0x600,kIfcAim=0x20,kIfcShots=0x2F0,kIfcBallistic=0x2F8,kIfcFromJet=0x2F9,kIfcFrom=0x300;
-constexpr float kLineGain=250.0f;   // m off the bombing line that turn it back at the most
 // ms the bay's last bombs (and a cluster's bomblets) still pass the bomber's flight after it closes.
 constexpr ULONGLONG kBombClearMs=15000;
 struct Sig { unsigned rva; unsigned char bytes[12]; };
@@ -146,8 +150,8 @@ constexpr float kImpactDrop=2.0f;
 // The drill tank's charge (DrillCharge, drill.cpp): tools/make_drill.py's EDF6VC_DRILL_CHARGE.SGO, the impact charges'
 // recipe with a small blast (pylib/vcobjects.py DRILL_CHARGE: 4 m, at least the 3 m from which a blast breaks buildings,
 // docs/drill-re.md §3) and a short flight (from the drill's base along its axis, it meets what the drill touches).
-const wchar_t kDrillChargeSgo[]=L"app:/object/edf6vc_drill_charge.sgo";
-const wchar_t kDrillChargeFile[]=L"EDF6VC_DRILL_CHARGE.SGO";
+using pyconst::kDrillChargeSgo;
+using pyconst::kDrillChargeFile;
 bool drillReady=false;                    // preloaded this mission (PreloadShells)
 // The EMC's rounds (emc.cpp, EmcFire; pylib/vcobjects.py EMC_*, tools/make_emc.py): its beam, its charge's glow, the
 // break charge it fires at each building on its line and the blast at its end; then the Sazabi's beams (sazabi.cpp;
@@ -465,9 +469,10 @@ void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noex
     const float rel[3]={b.bombAt[0]-pos[0],0,b.bombAt[2]-pos[2]};
     const float side[3]={b.bombDir[2],0,-b.bombDir[0]};
     const float along=Dot(rel,b.bombDir),off=-Dot(rel,side);   // ahead to the target; right of the line
-    const float c=Clamp(off/kLineGain,-0.7f,0.7f);
-    const float dir[3]={b.bombDir[0]-side[0]*c,0,b.bombDir[2]-side[2]*c};
-    Level(pos,dir,b.bombAlt,want);
+    // Onto the line as Ferry follows its own: toward the point BombLead (its turn's radius at kBombG) on along it. Its
+    // 250 m before, against that turn (1.3 km at 120 m/s, 2.9 km at 180), had it swing across the line and back
+    // (jet_obstacle_sim --wobble-suite; the user, 2026-11-27: 「飞机会左右摇摆」).
+    BombLine(pos,b.bombAt,b.bombDir,BombLead(b.bombSpeed),b.bombAlt,want);
     *speed=b.bombSpeed;
     if(Cfg().debug && ms-j.t.gateAt>1000){j.t.gateAt=ms;Log("JET v=%p bomb run: %.0f m to the target, %.0f m off the line",j.Vehicle(),along,off);}
     // The last bomb out (BayFrame may have torn the bay down already, its bombs gone too): it flies on, leaving.

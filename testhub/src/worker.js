@@ -10,6 +10,7 @@ import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
 import { storyRoute } from './story.js';
 import { outlineRoute } from './outline.js';
+import { reviewRoute } from './review.js';
 import { shareRoute, putSharePart, headSharePart, publishShare } from './share.js';
 import MISSIONS from './missions.json' with { type: 'json' };
 
@@ -21,8 +22,10 @@ const STATUSES = ['todo', 'verify', 'pass', 'fail', 'done', 'closed'];
 export const REPORT_STATUSES = ['open', 'doing', 'verify', 'done', 'closed'];
 // The download page and its scripts are public too (share.js: the share package needs no account).
 // So are the plan, story and outline pages: anyone may read them, only a group's members (and developers) write.
+// And the external review page (/rate.html, src/review.js): anyone reads and scores the published outlines.
 const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css', '/download.html', '/download.js', '/chunked-download.mjs', '/pack-download.mjs',
-  '/plan.html', '/plan.js', '/story.html', '/story.js', '/outline.html', '/outline.js', '/groups.js']);
+  '/plan.html', '/plan.js', '/story.html', '/story.js', '/outline.html', '/outline.js', '/groups.js',
+  '/rate.html', '/rate.js']);
 const SESSION_DAYS = 60;
 
 export default {
@@ -83,6 +86,11 @@ async function route(request, env) {
   }
 
   const me = await who(request, env, accounts);
+  if (path === '/api/review' || path.startsWith('/api/review/')) {
+    const out = await reviewRoute(request, env, me, path);
+    if (out) return json(out);
+    throw new HttpError(404, 'not found');
+  }
   if (!me) {
     // No account at all (not wrong credentials, which stay a 401): the plan, the story list and the outline are
     // readable as a visitor (the script digests are not: they are the game's own files).

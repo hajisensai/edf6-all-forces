@@ -65,6 +65,18 @@ Cloudflare Worker + D1（测试版、测试项、反馈的元数据）+ R2（安
 游客只看到平均分和评分人数，看不到评价内容和评分人；大纲里删掉的线 / 步，它的评分在保存时一起删。
 存在 `outline_ratings` 表；新部署先执行 `migrations/0004-outline-ratings.sql`（可重复执行）。
 
+## 剧情大纲外部评分（/rate.html）
+
+给组外的人盲评剧情大纲：不用账号，几份大纲按每个访客各自随机的顺序逐份展示（不显示组、作者、编辑者），中文 / English / 日本語 切换（`?lang=zh|en|ja`，默认按浏览器语言）。
+每份打 1–5 分并可写评论（昵称可空），也可以只写评论；同一浏览器能改或删自己的。打过分后才显示这份的平均分（免得先看到别人的分受影响）；别人的评论和昵称不对访客展示，服务器也不下发，只有开发者看得到：开发者账号登录后打开 /rate.html，页面底部有「评分结果」（每份平均分、分语言、分数分布、全部评论），命令行是 `review-results`。各页导航都有「外部评分」入口。
+
+- 展示的是**快照**：开发者把某份大纲在某个已保存版本连同英、日译文发布，之后组里再改大纲不影响已发布的文字；要更新就重新翻译、重新发布（同一份新版本算新条目，旧版本的评分留在结果里）。
+  `python tools/testhub.py review-source src.json` 导出各组当前大纲 → 翻译成 `[{group, book, version, zh_title?, en, ja}]`（`en` / `ja` 是与原文同结构、同编号的整份大纲，`zh_title` 可改中文标题）→
+  `python tools/testhub.py review-publish items.json`（整组替换当前展示的大纲，空列表 = 全部下架）→ `python tools/testhub.py review-results` 看各份平均分（分语言）与全部评论。
+- 评审人身份是浏览器 localStorage 里的随机令牌，库里只存它的 SHA-256；访客写操作按 IP 限频（10 分钟 30 次、一天 200 次，只存 IP 的带密钥哈希），每份最多 5000 条。
+- 文字清洗同策划页，页面只当文本放进 DOM；`review-results` 把访客文字用随机标记包起来。
+- 已有库执行一次 `migrations/0007-outline-review.sql`（可重复执行）。测试 `test/review.test.mjs`。
+
 ## 游客（不登录）
 
 关卡策划（`/plan.html`）、MOD 剧情关卡（`/story.html`）、剧情大纲（`/outline.html`）三页没账户也能看，只读：

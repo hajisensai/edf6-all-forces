@@ -11,7 +11,7 @@ So:
   - the plugin's own channels (plugin_net) are pumped once per logic frame: RunSupportNetTick returns at once unless
     GameFrame() moved, GameFrame only moves when SeeFrame sees +0xCE0 move, and SeeFrame is called from per-tick hooks
     only; plugin_net::Update / Receive and the extension poll live in that pump alone;
-  - every file that sends (plugin_net::Send / Broadcast / SendHost, seat_net::Send, edf41net::Send) or pumps
+  - every file that sends (plugin_net::Send / Broadcast / SendHost, object_net::Send, edf41net::Send) or pumps
     (SupportNetTick) is a known one, reviewed as tick driven; the per-presented-frame hooks (render, HUD, Present, UI,
     window procedure, fps-9) send nothing and pump nothing;
   - periodic sends are paced by time (roster kRosterGapMs) or by logic frames (enemy control kSampleFrames), never by
@@ -22,9 +22,12 @@ add it to the list. Source only, no game.
 Usage: python frame_rate_net_guard.py [repository root]   (default: the parent of this file's directory)"""
 from __future__ import annotations
 
+import functools
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 checks = 0
@@ -42,28 +45,8 @@ def read(*parts: str) -> str:
     return open(os.path.join(ROOT, *parts), encoding='utf-8').read()
 
 
-def code(text: str) -> str:
-    text = re.sub(r'/\*.*?\*/', '', text, flags=re.S)
-    return re.sub(r'//[^\n]*', '', text)   # comments may name anything
-
-
-def body(text: str, head: str) -> str:
-    """The braces' content of the first definition whose text starts with `head` (a regex)."""
-    m = re.search(head, text)
-    if not m:
-        return ''
-    i = text.find('{', m.end() - 1)
-    if i < 0:
-        return ''
-    depth = 0
-    for j in range(i, len(text)):
-        if text[j] == '{':
-            depth += 1
-        elif text[j] == '}':
-            depth -= 1
-            if depth == 0:
-                return text[i + 1:j]
-    return ''
+code = srcscan.code
+body = functools.partial(srcscan.body, regex=True, braces=False)
 
 
 src_dir = os.path.join(ROOT, 'src')
@@ -151,11 +134,11 @@ for n, head in (('crew.cpp', r'void SharedFrameTick\(\) noexcept \{'), ('support
           f'{head.split("(")[0].split()[-1]} runs once a logic frame')
 
 # --- 3. Who sends, who pumps ---
-PER_FRAME_FILES = ['dmgnum.cpp', 'firstperson.cpp', 'frame_pacing.cpp', 'frame_rate.cpp', 'frame_rate_view.cpp', 'frame_rate_objects.cpp', 'render_record.cpp', 'hud.cpp',
+PER_FRAME_FILES = ['dmgnum.cpp', 'firstperson.cpp', 'frame_pacing.cpp', 'frame_rate.cpp', 'frame_rate_view.cpp', 'frame_rate_objects.cpp', 'render_record.cpp', 'hud.cpp', 'hud_text.cpp', 'hud_vehicle.cpp', 'hud_air.cpp', 'hud_map.cpp', 'hud_scope.cpp',
                    'infantryscope.cpp', 'map.cpp', 'perf_probe.cpp', 'room_preview.cpp', 'room_ui.cpp', 'scope_lens.cpp',
                    'sightzoom.cpp', 'swap_flip.cpp', 'thermal.cpp', 'thermal_gpu.cpp', 'thermal_models.cpp',
                    'worldmap.cpp', 'worldmap_gpu.cpp', 'worldmap_text.cpp', 'worldmap_tiles.cpp']
-NET = re.compile(r'plugin_net::|#include "plugin_net\.h"|\bSupportNetTick\(|seat_net::Send\(|edf41net::Send\(|'
+NET = re.compile(r'plugin_net::|#include "plugin_net\.h"|\bSupportNetTick\(|object_net::Send\(|edf41net::Send\(|'
                  r'\bSubmit(SupportRequest|MapCommand|PreparedSupportPlan)\(|\bMapCommandNetworkReady\(|'
                  r'\bSupport(StrikeAt|CallAt|CallUnpaidAt|CallComposedAt)\(|\bUltimateStart\(|\bBarrageStart\(|'
                  r'\bSupportPoints(KeepHeld|Refund)\(')
@@ -174,7 +157,8 @@ pumpers = {n for n, t in src.items() if re.search(r'(?<![\w:])SupportNetTick\(\)
 check(pumpers == PUMPERS, f'SupportNetTick callers are the reviewed ones: {sorted(pumpers)}')
 NATIVE_SENDERS = {'andryusha.cpp', 'dreadnought_turrets.inc', 'drill_net.cpp', 'edf41mother.cpp', 'edf41mother401.cpp', 'edf41robo.cpp', 'payload.cpp',
                   'proteus_net.cpp', 'sazabi_net.cpp', 'seat_turret.cpp'}   # vehicle input / object update hooks
-native = {n for n, t in src.items() if re.search(r'(seat_net|edf41net)::Send\(', t)}
+# edf41net.cpp is the EDF4.1 kind itself (its Send over object_net::Send): its senders are the classes listed above
+native = {n for n, t in src.items() if n != 'edf41net.cpp' and re.search(r'(object_net|edf41net)::Send\(', t)}
 check(native <= NATIVE_SENDERS, f'native object senders are the reviewed ones: new {sorted(native - NATIVE_SENDERS)}')
 
 # --- 4. Periodic traffic is paced by time or by logic frames, not by calls ---

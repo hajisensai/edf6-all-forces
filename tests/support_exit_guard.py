@@ -12,10 +12,13 @@
 """
 from __future__ import annotations
 
+import functools
 import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 failures: list[str] = []
 
@@ -24,36 +27,14 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    """The text with // comments cut (no // inside the string literals these checks read)."""
-    return '\n'.join(line.split('//', 1)[0] for line in text.splitlines())
+code_only = srcscan.code
+body = functools.partial(srcscan.body, regex=True, braces=False)
+functions_calling = srcscan.callers
 
 
 def read(root: str, rel: str) -> str:
     with open(os.path.join(root, rel), encoding='utf-8') as f:
         return code_only(f.read())
-
-
-def body(text: str, signature: str) -> str:
-    """The braces-balanced body of the first definition whose header matches `signature` (a regex), '' when none."""
-    m = re.search(signature + r'[^;{]*\{', text)
-    if not m:
-        return ''
-    depth, i = 1, m.end()
-    while i < len(text) and depth:
-        depth += {'{': 1, '}': -1}.get(text[i], 0)
-        i += 1
-    return text[m.end():i - 1]
-
-
-def functions_calling(text: str, callee: str) -> set[str]:
-    """The names of the top-level definitions in `text` whose bodies call `callee`."""
-    names: set[str] = set()
-    for m in re.finditer(r'^[A-Za-z_][\w:<>,\s\*&]*?\b(\w+)\s*\([^;{]*\)\s*(?:const\s*)?noexcept\s*\{', text, re.M):
-        b = body(text[m.start():], re.escape(m.group(1)) + r'\s*\(')
-        if re.search(r'\b' + re.escape(callee) + r'\s*\(', b):
-            names.add(m.group(1))
-    return names
 
 
 def main() -> int:
@@ -84,8 +65,8 @@ def main() -> int:
 
     internal = read(root, 'src/jet_internal.h')
     holds = re.search(r'bool\s+SoftEdgeHolds\s*\(\s*const\s+Jet\s*&\s*j\s*\)\s*noexcept\s*\{([^}]*)\}', internal)
-    if not holds or not re.search(r'j\s*\.\s*mode\s*!=\s*Mode::withdraw', holds.group(1)):
-        fail('jet_internal.h: SoftEdgeHolds is not `j.mode!=Mode::withdraw`')
+    if not holds or not re.search(r'j\s*\.\s*phase\s*!=\s*jetphase::Phase::withdraw', holds.group(1)):
+        fail('jet_internal.h: SoftEdgeHolds is not `j.phase!=jetphase::Phase::withdraw`')
 
     flight = read(root, 'src/jet_flight.cpp')
     edge = body(flight, r'void\s+SoftEdge\s*\(\s*Jet\s*&')
@@ -102,7 +83,7 @@ def main() -> int:
     if re.search(r'^\s*void\s+Away\s*\(', jet, re.M):
         fail('jet.cpp: a second Away (the one in jet_flight.cpp is the one tools/jet_obstacle_sim flies)')
     guide = body(jet, r'void\s+Guide\s*\(\s*Jet\s*&')
-    if not re.search(r'case\s+Mode::withdraw\s*:\s*Away\s*\(', guide):
+    if not re.search(r'if\s*\(\s*j\.phase\s*==\s*jetphase::Phase::withdraw\s*\)\s*\{\s*Away\s*\(', guide):
         fail('jet.cpp Guide: a withdrawing jet is not flown by Away')
 
     for f in failures:

@@ -1,6 +1,6 @@
 // Execute the actual GroundNavigate world adapter. Only EDF scene boundaries are
 // fixtures; water policy, budget, A*, cache and waypoint advancement are production.
-#include "../src/crew.h"
+#include "../src/scene.h"
 #include "../src/heli.h"
 #include "../src/ground_navigation.h"
 #include "ground_ray_batch_fixture.h"

@@ -93,6 +93,35 @@ for name, (want, _screens, _doc, mode) in mech.PODS.items():
     expect(np.mean(by_step[first]) < np.mean(by_step[last]), f'{name}: the boot spreads outward from ahead '
            f'(step {first} {np.mean(by_step[first]):.0f} deg, step {last} {np.mean(by_step[last]):.0f} deg)')
     expect(len(kit.screens) == 3, f'{name}: its three live screens kept')
+    # Its two control sticks, each one part on its own moving control at its foot (StickPose's j_<hand>_<throw>_0).
+    sticks = {c.part: c for c in kit.controls if c.control.startswith('j_')}
+    expect(set(sticks) == {'stick_l', 'stick_r'} and sticks['stick_l'].control.startswith('j_0_')
+           and sticks['stick_r'].control.startswith('j_1_') and sticks['stick_l'].centre[0] > 0 > sticks['stick_r'].centre[0],
+           f'{name}: a left stick (the left, +x, the move) and a right one (the aim)')
+    stick_parts = [p for p in kit.parts if p.name.startswith('stick_')]
+    inside = all(-R <= v.pos[0] <= L and -D <= v.pos[1] <= U and -B <= v.pos[2] <= A for p in stick_parts for v in p.verts)
+    expect(inside, f'{name}: the sticks inside the pod')
+    # The seat keeps no piece the pod's box cut (its faces left hanging: the user, 2026-11-26 「这里有多余的东西」)
+    # and nothing floating free of the rest.
+    seat = [p for p in kit.parts if p.name.startswith('seat')]
+    expect(all(-R - 1e-6 <= v.pos[0] <= L + 1e-6 and -D - 1e-6 <= v.pos[1] <= U + 1e-6 for p in seat for v in p.verts),
+           f'{name}: the seat inside the pod')
+
+# The seat's cut (a narrow pod's box): no triangle of a piece the box cuts is kept.
+lo, hi = (-0.37, -0.42, -0.47), (0.37, 0.18, 0.42)
+scale = mech.SEAT_SCALE * 0.6
+parts, _ = mech._seat(scale, lo, hi)
+part_tris = {p.name: len(p.tris) for p in parts}
+cut_any = False
+for name, _rgb, pos, _n, tris, piece in mech._seat_mesh():
+    q = pos * scale
+    ins = ((q >= np.array(lo)) & (q <= np.array(hi))).all(1)[tris].all(1)
+    cut = np.unique(piece[~ins])
+    partial = [p for p in cut if ins[piece == p].any()]
+    cut_any = cut_any or bool(partial)
+    expect(part_tris.get(name, 0) <= int((ins & ~np.isin(piece, cut)).sum()),
+           f'seat {name}: no triangle of a piece the box cut ({len(partial)} cut pieces)')
+expect(cut_any, 'the narrow box cuts some of the seat (the check above checks something)')
 
 print('FAILED' if failures else 'all ok')
 sys.exit(1 if failures else 0)

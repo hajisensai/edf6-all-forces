@@ -18,6 +18,10 @@ import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+import gen_config  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 failures: list[str] = []
 
@@ -26,45 +30,15 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    return '\n'.join(re.sub(r'//.*', '', line) for line in text.splitlines())
+code_only = srcscan.code
+body = srcscan.body
+before = srcscan.before
 
 
 def read(root: str, rel: str) -> str:
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(root, rel), encoding='utf-8') as f:
-        return f.read()
-
-
-def body(text: str, signature: str) -> str:
-    at = text.find(signature)
-    while at >= 0:
-        open_at = text.find('{', at)
-        if open_at < 0:
-            return ''
-        if ';' not in text[at:open_at]:
-            break
-        at = text.find(signature, at + 1)
-    if at < 0:
-        return ''
-    depth, i = 0, text.find('{', at)
-    for j in range(i, len(text)):
-        if text[j] == '{':
-            depth += 1
-        elif text[j] == '}':
-            depth -= 1
-            if depth == 0:
-                return text[i:j + 1]
-    return ''
-
-
-def before(text: str, *parts: str) -> bool:
-    at = -1
-    for p in parts:
-        nxt = text.find(p, at + 1)
-        if nxt < 0 or nxt <= at:
-            return False
-        at = nxt
-    return True
+        return gen_config.expand(f.read())
 
 
 def main() -> int:
@@ -116,7 +90,7 @@ def main() -> int:
     drive = body(npcai, 'Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,')
     scripted = body(npcai, 'Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const float* pos) noexcept')
     checks += 1
-    if 'if(a.held[0]>=0){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}' not in drive or 'Backpack(' in scripted:
+    if 'if(a.held[0]>=0 && !silent){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}' not in drive or 'Backpack(' in scripted:
         fail('Backpack runs outside Drive (a script\'s unit), or without the held weapon known')
     checks += 1
     if npcai.count('Backpack(s,h,') != 1:

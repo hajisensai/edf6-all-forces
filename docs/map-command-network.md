@@ -86,6 +86,33 @@ The march formation is per player on the squads' authority (`npcai.cpp PeerMarch
 own recruited squads sets the march the host keeps round that guest (anchored on the guest, facing its body), the host
 player's own march unchanged.
 
+## Version 11 (2026-11-27): the Broken Arrow controls
+
+The map's controls became Broken Arrow's (the user: 「把指挥改成断箭的操作方式吧，全照抄」), and with them the wire,
+the 828-byte layout unchanged:
+
+- `mapcmd::Order` gains, after `formation` (14): `fastMove` 15, `reverseMove` 16, `unloadAt` 17, `holdFire` 18,
+  `altitude` 19, `sprint` 20, `smoke` 21, `decoy` 22 (`kLastOrder`). The three moves are point orders like `move`
+  (`PointOrder` / `PlaceOrder`); `unloadAt` is kept by the authority as the move and a `dismountAll` once there
+  (`mapcmd_logic.h Replace` / `Advance`), so a Shift queue after it waits for the riders to be off.
+- `Command::param` of a point order may carry a line (`mapcmd_logic.h LineParam`: `kLineFlag`, its length and heading):
+  the right drag's line, its middle the point. The authority spreads the units on it (`LineSlot`) facing the way
+  the drag's eye looked; no line (0) is the formation round the point as before. `holdFire` and `altitude` take the
+  switch (0 / 1), `sprint` / `smoke` / `decoy` none (`OrderParamValid`); anything else is refused unexecuted.
+- `Kind::ping` (F1-F4): the requester's reference, the point and the ping's kind (`kPingKinds`); a client sends it to
+  the host, which checks that the authenticated sender speaks for that player (`Speaks`) and relays it to every
+  other member, at most one from each member every `kPingGapMs`. Every map shows the room's pings.
+
+The orders execute where the unit's AI runs, as every other order: `HOLD FIRE` is the authority's table
+(`src/unit_hold_fire.cpp`: by identity, firing again for `kReturnFireMs` once hurt) read by every firing module of
+that machine; `ALTITUDE`, `SPRINT` (the jets' afterburner, the soldiers' unrested dashes) and `DECOY` (the jets'
+flares) are the modules' own state on the authority. No version is negotiated: the room's protocol
+(`kAllForcesRoomProtocol`, unchanged at 23) already lets only this build in, and a message of another command
+version does not decode.
+
+`command_protocol_test` (Version11) covers the new orders' params and refusals, the line param's bounds, the ping's
+codec, the host's `Speaks` check and the relay.
+
 ## Integration and checks
 
 `InstallNpcAi` registers the executor once through `ConfigureNpcCommandNetwork`,
@@ -110,7 +137,7 @@ gameplay acceptance boundaries.
 
 客户端地图通过独立只读原生友军遍历列出远端小队，不调用这些副本的 Think、Gather 或 SeeSquad，也不修改移动、射击、跟随关系。小队行传递绘制时的 ObjRef，重新排序、对象更换或失焦不会把旧点击应用给别的行。只有当前选择真正支持的命令才在 HUD 中启用。
 
-本机拥有 AI 权威的单位走真实执行入口；远端小队通过一次最多 16 队的 RPC 请求执行。2026-10-20（命令协议 v7）：所有命令统一走 `Dispatch`（本机权威的单位进 `MapCommandAuthority`，远端的打包一次请求），Shift 排队带 `kQueued` 标志由权威端保存、场景每帧推进；阵形（T / 阵形菜单）作为 `Order::formation` 走同一通道；与 v6 对端协商为 v6，v6 房主收不到排队 / 阵形指令（本机先拒绝并提示）。混合选择先按同一排序计算全局 guard 阵形槽和总数，远端报文传槽号，不预先偏移坐标；本机及房主均使用相同间距并要求真实近地面命中。UI 区分排队与权威端逐项受理，显示过期、归属、脚本控制、无车辆、无兼容空座和超时原因，不把发送成功当作完成登车。
+本机拥有 AI 权威的单位走真实执行入口；远端小队通过一次最多 16 队的 RPC 请求执行。2026-10-20（命令协议 v7）：所有命令统一走 `Dispatch`（本机权威的单位进 `MapCommandAuthority`，远端的打包一次请求），Shift 排队带 `kQueued` 标志由权威端保存、场景每帧推进；阵形（命令卡「编队」/ 阵形菜单；2026-11-27 起 T 是火力任务）作为 `Order::formation` 走同一通道；与 v6 对端协商为 v6，v6 房主收不到排队 / 阵形指令（本机先拒绝并提示）。混合选择先按同一排序计算全局 guard 阵形槽和总数，远端报文传槽号，不预先偏移坐标；本机及房主均使用相同间距并要求真实近地面命中。UI 区分排队与权威端逐项受理，显示过期、归属、脚本控制、无车辆、无兼容空座和超时原因，不把发送成功当作完成登车。
 
 ForRequester 使用消息认证后的真实玩家，而非房主 PlayerHuman。原生跟随另一名玩家的队伍不可抢占；上下车逐成员核验 authority 与实际空席。队长职业不再代表所有队员，车辆选择按成员可用的实际座位入口距离；队员已在执行有效登车任务时不重复清空或延长任务。host 所有的 NPC 可通过原有 host 登车权限进入 guest 控制车辆的空副席，已占驾驶席保持不变。每队明确攻击目标使用独立弱引用，不覆盖房主的全局 Q 标记；换令、回收小队记录与任务重置释放引用。
 

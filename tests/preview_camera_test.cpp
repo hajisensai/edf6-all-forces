@@ -104,7 +104,49 @@ static void Squad() {
     Check(Near(SquadRectOf(r,9,3).w,r.w/4),"more than four: four columns");
 }
 
+// 自由 turned by hand: the free preset until moved, then absolute from the yaw the view drew the model with; pitch and
+// distance held in their ranges; YawOf reads back the yaw Place built.
+static void FreeLooks() {
+    using namespace crew::roompreview;
+    FreeLook l;
+    const ViewCamera c0=CameraOf(l);
+    Check(!l.moved && c0.followStand && c0.yaw==kCameraPresets[0].yaw && c0.pitch==kCameraPresets[0].pitch,"unmoved: the free preset");
+    const ViewRect r{638,130,634,340};
+    for(float yaw:{0.f,0.7f,-2.5f,3.0f}) {
+        ViewCamera c=kCameraPresets[1];
+        c.yaw=yaw;c.pitch=0.4f;
+        Check(Near(YawOf(Place(r,c,ModelFrame{},0.f,16.f/9.f)),yaw),"YawOf reads Place's yaw back (pitched too)");
+    }
+    Turn(&l,0,0,1.f);
+    Check(!l.moved,"no turn: still the preset");
+    Turn(&l,0.2f,0.f,1.f);
+    ViewCamera c=CameraOf(l);
+    Check(l.moved && !c.followStand && Near(c.yaw,1.2f) && Near(c.pitch,kCameraPresets[0].pitch) &&
+          Near(c.distance,kCameraPresets[0].distance),"the first turn: from the stand's yaw, absolute after");
+    Turn(&l,0.1f,0.f,-3.f);
+    Check(Near(CameraOf(l).yaw,1.3f),"later turns: the stand's yaw no longer counts");
+    Turn(&l,0,5.f,0);
+    Check(Near(l.pitch,kLookPitchMax),"pitch held at its top");
+    Turn(&l,0,-10.f,0);
+    Check(Near(l.pitch,kLookPitchMin),"pitch held at its bottom");
+    Turn(&l,6.f,0,0);
+    Check(l.yaw>-3.1416f && l.yaw<=3.1416f,"yaw wrapped");
+    const float d=l.distance;
+    Zoom(&l,1,0);
+    Check(Near(l.distance,d*kLookZoomStep),"a notch away: closer");
+    Zoom(&l,-1,0);
+    Check(Near(l.distance,d),"a notch back: as far again");
+    Zoom(&l,40,0);
+    Check(Near(l.distance,kLookDistanceMin),"held at the nearest");
+    Zoom(&l,-40,0);
+    Check(Near(l.distance,kLookDistanceMax),"held at the farthest");
+    FreeLook z;
+    Zoom(&z,1,0.5f);
+    Check(z.moved && Near(z.yaw,0.5f) && Near(z.distance,kCameraPresets[0].distance*kLookZoomStep),"zoom first: from the stand too");
+}
+
 int main() {
+    FreeLooks();
     Ndcs();
     StockProjection();
     Placement();

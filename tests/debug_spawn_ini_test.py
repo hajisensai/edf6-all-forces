@@ -10,6 +10,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.join(ROOT, p) for p in ('tools', 'pylib', 'testrange')]
+import gen_config  # noqa: E402
 import installer  # noqa: E402
 
 checks = 0
@@ -24,8 +25,9 @@ def check(ok: bool, why: str) -> None:
 
 
 def read(rel: str) -> str:
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(ROOT, rel), encoding='utf-8-sig') as f:
-        return f.read()
+        return gen_config.expand(f.read())
 
 
 def values(text: str) -> dict[str, str]:
@@ -49,21 +51,21 @@ def main() -> int:
         check(key in ship, f'the shipped ini has {key}')
     check(ship['DebugSpawn'] == '0', 'the shipped ini ships the tool off')
 
-    # The plugin's own default (crew.h Config) is off, and LoadConfig reads the key with it as the fallback.
-    crew_h = read('src/crew.h')
+    # The plugin's own default (config.h Config) is off, and LoadConfig reads the key with it as the fallback.
+    crew_h = read('src/config.h')
     check(re.search(r'\bbool debugSpawn=false;', crew_h) is not None, 'Config::debugSpawn defaults to false')
     plugin = read('src/plugin.cpp')
     check('n.debugSpawn=ReadBool(L"DebugSpawn",n.debugSpawn);' in plugin, 'LoadConfig reads DebugSpawn over the default')
-    # Each key's default in crew.h is the one the ini ships.
+    # Each key's default in config.h is the one the ini ships.
     for field, key in (('debugSpawnKey', 'DebugSpawnKey'), ('debugSpawnPrevKey', 'DebugSpawnPrevKey'),
                        ('debugSpawnNextKey', 'DebugSpawnNextKey'), ('debugSpawnCategoryKey', 'DebugSpawnCategoryKey'),
                        ('debugSpawnSpawnKey', 'DebugSpawnSpawnKey')):
         m = re.search(rf'\bint {field}=(0x[0-9A-Fa-f]+);', crew_h)
-        check(m is not None and int(m.group(1), 16) == int(ship[key], 0), f'{key}: crew.h and the ini agree')
+        check(m is not None and int(m.group(1), 16) == int(ship[key], 0), f'{key}: config.h and the ini agree')
         check(f'ReadInt(L"{key}"' in plugin, f'LoadConfig reads {key}')
     for field, key in (('debugSpawnRange', 'DebugSpawnRange'), ('debugSpawnDistance', 'DebugSpawnDistance')):
         m = re.search(rf'\bfloat {field}=([0-9.]+)f;', crew_h)
-        check(m is not None and float(m.group(1)) == float(ship[key]), f'{key}: crew.h and the ini agree')
+        check(m is not None and float(m.group(1)) == float(ship[key]), f'{key}: config.h and the ini agree')
 
     # The tool's keys clash with no other key the ini sets (a *Key setting, not a pad button).
     others = {int(v, 0) for k, v in ship.items() if k.endswith('Key') and not k.startswith('DebugSpawn') and v}

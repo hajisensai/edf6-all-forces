@@ -17,7 +17,9 @@
 // The key is read the way the class reads its own (classic SGO): 0x528A0(&object+0xA0, name) gives the 12-byte node
 // {type (0 array, 3 string), count, offset of the first child / the characters from the node} or null.
 // EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 
 #include <atomic>

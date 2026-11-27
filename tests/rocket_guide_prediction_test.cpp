@@ -1,6 +1,5 @@
 // Compare the read-only rocket predictor against the production missile.cpp Guide, followed by the separately
 // tested native MissileBullet01 motor/core step. No game process. Covers inherited velocity, ignition and burnout.
-#include "../src/crew.h"
 #include "../src/rounds.h"
 #define rounds trackedRounds
 #include "../src/missile.cpp"
@@ -22,6 +21,8 @@ bool BodyWorldBox(const void*,float*) noexcept{return false;}
 int VehicleClassOf(const void*) noexcept{return -1;}
 bool IsHelicopter(const void*) noexcept{return false;}
 }
+static_assert(crew::kDrop==crew::rounds::kRailDrop,"missile.cpp's rail drop is the predictor's");
+
 int main(){
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1800000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));

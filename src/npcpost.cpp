@@ -25,7 +25,13 @@
 //    (mission_crew.h MissionAiVehicle) keeps no post until the player gives it one: its stock walk is the script's.
 // What the plugin wrote last is remembered: a stick still holding it is the plugin's, not the stock AI driving (a
 // frame without the AI pass clears nothing), and it is taken back when the drive ends.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "body506.h"
 #include "layout.h"
 #include "online_authority.h"
@@ -59,6 +65,7 @@ constexpr std::size_t kStockGoal=0x25E0;             // the navigation target (t
 constexpr std::size_t kDriveMode=0x1AD0;             // bit 0 clear: slot 55 does not read the stick (dl = 0)
 constexpr std::size_t kSeatSteer=0x2C0,kSeatThrottle=0x2C4;
 constexpr float kBackAngle=2.199f;                  // 0x17DEBAC: the stock reverses past this off the nose
+constexpr float kReverseMoveMax=1.0e9f;             // m: a REVERSE MOVE backs onto its point however far it is
 constexpr float kTurnOnSpot=0.314159f;              // 0x17A3E04: the stock turns on the spot past this
 constexpr float kMechTurnOnSpot=0.9424778f;         // 0x17A3C00: the Begaruta family's (0x63BDA0)
 constexpr float kGoalNear=30.0f;                    // m: +0x25E0 this near when first seen is its spawn point
@@ -485,16 +492,20 @@ void NpcPostInput(unsigned char* v) noexcept {
         }
         const auto profile=GroundVehicleProfile();
         if(GroundNavigate(*path,pos,goal,arrival,ms,waypoint,profile)!=npc::navigation::Result::moving) {
+            if(p->cmd.order==Order::reverseMove)p->cmd.order=Order::guard;   // there: it guards the point it backed onto
             p->active=false;TakeBack(v,f,*p);return;
         }
         goal=waypoint;
         arrival=profile.waypointRadius;
     }
-    const npc::Steer s=npc::ReturnToPost(pos,m,m+8,goal,arrival,
-                                         Cfg().tankReverseMax,kBackAngle,f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot);
-    if(s.active!=p->active)Log("NPCPOST v=%p %s (%.1f m off its post)",v,s.active ? "driving back" : "back at its post",s.dist);
+    // REVERSE MOVE (the map's R, Broken Arrow's): its tail onto every leg however far, its front kept to the enemy it
+    // backs away from (TankCommand); else TankReverseMax and kBackAngle choose.
+    const bool backing=p->cmd.order==Order::reverseMove;
+    const npc::Steer s=npc::ReturnToPost(pos,m,m+8,goal,arrival,backing ? kReverseMoveMax : Cfg().tankReverseMax,
+                                         backing ? 0.0f : kBackAngle,f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot);
+    if(s.active!=p->active)Log("NPCPOST v=%p %s (%.1f m off its post)",v,s.active ? (backing ? "reversing" : "driving back") : "back at its post",s.dist);
     p->active=s.active;
-    if(!s.active){TakeBack(v,f,*p);return;}
+    if(!s.active){if(backing)p->cmd.order=Order::guard;TakeBack(v,f,*p);return;}
     float c0=npc::SteerStick(s),c1=npc::ThrottleStick(s);
     // The paced march (mapcmd.cpp MapPaceScale): the throttle a share of full, to keep with the slowest (the turn as
     // it is: it still faces its way while it waits).
@@ -566,7 +577,8 @@ void SeePostFocus(void* context,const void* object,const float*) noexcept {
 }
 bool TankCommand(const void* v,const Command& c,const ObjRef& focus,const ObjRef& requester) noexcept {
     if(!IsOnlineAuthority(v))return false;
-    if(c.order!=Order::guard && c.order!=Order::none && c.order!=Order::focus && c.order!=Order::follow)return false;
+    if(c.order!=Order::guard && c.order!=Order::none && c.order!=Order::focus && c.order!=Order::follow &&
+       c.order!=Order::reverseMove)return false;
     if(c.order==Order::follow && !npcmark::Alive(requester))return false;
     for(auto& p:posts)if(p.ref.Is(v) && Available(p,GameMs())) {
         if(c.order==Order::focus) {
@@ -574,14 +586,16 @@ bool TankCommand(const void* v,const Command& c,const ObjRef& focus,const ObjRef
             if(!npcmark::Alive(focus) || !VisitEnemies(static_cast<const unsigned char*>(v),&SeePostFocus,&checked) || !checked.seen)return false;
             npcmark::Assign(p.focus,focus);p.cmd=c;return true;
         }
-        const bool routed=c.order==Order::guard || c.order==Order::follow;
+        // REVERSE MOVE: a guard's point and route, driven tail first (the drive above).
+        const bool point=c.order==Order::guard || c.order==Order::reverseMove;
+        const bool routed=point || c.order==Order::follow;
         std::unique_ptr<npc::navigation::RouteState> path;
         if(routed) {
             path.reset(new(std::nothrow) npc::navigation::RouteState{});
             if(!path)return false;
         }
         const auto* here=reinterpret_cast<const float*>(static_cast<const unsigned char*>(v)+kPosition);
-        if(!NpcPostCommand(v,c.order==Order::guard ? c.at : c.order==Order::follow ? here : nullptr))return false;
+        if(!NpcPostCommand(v,point ? c.at : c.order==Order::follow ? here : nullptr))return false;
         npcmark::Assign(p.focus,{});
         if(c.order==Order::follow)npcmark::Assign(p.escort,requester);
         paths[&p-posts]=std::move(path);

@@ -1,4 +1,4 @@
-#include "crew.h"
+#include "scene.h"
 #include "ground_navigation.h"
 #include "ground_body_rays.h"
 #include "heli.h"

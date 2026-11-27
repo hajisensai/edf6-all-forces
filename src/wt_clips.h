@@ -1,6 +1,7 @@
 #pragma once
 // The War Thunder recordings the ground vehicles' guns, the explosions and the rounds going by are layered from, and the
-// turret's and the loader's (jetaudio.cpp kWtFor), the rounds hitting armour (hitsound.cpp)
+// turret's and the loader's (jetaudio.cpp kWtFor), the rounds hitting armour (hitsound.cpp), the engines
+// (sound_engine.h) and the jets' air (jet_air.h: the passby, the wind, the airframe under g)
 // (docs/feature-wt-sound.md): each a group of variants, installed as Mods/Plugins/<dll name>_wt/<name>_<1..n>.wav (16-bit PCM 48 kHz, mono or stereo), made from
 // GaijinEntertainment/fmod_studio_warthunder_for_modders by tools/wt_sound.py (its table says which file each one is;
 // assets/sound/wt/SOURCE.md lists them). tools/wt_sound.py and tests/wt_sound_test.py read this list: the same names,
@@ -26,7 +27,9 @@
     X(gt_66_load,1) X(gt_99_load,1) X(gt_dist,1) X(di_00,1) X(di_33,1) X(di_66,1) X(di_33_load,1) X(di_66_load,1) \
     X(di_99_load,1) X(di_hiss_idle,1) X(di_hiss_low,1) X(di_hiss_high,1) X(di_switch,3) X(di_hiss_load,2) X(di_off,2) \
     X(pe_00,1) X(pe_33,1) X(pe_66,1) X(pe_99,1) X(pe_33_load,1) X(pe_66_load,1) X(pe_99_load,1) X(pe_revv,3) \
-    X(pe_release,3) X(tr_33,1) X(tr_66,1) X(tr_99,1) X(tr_stop,3) X(su_33,1) X(su_66,1) X(su_99,1) X(su_load,2)
+    X(pe_release,3) X(tr_33,1) X(tr_66,1) X(tr_99,1) X(tr_stop,3) X(su_33,1) X(su_66,1) X(su_99,1) X(su_load,2) \
+    X(jet_passby_close,4) X(jet_passby_med,3) X(jet_passby_far,2) X(jet_passby_fast,2) X(jet_wind_low,1) \
+    X(jet_wind_high,1) X(jet_overload,1)
 
 namespace crew::wt {
 #define CREW_WT_ENUM(name,n) k_##name,

@@ -6,7 +6,7 @@
 #include "enemy_control_deiroi.h"
 #include "enemy_control_walking_guns.h"
 #include "enemy_control_walking_net.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

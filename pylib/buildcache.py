@@ -21,13 +21,13 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
-GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'barrage', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'bigmap', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'proteus', 'optics')
-MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi', 'dreadnought': 'dreadnought', 'c130': 'c130', 'helicarrier': 'helicarrier', 'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'quadvulcan': 'wt_m163', 'tunguska': 'wt_tunguska',
+GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'barrage', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'bigmap', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'proteus', 'optics', 'aura_vehicles')
+MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi', 'dreadnought': 'dreadnought', 'c130': 'c130', 'helicarrier': 'helicarrier', 'jets': 'salvo_tu1600', 'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'quadvulcan': 'wt_m163', 'tunguska': 'wt_tunguska',
                 'pzh2000': 'wt_pzh2000', 'sturmtiger': 'wt_sturmtiger',
                 **{kind: 'dreadnought' for kind in ('emp_mid', 'emp_short', 'emp_long')}, 'ciws_phalanx': 'emp_phalanx', 'flak88': 'emp_flak88', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',
                 'gdf005': 'emp_gdf005', 'laser': 'emp_laser', 'railgun': 'emp_railgun', 'patriot': 'emp_patriot'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
-COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'sazabi', 'optics', 'c130', 'helicarrier')
+COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'sazabi', 'optics', 'c130', 'helicarrier', 'aura_vehicles')
 # Every X-Morph unit is a group of its own (its ledger owner, its model folder; pylib/xm_units.py), all built by the one
 # generator tools/make_xmorph.py (generator(), tool()); the V603 ones, the cars and the walkers carry cockpits (the
 # aircraft none yet, the infantry none).
@@ -72,42 +72,63 @@ def source_modules(root: str) -> dict[str, Path]:
     return modules
 
 
-def source_recipes(root: str) -> dict[str, str]:
-    """Fingerprint each generator's dependency closure, without importing or executing it."""
+def _imports(raw: bytes) -> set[str]:
+    """The top-level names a module imports (also function-local imports and importlib.import_module of a constant or
+    of a module-level table's values)."""
+    imports: set[str] = set()
+    tree = ast.parse(raw)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(a.name.split('.')[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module.split('.')[0])
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'import_module' and node.args:
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                imports.add(arg.value)
+            elif isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name):
+                for assignment in tree.body:
+                    targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target] if isinstance(assignment, ast.AnnAssign) else []
+                    if any(isinstance(t, ast.Name) and t.id == arg.value.id for t in targets):
+                        imports.update(ast.literal_eval(assignment.value).values())
+    return imports
+
+
+def _recipes(root: str, groups: tuple[str, ...]) -> dict[str, str]:
+    """Each of `groups`' recipe: the digest of its generator's local dependency closure. Only the modules some closure
+    reaches are read and parsed, each once (a module outside every closure cannot change a recipe)."""
     modules = source_modules(root)
-    dependencies: dict[str, set[str]] = {}
     digests: dict[str, str] = {}
-    for name, path in modules.items():
-        raw = path.read_bytes()
-        digests[name] = sha256(raw)
-        imports: set[str] = set()
-        tree = ast.parse(raw)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imports.update(a.name.split('.')[0] for a in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imports.add(node.module.split('.')[0])
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'import_module' and node.args:
-                arg = node.args[0]
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    imports.add(arg.value)
-                elif isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name):
-                    for assignment in tree.body:
-                        targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target] if isinstance(assignment, ast.AnnAssign) else []
-                        if any(isinstance(t, ast.Name) and t.id == arg.value.id for t in targets):
-                            imports.update(ast.literal_eval(assignment.value).values())
-        dependencies[name] = imports & modules.keys()
+    dependencies: dict[str, set[str]] = {}
+
+    def read(name: str) -> set[str]:
+        if name not in dependencies:
+            raw = modules[name].read_bytes()
+            digests[name] = sha256(raw)
+            dependencies[name] = _imports(raw) & modules.keys()
+        return dependencies[name]
+
     out = {}
-    for group in GROUPS:
+    for group in groups:
         seen: set[str] = set()
         pending = [generator(group)]
         while pending:
             name = pending.pop()
             if name not in seen:
                 seen.add(name)
-                pending.extend(dependencies[name] - seen)
+                pending.extend(read(name) - seen)
         out[group] = sha256(json.dumps({n: digests[n] for n in sorted(seen)}, sort_keys=True).encode())
     return out
+
+
+def source_recipes(root: str) -> dict[str, str]:
+    """Fingerprint each generator's dependency closure, without importing or executing it."""
+    return _recipes(root, GROUPS)
+
+
+def source_recipe(root: str, group: str) -> str:
+    """source_recipes(root)[group], reading only that generator's closure."""
+    return _recipes(root, (group,))[group]
 
 
 def recipes() -> dict[str, str]:

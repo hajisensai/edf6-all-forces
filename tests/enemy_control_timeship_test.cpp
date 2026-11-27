@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "../src/netprobe.h"
 namespace crew {unsigned char* image=nullptr;}
 namespace {
 using namespace crew;using namespace crew::enemy_native;

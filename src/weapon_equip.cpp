@@ -1,7 +1,6 @@
 // 整备界面武器页的游戏侧：weapon_equip.h（逆向：docs/weapon-select-re.md）。
 #include "weapon_equip.h"
 #include "code_signatures.h"
-#include "crew.h"
 #include "memory.h"
 #include "weapon_records.h"
 #include <cstdint>

@@ -9,7 +9,10 @@
 #include <iterator>
 #include <new>
 
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
 #include "ground_navigation.h"
 #include "memory.h"
 #include "edf/patch.h"

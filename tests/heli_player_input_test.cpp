@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <limits>
 #include <initializer_list>
+#include "../src/hud.h"
 
 namespace crew {
 void SupportAircraftFrame(unsigned char*) noexcept {}   // jet_spawn.cpp: no support aircraft here

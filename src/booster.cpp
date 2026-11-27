@@ -22,7 +22,16 @@
 // sets +0x3EC = how strongly it burns, +0x3F0 = 1, +0x3F4 = 3 while it burns (0, 0 when not: it burns down); a vehicle
 // gone for kStaleMs, or dead, has its boosters deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the
 // last jet is gone). (H/M)
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "booster.h"
+#include "jet.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "exhaust_nozzles.h"
 #include "exhaust_pose.h"
@@ -85,16 +94,12 @@ struct Carrier {               // a vehicle's flames (the name from when only th
 Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
 
+// A booster is a scene object (no death byte): objref.h Exists, and still a booster.
 bool Live(const Nozzle& z) noexcept {
-    return z.obj && z.ctrl && Readable(z.obj,kSize) && Readable(z.ctrl,0x10) && At<const void*>(z.obj,0)==image+kVtable &&
-           At<long>(z.ctrl,8)>0 && !(z.obj[kObjFlags]&kObjDeleted);
+    return objref::Exists(ObjRef{z.obj,z.ctrl}) && Readable(z.obj,kSize) && At<const void*>(z.obj,0)==image+kVtable;
 }
 
-void DropWeak(void* ctrl) noexcept {
-    if(!ctrl)return;
-    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+0xC),-1)==1)
-        (*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
-}
+void DropWeak(void* ctrl) noexcept { objref::Release(ctrl); }
 
 // A shared reference let go as MSVC's _Ref_count_base::_Decref does: the uses down by one, and only when that was
 // the last use, the object destroyed and the uses' own weak count dropped. It dropped a weak count every time, one
@@ -152,7 +157,7 @@ void Make(Nozzle& z,const unsigned char* v,const float* size) noexcept {
     if(At<const void*>(o,0)==image+kVtable && !(o[kObjFlags]&kObjDeleted)) {
         void* const ctrl=At<void*>(o,kSelfCtrl);
         if(ctrl) {
-            _InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+0xC));
+            objref::Retain(ctrl);
             z.obj=o;z.ctrl=ctrl;
         }
     }
@@ -486,8 +491,7 @@ struct SmokeSet { const unsigned char* v; const void* ctrl; ULONGLONG seen; Trai
 SmokeSet smokeSets[kSmokeSets];
 
 bool TrailLive(const Trail& t) noexcept {
-    return t.obj && t.ctrl && Readable(t.obj,kTrailSize) && Readable(t.ctrl,0x10) && At<const void*>(t.obj,0)==image+kTrailVtable &&
-           At<long>(t.ctrl,8)>0 && !(t.obj[kObjFlags]&kObjDeleted);
+    return objref::Exists(ObjRef{t.obj,t.ctrl}) && Readable(t.obj,kTrailSize) && At<const void*>(t.obj,0)==image+kTrailVtable;
 }
 // Off: it lays no more; what it laid fades and the object deletes itself (kTrailUpdate). Our weak reference goes.
 void TrailStop(Trail& t) noexcept {

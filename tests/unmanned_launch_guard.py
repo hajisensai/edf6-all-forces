@@ -14,10 +14,13 @@ six doll drones driver=0, seats=[-], under the ground and on down from 40 km). W
 """
 from __future__ import annotations
 
+import functools
 import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 failures: list[str] = []
 
@@ -26,25 +29,13 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    return '\n'.join(line.split('//', 1)[0] for line in text.splitlines())
+code_only = srcscan.code
+body = functools.partial(srcscan.body, regex=True, braces=False)
 
 
 def read(root: str, rel: str) -> str:
     with open(os.path.join(root, rel), encoding='utf-8') as f:
         return code_only(f.read())
-
-
-def body(text: str, signature: str) -> str:
-    """The braces-balanced body of the first definition whose header matches `signature` (a regex), '' when none."""
-    m = re.search(signature + r'[^;{]*\{', text)
-    if not m:
-        return ''
-    depth, i = 1, m.end()
-    while i < len(text) and depth:
-        depth += {'{': 1, '}': -1}.get(text[i], 0)
-        i += 1
-    return text[m.end():i - 1]
 
 
 def before(text: str, first: str, second: str, where: str) -> None:

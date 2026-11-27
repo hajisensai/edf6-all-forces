@@ -2,7 +2,7 @@
 #include "enemy_control_unit_guide.h"
 #include "enemy_control.h"
 #include "enemy_control_native.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include "edf/patch.h"
 #include <cstring>

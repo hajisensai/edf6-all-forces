@@ -3,6 +3,10 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "lockon.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "mapbounds.h"
+#include "damagestats.h"
 
 namespace crew {
 namespace jet {
@@ -71,7 +75,8 @@ constexpr float kDogfightKeep=1.5f;
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
 struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; bool charges;
-             const void* best; float score,aim[3]; bool flyer,focus,focusSeen; };
+             const void* best; float score,aim[3]; bool flyer,focus,focusSeen;
+             const void* claimed[kMaxJets]={}; int claims=0; };   // its flight-mates' targets (flight_spread.h Claims)
 // Whether `object` (lock point `p`) flies: its root more than kFlyerClear over the ground, or no ground
 // under it (see kFlyerProbe); one ray per object per kFlyerMemoMs, shared by every jet.
 // The memo: kFlyerSets sets of kFlyerWays, an object's set picked by a multiplicative hash of its address (the
@@ -122,7 +127,7 @@ bool Charges(const Jet& j) noexcept {
 // anything out past that (the one it chased out there too, the user 2026-10-06: "过了这个小边界会往回走"); else anything out
 // past the play area's walls (mapbounds.h PlayBox: the ground's edge), where it never goes.
 bool PastEdge(const Jet& j,const float* p) noexcept {
-    return !airbound::Inside(j.m.edgeBack ? JetSoftBox(j) : PlayBox(),p);
+    return !airbound::Inside(j.m.edgeBack ? JetHeldBox(j) : PlayBox(),p);
 }
 
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
@@ -147,6 +152,10 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     // A sortie strikes the ground (jet_sortie.cpp), each missile at another target (SortieStruck).
     const Prefer prefer=k.j->sortie.pass!=SortiePass::none ? Prefer::ground : k.j->loadSet ? k.j->loadPrefer : KindOf(*k.j).prefer;
     if(SortieStruck(*k.j,object))score+=4000.0f;
+    // One a flight-mate is on counts farther (flight_spread.h): each its own while there are others to go round.
+    int mates=0;
+    for(int i=0;i<k.claims;++i)if(k.claimed[i]==object)++mates;
+    score+=spread::ClaimScore(mates);
     if(prefer!=Prefer::any && flyer!=(prefer==Prefer::air))score+=2000.0f;   // the other kind: only with none of its own
     if(!k.best || score<k.score){k.best=object;k.score=score;std::memcpy(k.aim,p,12);k.flyer=flyer;}
 }
@@ -308,7 +317,8 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
         break;
     }
     // Approach: at the target at height; dive once in the window with the lead in sight, else fly out and come round.
-    // Arriving (Entering) it comes straight on at the height it came at and its attack speed, never flying out first.
+    // Arriving (Entering) it comes straight on at the height it came at (or the one ALTITUDE gave it since: heightOrdered)
+    // and its attack speed, never flying out first.
     // Its arrival ends where it cannot come straight on: the target inside its turn (it would circle it), or too low to
     // dive (the height it came at kept, it never would): the approach's climb and fly-out as ever.
     bool entering=Entering(j,ms);
@@ -319,7 +329,7 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
     if(!entering && off>kDiveCone && InsideTurn(j,pos,lead)) {
         if(PlanExtend(j,pos,lead,vdir)){SetMode(j,Mode::extend,ms);FlyExtend(j,pos,height,want);return false;}
     }
-    Level(pos,to,entering ? pos[1] : height,want);
+    Level(pos,to,entering && !j.heightOrdered ? pos[1] : height,want);
     *speed=entering ? k.attack : k.cruise;
     return false;
 }
@@ -446,6 +456,10 @@ void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float
 
 void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,float range,float dt,ULONGLONG ms) noexcept {
     Pick pick{&j,pos,anchor,range,ms,Charges(j),nullptr,0.0f,{},false,false,false};
+    const bool hostile=HostileJet(v);   // a mission's placed flight holds both sides: only its own side's claims
+    for(const Jet& o:jets)
+        if(&o!=&j && o.flight==j.flight && o.t.target && Flown(o,ms) && !jetphase::Leaving(o.phase) && HostileJet(o.Vehicle())==hostile)
+            pick.claimed[pick.claims++]=o.t.target;
     VisitEnemies(v,&VisitTarget,&pick);
     if(j.focus && !pick.focusSeen) {
         Log("JET v=%p focus target %p no longer among the enemies: back to its order",j.Vehicle(),j.focus.obj);
@@ -516,17 +530,18 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
 }
 
 bool WeaponsFree(const Jet& j) noexcept {
-    return Cfg().jetPilot && (j.t.target || j.sortie.strafing) && j.mode!=Mode::withdraw &&
-           j.mode!=Mode::recover && j.mode!=Mode::takeoff;
+    return Cfg().jetPilot && (j.t.target || j.sortie.strafing) && !jetphase::Leaving(j.phase) &&
+           j.mode!=Mode::takeoff;
 }
 
-// Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (its fall from here
-// at the jet's velocity, the target's height, the target moving on as it falls) is within kBombHit of its blast
-// radius of the target, and the jet is kBombSafe over it (its own blast); one every kBombMs.
+// Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (StoreLands: as the game
+// flies the round, the world's 14.7 m/s^2 x its factor onto the ground under it; it reckoned 9.8 onto the target's
+// height before and fell short, the user, 2026-11-27: 「炸弹也很难投中」), the target moved on over its fall, is within
+// kBombHit of its blast radius of the target, and the jet is kBombSafe over it (its own blast); one every kBombMs.
 // Rockets (StoreRole::rocket) in a strafing run: a ripple (the store's burst) every kRocketMs while the guns' lead is
 // within kRocketCone of the nose, from kRocketOpen in to kRocketClose times the guns' closest; then the guns go on.
 constexpr float kRocketOpen=1400.0f,kRocketClose=2.5f,kRocketCone=0.026f;   // m, x gunClose, rad (1.5 deg)
-constexpr ULONGLONG kRocketMs=600;
+constexpr ULONGLONG kRocketMs=sortie::kRocketGapMs;
 constexpr float kBombHit=1.0f,kBombSafe=100.0f;
 constexpr ULONGLONG kBombMs=400;
 void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) noexcept {
@@ -534,11 +549,12 @@ void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) n
     if(!t.target || t.flyer || a.bombs<=0 || ms-t.bombAt<kBombMs)return;
     const float over=pos[1]-t.aim[1];
     if(over<kBombSafe)return;
-    const float vy=j.m.vel[1],fall=(vy+std::sqrt(vy*vy+2.0f*kG*over))/kG;   // s to the target's height
     for(int i=0;i<a.storeCount;++i) {
         const Store& s=a.stores[i];
         if(s.spec->role!=StoreRole::bomb || s.ammo<=0)continue;
-        const float dx=pos[0]+j.m.vel[0]*fall-(t.aim[0]+t.tgtVel[0]*fall),dz=pos[2]+j.m.vel[2]*fall-(t.aim[2]+t.tgtVel[2]*fall);
+        float at[3],fall=0.0f;
+        if(!StoreLands(s,kBombReach,at,&fall))return;
+        const float dx=at[0]-(t.aim[0]+t.tgtVel[0]*fall),dz=at[2]-(t.aim[2]+t.tgtVel[2]*fall);
         const float miss=std::sqrt(dx*dx+dz*dz),hit=At<float>(s.weapon,kWeaponBlast)*kBombHit;
         if(!(miss<hit))return;
         if(HoldFire(v,t.target,pos,At<float>(s.weapon,kWeaponSpeed)*60.0f,At<float>(s.weapon,kWeaponGravity)*kGravity))return;
@@ -590,15 +606,16 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float tdist=Len(to),off=tdist>1.0f ? std::acos(Clamp(Dot(to,nose)/tdist,-1.0f,1.0f)) : 0.0f;
         const bool salvo=j.sortie.pass==SortiePass::missileRain;
         const float missileReach=salvo ? a.missileRange : MissileReach(k,a);
-        if(!missileOk || off>(salvo ? 0.32f : kMissileCone))t.lockAt=0;
+        const float level=std::sqrt(j.m.vel[0]*j.m.vel[0]+j.m.vel[2]*j.m.vel[2]);
+        if(!missileOk || !(salvo ? sortie::RainTrigger(pos,nose,level,t.aim) : off<=kMissileCone))t.lockAt=0;
         else if(!t.lockAt)t.lockAt=ms;
         missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=SortieLockMs(j,kLockMs) && tdist>kMissileMin &&
                 tdist<missileReach && ms-t.missileAt>SortieMissileGapMs(j,kMissileMs) && !FriendInLine(pos,t.aim,v);
         if(salvo)
             missile=missile && sortie::SalvoLocked(a.missiles,a.locked);
         if(missile && a.pick>=0)
-            missile=!HoldFire(v,t.target,pos,At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
-                              At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);
+            missile=!HoldFire(v,t.target,pos,salvo ? sortie::kRainRoundSpeed : At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
+                              salvo ? 0.0f : At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);
         if(missile) {
             t.missileAt=ms;
             if(Cfg().debug && j.sortie.pass==SortiePass::missileRain && a.pick>=0)LogSalvoLocks(a.stores[a.pick].weapon);
@@ -621,7 +638,7 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
         std::acos(Clamp(At<float>(v,kMatrix+0x14)/std::sqrt(1.0f-At<float>(v,kMatrix+0x24)*At<float>(v,kMatrix+0x24)+1e-6f),-1.0f,1.0f))*180.0f/kPi,
         j.t.target,j.t.flyer ? "(air)" : "",d,j.t.target ? aim[1] : 0.0f,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile],pos[0],pos[2],
-        airbound::Depth(JetSoftBox(j),pos),j.m.edgeBack ? " back" : "");
+        airbound::Depth(JetSoftBox(j),pos),j.m.arriving ? j.m.edgeBack ? " arriving back" : " arriving" : j.m.edgeBack ? " back" : "");
 }
 
 // Each weapon's barrel against the nose (the guns must point where the nose does): true once there were weapons to log.

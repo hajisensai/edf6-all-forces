@@ -1,4 +1,5 @@
 // Execute the production family adapters with native target-state fixtures.
+#include <initializer_list>
 #include "../src/enemy_control_native_look_extra.cpp"
 #include <cstdio>
 #include <cstdlib>

@@ -57,7 +57,10 @@
 // same form the stock voice banks end up as ("./SOUND/PC/<name>", relative to the game folder, which is the working
 // directory): "./Mods/SOUND/PC/<name>". No prefix rule matches it, the game's stream and CRI both open it as is. Should a
 // load still fail, the empty node 0x7B2500 appended is taken out again the way 0x7B2CD0 removes one.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 #include "edf41classes.h"
 #include "edf41_sound_fallback.h"

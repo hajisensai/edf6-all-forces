@@ -136,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-slim-') as root:
     finally:
         installer.bundle_dir = real_bundle
 inst = open(os.path.join(ROOT, 'tools', 'installer.py'), encoding='utf-8').read()
-check('install_generator(game, generator_source())' in inst, 'install copies generator_source()')
+check('install_generator(game, fresh_source_generator() or generator_source())' in inst, 'install copies the fresh source generator, else generator_source()')
 
 # build_release: the commands, captured.
 cmd = build_release.generator_cmd()

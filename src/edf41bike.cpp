@@ -8,7 +8,13 @@
 // as row 1 (native mode 2, keyframed) its ragdoll joint held the dynamic chassis
 // where it was made, in the air (docs/edf41-bike-re.md 「悬空」, 2026-10-21 run).
 // No guessed angular velocity, fabricated hinge or substitute bike.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "map.h"
+#include "stab_api.h"
+#include "npcai.h"
 #include "edf41bike.h"
 #include "host_settings.h"
 #include "body506.h"

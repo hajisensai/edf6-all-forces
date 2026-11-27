@@ -138,7 +138,8 @@ const wchar_t* SupportCallKey(int index) noexcept;
 // (only the rescue's own trigger asks for it).
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
 // The same call for no pt: a sortie's second wave (airstrike.cpp, paid with its first), the autopilot's AirdropTest.
-bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// `run`: the first wave's way in, kept (sortie_plan.h RunSpec).
+bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity,const sortie::RunSpec& run={}) noexcept;
 // An entry's pt (tools/calls.py Call.pt for the calls and strikes, support_dispatch.cpp kGroundPt for the rest; the rescue
 // 0) and its price now (times SupportPtScale: support_points.h).
 std::uint32_t SupportCallPt(int index) noexcept;
@@ -147,9 +148,13 @@ std::int32_t SupportCallPrice(int index) noexcept;
 // submarine carrier).
 int SupportCatalogStrike(int index) noexcept;
 bool SupportCatalogAir(int index) noexcept;
+// Whether an entry comes in by air (a flown call, a transport, an airdrop): the ones that take a way in (sortie_plan.h
+// RunSpec's heading; the map's G turns it, mapcmd.cpp).
+bool SupportCatalogFlown(int index) noexcept;
 // The map's preview (support_warning.cpp): where a flown entry would come in for `target` as the planner sees it now
 // from this machine's player (airstrike.cpp PreviewAirRoute: quiet). False: none found (or not a flown entry).
-bool SupportPreviewEntry(int index,const float* target,float* from) noexcept;
+// `heading`: the way in the call would ask for (the map's turned entry; null: from this player toward the target).
+bool SupportPreviewEntry(int index,const float* target,float* from,const float* heading=nullptr) noexcept;
 // airstrike.cpp: the strikes (kStrikes): how many, a strike's ini key, its name on the bar, its pt, its barrage kind
 // (barrage_plan.h Kind; -1: the ultimate), the heading one at `target` comes along (from the local player to it), and the
 // local player's call of one (started here and told to the others; false with why in `note`).
@@ -199,12 +204,20 @@ SupportIcon SupportCallIcon(int index) noexcept;
 // paratroop drop). The container airdrops' (AirdropCatalog): the vehicle the plane drops (the row: the plane).
 enum class SupportVariant : std::uint8_t { none, guard, follow, crewed, empty, squad, platoon, tank, apc, truck };
 SupportVariant SupportCallVariant(int index) noexcept;
-// The bar's tabs (2026-10-26: every support on the bar, more rows than its column holds): the flown supports that stay
-// (guard / follow, the carriers), the sorties, the strikes (barrages, the ultimate), and the ones on the ground or carried
-// there (infantry, vehicles, transports, airdrops). Each entry is in one.
-enum class SupportTab : std::uint8_t { air, sortie, strike, ground, count };
+// The bar's tabs (2026-10-26: every support on the bar, more rows than its column holds): everything flown (2026-11-27: the
+// one 「出击」 tab: the aircraft that stay, guard / follow, the carriers, and the sorties, each flying the airframe the player
+// configured, no separate air tab), the strikes (barrages, the ultimate), and the ones on the ground or carried there
+// (infantry, vehicles, transports, airdrops). Each entry is in one.
+enum class SupportTab : std::uint8_t { sortie, strike, ground, count };
 inline constexpr int kSupportTabs=static_cast<int>(SupportTab::count);
 SupportTab SupportCallTab(int index) noexcept;
+// The catalog entry whose SupportVehicle_<key> pylons entry `index`'s aircraft fly (support_dispatch.cpp HullOf: its own,
+// a jet sortie's the guarding call of its jet role), -1 none.
+int SupportHullCatalog(int index) noexcept;
+// m: the shortest line entry `index`'s ground run (SupportGroundRun) may be drawn (sortie_plan.h RunLeast: every ground
+// store its jets fly let go down it, this machine's configured pylons where the room would fly them, else stock); 0 for
+// an entry that flies none. The host plans the line that long at least (support_dispatch.cpp Plan).
+float SupportRunLeast(int index) noexcept;
 enum class SupportReady : std::uint8_t { ready, planning, cooldown, off };
 struct SupportReadiness { SupportReady state; int seconds; };   // seconds: the cooldown left
 SupportReadiness SupportCallReadiness() noexcept;

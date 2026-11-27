@@ -59,6 +59,7 @@ bool Frame(unsigned char*,bool,bool) noexcept {UnexpectedRoomDependency();return
 bool PreviewWanted(roompreview::PreviewSpec*,roompreview::ViewRect*,roompreview::ViewCamera*,bool*,roompreview::SquadSpec*) noexcept {UnexpectedRoomDependency();return false;}
 bool TakePvpRequest() noexcept {UnexpectedRoomDependency();return false;}
 bool TakeMapRequest() noexcept {UnexpectedRoomDependency();return false;}
+void MapPressed(bool) noexcept {UnexpectedRoomDependency();}
 int TakeOpenAsk() noexcept {UnexpectedRoomDependency();return -1;}
 void Forget() noexcept {}
 void ScreenGone(unsigned char*) noexcept {}

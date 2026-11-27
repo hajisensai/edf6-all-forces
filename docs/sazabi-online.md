@@ -1,6 +1,7 @@
 # Sazabi 联机动作复制
 
 > 2026-10-20：传输（签名、读写、接收钩子、发送者 / 序号、去重 Gate）已与钻头、沙扎比、座位选弹合为一份 `src/seat_net.cpp`，按块头 magic 分发；本文的格式、版本与行为不变。见 [seat-net.md](seat-net.md)。
+> 2026-11-27：这份传输与 EDF4.1 类的事件层合并为对象消息层 `src/object_net.*`（设计审查 1126 第 7 步）：类的 slot 17 由 `object_net::ChainClass` 按类表 `kClasses` 统一链，不再各自硬编码 `kReceiveSlot`；本文的块格式、版本与行为不变。
 
 适用 EDF.dll `0x678CCB46`，代码 `sazabi_net.cpp/.h/.inc`。机体位置和普通 holder 枪弹继续走原版 506 同步；这里补齐插件自己的关节姿态、盾、近战动作、蓄能炮及浮游炮，所有要显示这些动作的机器需安装此版本。
 

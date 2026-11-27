@@ -239,11 +239,7 @@ bool ModelMatrix(void* object,const float* matrix) noexcept;
 // from the camera the near pass draws nothing. True once set (or set already); false: ask again next frame.
 bool FarRender(void* object) noexcept;
 
-// Weak references through the game's shared_ptr control block (use +8, weak +0xC, vtable {destroy, delete}).
-struct WeakRef { void* object=nullptr; void* control=nullptr; };
-void WeakSet(WeakRef& w,const void* object) noexcept;          // from the object's own weak pointer (+0x28 / +0x30)
-void WeakReset(WeakRef& w) noexcept;
-bool WeakAlive(const WeakRef& w) noexcept;                     // use count > 0 and not deleted
+// Weak references: crew::WeakRef (src/objref.h, one weak count held; objref::Exists = use count > 0, the same block, not deleted).
 // The object's weak pointer written to `out` ({object, control}: what GetPartsObject's message 0x10000017 returns at +8), one
 // weak count taken for the receiver.
 bool WeakOut(const void* object,void* out) noexcept;

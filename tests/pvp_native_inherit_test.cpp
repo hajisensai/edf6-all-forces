@@ -1,4 +1,5 @@
 // Production native ownership/cache/restore path, including ordinary Decoy GameObjects.
+#include <initializer_list>
 #define main ExistingPvpNativeFixtureMain
 #include "pvp_native_fixture.cpp"
 #undef main

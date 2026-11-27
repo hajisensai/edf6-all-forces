@@ -9,7 +9,9 @@
 // Here every call into the cache (the 10 call sites of its 4 entry points) runs under one lock, taken before
 // the game's own GDI lock (always in that order: no deadlock). The first entry from each thread is logged
 // ("GLYPH thread"), the evidence of how many threads share the cache.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "patches.h"
 #include "memory.h"
 #include <cstdint>
 #include <cstring>

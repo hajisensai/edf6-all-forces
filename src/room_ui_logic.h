@@ -4,6 +4,7 @@
 //   input       the keyboard and the XInput pad mapped onto room_menu.h Keys; the toggle's pad combination
 //   gate        when the screen's own input is taken away (整备 / the 对战 pages up, and after they close until every
 //               key is up: the key that closed them must not reach the room as a cancel)
+//   screens     which room / HQ object the menu follows when two run at once (the old one retired until it ends)
 //   texts       the native button's label and description in the HUD's language (hudtext.h)
 //   catalog     the units 整备's support pages list, from the live support catalog (support_call.h)
 //   crews       a crew's soldier kind (SupportVehicleCrewWeapon / SupportAircraftCrewWeapon), the colours it wears
@@ -18,6 +19,7 @@
 #include "loadout_ini.h"
 #include "room_menu.h"
 #include "room_preview.h"
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -145,6 +147,55 @@ inline Plan PlanFrame(bool hasInput,bool open) noexcept {
 // while the support loadout menu (F2) is up or its closing key still held (`menuBusy`): that frame is simply waited out.
 inline bool AutoOpenDue(bool on,bool tried,bool hasInput,bool menuBusy) noexcept {
     return on && !tried && hasInput && !menuBusy;
+}
+
+// --- Which screen object the menu follows (room_ui.cpp Follow) ---
+// Two screen objects of the hooked classes can run OnUpdate in the same frames: the HQ's pack switch (pack_switch.cpp)
+// closes the HQ and the script builds the next HQ at once, and the old one keeps updating through its close (the
+// 2026-11-27 run: ~0.27 s of frames from both after every switch). The menu follows one object; a newer one replaces it
+// and the replaced one is retired: its frames pass straight through (nothing of the menu run, nothing created on it)
+// until its destructor runs (Unretire). Without that every frame alternated between the two, forgetting the menu and
+// creating the native 整备 button anew on each (dozens of orphan buttons left in the new HQ's list). When the followed
+// object itself ends first (its destructor), every retired one may be followed again (ClearRetired): an older object
+// still alive is then the only screen.
+// The destructor hooks may run on another thread than the frames: the retired slots are atomic; the ring index is the
+// frames' (the UI thread's) alone.
+inline constexpr int kRetiredMost=4;
+struct ScreenTrack {
+    std::atomic<const void*> retired[kRetiredMost]{};
+    int next=0;
+};
+inline bool IsRetired(const ScreenTrack& t,const void* p) noexcept {
+    if(!p)return false;
+    for(const auto& r:t.retired)if(r.load()==p)return true;
+    return false;
+}
+inline void Retire(ScreenTrack& t,const void* p) noexcept {
+    if(!p || IsRetired(t,p))return;
+    t.retired[t.next].store(p);
+    t.next=(t.next+1)%kRetiredMost;
+}
+// The object's destructor: true when it was retired (now forgotten: a new object at its address is a new screen).
+inline bool Unretire(ScreenTrack& t,const void* p) noexcept {
+    bool was=false;
+    for(auto& r:t.retired) {
+        const void* expect=p;
+        if(p && r.compare_exchange_strong(expect,nullptr))was=true;
+    }
+    return was;
+}
+inline void ClearRetired(ScreenTrack& t) noexcept {
+    for(auto& r:t.retired)r.store(nullptr);
+}
+enum class Track { Same, First, Replaced, Stale };
+// `self`'s frame with `current` followed (nullptr: none, or the followed one ended and was forgotten). Replaced:
+// `current` is retired here; the caller forgets the menu and follows `self`. Stale: a retired object, passed through.
+inline Track TrackScreen(ScreenTrack& t,const void* current,const void* self) noexcept {
+    if(self==current)return Track::Same;
+    if(IsRetired(t,self))return Track::Stale;
+    if(!current)return Track::First;
+    Retire(t,current);
+    return Track::Replaced;
 }
 
 // --- The switches over one screen frame: Enabled && RoomLoadout (`on`) and RoomPreSync ---

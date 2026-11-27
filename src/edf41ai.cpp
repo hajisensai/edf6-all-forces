@@ -52,7 +52,15 @@
 // The gun object is {GunBattery*, ...} with its owner at +0x10; the owner's guns are the vector of 16-byte
 // {gun*, control} at +0x1AA8 (count +0x1AB8), in gun_control's order. The target is 0x30C0F0(owner) (null: none), its
 // position the vec4 at +0x90 (the vec4 at *(*(+0x368)) + 0x10 when +0x378 is set), the owner's at +0x90.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "edf41.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "edf41classes.h"
 #include "enemy_control.h"
 #include "hector_ai.h"
@@ -181,7 +189,7 @@ struct Entry {
     unsigned shieldMask=0;               // bit i: gun_control entry i is a shield (it never fires)
     wchar_t weaponPath[hector::kArms][128]{};
     bool weaponMade[hector::kArms]{};
-    edf41c::WeakRef weapon[hector::kArms];
+    WeakRef weapon[hector::kArms];
 };
 
 std::atomic<int> animState{0};          // 0 unchecked, 1 the functions are this build's, 2 they are not: no animation
@@ -556,7 +564,7 @@ constexpr std::size_t kHectorTeamAt=0x314;
 constexpr int kWeaponAccept=16;                  // slot 16 Accept(object, GDI*) -> bool (ApplyDamage 0x547C30 asks it)
 constexpr int kWeaponAnimKinds[2]={0,2};         // material_animation load kinds of [glow, death] (the generator writes them too)
 struct WeaponRec {
-    edf41c::WeakRef owner;
+    WeakRef owner;
     bool shield=false;                           // Hector401_Shield: its ragdoll stops hostile bullets while its Hector lives
     bool layered=false;
     bool gone=false;                             // DeleteObject asked
@@ -647,7 +655,7 @@ std::uint64_t __fastcall WeaponDtor(void* self,unsigned flags) {
         const auto it=weapons.find(self);
         if(it!=weapons.end()) {
             edf41c::MaterialAnimsFree(it->second.mat);   // before the model it is bound to goes
-            edf41c::WeakReset(it->second.owner);
+            it->second.owner.Reset();
             weapons.erase(it);
         }
     }
@@ -659,7 +667,7 @@ std::uint64_t __fastcall WeaponUpdate(void* self,void* dt) {
         std::lock_guard<std::mutex> hold(weaponLock);
         const auto it=weapons.find(self);
         if(it!=weapons.end() && !it->second.gone) {
-            drop=!edf41c::WeakAlive(it->second.owner);
+            drop=!objref::Exists(it->second.owner);
             if(drop)it->second.gone=true;
         }
     }
@@ -730,8 +738,8 @@ void ReadWeapons(void* self,Entry& e) noexcept {
 
 void DropWeapons(Entry& e) noexcept {
     for(int i=0;i<hector::kArms;++i) {
-        if(edf41c::WeakAlive(e.weapon[i]))edf41c::DeleteObject(e.weapon[i].object);
-        edf41c::WeakReset(e.weapon[i]);
+        if(objref::Exists(e.weapon[i]))edf41c::DeleteObject(e.weapon[i].Obj());
+        e.weapon[i].Reset();
     }
 }
 
@@ -757,7 +765,7 @@ void Weapons(void* self,Entry& e) noexcept {
                 std::lock_guard<std::mutex> hold(weaponLock);
                 const auto it=weapons.find(obj);
                 ours=it!=weapons.end();
-                if(ours)edf41c::WeakSet(it->second.owner,self);
+                if(ours)it->second.owner=ObjRef::Of(self);
             }
             if(!ours) {
                 Log("EDF41AI hector %p arm %d: %ls made %p, not the plugin's weapon class: this arm shows no weapon",self,i,e.weaponPath[i],obj);
@@ -765,11 +773,11 @@ void Weapons(void* self,Entry& e) noexcept {
                 continue;
             }
             edf41c::SetTeam(obj,team,false);
-            edf41c::WeakSet(e.weapon[i],obj);
+            e.weapon[i]=ObjRef::Of(obj);
             Log("EDF41AI hector %p arm %d: weapon #%d %p made (%ls), team %d",self,i,++weaponsMade,obj,e.weaponPath[i],team);
         }
-        if(!edf41c::WeakAlive(e.weapon[i]))continue;
-        char* obj=static_cast<char*>(e.weapon[i].object);
+        if(!objref::Exists(e.weapon[i]))continue;
+        char* obj=reinterpret_cast<char*>(e.weapon[i].Obj());
         std::memcpy(obj+edf41c::kMatrixAt,m,sizeof(m));
         if(*reinterpret_cast<const std::int32_t*>(obj+kHectorTeamAt)!=team)edf41c::SetTeam(obj,team,false);
         const bool attacking=!dead && e.haveTarget && Attacking(self,i);

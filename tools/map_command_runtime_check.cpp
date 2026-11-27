@@ -26,6 +26,28 @@ bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t) noexc
 bool EnemyControlExit(const enemy_control::Snapshot&) noexcept {return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
+// The map's cues (mapcmd.cpp PlayCue; jetaudio.cpp, jetsound.cpp: not linked here): counted, never heard.
+int cuesPlayed=0;
+namespace audio {
+bool ClipsReady() noexcept { return true; }
+void Beat(float) noexcept {}
+void PlayOnce(int,const Heard&) noexcept { ++cuesPlayed; }
+}
+float GameEffectVolume() noexcept { return 1.0f; }
+// The loadout panel's world (support_dispatch.cpp, support_config.cpp, loadout_store.cpp, support_variants.cpp,
+// support_net.cpp: not linked here): entry 0's hull its own, an interceptor's; the ini a SupportConfig saved into.
+int SupportHullCatalog(int index) noexcept { return index==0 ? 0 : -1; }
+const wchar_t* SupportCallKey(int index) noexcept { return index==0 ? L"INTERCEPTOR" : nullptr; }
+SupportConfig loadoutCfg{};int loadoutSaves=0;std::wstring loadoutSavedKey,loadoutSavedValue,loadoutReadyFile;
+const SupportConfig& SupportCfg() noexcept { return loadoutCfg; }
+bool SaveSupportLoadout(LoadoutField field,const wchar_t* unit,const wchar_t* value,wchar_t* why,std::size_t capacity) noexcept {
+    ++loadoutSaves;loadoutSavedKey=unit;loadoutSavedValue=value;
+    VehicleLoadout l{};
+    if(field!=LoadoutField::vehicle || (*value && !ParseVehicleLoadout(value,VehicleBody::interceptor,&l,why,capacity)))return false;
+    loadoutCfg.vehicle[0]=l;return true;
+}
+bool SupportVariantReady(const wchar_t* file) noexcept { return file && loadoutReadyFile==file; }
+bool SupportPeersHaveVariantFile(std::uint64_t) noexcept { return true; }
 int SupportMenuCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
@@ -38,8 +60,11 @@ std::int32_t SupportPointsMost() noexcept { return 30000; }
 void WarnPreview(int,const float*,const float*,const float*) noexcept {}
 int SupportCatalogStrike(int) noexcept {return -1;}
 bool SupportGroundRun(int) noexcept {return false;}
+float SupportRunLeast(int) noexcept {return 0.0f;}
+bool SupportCatalogFlown(int) noexcept {return false;}
+void SupportStrikeHeading(const float*,float* out) noexcept {out[0]=0.0f;out[1]=0.0f;out[2]=1.0f;}
 int SupportStrikeBarrage(int) noexcept {return -1;}
-SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
+SupportTab SupportCallTab(int) noexcept { return SupportTab::sortie; }
 int forbiddenEntry=-1;   // the entry the stub mission forbids (underground: an aircraft), -1 none
 const wchar_t* SupportCallForbidden(int index) noexcept { return index==forbiddenEntry ? L"underground: soldiers only" : nullptr; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
@@ -108,6 +133,16 @@ unsigned ReadMapCommandWays(const ObjRef& unit,Command* current,float (*at)[3],u
     for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=hostWaysAt[i][c];
     return n;
 }
+// Kind::ping (command_net.cpp, F1-F4): what this machine sent; one heard from the room to hand the map.
+unsigned pingsSent=0,pingKind=99;float pingAt[3]{};
+bool SendMapPing(const ObjRef&,const float* at,unsigned kind) noexcept {
+    ++pingsSent;pingKind=kind;for(int c=0;c<3;++c)pingAt[c]=at[c];return true;
+}
+bool pingWaiting=false;MapPingHeard pingHeard{};
+bool TakeMapPing(MapPingHeard* out) noexcept { if(!pingWaiting)return false;*out=pingHeard;pingWaiting=false;return true; }
+// support_dispatch.cpp: WITHDRAW of an aircraft a call brought.
+const void* withdrawn=nullptr;
+bool SupportWithdrawVehicle(const void* v) noexcept { withdrawn=v;return true; }
 
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}
@@ -160,7 +195,7 @@ int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
-bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool HeliSharesPost() noexcept { return true; }
 // One stand-in squad (when `squadOn`), its last order; the enemies the lock registry would list; the mark npcai.cpp keeps.
@@ -241,7 +276,7 @@ bool NpcSweepOn() noexcept { return sweepState; }
 bool NpcPickupHealthToggle() noexcept { ++healthCalls;healthState=!healthState;return healthState; }
 bool NpcPickupHealthOn() noexcept { return healthState; }
 int NpcMarchShape() noexcept { return 0; }
-const wchar_t* FormationText(int) noexcept { return L"SHAPE"; }
+const wchar_t* FormationText(int,bool) noexcept { return L"SHAPE"; }
 struct StubEnemy { const void* object; float aim[3]; };
 StubEnemy stubEnemies[2]{};int stubEnemyCount=0;
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
@@ -370,15 +405,17 @@ void StatsPage() noexcept {
     const auto click=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
     click();
     Check(statsClicks==1 && statsLastCode==0x30005 && sweepCalls==0,"a click on the stats page's target goes to it, not the button under it");
-    inputstub::keys['Y']=true;MapCommandFrame(in,centre);inputstub::keys['Y']=false;MapCommandFrame(in,centre);
-    Check(sweepCalls==0,"the stats page shown: no order key reaches the units");
+    inputstub::keys['T']=true;MapCommandFrame(in,centre);inputstub::keys['T']=false;MapCommandFrame(in,centre);
+    Check(game.armedSupport<0,"the stats page shown: no order key reaches the map (T arms no fire mission)");
     statsShown=false;statsTargetCode=0;
-    inputstub::keys['Y']=true;MapCommandFrame(in,centre);inputstub::keys['Y']=false;MapCommandFrame(in,centre);
-    Check(sweepCalls==1,"the page shut: Y sweeps again");
+    inputstub::keys['T']=true;MapCommandFrame(in,centre);inputstub::keys['T']=false;MapCommandFrame(in,centre);
+    Check(game.armedSupport==game.supportPick,"the page shut: T arms the fire mission again");
+    click();
+    Check(sweepCalls==1,"...and the sweep's button takes its click once more");
     MapCommandButtons(nullptr,nullptr,0);
 }
-// T on the map: each selected squad that guards cycles its own defence, the march once however many follow; online
-// (orders refused) nothing changes.
+// The card's formation menu (T is FIRE MISSION since Broken Arrow's keys): a defence row goes to the selected squad that
+// guards, a march row to the following ones as one order (the march set once); online the order itself is requested.
 void FormationKey() noexcept {
     static unsigned char a[0x400]{},b[0x400]{},c[0x400]{},d[0x400]{};
     static Game g;g=kNewGame;
@@ -387,31 +424,35 @@ void FormationKey() noexcept {
     for(int i=0;i<4;++i){g.list[i]=Entry{CommandUnit{who[i],"squad",Command{}},Owner::squad};}
     g.sel.Add(a);g.sel.Add(b);g.sel.Add(c);   // d not selected
     guardLeader=a;guardCalls=marchCalls=0;marchSet=-1;
-    Formation(g,true);
-    // One formation order (Order::formation, through Dispatch as every order): the guarding squad cycles its defence,
-    // each following squad sets the march to the one after this machine's now (the same one: the march steps once).
+    // One formation order (Order::formation, through Dispatch as every order).
     const int next=static_cast<int>(npc::formation::Next(npc::formation::FromInt(NpcMarchShape()),false));
-    Check(guardCalls==1 && marchCalls==2 && marchSet==next,"T: the guard squad cycled, the two following squads given one march");
+    PickFormation(g,mapbtn::MenuEntry(false,next));
+    Check(guardCalls==0 && marchCalls==2 && marchSet==next,"a march row: the two following squads given one march, the guard's kept");
+    guardCalls=marchCalls=0;marchSet=-1;
+    PickFormation(g,mapbtn::MenuEntry(true,5));
+    Check(guardCalls==1 && guardSet==5 && marchCalls==0,"a defence row: the guard squad's defence set, the march untouched");
     guardCalls=marchCalls=0;
-    Formation(g,false);
-    Check(guardCalls==0 && marchCalls==0,"T with the plugin off: nothing given");
+    config.enabled=false;
+    PickFormation(g,mapbtn::MenuEntry(false,next));
+    Check(guardCalls==0 && marchCalls==0,"the formation menu with the plugin off: nothing given");
+    config.enabled=true;
     g.sel.Clear();g.sel.Add(a);guardCalls=marchCalls=0;
-    Formation(g,true);
-    Check(guardCalls==1 && marchCalls==0,"T on a guarding squad alone: the march untouched");
+    PickFormation(g,mapbtn::MenuEntry(true,5));
+    Check(guardCalls==1 && marchCalls==0,"a defence row on a guarding squad alone: the march untouched");
     // Online (the user: 「所有功能都要支持联机」): another machine's squad is asked of its authority as the formation order
     // itself (command protocol v7), its parameter with it -- not refused as offline-only any more.
     mapOnline=true;remoteAuthority=b;networkSubmits=0;networkCommand=Command{};
     for(int i=0;i<4;++i)Put<void*>(const_cast<void*>(who[i]),kSelfCtrl,const_cast<void*>(who[i]));
-    g.sel.Clear();g.sel.Add(b);guardCalls=marchCalls=0;
-    Formation(g,true);
-    Check(networkSubmits==1 && networkCommand.order==Order::formation && mapcmd::FormationCycles(networkCommand.param) &&
-          mapcmd::FormationMarchShape(networkCommand.param)==next && !guardCalls && !marchCalls,
-          "T online on another machine's squad: the formation order requested of its authority, nothing done here");
+    g.sel.Clear();g.sel.Add(b);guardCalls=marchCalls=0;marchSet=-1;
+    PickFormation(g,mapbtn::MenuEntry(false,next));
+    Check(networkSubmits==1 && networkCommand.order==Order::formation && !mapcmd::FormationCycles(networkCommand.param) &&
+          mapcmd::FormationMarchShape(networkCommand.param)==next && !guardCalls && !marchCalls && marchSet==next,
+          "a march row online on another machine's squad: the formation order requested of its authority, this machine's march kept with it");
     mapOnline=false;remoteAuthority=nullptr;networkSubmits=0;
 }
 // The map's buttons (hud.cpp draws them and hands their rectangles over): a click on the sweep's button runs it and
 // selects nothing; the guard's arms the next click on the ground (no unit picked by it), clicked again disarms it;
-// Y and O do what the sweep's and the health switch's buttons do.
+// the sweep's and the health switch's buttons are theirs alone (Y and O went with Broken Arrow's keys).
 void ButtonClicks() noexcept {
     ResetMapCommands();view=View{};
     MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;
@@ -419,9 +460,9 @@ void ButtonClicks() noexcept {
     const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     MapCommandView(vp,1280,720);
     MapCommandFrame(in,centre);   // the pointer placed at the centre (640, 360)
-    const float rects[8]={600,340,680,380, 700,340,780,380};
-    const int ids[2]={static_cast<int>(mapbtn::Id::sweep),static_cast<int>(mapbtn::Id::guard)};
-    MapCommandButtons(rects,ids,2);
+    const float rects[12]={600,340,680,380, 700,340,780,380, 800,340,880,380};
+    const int ids[3]={static_cast<int>(mapbtn::Id::sweep),static_cast<int>(mapbtn::Id::guard),static_cast<int>(mapbtn::Id::health)};
+    MapCommandButtons(rects,ids,3);
     sweepCalls=healthCalls=0;sweepState=healthState=false;
     const auto click=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
     click();
@@ -436,10 +477,15 @@ void ButtonClicks() noexcept {
     in.dy=150.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dy=0.0f;   // off the buttons, on the ground
     click();
     Check(!game.armedOrder && game.sel.n==0,"armed, a click on the ground is the guard's point (taken, disarmed), no unit picked");
-    inputstub::keys['Y']=true;MapCommandFrame(in,centre);inputstub::keys['Y']=false;MapCommandFrame(in,centre);
-    Check(sweepCalls==2 && !sweepState,"Y as the sweep's button: called back");
-    inputstub::keys['O']=true;MapCommandFrame(in,centre);inputstub::keys['O']=false;MapCommandFrame(in,centre);
-    Check(healthCalls==1 && healthState,"O flips the health-box switch");
+    inputstub::keys['Y']=true;inputstub::keys['O']=true;MapCommandFrame(in,centre);
+    inputstub::keys['Y']=inputstub::keys['O']=false;MapCommandFrame(in,centre);
+    Check(sweepCalls==1 && healthCalls==0,"Y and O are no map keys any more");
+    in.dx=-100.0f/kPointerGain/(720.0f/1080.0f);in.dy=-150.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    click();
+    Check(sweepCalls==2 && !sweepState,"the sweep's button again: called back");
+    in.dx=200.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
+    click();
+    Check(healthCalls==1 && healthState,"the health-box button flips its switch");
     MapCommandReadout r{};
     Check(PlayerMapCommands(&r) && r.healthOn && !r.sweepOn,"the readout carries the switches for the buttons' labels");
 }
@@ -482,44 +528,32 @@ void MarkFromMap() noexcept {
     MapCommandReadout r{};
     Check(PlayerMapCommands(&r) && r.hover,"an enemy under the pointer is shown as such");
     Check(At<long>(foeCtrl,0xC)==2,"hover pins the enemy's control block without keeping the enemy alive");
-    inputstub::keys['Q']=true;
-    Check(MapCommandEats(true),"Q on an enemy is not the map's turn");
-    Check(At<long>(foeCtrl,0xC)==3,"the pending press holds its own identity token");
-    MapCommandFrame(in,centre);
-    Check(marked==foe && markCalls==1,"Q on an enemy marks it");
-    Check(MapCommandEats(true),"the press held: still not the map's");
-    MapCommandFrame(in,centre);
-    Check(markCalls==1,"Q held: marked once");
-    inputstub::keys['Q']=false;
-    Check(!MapCommandEats(true),"Q let go");
-    MapCommandFrame(in,centre);
-    inputstub::keys['Q']=true;MapCommandEats(true);MapCommandFrame(in,centre);
-    Check(marked==nullptr && markCalls==2,"Q again on the marked enemy lets it go");
-    inputstub::keys['Q']=false;MapCommandEats(true);MapCommandFrame(in,centre);
-    // The pointer off the enemy: Q turns the map, marks nothing.
+    // Q is Broken Arrow's ATTACK-MOVE (map_keys.h): the map has no mark key any more (the right button's focus marks,
+    // below). On an enemy with nothing selected it marks nothing and arms nothing.
+    inputstub::keys['Q']=true;MapCommandFrame(in,centre);
+    Check(At<long>(foeCtrl,0xC)==2,"Q on an enemy takes no identity token of its own (the hover's only)");
+    Check(marked==nullptr && markCalls==0 && !game.armedOrder,"Q on an enemy with nothing selected: nothing marked, nothing armed");
+    inputstub::keys['Q']=false;MapCommandFrame(in,centre);
+    // The pointer off the enemy: none under it.
     in.mouse=true;in.dx=300.0f;MapCommandFrame(in,centre);in.mouse=false;in.dx=0.0f;
     Check(PlayerMapCommands(&r) && !r.hover,"the pointer off the enemy: no enemy under it");
-    inputstub::keys['Q']=true;
-    Check(!MapCommandEats(true),"Q off an enemy turns the map");
-    MapCommandFrame(in,centre);
-    Check(markCalls==2,"Q off an enemy marks nothing");
-    inputstub::keys['Q']=false;MapCommandEats(true);MapCommandFrame(in,centre);
     // H with no mark and nothing under the pointer: refused, nothing marked.
     Put<void*>(squadObj,kSelfCtrl,squadCtrl);squadOn=true;
     game.sel.Clear();game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);
-    // H is HOLD since 2026-10-19 (RTS): with no ground found under the unit it is refused, and it never marks.
+    // H is HOLD FIRE (Broken Arrow's): a switch given at once (param 1: hold), no point asked, nothing marked.
     inputstub::keys['H']=true;MapCommandFrame(in,centre);inputstub::keys['H']=false;MapCommandFrame(in,centre);
-    Check(squadOrders==0 && marked==nullptr,"H (HOLD) with no ground under the unit: refused, nothing marked");
+    Check(squadOrders==1 && squadGot.order==Order::holdFire && squadGot.param==1 && marked==nullptr,
+          "H (HOLD FIRE): the squad told to hold its fire, nothing marked");
     // The right button on the enemy: marked and the squad focuses on it in one press.
     in.mouse=true;in.dx=-300.0f;MapCommandFrame(in,centre);in.mouse=false;in.dx=0.0f;
     inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
-    Check(marked==foe && squadOrders==1 && squadGot.order==Order::focus,"the right button on an enemy marks it and the squad focuses on it");
+    Check(marked==foe && squadOrders==2 && squadGot.order==Order::focus,"the right button on an enemy marks it and the squad focuses on it");
     // On foot: the point goes to the selection kept from the map.
     const float at[3]={50.0f,2.0f,-80.0f};groundReady=true;
-    Check(MapCommandGuardAt(at)==1 && squadOrders==2 && squadGot.order==Order::guard && squadGot.at[0]==50.0f &&
+    Check(MapCommandGuardAt(at)==1 && squadOrders==3 && squadGot.order==Order::guard && squadGot.at[0]==50.0f &&
           squadGot.at[2]==-80.0f,"the mark key's point: the selected squad guards it");
     game.sel.Clear();
-    Check(MapCommandGuardAt(at)==-1 && squadOrders==2,"the mark key's point with nothing selected: no order");
+    Check(MapCommandGuardAt(at)==-1 && squadOrders==3,"the mark key's point with nothing selected: no order");
     squadOn=false;stubEnemyCount=0;groundReady=false;ResetMapCommands();
     Check(At<long>(foeCtrl,0xC)==1,"map reset balances both hover and press weak references");
 }
@@ -556,8 +590,8 @@ void MarkLifetimeAndConfig() noexcept {
             Check(!PlayerMapCommands(&read) && !view.at,"closing discards its readout and previous view immediately");
         }
         stubEnemyCount=0;
-        inputstub::keys['Q']=true;
-        Check(!MapCommandEats(true),"invalid or disabled hover cannot swallow the camera key");
+        inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_RBUTTON]=false;
+        Check(!game.hover,"invalid or disabled hover is dropped before the press");
         MapCommandFrame(in,centre);
         Check(markCalls==0 && !marked,"invalid or disabled hover cannot mark a replacement or removed enemy");
         Check(At<long>(control,0xC)==1,"discarded hover releases its original control block");
@@ -569,9 +603,13 @@ void MarkLifetimeAndConfig() noexcept {
     Put<void*>(foe,kSelfCtrl,control);Put<long>(control,8,1);Put<long>(control,0xC,1);
     stubEnemies[0]=StubEnemy{foe,{0,0,0.5f}};stubEnemyCount=1;
     MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
-    inputstub::keys['Q']=true;Check(MapCommandEats(true),"live target press is latched");
+    squadOn=true;Put<void*>(squadObj,kSelfCtrl,squadCtrl);MapCommandFrame(in,centre);
+    game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);
+    inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);
+    Check(game.rpressing,"live target press is latched");
     Put<void*>(foe,kSelfCtrl,replacement);stubEnemyCount=0;
-    MapCommandFrame(in,centre);
+    inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
+    squadOn=false;
     Check(!markCalls,"replacement after latching is not marked");
 
     // With the Q mark off (the plugin off, or NpcMarkKey=0), even a current registry entry must not be offered as Q/H's
@@ -582,9 +620,9 @@ void MarkLifetimeAndConfig() noexcept {
         config.customNpcAi=false;config.enabled=keyOff;config.npcMarkKey=keyOff ? 0 : 0x51;
         stubEnemyCount=1;
         MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
-        inputstub::keys['Q']=true;inputstub::keys['H']=true;
-        Check(!MapCommandEats(true),"disabled NPC marking does not consume its camera key");
-        MapCommandFrame(in,centre);
+        inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);
+        Check(!game.hover,"disabled NPC marking offers no enemy to the right button");
+        inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
         MapCommandReadout read{};
         Check(PlayerMapCommands(&read) && !read.hover && !markCalls,"disabled marking exposes no target or action");
     }
@@ -608,10 +646,22 @@ void SupportInput() noexcept {
     inputstub::keys[VK_OEM_6]=true;MapCommandFrame(in,centre);
     Check(game.supportPick==1 && !supportCalls,"catalog choice does not dispatch a unit");
     MapCommandFrame(in,centre);Check(game.supportPick==1,"holding next advances once");
-    inputstub::keys[VK_OEM_6]=false;inputstub::keys['C']=true;MapCommandFrame(in,centre);
+    inputstub::keys[VK_OEM_6]=false;inputstub::keys['T']=true;MapCommandFrame(in,centre);
+    Check(game.armedSupport==1 && !supportCalls,"T (FIRE MISSION) arms the chosen support, nothing called yet");
+    MapCommandFrame(in,centre);Check(game.armedSupport==1,"T held: armed once, not toggled every frame");
+    inputstub::keys['T']=false;MapCommandFrame(in,centre);
+    // Its point's click: the left button with the mouse, the pad's A at the screen's centre (no view here: the pad's).
+    Check(MapPlaceHoldsPad(),"T armed: the pad's A / B are the arming's (the map's centring and shutting wait)");
+    in.pad=true;
+    const auto pad=[&](WORD b){in.buttons=b;MapCommandFrame(in,centre);in.buttons=0;MapCommandFrame(in,centre);};
+    pad(XINPUT_GAMEPAD_A);
     Check(supportCalls==1 && supportChosen==1 && std::fabs(supportTarget[0]-80)<0.01f && std::fabs(supportTarget[2]-120)<0.01f,
-          "C dispatches chosen support to map ground without selected units");
-    MapCommandFrame(in,centre);Check(supportCalls==1,"holding call does not spawn every frame");
+          "armed, the pad's A dispatches it to the map ground at the screen's centre without selected units");
+    MapCommandFrame(in,centre);Check(supportCalls==1 && game.armedSupport<0 && !MapPlaceHoldsPad(),"called once, disarmed, A the map's again");
+    inputstub::keys['T']=true;MapCommandFrame(in,centre);inputstub::keys['T']=false;MapCommandFrame(in,centre);
+    pad(XINPUT_GAMEPAD_B);
+    Check(supportCalls==1 && game.armedSupport<0,"the pad's B: the arming left, nothing called");
+    in.pad=false;
     MapCommandReadout read{};
     Check(PlayerMapCommands(&read) && read.supports==3 && read.support[1].name[0] && read.supportPick==1 && read.noteFresh,
           "the catalog, its pick and the support result published for the HUD's bar");
@@ -793,7 +843,7 @@ void PlacePanel() noexcept {
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));ResetMapCommands();
 }
 // Only the units that take orders are picked (the user, 2026-10-09: "总有一些我不能指挥的"; "坦克上的…框选的时候应该去重"):
-// Tab passes over a script's squad and a riding one, a script's squad's panel row says why instead of selecting it, a
+// Ctrl+A passes over a script's squad and a riding one, a script's squad's panel row says why instead of selecting it, a
 // riding squad's row still picks it (for its dismount), and the log of a refused order counts why per unit.
 void PickOnlyCommandable() noexcept {
     ResetMapCommands();view=View{};config=Config{};
@@ -802,10 +852,12 @@ void PickOnlyCommandable() noexcept {
     MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;float centre[3]{};
     const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
-    const auto tab=[&]{inputstub::keys[VK_TAB]=true;MapCommandFrame(in,centre);inputstub::keys[VK_TAB]=false;MapCommandFrame(in,centre);};
+    // Ctrl+A (Tab is Broken Arrow's sub-selection now: the kinds within the selection, never a unit outside it).
+    const auto tab=[&]{inputstub::keys[VK_CONTROL]=inputstub::keys['A']=true;MapCommandFrame(in,centre);
+                       inputstub::keys[VK_CONTROL]=inputstub::keys['A']=false;MapCommandFrame(in,centre);};
     tab();
     MapCommandReadout r{};
-    Check(!game.sel.n && PlayerMapCommands(&r) && r.count==1 && r.pickable==0,"Tab passes over a script's squad (shown, not picked)");
+    Check(!game.sel.n && PlayerMapCommands(&r) && r.count==1 && r.pickable==0,"Ctrl+A passes over a script's squad (shown, not picked)");
     const float panel[4]={500,300,900,500},row[4]={600,340,680,380};
     MapCommandUiPanels(panel,1);ObjRef identity=ObjRef::Of(squadObj);MapCommandSquadButtons(row,&identity,1);
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
@@ -816,9 +868,9 @@ void PickOnlyCommandable() noexcept {
     Check(game.sel.Has(squadObj),"a riding squad's row picks it (its dismount)");
     game.sel.Clear();RememberSelection(game);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
     tab();
-    Check(!game.sel.n,"Tab passes over a riding squad (its vehicle is the unit)");
+    Check(!game.sel.n,"Ctrl+A passes over a riding squad (its vehicle is the unit)");
     squadRiding=false;tab();
-    Check(game.sel.Has(squadObj),"Tab picks a squad on foot that takes orders");
+    Check(game.sel.Has(squadObj),"Ctrl+A picks a squad on foot that takes orders");
     // The squad panel's summary row: a click opens the panel (published), another folds it.
     const float foldRow[4]={600,400,680,420};
     MapCommandUiPanels(panel,1);MapCommandSquadFold(foldRow);
@@ -882,9 +934,9 @@ void RtsClicks() noexcept {
     right();
     Check(squadOrders==1 && squadGot.order==Order::move,"right click on the ground: the selection moves there");
     inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);
-    in.dx=40.0f;MapCommandFrame(in,centre);in.dx=0.0f;   // the map turned by a right drag
+    in.dx=40.0f;MapCommandFrame(in,centre);in.dx=0.0f;   // a right drag too short for a line (mapcmd_logic.h kLineDragLeast)
     inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
-    Check(squadOrders==1,"a right drag turns the map: no order");
+    Check(squadOrders==1,"a right drag too short to lay a line, and no click: no order");
     unsigned char foe[0x400]{},foeCtrl[0x10]{};
     Put<void*>(foe,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
     // The pointer is at x 1280/2 + 40 * (720/1080) px now: an enemy under it.
@@ -894,13 +946,21 @@ void RtsClicks() noexcept {
     right();
     Check(squadOrders==2 && squadGot.order==Order::focus && marked==foe,"right click on an enemy: marked and attacked");
     stubEnemyCount=0;MapCommandFrame(in,centre);npcmark::Assign(game.hover,{});
-    inputstub::keys['Z']=true;MapCommandFrame(in,centre);inputstub::keys['Z']=false;MapCommandFrame(in,centre);
-    Check(squadOrders==3 && squadGot.order==Order::attackMove,"Z: an attack-move to the pointer");
+    const auto left=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
+    // Q (Broken Arrow's ATTACK-MOVE): armed, the next left click its point.
+    inputstub::keys['Q']=true;MapCommandFrame(in,centre);inputstub::keys['Q']=false;MapCommandFrame(in,centre);
+    Check(game.armedOrder && game.armed==Order::attackMove && squadOrders==2,"Q arms an attack-move, nothing given yet");
+    left();
+    Check(squadOrders==3 && squadGot.order==Order::attackMove && !game.armedOrder,"Q, then a left click: an attack-move there");
+    // F (FAST MOVE) the same way, given as its own order.
+    inputstub::keys['F']=true;MapCommandFrame(in,centre);inputstub::keys['F']=false;MapCommandFrame(in,centre);
+    left();
+    Check(squadOrders==4 && squadGot.order==Order::fastMove,"F, then a left click: a fast move there");
+    squadOrders=3;
     const float rect[4]={1100,600,1180,640};const int id=static_cast<int>(mapbtn::Id::move);
     MapCommandButtons(rect,&id,1);
     const float back=game.pointer.x;
     in.dx=(1140.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(620.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
-    const auto left=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
     left();
     Check(game.armedOrder && game.armed==Order::move && squadOrders==3,"the move button arms the next left click");
     right();
@@ -970,6 +1030,48 @@ void RtsClicks() noexcept {
         Check(supportCalls==1 && supportChosen==1 && supportLoad.count==4 && supportLoad.soldier[3]==SupportWeapon::fencerCannon &&
               game.armedSupport<0 && game.composeEntry<0,"the left click on the map sends the composed load; the panel closes");
         MapCommandComposeButtons(nullptr,nullptr,0);
+    }
+    // The loadout panel (the user, 2026-11-27: 「包括m里面装配东西」): entry 0 (an interceptor hull) armed lists stock (set
+    // now) and the interceptor variants the installer wrote (mod_file), their states; a row's click saves its value as
+    // SupportVehicle_INTERCEPTOR (installer menu 8's key), lights it; disarmed, the panel closes.
+    {
+        static const wchar_t* const kValues[]={L"AAM_M:4,AAM_M:4,AAM_L:2",L"AGM:4,AGM:4,MK82:2"};
+        wchar_t files[2][maploadout::kFileMost]{};VehicleLoadout l[2]{};wchar_t why[80]{};
+        bool made=true;
+        for(int i=0;i<2;++i)made=made && ParseVehicleLoadout(kValues[i],VehicleBody::interceptor,&l[i],why,80) &&
+                                 VehicleVariantFile(l[i],files[i],maploadout::kFileMost);
+        Check(made,"loadout: the variant files named");
+        mod_file::dirs[0].files={L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",files[0],L"EDF6VC_LO_FIGHTER_0000000000000001.SGO",files[1]};
+        loadoutReadyFile=files[0];loadoutCfg=SupportConfig{};loadoutSaves=0;supportCalls=0;
+        const float row0[4]={20,160,240,186};const int entry0=0;
+        MapCommandSupportButtons(row0,&entry0,1);
+        in.dx=(100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(173.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        MapCommandFrame(in,centre);
+        MapCommandReadout rl{};
+        Check(game.armedSupport==0 && PlayerMapCommands(&rl) && rl.loadout.entry==0 && rl.loadout.rows==3,"loadout: armed, the panel lists stock and the two interceptor variants");
+        Check(rl.loadout.row[0].state==maploadout::State::stock && rl.loadout.row[0].current && !rl.loadout.row[1].current &&
+              rl.loadout.row[1].state==maploadout::State::ready && rl.loadout.row[2].state==maploadout::State::next &&
+              !std::wcscmp(rl.loadout.row[1].value,kValues[0]),"loadout: stock set now; one preloaded (ready), one the next mission's");
+        const float hits[12]={900,300,1180,326, 900,330,1180,356, 900,360,1180,386};const int codes[3]={0,1,2};
+        MapCommandSupportButtons(row0,&entry0,1);MapCommandLoadoutButtons(hits,codes,3);
+        const int cuesBefore=cuesPlayed;
+        in.dx=(1000.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(343.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();
+        MapCommandFrame(in,centre);
+        Check(loadoutSaves==1 && loadoutSavedKey==L"INTERCEPTOR" && loadoutSavedValue==kValues[0] && game.armedSupport==0 && !supportCalls,
+              "loadout: a row's click saves SupportVehicle_INTERCEPTOR; still armed, nothing called");
+        Check(PlayerMapCommands(&rl) && rl.loadout.rows==3 && rl.loadout.row[1].current && !rl.loadout.row[0].current &&
+              std::wcsstr(game.note,kValues[0]) && cuesPlayed==cuesBefore+1,"loadout: the saved row lit, the note says it, the ack heard");
+        MapCommandFrame(in,centre);
+        left();   // the lit row again: nothing saved
+        Check(loadoutSaves==1,"loadout: the row set now: no save");
+        MapCommandLoadoutButtons(nullptr,nullptr,0);
+        in.dx=(100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(173.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+        left();   // the row again: disarmed
+        MapCommandFrame(in,centre);
+        Check(game.armedSupport<0 && PlayerMapCommands(&rl) && rl.loadout.entry<0 && rl.loadout.rows==0,"loadout: disarmed, the panel closes");
+        mod_file::dirs[0].files.clear();
     }
     MapCommandSupportButtons(nullptr,nullptr,0);MapCommandButtons(nullptr,nullptr,0);
     // Nothing selected: the right button does nothing.
@@ -1100,8 +1202,10 @@ void SelectionCapabilityMask() noexcept {
     const float point[3]{};Publish(selection,true,true,point,true);MapCommandReadout r{};PlayerMapCommands(&r);
     Check(r.allowedOrders==((1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::move))|
                             (1u<<static_cast<unsigned>(Order::attackMove))|(1u<<static_cast<unsigned>(Order::hold))|
-                            (1u<<static_cast<unsigned>(Order::follow))|1u) && !r.selectedSquads,
-        "tank selection enables following, point orders and release");
+                            (1u<<static_cast<unsigned>(Order::follow))|(1u<<static_cast<unsigned>(Order::fastMove))|
+                            (1u<<static_cast<unsigned>(Order::reverseMove))|(1u<<static_cast<unsigned>(Order::holdFire))|1u) &&
+          !r.selectedSquads,
+        "tank selection enables following, point orders (fast, reverse too), hold fire and release");
     selection.list[0].owner=Owner::squad;selection.list[0].u.locked=true;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(!r.allowedOrders && !r.selectedSquads,"script locked squad exposes no executable buttons");
     // The card shows no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了").
@@ -1128,7 +1232,8 @@ void SelectionCapabilityMask() noexcept {
 // The RTS model (the user, 2026-10-19: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): a plain left
 // drag boxes, Ctrl+N keeps a group that N selects again (twice: the map centres on it), a double click takes the
 // clicked unit's kind, a group follows a squad through its leader's death, Shift + right click queues the moves that
-// go on frame by frame with the map shut, H holds each unit where it stands, the right button on the player follows.
+// go on frame by frame with the map shut, the HOLD button holds each unit where it stands, the right button on the
+// player follows, H holds their fire.
 void RtsGroups() noexcept {
     ResetMapCommands();view=View{};config=Config{};groundReady=true;
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));
@@ -1225,15 +1330,20 @@ void RtsGroups() noexcept {
     Check(squadOrders==2,"once a frame");
     // Another order without Shift drops what was queued (the map open again: its view drawn).
     MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
-    press('X');
+    press('E');
     squadPos[0]=squadGot.at[0];squadPos[2]=squadGot.at[2];
     ++stubFrame;MapCommandQueueTick();
-    Check(squadOrders==3 && squadGot.order==Order::none,"X: stopped, its queue gone (no point given after it)");
-    // H: each unit guards its own spot.
+    Check(squadOrders==3 && squadGot.order==Order::none,"E: stopped, its queue gone (no point given after it)");
+    // The card's HOLD: each unit guards its own spot (H is HOLD FIRE now).
     std::memcpy(squadPos,p1,12);
     game.sel.Clear();game.sel.Add(squadObj);RememberSelection(game);
-    press('H');
-    Check(squadOrders==4 && squadGot.order==Order::hold && squadGot.at[0]==p1[0] && squadGot.at[2]==p1[2],"H: HOLD where it stands");
+    {
+        const float holdRect[4]={1100,600,1180,640};const int holdId=static_cast<int>(mapbtn::Id::hold);
+        MapCommandButtons(holdRect,&holdId,1);
+        move(1140.0f,620.0f);press(VK_LBUTTON);
+        MapCommandButtons(nullptr,nullptr,0);
+    }
+    Check(squadOrders==4 && squadGot.order==Order::hold && squadGot.at[0]==p1[0] && squadGot.at[2]==p1[2],"the HOLD button: HOLD where it stands");
     // The right button on the player's own mark: FOLLOW.
     static unsigned char me[0x400]{},meCtrl[0x10]{};
     Put<void*>(me,kSelfCtrl,meCtrl);const float mine[3]={0.0f,0.0f,0.0f};std::memcpy(me+kPosition,mine,12);
@@ -1241,6 +1351,9 @@ void RtsGroups() noexcept {
     move(640.0f,360.0f);press(VK_RBUTTON);
     Check(squadOrders==5 && squadGot.order==Order::follow,"the right button on the player: FOLLOW");
     in.requester=ObjRef{};
+    // H: HOLD FIRE, at once, on (none of the selection holds yet).
+    press('H');
+    Check(squadOrders==6 && squadGot.order==Order::holdFire && squadGot.param==1,"H: hold fire on, given at once");
     // Ctrl+A: every unit.
     game.sel.Clear();RememberSelection(game);
     inputstub::keys[VK_CONTROL]=true;press('A');inputstub::keys[VK_CONTROL]=false;

@@ -11,7 +11,9 @@
 // '<model>.hkt'); MOPP and storage-extended meshes (4.1's) become hknpCompressedMeshShape (0x160BE90). Research:
 // jobs/4bf89026/tmp/madload/REPORT.md. The migrated container lives as long as the process (16 bytes per map load;
 // the bodies built from it reference what it holds).
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 
 namespace crew {

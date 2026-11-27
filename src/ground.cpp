@@ -25,7 +25,15 @@
 // Per crawler the module keeps a Robo, keyed by its ObjRef (a new object at an old address is a new crawler),
 // dropped at a new mission (ResetGround) and reused only once its crawler has not been driven for kStaleMs:
 // a full table drives no new crawler rather than drop a live one.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "ground.h"
+#include "heli.h"
+#include "damagestats.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"
@@ -270,7 +278,8 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     const float pitch=Pitch(r,v,ref,aim,ms);
     // Fire: one map ray per frame from the reference barrel.
     bool fire[kGuns]{};
-    if(aim && Cfg().groundFire && ref) {
+    // HOLD FIRE (the map's H; mapcmd.h UnitHoldsFire): it aims as ever, and fires only once hurt.
+    if(aim && Cfg().groundFire && ref && !UnitHoldsFire(v)) {
         float hit[3];
         const float d=Dist(ref->pos,aim);
         const float wall=MapRay(ref->pos,aim,hit);
@@ -327,6 +336,8 @@ int GroundCommandUnits(CommandUnit* out,int most) noexcept {
 bool GroundCommand(const void* vehicle,const Command& c) noexcept {
     for(auto& r:robos) {
         if(r.ref.obj!=vehicle || !Commandable(r,GameMs()))continue;
+        // Its one post (mapcmd_logic.h VehicleCommandOf): guard, follow, release; HOLD FIRE is the table's (mapcmd.cpp Give).
+        if(c.order!=Order::none && c.order!=Order::guard && c.order!=Order::follow)return false;
         r.cmd=c;
         Log("GROUND v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
             c.at[0],c.at[1],c.at[2]);

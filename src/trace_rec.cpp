@@ -6,7 +6,13 @@
 // round, which War Thunder recordings were read), and what it did (its sounds and Debug's tally: jetaudio.cpp's hooks).
 // tests/vehsound_replay_test.cpp plays a recording back through the same vehsound.cpp, its memory at the very addresses
 // it had in the game. Nothing changes in the game: the recorder only reads (Readable first), on the game thread.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "sound.h"
+#include "subcarrier.h"
 #include "jetaudio.h"
 #include "vhud.h"
 #include "heli.h"

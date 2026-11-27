@@ -21,7 +21,10 @@
 // its settled flags (+0x2650 position, +0x2651 rotation; set once corrected, cleared by each packet), stale = slot 51's
 // frame count (+0x2624, seat 0's input block cleared at 30, then 0 again), tx = the position
 // throttle (+0x2660: countdown, interval, min, max) and how far the body is from the last sent position (+0x26B0).
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 #include "gunnerrecoil.h"
 #include "heli.h"
 #include "memory.h"

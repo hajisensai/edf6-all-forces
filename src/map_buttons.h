@@ -20,9 +20,11 @@ enum class Id : int {
     move, attackMove, guard, follow, release, engage, focus, board, dismount, dismiss, recruit,   // the orders
     withdraw,                                                                                    // ...a squad's transport sent off
     dismountAll,                                                                                 // ...every rider off, its crew too
-    hold,                                                                                        // ...each unit where it stands (H)
+    hold,                                                                                        // ...each unit where it stands
+    fastMove, reverseMove, unloadAt, holdFire, altitude, sprint, smoke, decoy,                   // ...Broken Arrow's (2026-11-27)
     formation,                                                                                   // the squads' shape
     sweep, health,                                                                               // the box sweep, its health-box switch
+    pace,                                                                                        // the paced march's switch
     count
 };
 constexpr int kCount=static_cast<int>(Id::count);
@@ -33,8 +35,12 @@ constexpr int kCount=static_cast<int>(Id::count);
 // one button that reads as the squad's state. STOP (release) apart from DISMISS it was mistaken for.
 // SPLIT / JOIN went on 2026-10-19 (the user: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): the RTS
 // groups (Ctrl+number) put any units together without changing the squads (mapcmd_logic.h GroupKey). HOLD came.
-constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::hold,Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,
-                           Id::dismiss,Id::release,Id::formation,Id::sweep,Id::health};
+// Broken Arrow's (the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」): its orders on the keys (map_keys.h) and
+// on the card too, GUARD back as the card's (an attack-move's guard at a point clicked), the paced march's switch a
+// button. SMOKE and DECOY shown greyed for a selection that has none (mapcmd.cpp Takes: the order unavailable).
+constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::guard,Id::fastMove,Id::reverseMove,Id::unloadAt,Id::hold,Id::holdFire,
+                           Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,Id::dismiss,Id::release,
+                           Id::altitude,Id::sprint,Id::smoke,Id::decoy,Id::formation,Id::sweep,Id::health,Id::pace};
 constexpr int kCardCount=static_cast<int>(sizeof(kCardOrder)/sizeof(kCardOrder[0]));
 constexpr int kOrders=static_cast<int>(Id::formation);
 struct Rect { float x0,y0,x1,y1; };
@@ -44,7 +50,8 @@ inline mapcmd::Order OrderOf(Id b) noexcept {
     using mapcmd::Order;
     static const Order kOrder[kOrders]={Order::move,Order::attackMove,Order::guard,Order::follow,Order::none,Order::engage,
                                          Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit,Order::withdraw,
-                                         Order::dismountAll,Order::hold};
+                                         Order::dismountAll,Order::hold,Order::fastMove,Order::reverseMove,Order::unloadAt,
+                                         Order::holdFire,Order::altitude,Order::sprint,Order::smoke,Order::decoy};
     const int i=static_cast<int>(b);
     return i>=0 && i<kOrders ? kOrder[i] : Order::none;
 }
@@ -57,12 +64,19 @@ inline bool OnCard(Id b) noexcept {
 // An order button arms a click on the map (its point) instead of acting at once.
 inline bool Arms(Id b) noexcept { return IsOrder(b) && mapcmd::PointOrder(OrderOf(b)); }
 // Shown on the card: an order the selection takes (`allowedOrders`: Order bits), a squad tool with squads selected,
-// the sweep and its switch always (they work on the recruited squads with nothing selected).
+// the sweep and its switch always (they work on the recruited squads with nothing selected). SMOKE and DECOY with any
+// order taken (a selection), greyed (Available) when it has none of them.
 inline bool Shown(Id b,std::uint32_t allowedOrders,bool squadTools) noexcept {
     if(!OnCard(b))return false;
+    if(b==Id::smoke || b==Id::decoy)return allowedOrders!=0;
     if(IsOrder(b))return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
     if(b==Id::sweep || b==Id::health)return true;
     return squadTools;
+}
+// A shown button that does something for the selection (SMOKE / DECOY with none of it: drawn greyed, its click says so).
+inline bool Available(Id b,std::uint32_t allowedOrders) noexcept {
+    if(!IsOrder(b))return true;
+    return (allowedOrders&(1u<<static_cast<unsigned>(OrderOf(b))))!=0;
 }
 
 // Lays `n` buttons of widths `w[i]` (px, the label's own plus its padding) out in rows `rowH` high, `gap` apart, each
@@ -95,6 +109,67 @@ inline int Flow(const float* w,int n,float width,float bottom,float rowH,float g
         i=k;
     }
     return rows;
+}
+
+// Broken Arrow's action panel (the user, 2026-11-27: 「这个操作方式和显示都抄抄断箭吧」): `n` cells alike, `cellW` x `rowH`,
+// `gap` apart, in the screen's bottom-right corner (the right column at `width-margin`), as many columns as fit in
+// `share` of the width less the margin (at least one, at most `n`); filled left to right from the top row, the bottom
+// row's bottom at `bottom`. A cell wider than the screen less its margins is cut to it. Rows past the screen's top are
+// left out (their cells zero: x1 == x0). Returns the rows used.
+inline int Grid(int n,float cellW,float width,float share,float bottom,float rowH,float gap,float margin,Rect* out) noexcept {
+    for(int i=0;i<n;++i)out[i]=Rect{};
+    if(n<=0)return 0;
+    const float cw=cellW<width-2.0f*margin ? cellW : width-2.0f*margin;
+    if(!(cw>0.0f))return 0;
+    const float room=width*share-margin;
+    int cols=static_cast<int>((room+gap)/(cw+gap));
+    if(cols<1)cols=1;
+    if(cols>n)cols=n;
+    int rows=(n+cols-1)/cols;
+    const int most=static_cast<int>((bottom+gap)/(rowH+gap));
+    if(rows>most)rows=most<0 ? 0 : most;
+    const float x0=width-margin-static_cast<float>(cols)*cw-static_cast<float>(cols-1)*gap;
+    for(int r=0;r<rows;++r) {
+        const float y1=bottom-static_cast<float>(rows-1-r)*(rowH+gap),y0=y1-rowH;
+        for(int c=0;c<cols;++c) {
+            const int i=r*cols+c;
+            if(i>=n)break;
+            const float x=x0+static_cast<float>(c)*(cw+gap);
+            out[i]=Rect{x,y0,x+cw,y1};
+        }
+    }
+    return rows;
+}
+
+// Broken Arrow's selection panel: `n` cards `cardW` x `cardH`, `gap` apart, from `left` rightwards up to `right`, rows
+// upwards from `bottom` (the bottom one first) no higher than `top`. Returns the cards placed (the rest have no room).
+inline int Cards(int n,float cardW,float cardH,float left,float right,float top,float bottom,float gap,Rect* out) noexcept {
+    const int cols=static_cast<int>((right-left+gap)/(cardW+gap));
+    if(cols<1 || n<=0)return 0;
+    int placed=0;
+    for(int i=0;i<n;++i) {
+        const int r=i/cols,c=i%cols;
+        const float y1=bottom-static_cast<float>(r)*(cardH+gap),y0=y1-cardH;
+        if(y0<top)break;
+        const float x=left+static_cast<float>(c)*(cardW+gap);
+        out[i]=Rect{x,y0,x+cardW,y1};
+        ++placed;
+    }
+    return placed;
+}
+
+// The selection's cards (Cards): the selected units grouped by kind (mapcmd::SameKind) and owner, in the order first
+// seen; each group's first unit `first` and its count. Returns the groups (at most `most`).
+struct CardGroup { int first; int count; };
+inline int GroupCards(const char* const* kind,const int* owner,int n,CardGroup* out,int most) noexcept {
+    int k=0;
+    for(int i=0;i<n;++i) {
+        int at=-1;
+        for(int j=0;j<k && at<0;++j)if(owner[out[j].first]==owner[i] && mapcmd::SameKind(kind[out[j].first],kind[i]))at=j;
+        if(at>=0)++out[at].count;
+        else if(k<most)out[k++]=CardGroup{i,1};
+    }
+    return k;
 }
 
 // The button under (x, y) (-1 none) of the `n` laid out.
@@ -192,6 +267,24 @@ inline int Column(const Group* g,int rows,float x0,float x1,float top,float bott
         ++placed;
     }
     return placed;
+}
+
+// The rows of a tab that fit between `top` and `bottom` (Column's count for rows enough).
+inline int ColumnFit(float top,float bottom,float rowH,float gap) noexcept {
+    if(bottom<top+rowH || rowH<=0.0f)return 0;
+    return 1+static_cast<int>((bottom-top-rowH)/(rowH+gap));
+}
+// The first row a tab longer than its column shows (2026-11-27: every flown support in one tab, more rows than fit): the
+// one it scrolled to (`top`), kept inside [0, rows - fit], moved the least that puts row `reveal` in the window (-1: none;
+// [ ] picked an entry the window does not show).
+inline int ColumnWindow(int rows,int fit,int top,int reveal) noexcept {
+    const int most=rows>fit ? rows-fit : 0;
+    top=top<0 ? 0 : top>most ? most : top;
+    if(reveal>=0 && reveal<rows && fit>0) {
+        if(reveal<top)top=reveal;
+        else if(reveal>=top+fit)top=reveal-fit+1;
+    }
+    return top;
 }
 
 // The bar's tabs (support_call.h SupportTab) in its hit list: a tab's code, below every catalog entry (-1 is none).

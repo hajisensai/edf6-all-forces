@@ -9,13 +9,15 @@
 
 namespace crew {
 namespace support_net { struct Plan; }
+struct ObjRef;
 // A warning's look: a strike's area (red), a route (cyan, an arrow at its end), a ring where a support circles (cyan).
 namespace warning { enum class Look : unsigned char { strike, route, orbit }; }
 
 // Game thread.
 void WarnBarrage(int kind,const float* target,const float* heading,int endFrame) noexcept;   // barrage.cpp, at its start
 void WarnUltimate(const float* at,unsigned long long ms) noexcept;                           // ultimate.cpp, at its start
-void WarnDeployment(const support_net::Plan& plan) noexcept;                                  // support_dispatch.cpp, applied
+// support_dispatch.cpp, applied: `lead` its first unit made (its route drawn on from it, the warning gone with it).
+void WarnDeployment(const support_net::Plan& plan,const ObjRef& lead) noexcept;
 // The map's preview (mapcmd.cpp, each frame a support is armed and the pointer is on the ground): catalog entry `catalog`
 // at `target`; -1 none. Kept while asked for again within a moment.
 void WarnPreview(int catalog,const float* target,const float* strikeHeading,const float* runStart=nullptr) noexcept;

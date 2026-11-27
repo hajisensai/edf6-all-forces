@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <string>
+#include "../src/edf_layout.h"
 
 namespace crew::enemy_native {
 constexpr NativeProfile fixtureProfiles[]={

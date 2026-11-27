@@ -35,7 +35,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', type=Path, required=True)
     parser.add_argument('--negative-controls', action='store_true')
+    # Every case is a compile of its own (cl /O2 of the fixture and the plugin source it includes, ~5 s), so the 27 ran
+    # one after another for minutes under one ctest: ctest's playerjet_recovery_<I> run the I-th of N shares side by side.
+    parser.add_argument('--shard', default='0/1', help='I/N: every N-th case from the I-th (0 <= I < N)')
     args = parser.parse_args()
+    index, count = (int(x) for x in args.shard.split('/'))
+    if not 0 <= index < count:
+        raise ValueError(f'--shard {args.shard}: want I/N with 0 <= I < N')
     root = Path(__file__).resolve().parents[1]
     build = args.build_dir.resolve()
     libraries = list((build / 'common').rglob('edf6common.lib'))
@@ -173,13 +179,12 @@ def main() -> int:
                 if changed:
                     changed.write_text(original, encoding='utf-8')
 
-        run_case('production', 'playerjet_recovery_test')
-        run_case('production-hangar', 'hangar_recover_test')
+        cases = [('production', 'playerjet_recovery_test', None), ('production-hangar', 'hangar_recover_test', None)]
         if args.negative_controls:
-            for name, relative, old, new in controls:
-                run_case(name, 'playerjet_recovery_test', (relative, old, new))
-            for name, relative, old, new in hangar_controls:
-                run_case(name, 'hangar_recover_test', (relative, old, new))
+            cases += [(name, 'playerjet_recovery_test', (relative, old, new)) for name, relative, old, new in controls]
+            cases += [(name, 'hangar_recover_test', (relative, old, new)) for name, relative, old, new in hangar_controls]
+        for name, fixture, mutation in cases[index::count]:
+            run_case(name, fixture, mutation)
     return 0
 
 

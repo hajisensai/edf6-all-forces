@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
+#include "../src/edf_layout.h"
 
 namespace crew::enemy_native {
 constexpr NativeProfile productionProfiles[]={

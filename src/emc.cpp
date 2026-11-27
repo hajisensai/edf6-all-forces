@@ -14,7 +14,19 @@
 // Everything is fired by the EMC: its side's enemies only (the IFC's team is its owner's), its kills.
 // An NPC driver's EMC is stock (its AI pulls the weapon itself); so is the player's without the files (tools/make_emc.py).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "emc.h"
+#include "heli.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
+#include "py_consts.inc"
 #include "body506.h"
 #include "emc_plan.h"
 #include "layout.h"
@@ -73,9 +85,10 @@ struct SoundHandle { void* ctrl; void* inst; };   // 16 bytes, zeroed before a p
 constexpr float kAhead=3.0f,kLead=3.0f,kInto=2.0f,kBlastLead=4.0f;
 constexpr float kBreakSec=0.1f;
 // m: the blast SGO's own radius (vcobjects.py EMC_BLAST_RADIUS), what it bursts with when RoundBlast cannot write EmcBlastRadius.
-constexpr float kSgoBlastRadius=300.0f;
+constexpr float kSgoBlastRadius=pyconst::kEmcBlastRadius;
 // The glow while it charges: from kSightThin to kSightThick as the charge fills (vcobjects.py EMC_SIGHT_SIZE is the first).
-constexpr float kSightThin=0.6f,kSightThick=4.0f;
+constexpr float kSightThin=pyconst::kEmcSightSize,kSightThick=4.0f;
+static_assert(kSightThick>kSightThin,"the glow thickens as the charge fills");
 constexpr ULONGLONG kStaleMs=2000;    // an EMC not seen this long is gone: its slot is free
 constexpr ULONGLONG kGoneMs=250;      // ...and its charge loop and rounds stopped after this (EmcTick)
 constexpr ULONGLONG kLogMs=1000;      // Debug: the beam's line at most this often

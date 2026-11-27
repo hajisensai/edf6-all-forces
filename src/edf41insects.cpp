@@ -23,7 +23,10 @@
 //
 // The keys are read the way the classes read their own (classic SGO): 0x528A0(&object+0xA0, name) gives the 12-byte node
 // {type (0 array, 2 float), count, offset of the first child / the float's bits} or null.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 
 #include <atomic>

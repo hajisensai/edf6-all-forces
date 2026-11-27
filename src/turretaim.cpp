@@ -3,7 +3,17 @@
 // turns the player's turret: this plugin says when its turret camera turns a seat after the view (CameraTurret), that
 // one when it turned it this frame (Steers, turretcam.cpp asks). Either DLL alone: nothing found, nothing drawn, the
 // other works as before.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "highcam.h"
+#include "hud.h"
+#include "map.h"
+#include "sightzoom_api.h"
+#include "turretcam_api.h"
+#include "payload.h"
 #include "turretaim.h"
 #include "firstperson.h"
 #include "memory.h"

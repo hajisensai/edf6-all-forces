@@ -41,7 +41,18 @@
 // angular velocity the car step sets (setAngVel at 0x6746C6, physics.cpp ChassisSetAngVel) loses its roll part,
 // replaced by a rate that brings the roll back to level (SidecarLevel): no lean in a turn, no falling over.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "boarding.h"
+#include "hud.h"
+#include "sidecar.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "exit_ground.h"
 #include "heli.h"
@@ -437,7 +448,7 @@ void __fastcall PassengerBlastDamage(void* damage,const void* target,void* info)
     __try {
         const auto targetCtrl=At<const unsigned char*>(target,8);
         const void* object=At<const void*>(target,0);
-        if(targetCtrl && At<int>(targetCtrl,8)>0 && object && At<const void*>(object,kSelfCtrl)==targetCtrl)
+        if(objref::Identity(ObjRef{object,targetCtrl})>=objref::Life::removed)
             pass=SidecarBulletPass(At<const void*>(info,0x10),object,At<const void*>(info,0x18));
     } __except(EXCEPTION_EXECUTE_HANDLER) { pass=false; }
     if(!pass)reinterpret_cast<DamageFn>(image+kDamage)(damage,target,info);

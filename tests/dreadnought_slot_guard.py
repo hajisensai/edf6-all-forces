@@ -16,14 +16,17 @@
     BoardBay over that m -> SendOut(..., true)), the board press reaching it from crew.cpp FindSeatHook; their fighter is
     called home to the bay it came out of (CallPlayerHome: the bay whose jet it is); the foredeck's ready fighter is gone
     (no dn_ready, kDeckRunSec, nextKind, DreadnoughtParked anywhere);
-  - the Dreadnought's frame and input run under their own fault step (crew.cpp kStepDreadnought), named in kStepNames.
+  - the Dreadnought's frame and input run under their own fault step (src/module_table.h kVehicleSteps: the dreadnought module, its own fault id).
 """
 from __future__ import annotations
 
+import functools
 import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 failures: list[str] = []
 
@@ -32,25 +35,13 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    return '\n'.join(line.split('//', 1)[0] for line in text.splitlines())
+code_only = srcscan.code
+body = functools.partial(srcscan.body, regex=True, braces=False)
 
 
 def read(root: str, rel: str) -> str:
     with open(os.path.join(root, rel), encoding='utf-8') as f:
         return code_only(f.read())
-
-
-def body(text: str, signature: str) -> str:
-    """The braces-balanced body of the first definition whose header matches `signature` (a regex), '' when none."""
-    m = re.search(signature + r'[^;{]*\{', text)
-    if not m:
-        return ''
-    depth, i = 1, m.end()
-    while i < len(text) and depth:
-        depth += {'{': 1, '}': -1}.get(text[i], 0)
-        i += 1
-    return text[m.end():i - 1]
 
 
 def main() -> int:
@@ -127,27 +118,20 @@ def main() -> int:
         fail('dreadnought_hangar.inc CallPlayerHome: a player\'s fighter not called home to the bay it came out of')
     if not re.search(r'DreadnoughtHangarBoard\s*\(', body(read(root, 'src/crew.cpp'), r'FindSeatHook\s*\(')):
         fail('crew.cpp FindSeatHook: the board press never reaches the Dreadnought\'s hangars (DreadnoughtHangarBoard)')
-    everything = '\n'.join(read(root, rel) for rel in ('src/dreadnought.cpp', 'src/dreadnought_hangar.inc', 'src/crew.h',
+    everything = '\n'.join(read(root, rel) for rel in ('src/dreadnought.cpp', 'src/dreadnought_hangar.inc', 'src/dreadnought.h',
                                                        'src/playerjet_board.inc', 'src/playerjet.cpp'))
     for gone in ('dn_ready', 'kDeckRunSec', 'nextKind', 'DreadnoughtParked', 'DeckSpot'):
         if gone in everything:
             fail(f'the foredeck\'s ready fighter is gone (2026-10-24), yet {gone} is still there')
 
-    crew = read(root, 'src/crew.cpp')
+    table = read(root, 'src/module_table.h')
+    steps = table[table.index('constexpr VehicleEntry kVehicleSteps[]={'):]
+    steps = steps[:steps.index('\n};')]
     for fn in ('DreadnoughtFrame', 'DreadnoughtInput'):
-        if not re.search(rf'Guarded\s*\(\s*kStepDreadnought\s*,\s*&{fn}\b', crew):
-            fail(f'crew.cpp: {fn} not under kStepDreadnought')
-    steps = re.search(r'enum\s+Step\s*\{([^}]*)\}', crew)
-    names_init = re.search(r'kStepNames\s*\[\s*\]\s*=\s*\{([^}]*)\}', crew)
-    if not steps or not names_init:
-        fail('crew.cpp: no Step enum or kStepNames[]')
-    else:
-        enum = [s.strip() for s in steps.group(1).split(',') if s.strip() and s.strip() != 'kStepCount']
-        labels = re.findall(r'"([^"]*)"', names_init.group(1))
-        if len(enum) != len(labels):
-            fail(f'crew.cpp: {len(enum)} steps, {len(labels)} names')
-        elif labels[enum.index('kStepDreadnought')] != 'dreadnought':
-            fail('crew.cpp: kStepDreadnought not named "dreadnought"')
+        if not re.search(rf'\{{VP::\w+,Id::kDreadnought,&Vehicle<&{fn}>', steps):
+            fail(f'module_table.h kVehicleSteps: {fn} not under the dreadnought module (its own fault id)')
+    if not re.search(r'M\(kDreadnought,"dreadnought",', table):
+        fail('module_table.h: no dreadnought module named "dreadnought"')
 
     for f in failures:
         print('FAIL', f)

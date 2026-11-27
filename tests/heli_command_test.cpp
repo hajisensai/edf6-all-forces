@@ -3,6 +3,7 @@
 #include "../src/heli.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/hud.h"
 
 namespace crew {
 void SupportAircraftFrame(unsigned char*) noexcept {}   // jet_spawn.cpp: no support aircraft here
@@ -118,7 +119,7 @@ int main() {
     check(!CommandMoving(h,pos,h.post),"combat has hysteresis beyond the arrival ring");
     pos[0]=guard.at[0]+commandConfig.heliRange+1.0f;
     check(CommandMoving(h,pos,h.post),"leaving the assigned combat area returns to the post");
-    check(HeliCommand(vehicle,Command{Order::none,{}}) && !h.cmdMoving && !h.guard && h.hold[0]==-100.0f,
+    check(HeliCommand(vehicle,Command{Order::none,{}}) && !h.cmdMoving && !Guard(h) && h.hold[0]==-100.0f,
           "release restores the original duty and clears travel");
     check(!CommandMoving(h,pos,h.post),"ordinary uncommanded combat remains unrestricted by this gate");
     check(HeliCommand(vehicle,Command{Order::follow,{}}),"follow accepted");
@@ -143,14 +144,22 @@ int main() {
         check(HeliCommand(vehicle,Command{Order::none,{}}) && HeliSupportEntry(vehicle,point)==SupportEntry::superseded,
               "let go already: nothing to let go");
         check(HeliCommand(vehicle,guard),"sent in again");h.cmdMoving=false;
-        h.ferry=true;check(HeliSupportEntry(vehicle,point)==SupportEntry::superseded,"a squad's ferry is its own order");
-        h.ferry=false;h.called=true;HeliSortie(vehicle,SortiePass::heliStrafe,point);
+        const heliphase::State before=h.mission;
+        check(Enter(h,heliphase::Event::ferry) && HeliSupportEntry(vehicle,point)==SupportEntry::superseded,
+              "a squad's ferry is its own order");
+        check(Enter(h,heliphase::Event::ferryEnd) && !Ferrying(h),"ferry over");
+        h.called=true;HeliSortie(vehicle,SortiePass::heliStrafe,point);
         check(h.sortie==SortiePass::heliStrafe && HeliSupportEntry(vehicle,point)==SupportEntry::sortie,
               "a sortie flies its own one pass, set the moment it is sent: not arrived");
-        h.leaving=true;check(HeliSupportEntry(vehicle,point)==SupportEntry::gone,"leaving: nothing to hand over");
-        h.leaving=false;h.sortie=SortiePass::none;h.called=false;h.reap=true;
+        // The way out is one-way (heliphase: no transition back), so the fixture puts the state back by hand.
+        check(Enter(h,heliphase::Event::leave) && HeliSupportEntry(vehicle,point)==SupportEntry::gone,
+              "leaving: nothing to hand over");
+        check(!Enter(h,heliphase::Event::guard) && !Enter(h,heliphase::Event::ferry) && Leaving(h),
+              "leaving: no duty or ferry takes it back");
+        h.sortie=SortiePass::none;h.called=false;
+        check(Enter(h,heliphase::Event::reap) && Gone(h),"its way out done: gone");
         check(HeliSupportEntry(vehicle,point)==SupportEntry::gone,"being deleted: nothing to hand over");
-        h.reap=false;
+        h.mission=before;
         check(HeliSupportEntry(vehicle,nullptr)==SupportEntry::gone && HeliSupportEntry(enemy,point)==SupportEntry::gone,
               "none of ours: gone");
         check(HeliCommand(vehicle,Command{Order::follow,{}}),"back to follow");
@@ -159,11 +168,11 @@ int main() {
     // engaging nothing; landing, it comes down on that point (never beside the player); kept for its squad, it does not leave
     // for fuel or ammo; HeliFerry(nullptr) ends the ferry.
     const float drop[3]={300.0f,10.0f,200.0f};
-    check(HeliFerry(vehicle,drop,false) && h.ferry && !h.ferryLand && !h.focus && h.hold[0]==300.0f &&
+    check(HeliFerry(vehicle,drop,false) && Ferrying(h) && !FerryLands(h) && !h.focus && h.hold[0]==300.0f &&
           h.hold[1]==10.0f+commandConfig.heliHeight,"a ferry holds HeliHeight over its point");
     Sense f{};f.pos=pos;f.type=h.type;f.fwd[2]=1.0f;f.dt=1.0f/60.0f;f.ms=GameMs();
     check(SelectMode(h,f)==Mode::hold,"ferrying: it holds its point (no orbit, no follow, no fight)");
-    check(HeliFerry(vehicle,drop,true) && h.ferryLand,"...then lands there");
+    check(HeliFerry(vehicle,drop,true) && FerryLands(h),"...then lands there");
     f.land=true;
     check(SelectMode(h,f)==Mode::land,"landing mode");
     const Want down=FlyMode(h,f,Mode::land);
@@ -172,7 +181,14 @@ int main() {
     h.leaveAt=0;const Loadout spent{};
     check(LeaveReason(h,vehicle,spent)!=nullptr,"a called heli out of fuel leaves");
     check(HeliKeep(vehicle) && LeaveReason(h,vehicle,spent)==nullptr,"a squad's transport stays (no leaving for fuel or ammo)");
-    check(HeliFerry(vehicle,nullptr,false) && !h.ferry,"the ferry ends");
+    check(HeliFerry(vehicle,nullptr,false) && !Ferrying(h) && h.mission.phase==heliphase::Phase::follow,
+          "the ferry ends, back to its duty");
+    // Badly hit on its ferry, a called transport leaves: the ferry goes with it (it used to stay set and hold the drop point).
+    check(HeliFerry(vehicle,drop,true) && HeliStartLeaving(vehicle) && Leaving(h) && !Ferrying(h),
+          "leaving drops the ferry");
+    check(!HeliFerry(vehicle,drop,false) && !HeliFerry(vehicle,nullptr,false) && Leaving(h),
+          "leaving: no ferry starts or ends");
+    h.mission=heliphase::State{};
     h.keep=false;
     // Enhanced door gunners are independent of local pilot controls; the online aim hook is required online only.
     alignas(16) unsigned char gunSeats[3*edf::kSeatStride]{},remotePilot[0x500]{};
@@ -188,9 +204,9 @@ int main() {
     gunnerSession=false;CrewDoorGuns(vehicle);
     check(gunnerQueries==2,"offline door gunners do not require the network aim bridge");
     remotePilot[edf::kHumanPlayer]=0;Put<std::uint16_t>(remotePilot,0x128,2);
-    h.ref=ObjRef::Of(vehicle);h.seenFrame=GameFrame();h.reap=true;h.top=37.0f;deleteOk=true;
+    h.ref=ObjRef::Of(vehicle);h.seenFrame=GameFrame();h.mission.phase=heliphase::Phase::gone;h.top=37.0f;deleteOk=true;
     HeliReap(nullptr);
-    check(h.ref.Is(vehicle) && h.reap && h.top==37.0f,
+    check(h.ref.Is(vehicle) && Gone(h) && h.top==37.0f,
           "withdrawal never deletes a helicopter under real NPCs or erases their flight state");
     remotePilot[edf::kHumanPlayer]=1;Put<std::uint16_t>(remotePilot,0x128,1);
     HeliReap(nullptr);

@@ -89,7 +89,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
 
 // Game thread, once the complete vehicle snapshot is gathered. The model draw consumes these readings; the HUD
 // renderer never reads native objects or paints over the physical instruments.
-namespace {
+namespace hudi {   // hud_internal.h: declared in hud.cpp
 void PublishInstruments(const Snapshot& snap) noexcept {
     using namespace instruments;
     const ScreenFeed f=FeedOf(snap);
@@ -139,7 +139,7 @@ void PublishInstruments(const Snapshot& snap) noexcept {
     ArmReadings(r,rows,n,picked);
     FirstPersonInstrumentReadings(r,PlayerHuman());
 }
-} // namespace
+}  // namespace hudi
 
 // The canvas's lines [from, *at) onto the view: centre through the map, size by the stretch, as a scale of the HUD's `s`.
 void CanvasText(const canvas::Map& k,Line* lines,int from,int at,float s) noexcept {

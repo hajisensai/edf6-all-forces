@@ -2,7 +2,8 @@
 // decided once a frame in one place for the eyes (hud.cpp: the annunciator, the ground cue, the RWR scope) and the ears
 // (jetaudio.cpp: the callouts, the stall horn, the launch warble). Game thread, except WarnLatest (any thread).
 #pragma once
-#include "crew.h"
+#include "step_fresh.h"
+#include "playerjet.h"
 
 namespace crew {
 // The warnings, in the annunciator's order (most urgent first). Warnings (red) are the ones that kill now: PULL UP, STALL,
@@ -31,4 +32,5 @@ float ClosureIn(const float* pos,const float* vel,float climb,float clear,float 
 Gpws GpwsOf(float impactIn,bool rising) noexcept;
 void WarnTick() noexcept;                 // once a game frame (crew.cpp FrameTick): decided, published and sounded
 bool WarnLatest(Warnings* out) noexcept;  // the last published (hud.cpp HudPublish); false with no aircraft flown
+void ResetWarn() noexcept;                // the mission's start: nothing lit, no missile counted (published off)
 }  // namespace crew

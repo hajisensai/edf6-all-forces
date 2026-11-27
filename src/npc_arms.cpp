@@ -9,6 +9,9 @@
 #include "memory.h"
 #include <cstring>
 #include <iterator>
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace {

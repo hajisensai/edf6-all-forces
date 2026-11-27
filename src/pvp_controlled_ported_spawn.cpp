@@ -7,6 +7,7 @@
 #include "memory.h"
 #include <cstring>
 #include <cwctype>
+#include "edf_layout.h"
 
 namespace crew {
 namespace {

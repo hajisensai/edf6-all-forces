@@ -6,6 +6,9 @@
 #include "support_soldier.h"
 #include <cmath>
 #include <cstring>
+#include "edf_layout.h"
+#include "heli.h"
+#include "payload.h"
 
 namespace crew::enemy_target {
 namespace {
@@ -23,14 +26,9 @@ constexpr unsigned char kOnlineSig[]={0x48,0x8B,0x05,0x99,0xDF,0x93,0x01,0x8B,0x
 bool ready=false;
 
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
-bool Current(const ObjRef& r) noexcept {
-    return r.obj && r.ctrl && Readable(r.ctrl,16) && At<LONG>(r.ctrl,8)>0 &&
-        Readable(r.obj,kSelfCtrl+8) && At<const void*>(r.obj,kSelf)==r.obj && At<const void*>(r.obj,kSelfCtrl)==r.ctrl;
-}
-bool Alive(const ObjRef& r) noexcept {
-    const auto* object=static_cast<const unsigned char*>(r.obj);
-    return Current(r) && Readable(object,kObjectFlags+4) && !(object[0x18]&4) && !object[kDead];
-}
+// Still this object (deleted from the scene or not): objref.h.
+bool Current(const ObjRef& r) noexcept {return objref::Identity(r)>=objref::Life::removed;}
+using objref::Alive;
 bool Finite(const float* p) noexcept {return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]);}
 bool Zero(const unsigned char* id) noexcept {for(unsigned i=0;i<32;++i)if(id[i])return false;return true;}
 // A focus is an object reference (net_object_ref.h): a player by its mission slot (an enemy player in PvP: its NetId is

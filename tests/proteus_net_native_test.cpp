@@ -1,7 +1,7 @@
 // Read-only EDF.dll: its real serializer, native object envelope and final event packet writer. No game entry point,
 // no running-game attachment, no EOS call. 750130's queue/peer lookup is replaced with a recorder only in this process.
 #include "../src/proteus_net.cpp"
-#include "../src/seat_net.cpp"
+#include "../src/object_net.cpp"
 #include "../src/sazabi_net.h"
 #include "edf/host.h"
 #include <cstdio>
@@ -22,7 +22,7 @@ void SazabiNetReceived(unsigned char*,const sazabi_net::State&) noexcept { ++saz
 }
 namespace {
 using namespace crew;
-namespace transport=crew::seat_transport;
+namespace transport=crew::object_transport;
 int checks=0;
 std::size_t messageBytes=0,objectBytes=0,packetBytes=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::printf("FAIL: %s\n",why);std::exit(1);} }
@@ -96,7 +96,7 @@ int main(int argc,char** argv) {
         Check(transport::Peek(reader,&magic,&block)==(tag==15) && (tag!=15 || magic==proteus_net::kMagic) && At<std::int64_t>(reader,8)==0,
               "peek preserves unrelated coop message position");
         unsigned char before[sizeof(proteusVehicle)];std::memcpy(before,proteusVehicle,sizeof(before));
-        transport::Fn<transport::ReceiveFn>(transport::kReceive)(proteusVehicle+0x120,reader);
+        transport::Fn<transport::ReceiveFn>(transport::kVehicleReceive)(proteusVehicle+0x120,reader);
         Check(!std::memcmp(before,proteusVehicle,sizeof(before)) && At<std::int64_t>(reader,8)==1,"stock receiver ignores custom tags safely");
     }
     // Another feature's type-15 block is not swallowed just because this receiver also uses type 15.
@@ -113,7 +113,7 @@ int main(int argc,char** argv) {
         transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(v1.bytes,&old,sizeof(old));
         alignas(16) unsigned char oldReader[0x600]{};Reader(v1.bytes,oldReader);
         const int received=proteusReceived;
-        transport::Receive(proteusVehicle+0x120,oldReader);
+        reinterpret_cast<transport::ReceiveFn>(proteusTable[17])(proteusVehicle+0x120,oldReader);
         Check(proteusReceived==received && incompatibleSeen==1 && incompatibleVersion==1,
               "an older build's packet is swallowed undecoded and reported as an incompatible peer");
     }

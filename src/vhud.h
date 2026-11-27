@@ -1,9 +1,10 @@
 // The stock vehicles' HUD (vhud.cpp gathers it, hud.cpp StockVehicleHud draws it; docs/hud-re.md §7) and the round
-// models it shares with the helis' sight (rounds.cpp, rounds.h). Included by crew.h.
+// models it shares with the helis' sight (rounds.cpp, rounds.h).
 #pragma once
 #include <Windows.h>
 #include <cstdint>
 #include "firecontrol.h"
+#include "playerjet.h"
 #include "gunsight.h"
 #include "reticle.h"
 #include "roundaim.h"
@@ -37,6 +38,11 @@ bool InstallRounds() noexcept;   // at load: the reads below (their EDF.dll code
 bool WeaponStatusOk() noexcept;
 // The round of weapon `w` (under the caller's __try); false when it cannot be read.
 bool ReadRound(const unsigned char* w,RoundModel* out) noexcept;
+// A round's Ammo_CustomParameter (`custom`: a variant as the game keeps one, e.g. the bullet core's copy at core+0xA58):
+// its entry count, and the numbers of its last entry (taken as a list; only when that entry's index is `from` or more) into
+// `out`, at most `most` (*got how many read).
+// -1: not readable (InstallRounds refused the reads, not a tag-2 variant, or a fault). Under its own __try.
+int CustomTail(const void* custom,int from,double* out,int most,int* got) noexcept;
 // Where a round of `w` (`m`) fired now from `pos` along the unit `dir` first meets the map (terrain and buildings: heli.cpp
 // MapRay), at most `reach` m away: `at` and the seconds it flies there; false (`at` where it ends: its life over or past
 // `reach`) when it meets none. The shooter's velocity it takes on is the weapon's (+0x190 x AmmoOwnerMove / 60).
@@ -107,7 +113,7 @@ struct StockHudReadout {
     FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
     int arms,selected;           // selected: secondary payload/list selection (-1 none)
     int sight=-1;               // independently selected actual primary/secondary fire-control weapon
-    int turret=-1;              // the arm the seat's turret is laid by (crew.h PlayerTurretGun; -1 none)
+    int turret=-1;              // the arm the seat's turret is laid by (turretcam_api.h PlayerTurretGun; -1 none)
     StockArm arm[kStockArms];
     int threats;                 // 2 a missile homing on it, 1 a jet's lock (missile.cpp, jet.cpp: as the jets' threat ring)
     float threatAt[kStockThreats][3];

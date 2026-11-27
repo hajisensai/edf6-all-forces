@@ -127,15 +127,18 @@ void SetLockPoint(void* point,const float* position) noexcept { std::memcpy(stat
 }
 }
 // The tables' high-water marks: every slot at or past a mark is empty, so the truncated scans see
-// exactly what a whole-table scan saw, and Find(empty ref) is still the table's first empty slot.
+// exactly what a whole-table scan saw, and Find(empty ref) is still the table's first empty slot (Find makes the
+// saved rows on first use, LazyRows: it runs first; the emitter rows exist once an emitter was bound).
 bool MarksHold() {
+    crew::Saved* const found=crew::Find(crew::ObjRef{});
     for(unsigned i=crew::savedUsed;i<crew::kMaxObjects;++i)if(crew::saved[i].ref.obj || crew::saved[i].ref.ctrl)return false;
     for(unsigned i=crew::supportUsed;i<crew::kMaxSupportOwned;++i)
         if(crew::supportOwners[i].ref.obj || crew::supportOwners[i].ref.ctrl)return false;
-    for(unsigned i=crew::emittersUsed;i<crew::kMaxNativeEmitters;++i)if(crew::nativeEmitters[i].binding.object)return false;
+    if(crew::nativeEmitters.Allocated())
+        for(unsigned i=crew::emittersUsed;i<crew::kMaxNativeEmitters;++i)if(crew::nativeEmitters[i].binding.object)return false;
     crew::Saved* firstEmpty=nullptr;
     for(auto& item:crew::saved)if(!item.ref.obj && !item.ref.ctrl){firstEmpty=&item;break;}
-    return crew::Find(crew::ObjRef{})==firstEmpty;
+    return found==firstEmpty;
 }
 int main() {
     // The production call site still calls a checked native-address function.

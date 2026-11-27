@@ -17,7 +17,9 @@
 // behind a null test, then returns past the body (src/edf41mech_boost.h). A built slot (every slot of every EDF6
 // object) runs exactly the stock instructions; the 406 keeps 4.1's two burner groups as the old parser builds them.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46 (tests/edf41mech_boost_native_audit.py).
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 #include "edf41mech_boost.h"
 #include "edf/patch.h"

@@ -59,7 +59,11 @@
 // (kPlayerNetId | index), the same on every machine and out of the script positions' range (code offsets).
 // More than four only where every machine creates them (edf5online_room.h): EDF6Coop 2.5.0's BvmPlayerTableHooks here
 // and every mission player's machine telling the room it runs this; otherwise every one creates four, and says why.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "campaign.h"
+#include "playarea.h"
 #include "memory.h"
 #include "mission_participant_gate.h"
 #include "spawn_layout.h"
@@ -244,18 +248,12 @@ bool BvmOnline() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-bool WriteImage(unsigned rva,const unsigned char* code,std::size_t size) noexcept {
-    unsigned char* at=image+rva;
-    edf::ClaimCode(at,size);   // a code write of its own (edf/code_owner.h)
-    DWORD old=0;
-    if(!VirtualProtect(at,size,PAGE_EXECUTE_READWRITE,&old))return false;
-    std::memcpy(at,code,size);
-    edf::RestoreProtection(at,size,old);
-    FlushInstructionCache(GetCurrentProcess(),at,size);
-    return true;
+// One site's write, only while it holds `expected` (edf::PatchCode: claimed, protection put back, the cache flushed).
+bool WriteImage(unsigned rva,const unsigned char* expected,const unsigned char* code,std::size_t size) noexcept {
+    return edf::PatchCode(image+rva,expected,code,size);
 }
 // The install's writer (tests/edf5_online_native_test.cpp's rollback run fails one on purpose).
-using WriteFn=bool(*)(unsigned,const unsigned char*,std::size_t) noexcept;
+using WriteFn=bool(*)(unsigned,const unsigned char*,const unsigned char*,std::size_t) noexcept;
 WriteFn writeCode=&WriteImage;
 
 // MSVC's _Ref_count_base::_Decref (as booster.cpp DropShared).
@@ -267,11 +265,7 @@ void DropShared(void* ctrl) noexcept {
         (*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
 }
 // A weak reference let go as the game's rows let theirs go (0x22B6D3: +0xC down, the block's vtbl[1] at the last).
-void DropWeak(void* ctrl) noexcept {
-    if(!ctrl)return;
-    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+0xC),-1)==1)
-        (*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
-}
+void DropWeak(void* ctrl) noexcept { objref::Release(ctrl); }
 // The vector let go as the game does (0x1B8DA4..0x1B8E1F): every element, then the storage; a big one's (0x1000 bytes
 // and over) real block 8 bytes before it.
 void FreeList(SharedVector& v) noexcept {
@@ -398,7 +392,7 @@ void __fastcall Edf5BvmStoreRow(const void* bvm,std::uint32_t index,std::int32_t
     }
     Row& r=t->row[index-kBvmPlayerSlots];
     void* const old=r.ctrl;
-    if(made->ctrl)_InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(made->ctrl)+0xC));
+    objref::Retain(made->ctrl);
     r.obj=made->ctrl ? made->obj : nullptr;
     r.ctrl=made->ctrl;
     r.index=listIndex;
@@ -785,11 +779,11 @@ bool InstallEdf5Online() noexcept {
     onlineObject=reinterpret_cast<OnlineObjectFn>(image+kOnlineObject);
     registerFn=reinterpret_cast<RegisterFn>(image+kRegister);
     std::size_t written=0;
-    while(written<count && writeCode(writes[written].rva,writes[written].bytes,writes[written].size))++written;
+    while(written<count && writeCode(writes[written].rva,writes[written].was,writes[written].bytes,writes[written].size))++written;
     if(written<count) {
         const unsigned failed=writes[written].rva;
         bool restored=true;
-        while(written>0){--written;restored=writeCode(writes[written].rva,writes[written].was,writes[written].size) && restored;}
+        while(written>0){--written;restored=writeCode(writes[written].rva,writes[written].bytes,writes[written].was,writes[written].size) && restored;}
         if(restored)VirtualFree(page,0,MEM_RELEASE);   // kept if a site could not be put back: it may still jump there
         onlineObject=nullptr;
         registerFn=nullptr;

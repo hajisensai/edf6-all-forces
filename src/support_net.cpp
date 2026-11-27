@@ -1,7 +1,13 @@
 #define _CRT_RAND_S
 #include "support_protocol.h"
 #include "coop_extension_api.h"
-#include "crew.h"
+#include "objref.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "transport.h"
 #include "online_authority.h"
 #include "mission_participants.h"
 #include "command_net.h"
@@ -18,6 +24,7 @@
 #include "barrage_net.h"
 #include "player_vehicle.h"
 #include "jet_lever_net.h"
+#include "aura.h"
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "npc_arms.h"
@@ -179,10 +186,6 @@ void CommandContext(ULONGLONG now) noexcept {
     plugin_net::Update(room,now);
 }
 void QMarkUpdate(const CommandNetworkContext& c,std::uint64_t now) noexcept { UpdateQMarkNetwork(c.linked,c.peerCount,c.send,now); }
-bool PvpOwns(const void* bytes,std::size_t size) noexcept {
-    const auto* b=static_cast<const unsigned char*>(bytes);
-    return bytes && size>=4 && b[0]=='A' && b[1]=='F' && b[2]=='P' && b[3]=='V';
-}
 // The channels, in the old chain's order (qmark, command, PvP, enemy control, the submarine's and the carrier's drones,
 // then the gravity operations, the float guns and the ultimate strike). Every machine of the room runs this build
 // (mod_room.h kAllForcesRoomProtocol): each channel is sent to and read from every peer.
@@ -196,7 +199,7 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(c);
     c=Channel{};c.name="command";c.magic=command_net::kMagic;c.receive=&ReceiveCommandNetwork;c.update=&UpdateCommandNetwork;
     c.reset=&ResetCommandNetwork;plugin_net::RegisterChannel(c);
-    c=Channel{};c.name="pvp";c.owns=&PvpOwns;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
+    c=Channel{};c.name="pvp";c.magic=pvp_protocol::kMagic;c.minSize=32;c.maxSize=pvp_protocol::kMaxWireBytes;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
     plugin_net::RegisterChannel(c);
     c=Channel{};c.name="enemy control";c.magic=enemy_control_protocol::kMagic;c.receive=&ReceiveEnemyControlNetwork;
     c.takesState=&enemy_control_protocol::PoseState;
@@ -212,6 +215,7 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(PlayerVehicleNetChannel());
     plugin_net::RegisterChannel(SupportPointsNetChannel());
     plugin_net::RegisterChannel(JetLeverNetChannel());
+    plugin_net::RegisterChannel(AuraNetChannel());
 }
 // A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
 // said once a magic (a few magics), never once a message.
@@ -387,7 +391,7 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 void ResetSupportNet() noexcept {
     session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastFrame=~0ULL;contextTold=false;ResetWorld();
     senderCheckLogs.store(0);
-    commandHostPeer=0;RegisterPluginChannels();plugin_net::Reset();
+    commandHostPeer=0;RegisterPluginChannels();   // their resets: the mission start's plugin net module (modules.cpp)
 }
 // The transport lost (its generation changed, or the room not ready a moment: EDF6Coop's room lease is 2 s and a link
 // 3 s quiet, so a long frame or a hitch on either side does it): suspended until the room is ready again, then the same

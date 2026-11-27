@@ -2,7 +2,7 @@
   - the weapon table (docs/weapons.csv): category 2 is Ranger Weapon_SniperRifle and 104 Wing Diver Weapon_Pale_Long,
     exactly the ones scope_spread_logic.h counts as sniper rifles; the ported EDF5 / EDF4.1 sniper rifles
     (edf5port / edf41port weapons.json, mapped from their source category: EDF4.1 Wing Diver long range 14) carry the same;
-  - the ini (EDF6VehicleCrew.ini), crew.h's defaults, plugin.cpp's reads, clamps (the logic's ranges) and its CONFIG line
+  - the ini (EDF6VehicleCrew.ini), config.h's defaults, plugin.cpp's reads, clamps (the logic's ranges) and its CONFIG line
     agree on the five keys;
   - the shot entry hook writes and restores around the stock shot; the host's word carries the values (kFeatScopeSpread).
 """
@@ -13,6 +13,9 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+import gen_config  # noqa: E402
+
 checks = 0
 
 
@@ -25,7 +28,8 @@ def ok(cond: bool, what: str) -> None:
 
 
 def read(rel: str) -> str:
-    return (ROOT / rel).read_text(encoding='utf-8-sig')
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    return gen_config.expand((ROOT / rel).read_text(encoding='utf-8-sig'))
 
 
 logic = read('src/scope_spread_logic.h')
@@ -53,14 +57,14 @@ for reg, source, mapping in (('edf5port/weapons.json', 'edf5_category', {2: 2}),
     ok(any(w['category'] in sniper for w in weapons), f'{reg}: ported sniper rifles counted as sniper rifles')
 
 ini = read('EDF6VehicleCrew.ini')
-crew = read('src/crew.h')
+crew = read('src/config.h')
 plugin = read('src/plugin.cpp')
 defaults = {'ScopeSpread': ('scopeSpread', '1', 'true'), 'ScopeSniperHipSpread': ('scopeSniperHipSpread', '4.0', '4.0f'),
             'ScopeSniperHipMinSpread': ('scopeSniperHipMinSpread', '0.015', '0.015f'),
             'ScopeHipSpread': ('scopeHipSpread', '1.25', '1.25f'), 'ScopeAimSpread': ('scopeAimSpread', '0.8', '0.8f')}
 for key, (field, value, member) in defaults.items():
     ok(re.search(rf'^{key}={re.escape(value)}$', ini, re.M) is not None, f'EDF6VehicleCrew.ini {key}={value}')
-    ok(re.search(rf'\b{field}={re.escape(member)};', crew) is not None, f'crew.h {field}={member}')
+    ok(re.search(rf'\b{field}={re.escape(member)};', crew) is not None, f'config.h {field}={member}')
     ok(f'L"{key}",n.{field})' in plugin, f'plugin.cpp reads {key}')
     ok(f'n.{field}' in plugin.split('Log("CONFIG scopeSpread=', 1)[1].split(';', 1)[0], f'the CONFIG line prints {key}')
 for key, rng in (('ScopeSniperHipSpread', 'kSniperHipRange'), ('ScopeSniperHipMinSpread', 'kSniperHipMinRange'),
@@ -72,7 +76,10 @@ heli = read('src/heli.cpp')
 hook = re.search(r'void __fastcall MedicShotHook\(.*?\n\}', heli, re.S).group(0)
 at = [hook.find(s) for s in ('ScopeSpreadShot(weapon,replay,&scope);', 'medicShotNext(', 'ScopeSpreadRestore(scope);')]
 ok(min(at) >= 0 and at == sorted(at), 'MedicShotHook writes, shoots, restores')
-ok('InstallScopeSpread();' in plugin, 'plugin.cpp installs it')
+installs = read('src/module_table.h')
+installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+ok(installs[:installs.index('\n};')].count('Id::kScopeSpread,&Install<&InstallScopeSpread>}') == 1,
+   'the load installs it (module_table.h kInstalls)')
 ok('target_sources(EDF6VehicleCrew PRIVATE src/scope_spread.cpp)' in read('CMakeLists.txt'), 'the plugin builds it')
 
 host = read('src/host_settings_logic.h')

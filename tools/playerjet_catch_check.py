@@ -45,16 +45,18 @@ def main() -> int:
     root = args.source_root
     held = production_function((root / 'src/playerjet_board.inc').read_text(encoding='utf-8'),
                                'bool Held(const unsigned char* v) noexcept')
-    crew = (root / 'src/crew.h').read_text(encoding='utf-8')
-    ref = re.search(r'struct ObjRef \{.*?\n\};', crew, re.S)
+    objref = (root / 'src/objref.h').read_text(encoding='utf-8')
+    ref = re.search(r'struct ObjRef \{.*?\n\};', objref, re.S)
     if not ref:
         raise RuntimeError('production ObjRef not found')
     fixture = r'''
 unsigned char vehicle=0, other=0;
 char firstControl=0, nextControl=0;
 const void* currentControl=&firstControl;
+namespace edf {   // src/objref.h's ObjRef reads the weak-this through edf::At / edf::kSelfCtrl
 constexpr int kSelfCtrl=0;
 template<class T> T At(const void*,int) noexcept { return static_cast<T>(currentControl); }
+}
 @REF@
 enum class Rider { none, player, dummy };
 Rider rider=Rider::none;

@@ -845,6 +845,15 @@
    "OBJECT/EDF6VC_XM_SMALL_MECH.MRAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6vc_aura_amo": [
+   "OBJECT/EDF6VC_AURA_AMO.MRAB"
+  ],
+  "edf6vc_aura_cmd": [
+   "OBJECT/EDF6VC_AURA_CMD.MRAB"
+  ],
+  "edf6vc_aura_rep": [
+   "OBJECT/EDF6VC_AURA_REP.MRAB"
+  ],
   "edf6vc_sedan": [
    "OBJECT/EDF6VC_SEDAN.MRAB"
   ],

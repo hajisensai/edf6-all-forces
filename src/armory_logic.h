@@ -62,12 +62,19 @@ struct Pos { int sub=0,row=0,item=0,field=0; };
 
 // ---- what the render thread draws ------------------------------------------------------------------------------------
 enum class Align : std::uint8_t { left,centre,right };
+// maxW > 0: at most that wide, fitted (smaller, then cut with an ellipsis: src/text_fit.h, ui_text.h Fit). A text that
+// yields (yieldTo: an index of the same layer, drawn before it) gets only what that one leaves of maxW: its room ends
+// `gap` before the other's drawn edge (a row's label before its value, the hint bar's keys before the note). size2 > 0:
+// it may take two rows of that size, their tops at rowY.
 struct Text {
     wchar_t s[kTextMost]{};
     float x=0,y=0,size=24,maxW=0;
     std::uint32_t argb=skin::kText;
     Align align=Align::left;
     bool bold=false;
+    std::int16_t yieldTo=-1;
+    float gap=0,size2=0;
+    float rowY[2]{};
 };
 struct Layer {
     static constexpr int kTextMost=320;
@@ -78,14 +85,44 @@ struct Layer {
     // The rect left uncovered (W / H 0: none): quads [0, holeQuads) are painted around it, the rest over it.
     skin::Rect hole{};
     int holeQuads=0;
-    void Say(const wchar_t* s,float x,float y,float size,std::uint32_t argb,Align a=Align::left,bool bold=false,
-             float maxW=0) noexcept {
-        if(nt>=kTextMost){++droppedTexts;return;}
+    // The text's index (-1: the layer is full).
+    int Say(const wchar_t* s,float x,float y,float size,std::uint32_t argb,Align a=Align::left,bool bold=false,
+            float maxW=0) noexcept {
+        if(nt>=kTextMost){++droppedTexts;return -1;}
         Text& t=texts[nt++];
         CopyText(t.s,armory::kTextMost,s);
         t.x=x;t.y=y;t.size=size;t.argb=argb;t.align=a;t.bold=bold;t.maxW=maxW;
+        return nt-1;
+    }
+    // Text `i` gives way to text `to` (both said; `to` first wins its width), `gap` between them.
+    void Yield(int i,int to,float gap) noexcept {
+        if(i<0 || i>=nt || to<0 || to>=nt || to==i)return;
+        texts[i].yieldTo=static_cast<std::int16_t>(to);texts[i].gap=gap;
+    }
+    // Text `i` may take two rows `size2` tall, their tops at y0 / y1.
+    void TwoRows(int i,float size2,float y0,float y1) noexcept {
+        if(i<0 || i>=nt)return;
+        texts[i].size2=size2;texts[i].rowY[0]=y0;texts[i].rowY[1]=y1;
     }
 };
+// A text's horizontal extent as drawn (none: nothing drawn).
+struct Edge { bool on=false; float x0=0,x1=0; };
+inline Edge EdgeOf(const Text& t,float w) noexcept {
+    if(!(w>0.f))return Edge{};
+    const float x0=t.align==Align::left ? t.x : t.align==Align::right ? t.x-w : t.x-w*0.5f;
+    return Edge{true,x0,x0+w};
+}
+// The width text `t` may take beside `other` (drawn): its maxW, less what reaches into it from the other side.
+inline float RoomBeside(const Text& t,const Edge& other) noexcept {
+    float room=t.maxW;
+    if(other.on) {
+        float until=room;
+        if(t.align==Align::left && other.x0>t.x)until=other.x0-t.gap-t.x;
+        else if(t.align==Align::right && other.x1<t.x)until=t.x-(other.x1+t.gap);
+        if(!(room>0.f) || until<room)room=until;
+    }
+    return room;
+}
 // Two layers: the screen, then the popup over it (quads of a layer under its texts).
 struct View {
     Layer layer[2];
@@ -108,6 +145,11 @@ struct Input {
     bool pointer=false;   // x / y valid (the cursor over the window, design units)
     float x=0,y=0;
     int wheel=0;          // notches since the last frame, + away from the user (up)
+    // The right stick past its dead zone, -1..1 (+ right / up), and the seconds since the last frame (0: not known):
+    // a page that looks round with it (Page::Look). stickKeys: the bits (1 << key) of kAltPrev / kAltNext / kJumpPrev /
+    // kJumpNext that only the stick holds (a page that takes the stick takes those, not the keyboard's A / D).
+    float lookX=0,lookY=0,dt=0;
+    unsigned stickKeys=0;
     wchar_t typed[8]{};   // characters typed since the last frame (WM_CHAR), for a rename / a page's search
     int ntyped=0;
 };
@@ -163,9 +205,14 @@ public:
     virtual bool Click(Pos& /*p*/,float /*x*/,float /*y*/) noexcept { return false; }
     // Z / C on a page without sub tabs. True when something changed.
     virtual bool Cycle(const Pos&,int /*delta*/) noexcept { return false; }
+    // Every frame without a popup, before Key: the page may look round its 3D view with the pointer, the wheel and the
+    // right stick. What it took (kLookWheel, kLookStick): the state does nothing with those this frame.
+    virtual int Look(const Pos&,int /*column*/,const Input&) noexcept { return 0; }
 protected:
     ~Page()=default;
 };
+
+inline constexpr int kLookWheel=1,kLookStick=2;   // Page::Look
 
 // ---- effects -------------------------------------------------------------------------------------------------------
 // The preset chips as the runtime knows them this frame.
@@ -541,10 +588,15 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
         for(int k=0;k<kKeyCount;++k)
             if(k!=kToggle && Pressed(s,in,k))page.Key(s.pos,s.column,k,in);
     }else{
-        // the page first: a key it takes is not down for the state this frame (prev still follows `in`)
+        // the page first: what it looks round with and a key it takes are not down for the state this frame (prev
+        // still follows `in`)
         Input use=in;
+        const int looked=page.Look(s.pos,s.column,in);
+        if(looked&kLookWheel)use.wheel=0;
+        if(looked&kLookStick)
+            for(int k=0;k<kKeyCount;++k)if(use.stickKeys&(1u<<k))use.held[k]=false;
         for(int k=0;k<kKeyCount;++k)
-            if(k!=kToggle && Pressed(s,in,k) && page.Key(s.pos,s.column,k,in))use.held[k]=false;
+            if(k!=kToggle && Pressed(s,use,k) && page.Key(s.pos,s.column,k,use))use.held[k]=false;
         Clamp(s,page);
         // preset chips: keys and mouse
         for(int d=0;d<kPresetMost;++d)
@@ -570,10 +622,12 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
                 if(!page.Click(s.pos,use.x,use.y))ClickColumns(s,page,use);
             }
         }
-        // page tabs, sub tabs
+        // page tabs (stopping at both ends: no wrap from the first round to the last, 任务, which opens the map),
+        // sub tabs
         const int dt=(Pressed(s,use,kTabNext) ? 1 : 0)-(Pressed(s,use,kTabPrev) ? 1 : 0);
-        if(dt && npages>1 && fx.op==Op::none && s.popup==Popup::none && CommitPage(s,page)){
-            s.tab=Wrap(s.tab+dt,npages);
+        const int toTab=s.tab+dt<0 ? 0 : s.tab+dt>=npages ? npages-1 : s.tab+dt;
+        if(dt && npages>1 && toTab!=s.tab && fx.op==Op::none && s.popup==Popup::none && CommitPage(s,page)){
+            s.tab=toTab;
             s.column=0;s.pos=Pos{};s.top[0]=s.top[1]=s.top[2]=0;
         }
         Page& now=*pages[s.tab];
@@ -619,6 +673,24 @@ inline Effects Step(State& s,Page* const* pages,int npages,const Presets& ps,con
     }
     return fx;
 }
+
+// A column line's label (left) and value (right): both kRowInset in from the line's ends; the value whole first (at most
+// all but kRowLabelLeast of the room, the label still shows something), the label in what it leaves (Text::yieldTo,
+// kRowGap before the value). With a colour swatch (ChipX, 34 wide) the label stops before it and the value starts
+// after it.
+inline constexpr float kRowInset=22,kRowGap=16,kRowLabelLeast=0.3f,kChipW=34;
+constexpr float ChipX(const skin::Rect& r) noexcept { return r.x0+r.W()*0.5f-40; }
+struct RowWidths { float label=0,value=0; };
+constexpr RowWidths RowWidthsOf(const skin::Rect& r,bool value,bool chip) noexcept {
+    const float room=r.W()-2*kRowInset;
+    if(!value)return RowWidths{chip ? ChipX(r)-2-kRowGap-(r.x0+kRowInset) : room,0};
+    if(chip)return RowWidths{ChipX(r)-2-kRowGap-(r.x0+kRowInset),r.x1-kRowInset-(ChipX(r)+kChipW+kRowGap)};
+    return RowWidths{room,room*(1-kRowLabelLeast)-kRowGap};
+}
+// The hint bar: its texts kHintInset in from the bar's ends; the note up to kHintNoteShare of the room; the keys
+// kHintGap before it, on two kHintRowSize rows (their tops kHintRowTop below the bar's) when one row does not fit.
+inline constexpr float kHintInset=60,kHintGap=40,kHintNoteShare=0.45f,kHintRowSize=19;
+inline constexpr float kHintRowTop[2]={2,26};
 
 // The frame's picture of the screen (the UI thread builds it, the render thread paints it: src/armory_draw.cpp).
 inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps,const Words& w,View* out,
@@ -690,8 +762,8 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
             if(c==0)skin::Button(&base.quads,r,beige);
             else skin::Cell(&base.quads,r);
             const std::uint32_t col=line.dim ? skin::kTextDim : skin::TextOn(beige);
-            const float textW=line.value[0] ? r.W()*0.5f : r.W()-40;
-            base.Say(line.label,r.x0+22,r.y0+12,26,col,Align::left,beige,textW);
+            const RowWidths rw=RowWidthsOf(r,line.value[0]!=0,line.chip!=0);
+            const int labelAt=base.Say(line.label,r.x0+kRowInset,r.y0+12,26,col,Align::left,beige,rw.label);
             if(line.value[0]){
                 const bool arrows=line.steps && c==2 && at && s.column==2;
                 wchar_t v2[kTextMost]{};
@@ -702,10 +774,11 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
                     while(v2[k])++k;
                     v2[k]=L' ';v2[k+1]=L'\x25B6';v2[k+2]=0;
                 }
-                base.Say(arrows ? v2 : line.value,r.x1-22,r.y0+12,26,col,Align::right,false,r.W()*0.5f-30);
+                const int valueAt=base.Say(arrows ? v2 : line.value,r.x1-kRowInset,r.y0+12,26,col,Align::right,false,rw.value);
+                base.Yield(labelAt,valueAt,kRowGap);   // the value whole first; the label in what it leaves
             }
             if(line.chip){   // the colour swatch left of the value, edged so a dark colour still shows
-                const float x=r.x0+r.W()*0.5f-40, y=r.y0+11;
+                const float x=ChipX(r), y=r.y0+11;
                 base.quads.Box(skin::Rect{x-2,y-2,x+32,y+32},skin::kCellEdge);
                 base.quads.Box(skin::Rect{x,y,x+30,y+30},line.chip);
             }
@@ -715,11 +788,17 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
     }
     // hint bar, note
     if(s.popup==Popup::none) {
+        // the keys left, the note right: the note whole first (up to kHintNoteShare of the bar), the keys in what it
+        // leaves, on two rows when one does not fit
         const wchar_t* own=page.Hint(s.pos,s.column);
-        base.Say(own ? own : w.hints[s.column],L::kHint.x0+60,L::kHint.y0+12,24,skin::kTextDark,Align::left,false,L::kHint.W()-560);
-        if(s.note[0])base.Say(s.note,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
-        else if(s.column==0)base.Say(w.rootExit,L::kHint.x1-60,L::kHint.y0+12,24,skin::kTextDark,Align::right,true,440);
-        else if(page.Dirty())base.Say(w.unsaved,L::kHint.x1-60,L::kHint.y0+12,24,0xFF8A1E0Au,Align::right,true,440);
+        const float span=L::kHint.W()-2*kHintInset, ty=L::kHint.y0+12;
+        int noteAt=-1;
+        if(s.note[0])noteAt=base.Say(s.note,L::kHint.x1-kHintInset,ty,24,0xFF8A1E0Au,Align::right,true,span*kHintNoteShare);
+        else if(s.column==0)noteAt=base.Say(w.rootExit,L::kHint.x1-kHintInset,ty,24,skin::kTextDark,Align::right,true,span*kHintNoteShare);
+        else if(page.Dirty())noteAt=base.Say(w.unsaved,L::kHint.x1-kHintInset,ty,24,0xFF8A1E0Au,Align::right,true,span*kHintNoteShare);
+        const int keysAt=base.Say(own ? own : w.hints[s.column],L::kHint.x0+kHintInset,ty,24,skin::kTextDark,Align::left,false,span);
+        base.TwoRows(keysAt,kHintRowSize,L::kHint.y0+kHintRowTop[0],L::kHint.y0+kHintRowTop[1]);
+        base.Yield(keysAt,noteAt,kHintGap);
     }
     // status strip: under the hint bar, the lines side by side
     if(status && status->n>0){
@@ -768,6 +847,34 @@ inline void Build(const State& s,Page* const* pages,int npages,const Presets& ps
         AppendChar(shown,L'_');
         top.Say(shown,r.x0+18,r.y0+12,26,skin::kText,Align::left,false,r.W()-36);
     }
+}
+
+// 整备 closed for the world map: what it drew stays drawn over its screen until the select is in place (no frame of the
+// HQ / room menu between them; armory.cpp). The select in place (the render thread's word) ends it at once; one UI
+// frame of the held screen at a time here: asked (until the closing key is released and the select button pressed;
+// the screen losing its input first: something else came over it, ended), pressed (the press made the select: the
+// screen loses its input or the select draws; neither by the second frame with input after the press: nothing opened,
+// ended), away (the select over it; the screen has its input again and the select no longer draws: it closed, ended).
+enum class Handoff : std::uint8_t { none, asked, pressed, away };
+struct HandoffState { Handoff phase=Handoff::none; int idle=0; };
+inline void HandoffAsk(HandoffState& h) noexcept { h=HandoffState{};h.phase=Handoff::asked; }
+inline void HandoffPressed(HandoffState& h,bool pressed) noexcept {
+    if(h.phase!=Handoff::asked)return;
+    h.phase=pressed ? Handoff::pressed : Handoff::none;
+    h.idle=0;
+}
+// `selectDrawn`: the select drew since the last frame. False: the hold ended (phase none).
+inline bool HandoffFrame(HandoffState& h,bool hasInput,bool selectDrawn) noexcept {
+    switch(h.phase) {
+        case Handoff::none: return false;
+        case Handoff::asked: if(!hasInput)h.phase=Handoff::none;break;
+        case Handoff::pressed:
+            if(!hasInput || selectDrawn)h.phase=Handoff::away;
+            else if(++h.idle>=2)h.phase=Handoff::none;
+            break;
+        case Handoff::away: if(hasInput && !selectDrawn)h.phase=Handoff::none;break;
+    }
+    return h.phase!=Handoff::none;
 }
 
 }  // namespace crew::armory

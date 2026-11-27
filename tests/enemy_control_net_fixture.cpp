@@ -2,6 +2,9 @@
 // codecs. Only native actor/core/transport endpoints are stubs; bridge identity,
 // authority, UI-snapshot matching and sampling logic execute unchanged.
 #include <Windows.h>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/netprobe.h"
 namespace { ULONGLONG FixtureTickCount64() noexcept; }
 #define GetTickCount64 FixtureTickCount64
 #include "../src/enemy_control_net.cpp"

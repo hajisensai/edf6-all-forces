@@ -788,7 +788,7 @@ jet::Jet* HailChoice(const float* p,const void* skip,float* dist) noexcept {
     jet::Jet* best=nullptr;
     float bestD=kHailRange;
     for(auto& e:jet::jets) {
-        if(!e.ref || e.reap || e.mode==jet::Mode::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
+        if(!e.ref || e.reap || e.phase==jetphase::Phase::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
         unsigned char* const v=e.Vehicle();
         if(v==skip || v[kDead] || At<std::int32_t>(v,kTeam)!=jet::kTeamFriend || !CrewedPilot(v) ||
            !BoardRowOf(v) || Held(v))continue;
@@ -802,7 +802,7 @@ jet::Jet* HailChoice(const float* p,const void* skip,float* dist) noexcept {
 jet::Jet* CatchChoice(const float* p) noexcept {
     jet::Jet* best=nullptr;float bestD=kHailRange;
     for(auto& e:jet::jets) {
-        if(!e.ref || e.reap || e.mode==jet::Mode::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
+        if(!e.ref || e.reap || e.phase==jetphase::Phase::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
         auto* v=e.Vehicle();
         const auto* row=BoardRowOf(v);
         if(v[kDead] || !CrewedPilot(v) || At<std::int32_t>(v,kTeam)!=jet::kTeamFriend ||

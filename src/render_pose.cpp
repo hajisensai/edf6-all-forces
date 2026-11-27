@@ -4,7 +4,8 @@
 #include "render_pose.h"
 #include "render_pose_frame.h"
 #include "render_record.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
 #include "edf/memory.h"
 #include "edf/patch.h"
 #include <array>

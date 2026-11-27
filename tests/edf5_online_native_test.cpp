@@ -7,7 +7,6 @@
 // guide 0x21F380, Factor_PlayerAreaIn's 0x207870, natives 0x3ED / 0x3EE / 0x3EF, 0x2252D0 / 0x2253A0, the first
 // player's 0x229040) run for real for six and forty players, EDF6Coop's four bounds in place as its hooks place them.
 // A failed write puts every site back and frees the page (`rollback`). Never starts the game.
-#include "../src/crew.h"
 #include "../src/memory.h"
 #include <cstdarg>
 #include <cstdio>
@@ -543,14 +542,14 @@ int main(int argc,char** argv) {
         before.assign(image+0x200000,image+0x230000);
         static int refused=0;
         static unsigned char* page=nullptr;
-        writeCode=[](unsigned rva,const unsigned char* bytes,std::size_t size) noexcept -> bool {
+        writeCode=[](unsigned rva,const unsigned char* expected,const unsigned char* bytes,std::size_t size) noexcept -> bool {
             if(rva==kCreateOnline && !refused++)return false;   // the first write of the entry: refused
             if((bytes[0]==0xE8 || bytes[0]==0xE9) && size>=5 && std::memcmp(image+rva,bytes,size)) {
                 std::int32_t rel=0;std::memcpy(&rel,bytes+1,4);
                 unsigned char* const to=image+rva+5+rel;
                 if(to<image || to>=image+0x22CE000)page=reinterpret_cast<unsigned char*>(reinterpret_cast<std::uintptr_t>(to)&~std::uintptr_t{0xFFF});
             }
-            return WriteImage(rva,bytes,size);
+            return WriteImage(rva,expected,bytes,size);
         };
         Check(!InstallEdf5Online() && !Edf5OnlineReady(),"a write refused: not installed");
         Check(refused==1 && page!=nullptr,"refused at the creation's entry, after every other site was written to the page");

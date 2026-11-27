@@ -6,6 +6,7 @@
 #include "../src/barrage_plan.h"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/netprobe.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -17,6 +18,8 @@ Sea SeaAt(float,float,float* surface) noexcept {*surface=1;return supportSea;}
 PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},supportMeasured,0,true}; }
 float HavokHalf() noexcept { return 3000.0f; }   // BigWorld off: the stock world
 float SupportPassTurn(const SupportAircraft& spec) noexcept { return spec.transportPlane ? 266.0f : 0.0f; }   // jet_flight.cpp FerryTurn
+float supportRunIn=0;   // jet_spawn.cpp SupportRunIn: the straight run in a jet gun run needs (set by a check)
+float SupportRunIn(const SupportAircraft&,float) noexcept { return supportRunIn; }
 // Ground height under (x, z): flat by default; `supportSlope` m per m rising from the map's centre; `supportStep` a
 // ledge every 30 m outward (no flat ground anywhere). Vertical rays meet that same ground.
 float supportSlope=0,supportStep=0;
@@ -45,7 +48,7 @@ bool UltimateStart(const unsigned char* caller,const float*,float damage,std::ui
 unsigned char* playerHuman=nullptr;
 unsigned char* PlayerHuman() noexcept { return playerHuman; }
 int unpaidCalls=0;
-bool SupportCallUnpaidAt(int,const float*,wchar_t*,std::size_t) noexcept {++unpaidCalls;return true;}
+bool SupportCallUnpaidAt(int,const float*,wchar_t*,std::size_t,const sortie::RunSpec&) noexcept {++unpaidCalls;return true;}
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }   // the second waves (airstrike.cpp SupportFollowUpTick)
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
@@ -115,7 +118,7 @@ int main() {
     Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::none && route.from[1]>=150,
           "production entry planner puts the aircraft in the air at the route's height");
     // Off the map (2026-10-10: made 180 m inside the ground, in plain sight): past the ground's edge (the walls +-1500 stand
-    // kVoidMargin inside it) by kOffMap, inside the physical square (crew.h ArrivalHalf: Havok's 3000 less kArrivalRoom).
+    // kVoidMargin inside it) by kOffMap, inside the physical square (world.h ArrivalHalf: Havok's 3000 less kArrivalRoom).
     Check(std::fmax(std::fabs(route.from[0]),std::fabs(route.from[2]))>=1500.0f+area::kVoidMargin+support::kOffMap-0.5f &&
           std::fabs(route.from[0])<=ArrivalHalf() && std::fabs(route.from[2])<=ArrivalHalf(),"the entry stands off the map, inside the square");
     // The map's preview plans the very same entry (support_warning.cpp), unlogged.
@@ -144,6 +147,23 @@ int main() {
            "the transport plane is planned in the air at the edge like any aircraft");
      SupportAircraft nothing{};nothing.count=1;
      Check(PlanAirSupport(nothing,supportTarget,observer,&route)==support::Refusal::unsupported,"a spec with no aircraft is refused");}
+    // The way in asked for (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」「应该直接进入航线才对」): a heading off the
+    // planner's 16 bearings comes in on it exactly, the entry on its line produced back from the target (no lap to line up).
+    {const float way[3]={0.5f,0.0f,0.8660254f};
+     support::Route asked;
+     Check(PlanAirSupport(call0,supportTarget,observer,&asked,way)==support::Refusal::none &&
+           std::fabs(asked.heading[0]-way[0])<1e-5f && std::fabs(asked.heading[2]-way[2])<1e-5f,
+           "the entry's heading is the one asked for, not the nearest of 16 bearings");
+     const float back[2]={asked.from[0]-supportTarget[0],asked.from[2]-supportTarget[2]};
+     Check(std::fabs(back[0]*way[2]-back[1]*way[0])<0.5f && back[0]*way[0]+back[1]*way[2]<-1000.0f,
+           "the entry stands on the attack line produced, short of the target");
+     const float other[3]={-0.8660254f,0.0f,-0.5f};
+     Check(PlanAirSupport(call0,supportTarget,observer,&asked,other)==support::Refusal::none &&
+           std::fabs(asked.heading[0]-other[0])<1e-5f && std::fabs(asked.heading[2]-other[2])<1e-5f,
+           "another way in turns the entry with it");
+     support::Route preview;
+     Check(PreviewAirRoute(call0,supportTarget,observer,&preview,other)==support::Refusal::none &&
+           !std::memcmp(preview.from,asked.from,12),"the map's preview shows the same way in");}
 
     // ---- The supports' prices (tools/calls.py Call.pt) ----
     for(int i=0;i<kCallCount;++i)Check(SupportAirCallPt(i)==kCalls[i].pt && kCalls[i].pt>=1000,"every flown support has its pt");

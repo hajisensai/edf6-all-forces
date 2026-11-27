@@ -1,7 +1,12 @@
 #pragma once
 // The older resolvers, thin over net_object_resolve.h (one walk, the same rules): what the map commands, the support
 // dispatch and the enemy control ask in one call.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "scene.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "net_object_ref.h"
 #include "net_object_resolve.h"
 #include "support_net.h"

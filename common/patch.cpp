@@ -2,6 +2,7 @@
 #include "edf/patch.h"
 #include "edf/memory.h"
 #include <atomic>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 
@@ -16,10 +17,6 @@ void RestoreProtection(void* at,std::size_t size,DWORD previous) noexcept {
 }
 
 unsigned ProtectRestoreFailures() noexcept { return restoreFailures.load(std::memory_order_relaxed); }
-
-bool Matches(const unsigned char* image,std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept {
-    return image && std::memcmp(image+rva,bytes,size)==0;
-}
 
 bool PatchVtableSlot(void** slot,void* expected,void* replacement,Claim kind,const char* owner) noexcept {
     ClaimCode(slot,sizeof(void*),kind,owner);
@@ -40,9 +37,9 @@ bool ChainVtableSlot(void** slot,void* hook,void** next,const char* owner) noexc
     return false;
 }
 
-bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size,
-               Claim kind,const char* owner) noexcept {
-    ClaimCode(at,size,kind,owner);
+namespace {
+// PatchCode's write, its bytes claimed by the caller already (one claim a patch: a conflict is told once).
+bool WriteCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size) noexcept {
     if(std::memcmp(at,replacement,size)==0)return true;
     if(std::memcmp(at,expected,size)!=0)return false;
     DWORD old=0;
@@ -52,24 +49,50 @@ bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned ch
     FlushInstructionCache(GetCurrentProcess(),at,size);
     return true;
 }
-bool RedirectImportCall(unsigned char* site,const unsigned char* sig,void* hook,void** slotValue,
-                        const char* owner) noexcept {
-    if(!Readable(site,6) || std::memcmp(site,sig,6)!=0)return false;
-    std::int32_t rel=0;
-    std::memcpy(&rel,sig+2,4);
-    void* const* slot=reinterpret_cast<void* const*>(site+6+rel);
-    if(!Readable(slot,8) || !*slot)return false;
-    if(*slotValue && *slotValue!=*slot)return false;   // several sites of one import share its slot
-    *slotValue=*slot;
-    void* const thunk=AllocateNearThunk(site,hook);
-    if(!thunk)return false;
-    const auto delta=static_cast<unsigned char*>(thunk)-(site+5);
-    if(delta>0x7FFFFFF0 || delta<-0x7FFFFFF0){VirtualFree(thunk,0,MEM_RELEASE);return false;}
-    unsigned char code[6]={0xE8,0,0,0,0,0x90};
-    const auto rel32=static_cast<std::int32_t>(delta);
-    std::memcpy(code+1,&rel32,4);
-    if(PatchCode(site,sig,code,sizeof(code),Claim::kSole,owner))return true;
-    VirtualFree(thunk,0,MEM_RELEASE);
-    return false;
+// RedirectToThunk's write, claimed by the caller already.
+bool WriteRedirect(unsigned char* site,const unsigned char* expected,std::size_t size,const void* thunk,Branch branch,
+                   unsigned char* written) noexcept {
+    unsigned char code[kMostRedirectBytes];
+    if(!expected || !BuildRedirect(site,size,thunk,branch,code) || !WriteCode(site,expected,code,size))return false;
+    if(written)std::memcpy(written,code,size);
+    return true;
 }
+}  // namespace
+
+bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size,
+               Claim kind,const char* owner) noexcept {
+    ClaimCode(at,size,kind,owner);
+    return WriteCode(at,expected,replacement,size);
+}
+
+bool BuildRedirect(const unsigned char* site,std::size_t size,const void* thunk,Branch branch,
+                   unsigned char* out) noexcept {
+    if(!site || !thunk || !out || size<5 || size>kMostRedirectBytes)return false;
+    const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(site+5);
+    if(delta<INT32_MIN || delta>INT32_MAX)return false;
+    const auto rel32=static_cast<std::int32_t>(delta);
+    out[0]=static_cast<unsigned char>(branch);
+    std::memcpy(out+1,&rel32,4);
+    std::memset(out+5,0x90,size-5);
+    return true;
+}
+
+bool RedirectToThunk(unsigned char* site,const unsigned char* expected,std::size_t size,const void* thunk,
+                     Branch branch,unsigned char* written,Claim kind,const char* owner) noexcept {
+    ClaimCode(site,size,kind,owner);   // before anything is looked at: a second owner is told even when refused
+    return WriteRedirect(site,expected,size,thunk,branch,written);
+}
+
+const unsigned char* RedirectToCode(unsigned char* site,const unsigned char* expected,std::size_t size,
+                                    const unsigned char* code,std::size_t codeSize,Branch branch,
+                                    unsigned char* written,Claim kind,const char* owner) noexcept {
+    ClaimCode(site,size,kind,owner);
+    if(!site || !expected || !Readable(site,size) || std::memcmp(site,expected,size)!=0)return nullptr;
+    void* const page=AllocateNearCode(site,code,codeSize);
+    if(!page)return nullptr;
+    if(WriteRedirect(site,expected,size,page,branch,written))return static_cast<const unsigned char*>(page);
+    VirtualFree(page,0,MEM_RELEASE);
+    return nullptr;
+}
+
 }  // namespace edf

@@ -65,7 +65,24 @@ def _paeth(a: int, b: int, c: int) -> int:
 
 
 def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> bytearray:
-    """PNG scanline filters 0..4 undone; `bpp` bytes per pixel (>= 1)."""
+    """_unfilter_py's bytes (and its TextureError), natively when native/png.cpp's DLL is there (pylib/edf6native.py)."""
+    import edf6native
+    lib = edf6native.lib()
+    if lib is None or height == 0 or len(raw) < height * (width * bpp + 1):   # a short stream: the reference's own
+        return _unfilter_py(raw, width, height, bpp)
+    import ctypes
+    raw = bytes(raw)
+    out = ctypes.create_string_buffer(width * bpp * height)
+    status = lib.edf6_png_unfilter(raw, len(raw), width, height, bpp, out)
+    if status > 0:
+        raise TextureError(f'PNG: unknown filter {status - 1}')
+    if status < 0:
+        raise TextureError('PNG: the native unfilter refused its arguments')
+    return bytearray(out.raw)
+
+
+def _unfilter_py(raw: bytes, width: int, height: int, bpp: int) -> bytearray:
+    """PNG scanline filters 0..4 undone; `bpp` bytes per pixel (>= 1). The reference of native/png.cpp."""
     stride = width * bpp
     out = bytearray(stride * height)
     prev = bytearray(stride)

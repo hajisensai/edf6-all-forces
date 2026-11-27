@@ -76,8 +76,10 @@ jobs:
         run: |
           python tools/gen_calls.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          git diff --exit-code -- src/calls.inc
-          if ($LASTEXITCODE) { Write-Error 'src/calls.inc is stale: run python tools/gen_calls.py and commit it'; exit 1 }
+          git diff --exit-code -- src/calls.inc src/sortie_pass.inc src/barrage_kind.inc
+          if ($LASTEXITCODE) { Write-Error 'src/calls.inc / sortie_pass.inc / barrage_kind.inc is stale: run python tools/gen_calls.py and commit it'; exit 1 }
+          python tools/gen_config.py --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python tools/gen_stores.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           git diff --exit-code -- src/stores.inc
@@ -101,12 +103,19 @@ jobs:
           # src/mech_parts.inc: from pylib/mech_parts.py (no game needed).
           python tools/gen_mech_parts.py --check
           if ($LASTEXITCODE) { Write-Error 'src/mech_parts.inc is stale: run python tools/gen_mech_parts.py and commit it'; exit 1 }
+          # src/py_consts.inc: the values the plugin shares with pylib (no game needed); each used by a source.
+          python tools/gen_py_consts.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/py_consts.inc is stale or unused: run python tools/gen_py_consts.py and commit it'; exit 1 }
           python tools/gen_weapon_series.py --check
           if ($LASTEXITCODE) { Write-Error 'src/weapon_series.inc is stale: run python tools/gen_weapon_series.py and commit it'; exit 1 }
           # common/edf/katyusha_cab_gen.h is measured on the Katyusha's model (no Root.cpk here): checked against its own
           # record of what it was made from (tools/gen_katyusha_cab.py --check).
           python tools/gen_katyusha_cab.py --check
           if ($LASTEXITCODE) { Write-Error 'common/edf/katyusha_cab_gen.h is stale: run python tools/gen_katyusha_cab.py (with the game) and commit it'; exit 1 }
+          # The Balam's attack table (src/barga_reach.inc, measured on the model's animations): its record of what it was
+          # made from (tools/gen_barga_reach.py --check).
+          python tools/gen_barga_reach.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/barga_reach.inc is stale: run python tools/gen_barga_reach.py (with the game) and commit it'; exit 1 }
           # docs/*.md named in the sources, and the repository paths the docs name, exist (tools/doc_links_check.py).
           python tools/doc_links_check.py
           if ($LASTEXITCODE) { Write-Error 'dead doc/code links: fix the paths tools/doc_links_check.py lists'; exit 1 }

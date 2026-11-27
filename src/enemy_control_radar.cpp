@@ -2,7 +2,8 @@
 // observer values: native stack center/rotation and native hostile-walk team.
 #include "enemy_control_radar.h"
 #include "enemy_control_types.h"
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
 #include "team_native_logic.h"
 #include "memory.h"
 #include <cmath>

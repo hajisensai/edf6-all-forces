@@ -4,14 +4,22 @@
 // dreadnought's turrets are (dreadnought_turrets.inc). The V603 aims, reads and poses seat 0 alone
 // (docs/independent-seat-re.md), so nothing native turns these.
 #include "seat_turret.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "netprobe.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "heli.h"
 #include "layout.h"
 #include "memory.h"
 #include "npcai.h"
 #include "payload.h"
-#include "seat_net_transport.h"
+#include "object_net_transport.h"
+#include "seat_net.h"
 #include "seat_turret_net.h"
 #include "seat_turret_pose.h"
 #include "stores.h"
@@ -50,9 +58,9 @@ struct Vehicle {
     ULONGLONG seen=0,lastMs=0,sentAt=0;
 };
 Vehicle vehicles[kMostVehicles]{};
-// Each vehicle's sender watermarks, apart from its record (seat_net.h StreamGates: a record re-rigged or taken for another
+// Each vehicle's sender watermarks, apart from its record (object_net.h StreamGates: a record re-rigged or taken for another
 // vehicle keeps them, so a delayed older block is never admitted again); dropped with the vehicle or the mission.
-seat_net::StreamGates<kMostVehicles*2,64> gates;
+object_net::StreamGates<kMostVehicles*2,64> gates;
 SRWLOCK lock=SRWLOCK_INIT;
 bool installed=false,netReady=false;
 
@@ -261,10 +269,10 @@ void FrameLocked(unsigned char* v) noexcept {
             out.holder[n]=static_cast<std::int16_t>(t.holder);out.yaw[n]=t.now.yaw;out.pitch[n]=t.now.pitch;
         }
     }
-    if(!netReady || !out.trained || !seat_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) ||
+    if(!netReady || !out.trained || !object_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) ||
        now-x->sentAt<seat_turret_net::kSendMs)return;
-    seat_net::ChainVehicle(v);   // this class hears its copies' turrets too
-    if(seat_net::Stamp(&out,sizeof(out)) && seat_turret_net::Valid(out) && seat_net::Send(v,&out,sizeof(out)))x->sentAt=now;
+    object_net::ChainVehicle(v);   // this class hears its copies' turrets too
+    if(object_net::Stamp(&out,sizeof(out)) && seat_turret_net::Valid(out) && object_net::Send(v,&out,sizeof(out)))x->sentAt=now;
 }
 
 // Another machine's turrets of `v` (game thread): each one this machine does not train itself turned as it says.
@@ -364,7 +372,7 @@ void SeatTurretsTrain(unsigned char* v,unsigned seat,const void* target) noexcep
 
 bool InstallSeatTurrets() noexcept {
     installed=true;
-    netReady=seat_net::Install() && seat_net::Register(seat_turret_net::kMagic,&Received);
+    netReady=object_net::Install() && object_net::Register(seat_turret_net::kMagic,&Received);
     Log("HOOK seat turrets=1 online=%d (the gunner seats' own turrets, tag 15 'STUR')",netReady);
     return true;
 }

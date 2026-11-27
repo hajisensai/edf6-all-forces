@@ -952,12 +952,15 @@ int main() {
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::attackMove,{900,0,0}},ObjRef::Of(other),{});
             Expect(result.Accepted() && transportOrders==asked+1 && commandSquad->cmd.order==before,
                    "a seated paired squad's far order goes by its transport, its own order untouched");
+            // WITHDRAW (B, BACK TO BASE) goes to the squad's transport when it has one (with none it is a dismissal).
+            const void* pairedWas=transportPaired;transportPaired=vehicle;
             transportTakes=false;transportWithdraw=NpcCommandReason::none;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
             Expect(result.Accepted(),"WITHDRAW answered by its transport");
             transportWithdraw=NpcCommandReason::noTransport;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::withdraw,{}},ObjRef::Of(other),{});
             Expect(result.reason==NpcCommandReason::noTransport,"...and its refusal passed on");
+            transportPaired=pairedWas;
             const int cancels=transportCancels;
             result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::none,{}},ObjRef::Of(other),{});
             Expect(result.Accepted() && transportCancels==cancels+1,"another order, taken, leaves the trip (TransportCancel)");

@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include "../src/highcam.h"
+#include "../src/hud.h"
+#include "../src/turretcam_api.h"
 
 namespace crew {
 unsigned char* image=nullptr;

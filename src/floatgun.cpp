@@ -39,7 +39,16 @@
 //    attacker. A peer that joins (plugin_net.h joined) is sent every gun again (drop, owner).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "floatgun.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "command_identity.h"
 #include "edf41classes.h"
 #include "gravity_net_protocol.h"

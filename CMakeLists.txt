@@ -10,7 +10,7 @@ set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only gene
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks (tools/check.py sets it from pylib/gamedir)")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/blastsound.cpp src/sightzoom.cpp src/drivegear.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/modules.cpp src/modules_load.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/hud_text.cpp src/hud_vehicle.cpp src/hud_air.cpp src/hud_map.cpp src/hud_scope.cpp src/launcher.cpp src/barga_aim.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/blastsound.cpp src/sightzoom.cpp src/drivegear.cpp)
 # The sources the vehicles' sounds are made by (src/trace_rec.cpp records a run of them, tests/vehsound_replay_test.cpp
 # plays it back): their hash in a recording's header and in the replay, which holds a recording made from the same sources
 # to exactly what the game did (docs/trace-replay.md).
@@ -71,8 +71,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
 # The objects the game handed the plugin this step (src/live_set.h): asked instead of edf::Readable for them.
 target_sources(EDF6VehicleCrew PRIVATE src/live_set.cpp)
-# The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
-target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
+# The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h); HOLD FIRE's table every firing module asks
+# (src/unit_hold_fire.cpp: the tests of those modules link it as they are).
+target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp src/unit_hold_fire.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
 # The map's support pt (src/support_points.cpp, rules in src/support_points_logic.h; tests/support_points_test.cpp) and the
 # supports' warnings on the ground (src/support_warning.cpp, src/support_warning_logic.h; tests/support_warning_test.cpp).
@@ -100,6 +101,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/andryusha.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/jet_sortie.cpp)
 # A registered jet's engine lever online (src/jet_lever_net.cpp; the wire src/jet_lever_protocol.h, tests/jet_lever_net_test.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/jet_lever_net.cpp)
+# The aura trucks (src/aura.cpp; the rules src/aura_logic.h, tests/aura_logic_test.cpp; docs/feature-aura-vehicles.md).
+target_sources(EDF6VehicleCrew PRIVATE src/aura.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus_net.cpp)
@@ -130,7 +133,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/edf41mech_boost.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 # The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): child identities, the host's decisions as events.
 target_sources(EDF6VehicleCrew PRIVATE src/edf41net.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp src/seat_net.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp src/object_net.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi_net.cpp)
 # Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
 target_sources(EDF6VehicleCrew PRIVATE src/guidance.cpp)
@@ -155,7 +158,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 # The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
 target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/ui_gpu.cpp src/ui_text.cpp src/armory.cpp src/armory_draw.cpp src/armory_presets.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp src/pack_switch.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
@@ -189,7 +192,10 @@ add_dependencies(EDF6VehicleCrew edf6_build_id)
 target_include_directories(EDF6VehicleCrew PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(EDF6VehicleCrew PRIVATE xaudio2 sapi ole32)
 target_compile_options(EDF6VehicleCrew PRIVATE /W4 /WX /utf-8 /permissive-)
-target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6VehicleCrew.pdb)
+# /MAP: build/EDF6VehicleCrew.map, outside Mods/Plugins (never shipped): plugin_image_size_guard reads it to name the
+# biggest objects in .data.
+target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6VehicleCrew.pdb
+    "/MAP:${CMAKE_BINARY_DIR}/EDF6VehicleCrew.map")
 # Build output, never tracked: build/Mods/Plugins holds both plugins and their ini files, laid out as they go
 # into the game (tools/installer.py and tools/build_release.py take them from there).
 set_target_properties(EDF6VehicleCrew PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Mods/Plugins")
@@ -201,11 +207,12 @@ foreach(_wav ${_wt_wavs})
   configure_file("${_wav}" "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6VehicleCrew_wt/${_wav_name}" COPYONLY)
 endforeach()
 
-# The installer's native helpers (native/*.cpp: the CMPL codec, CRILAYLA, the SK maps' greedy LZSS and collision trees):
+# The installer's native helpers (native/*.cpp: the CMPL codec, CRILAYLA, the SK maps' greedy LZSS and collision trees,
+# the texture encoders, PNG's scanline filters):
 # pylib/edf6native.py loads them with ctypes, tools/build_release.py bundles the DLL. Each is a port of a Python
 # reference that stays the fallback (tests/test_native_*.py: the same bytes).
 # MODULE, not SHARED: nothing links it, and SHARED libraries are the game's plugins (selftest pack_ships_every_plugin).
-add_library(edf6cmpl MODULE native/cmpl.cpp native/crilayla.cpp native/lzss_greedy.cpp native/aabb_tree.cpp native/dxt1.cpp native/bc7.cpp)
+add_library(edf6cmpl MODULE native/cmpl.cpp native/crilayla.cpp native/lzss_greedy.cpp native/aabb_tree.cpp native/dxt1.cpp native/bc7.cpp native/png.cpp)
 target_compile_options(edf6cmpl PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(edf6cmpl PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pylib")
 
@@ -416,6 +423,12 @@ add_executable(katyusha_cab_check EXCLUDE_FROM_ALL tools/katyusha_cab_check.cpp)
 target_compile_options(katyusha_cab_check PRIVATE /W4 /WX /utf-8 /permissive-)
 target_include_directories(katyusha_cab_check PRIVATE ${CMAKE_SOURCE_DIR}/common)
 set_target_properties(katyusha_cab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Balam's impact marker's pure part (src/barga_aim.h: the cannon's sweep, the combo's availability, the hit spheres,
+# the reach arcs; the tables tools/gen_barga_reach.py), offline. cmake --build build --target barga_aim_check
+add_executable(barga_aim_check EXCLUDE_FROM_ALL tools/barga_aim_check.cpp)
+target_compile_options(barga_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
+target_include_directories(barga_aim_check PRIVATE ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(barga_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The gunship's muzzle (src/gunmuzzle.h) on the circles it flies: no round's line through its airframe, its start where the
 # muzzle is when it leaves, against the old origin start and the shell's stock wait, offline (tools/gunship_muzzle_check.cpp).
@@ -562,6 +575,13 @@ target_include_directories(vsound_check PRIVATE src common third_party/EDFModLoa
 target_link_libraries(vsound_check PRIVATE edf6common xaudio2 sapi ole32)
 target_compile_options(vsound_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vsound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# How many engine voices XAudio2 carries and at what CPU (tools/jet_voice_bench.cpp): needs an audio output, no ctest.
+# cmake --build build --target jet_voice_bench && build\jet_voice_bench.exe
+add_executable(jet_voice_bench EXCLUDE_FROM_ALL tools/jet_voice_bench.cpp)
+target_include_directories(jet_voice_bench PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(jet_voice_bench PRIVATE edf6common xaudio2 sapi ole32)
+target_compile_options(jet_voice_bench PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(jet_voice_bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The EMC's charged beam offline (tools/emc_check.cpp: src/emc_plan.h's trigger cycle, damage budget and the scan along the
 # beam against a stand-in line of buildings and a hill). Not part of the plugin build:
@@ -616,8 +636,13 @@ set_target_properties(wing_engine_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${C
 add_executable(sound_engine_check EXCLUDE_FROM_ALL tools/sound_engine_check.cpp)
 target_compile_options(sound_engine_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(sound_engine_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The jets' engines mixed together offline (tools/jet_mix_check.cpp, src/jet_mix.h: jetsound.cpp's Mix): the far
+# rolloff, the fades, the ranking. cmake --build build --target jet_mix_check && build\jet_mix_check.exe
+add_executable(jet_mix_check EXCLUDE_FROM_ALL tools/jet_mix_check.cpp)
+target_compile_options(jet_mix_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(jet_mix_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-# The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp against a stand-in image whose draw functions record;
+# The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp and its parts hud_*.cpp against a stand-in image whose draw functions record;
 # tools/hud_view.py makes the PNGs): the warnings' layout to look at. Not part of the plugin build:
 # cmake --build build --target hud_view && build\hud_view.exe && python tools\hud_view.py %TEMP%\edf6_hud_view
 add_executable(hud_view EXCLUDE_FROM_ALL tools/hud_view.cpp)
@@ -653,6 +678,12 @@ target_link_libraries(transport_runtime_test PRIVATE edf6common)
 target_include_directories(transport_runtime_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(transport_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME transport_runtime COMMAND transport_runtime_test)
+# The one object reference and liveness test (src/objref.h, docs/objref-re.md) on forged control blocks.
+add_executable(objref_test EXCLUDE_FROM_ALL tests/objref_test.cpp)
+target_link_libraries(objref_test PRIVATE edf6common)
+target_include_directories(objref_test PRIVATE src common)
+target_compile_options(objref_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME objref COMMAND objref_test)
 add_executable(airdrop_check EXCLUDE_FROM_ALL tools/airdrop_check.cpp)
 target_compile_options(airdrop_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(airdrop_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -777,6 +808,9 @@ add_executable(scope_lens_test tests/scope_lens_test.cpp)
 target_link_libraries(scope_lens_test PRIVATE edf6common)
 target_compile_options(scope_lens_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME scope_lens COMMAND scope_lens_test)
+add_executable(screen_view_test tests/screen_view_test.cpp)
+target_compile_options(screen_view_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME screen_view COMMAND screen_view_test)
 add_executable(highcam_input_test EXCLUDE_FROM_ALL tests/highcam_input_test.cpp)
 target_include_directories(highcam_input_test PRIVATE src common)
 target_link_libraries(highcam_input_test PRIVATE edf6common user32)
@@ -856,6 +890,12 @@ add_test(NAME weapon_records COMMAND weapon_records_test)
 add_executable(room_dialog_test tests/room_dialog_test.cpp)
 target_compile_options(room_dialog_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_dialog COMMAND room_dialog_test)
+# The HQ's mission pack switch, its pure side: the mode Q / E go to, the routine compiled into MAINSCRIPT, the keys'
+# edge (src/pack_switch_logic.h; src/pack_switch.cpp hooks with it), and its addresses against the real EDF.dll and
+# MAINSCRIPT.AS (tests/pack_switch_native_audit.py, skipped without the game).
+add_executable(pack_switch_test tests/pack_switch_test.cpp)
+target_compile_options(pack_switch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME pack_switch COMMAND pack_switch_test)
 # The PvP unit catalogue: the enemy rows a PvP player can be and their sides (src/pvp_units.h; src/pvp_units.inc is
 # written by tools/gen_pvp_units.py).
 add_executable(pvp_units_test tests/pvp_units_test.cpp)
@@ -949,6 +989,9 @@ add_test(NAME player_slots COMMAND player_slots_test)
 add_executable(armory_logic_test tests/armory_logic_test.cpp)
 target_compile_options(armory_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME armory_logic COMMAND armory_logic_test)
+add_executable(text_fit_test tests/text_fit_test.cpp)
+target_compile_options(text_fit_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME text_fit COMMAND text_fit_test)
 # 整备's 支援编成 / 载具 pages (src/support_pages.h): edits through room_menu.h, per-page saves, the 3D viewport's hole.
 add_executable(support_pages_test tests/support_pages_test.cpp)
 target_compile_options(support_pages_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -975,7 +1018,7 @@ add_test(NAME room_sync COMMAND room_sync_test)
 # A room member's support loadout line (src/member_config.h): written, read back, left out past the budget, refused whole.
 add_executable(member_config_test tests/member_config_test.cpp)
 target_compile_options(member_config_test PRIVATE /W4 /WX /utf-8 /permissive-)
-add_test(NAME member_config COMMAND member_config_test)
+add_test(NAME member_config COMMAND member_config_test text_fit_test)
 # The mission's variant preload set (configuration + the room host's list + the pending list's newest, never a
 # directory scan) and the hello's filter (src/support_variants_logic.h; the design doc's 阶段 R).
 add_executable(support_variants_test tests/support_variants_test.cpp)
@@ -1060,10 +1103,14 @@ add_test(NAME online_authority COMMAND online_authority_test)
 add_executable(drill_net_test tests/drill_net_test.cpp)
 target_compile_options(drill_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME drill_net COMMAND drill_net_test)
-# The vehicles' tag 15 kinds: the common head, gate and the seat pick (src/seat_net.h).
+# The object messages' tag 15 kinds: the seat pick (src/seat_net.h) and the old kinds' layouts under the common head.
 add_executable(seat_net_test tests/seat_net_test.cpp)
 target_compile_options(seat_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME seat_net COMMAND seat_net_test)
+# The object message layer (src/object_net.h): head, gates, the kinds' registry, the class table, two kinds on one object.
+add_executable(object_net_test tests/object_net_test.cpp)
+target_compile_options(object_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME object_net COMMAND object_net_test)
 add_executable(dreadnought_net_test tests/dreadnought_net_test.cpp)
 target_compile_options(dreadnought_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME dreadnought_net COMMAND dreadnought_net_test)
@@ -1075,14 +1122,14 @@ add_executable(wing_turn_test tests/wing_turn_test.cpp)
 target_compile_options(wing_turn_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME wing_turn COMMAND wing_turn_test)
 # ...and the hangar's whole flight home: its capture, its nose, its speed held (src/hangar_recover.h; test hub #42). Its
-# negative controls run under playerjet_recovery (tools/playerjet_recovery_check.py).
+# negative controls run under playerjet_recovery_<I> (tools/playerjet_recovery_check.py).
 add_executable(hangar_recover_test tests/hangar_recover_test.cpp)
 target_compile_options(hangar_recover_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME hangar_recover COMMAND hangar_recover_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The installer's support menu (tools/support_config.py) against the plugin's keys and weapons, and its ini edits.
 # In COCKPIT_BUILD_SHARDS parts run side by side (its units: tests/cockpit_build_test.py units; all in one run took ~15 min).
-set(COCKPIT_BUILD_SHARDS 8)
+set(COCKPIT_BUILD_SHARDS 20)
 math(EXPR _cockpit_last "${COCKPIT_BUILD_SHARDS} - 1")
 foreach(_shard RANGE ${_cockpit_last})
   add_test(NAME cockpit_build_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_build_test.py"
@@ -1109,6 +1156,8 @@ add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 add_test(NAME enemy_control_crosshair_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_crosshair_guard.py")
 # Every channel names a player by its mission slot, never its NetId (tests/player_identity_guard.py).
 add_test(NAME player_identity_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_identity_guard.py")
+# The shipped ini parsed back equals tools/config_keys.py (defaults, config.h Config initialisers via src/config.inc).
+add_test(NAME config_roundtrip COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/config_roundtrip_test.py")
 add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
 # The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.
 set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1154,6 +1203,8 @@ set_tests_properties(weapon_records_native PROPERTIES ENVIRONMENT PYTHONIOENCODI
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME generator_excludes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/generator_excludes_test.py")
+set_tests_properties(generator_excludes PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # 原版启动.cmd: ModLoader.ini off for one run and back (tools/vanilla_launch.py).
 add_test(NAME vanilla_launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vanilla_launch_test.py")
 set_tests_properties(vanilla_launch PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1190,6 +1241,9 @@ set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME room_dialog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_dialog_native_audit.py")
 set_tests_properties(room_dialog_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # 武器页写槽所依据的代码（src/weapon_equip.cpp，tools/weapon_equip_sigs.py）与生成的武器数据对 EDF.dll / Root.cpk（没有游戏则跳过）。
+# The HQ's pack switch against EDF.dll and MAINSCRIPT.AS (src/pack_switch.cpp; skipped without the game).
+add_test(NAME pack_switch_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/pack_switch_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(pack_switch_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
@@ -1243,6 +1297,8 @@ add_test(NAME redirect_owner_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 # 0-tick frames (n = 0) run no online pump and send nothing: the pump dedups on the logical frame, the senders sit on
 # tick paths, the per-frame files send nothing (tests/frame_rate_net_guard.py, docs/unlimited-fps-re.md §4.4).
 add_test(NAME frame_rate_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_net_guard.py")
+# Every HUD text in its 4 languages against its line's 127 characters and its slot's width (tests/hudtext_fit.py: hud_view's glyph table).
+add_test(NAME hudtext_fit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hudtext_fit.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
@@ -1307,8 +1363,10 @@ set_tests_properties(sound_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")
 set_tests_properties(debug_spawn_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The plugin's writable data section stays small: big per-session tables are crew::LazyRows (mem-4,
-# tests/plugin_image_size_guard.py reads the built DLL's PE header).
-add_test(NAME plugin_image_size_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/plugin_image_size_guard.py" "$<TARGET_FILE:EDF6VehicleCrew>")
+# tests/plugin_image_size_guard.py reads the built DLL's PE header; near the limit it names the biggest objects from
+# the linker map the plugin's link writes, /MAP above).
+add_test(NAME plugin_image_size_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/plugin_image_size_guard.py"
+    "$<TARGET_FILE:EDF6VehicleCrew>" "${CMAKE_BINARY_DIR}/EDF6VehicleCrew.map")
 # An empty vehicle it makes is CreateVehicle2's (0x633280), never SetLevel's: off the native AI list, so the player in
 # it drives and fires; with EDF6_NATIVE_DLL its signatures are compared with the DLL.
 add_test(NAME debug_spawn_vehicle_level_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_vehicle_level_guard.py")
@@ -1365,12 +1423,21 @@ set_target_properties(fp_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_
 add_executable(world_text_check EXCLUDE_FROM_ALL tools/world_text_check.cpp)
 target_compile_options(world_text_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(world_text_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# A jet's escort of the player it follows (src/jet_escort.h: the slot, the racetrack round a slow player) offline.
+add_executable(jet_escort_check EXCLUDE_FROM_ALL tools/jet_escort_check.cpp)
+target_compile_options(jet_escort_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(jet_escort_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# A flight's aircraft kept apart (src/flight_spread.h: lanes, breaks, claims, separation) offline.
+add_executable(flight_spread_check EXCLUDE_FROM_ALL tools/flight_spread_check.cpp)
+target_compile_options(flight_spread_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(flight_spread_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check surround_check sound_event_check sound_engine_check wing_engine_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check world_text_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check barga_aim_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check surround_check sound_event_check sound_engine_check jet_mix_check wing_engine_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check world_text_check jet_escort_check flight_spread_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
+add_dependencies(offline_checks objref_test)
 add_dependencies(offline_checks keybind_test)
 add_dependencies(offline_checks vehicle_weapons_test)
 add_dependencies(offline_checks rip_sampler)   # built in CI so it keeps compiling; never run there
@@ -1391,6 +1458,10 @@ add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE
 # The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
 # edge (jet_obstacle_sim --edge-suite).
 add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# A called jet made past that soft edge (off the map) arrives: it flies in at its own heading, held by an arrival box drawn
+# in after it, not turned "back in first" round and round at the edge (jet_obstacle_sim --entry-suite; the user,
+# 2026-11-27: 「他怎么入场一直在边缘晃悠」).
+add_test(NAME jet_entry_suite COMMAND jet_obstacle_sim --entry-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
 # A withdrawing jet (fuel, ammo, damage, a sortie's pass made) is not held by that soft edge: it leaves the map and is
 # reaped out of sight (jet_obstacle_sim --withdraw-suite; the user, 2026-10-26: 「空中支援不会退场」).
 add_test(NAME jet_withdraw_suite COMMAND jet_obstacle_sim --withdraw-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -1404,6 +1475,9 @@ add_test(NAME jet_strike_room COMMAND jet_obstacle_sim --strike-room-suite --out
 # An extend Strike begins is flown, not ended the next frame and planned again (jet_obstacle_sim --extend-flip-suite;
 # the 2026-11-26 perfrun log's fighter: 245 approach / extend flips and teardrop lines in a minute).
 add_test(NAME jet_extend_flip COMMAND jet_obstacle_sim --extend-flip-suite --out "${CMAKE_BINARY_DIR}")
+# A wing flown level holds its wings level once on its heading or its pass line (jet_obstacle_sim --wobble-suite; the
+# user, 2026-11-27: 「飞机会左右摇摆，即便是在平飞的时候」: JetSteer's acos snap, the gunship's roll-out).
+add_test(NAME jet_wobble COMMAND jet_obstacle_sim --wobble-suite)
 # The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
 # offline (tools/play_area_check.cpp). Not part of the plugin build:
 # cmake --build build --target play_area_check && build\play_area_check.exe
@@ -1463,6 +1537,13 @@ target_compile_options(tvguide_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks tvguide_test)
 add_test(NAME tvguide COMMAND tvguide_test)
 
+add_executable(module_registry_test EXCLUDE_FROM_ALL tests/module_registry_test.cpp)
+target_compile_options(module_registry_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks module_registry_test)
+add_test(NAME module_registry COMMAND module_registry_test)
+# plugin.cpp / mission.cpp list no installs / resets of their own; every module keeps the reset rule (src/module_table.h).
+add_test(NAME module_registry_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/module_registry_guard.py")
+
 add_executable(crew_first_use_test EXCLUDE_FROM_ALL tests/crew_first_use_test.cpp)
 target_link_libraries(crew_first_use_test PRIVATE edf6common)
 target_compile_options(crew_first_use_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
@@ -1513,6 +1594,9 @@ add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}
 add_test(NAME range_tracked_reuse COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/range_tracked_reuse_test.py")
 add_test(NAME perfrun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perfrun_test.py")
 add_test(NAME test_domains COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_domains_test.py")
+add_test(NAME testpool COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/testpool_test.py")
+# pylib/srcscan.py: the source guards' one C++ reader (comments, literals, definitions, calls), on synthetic sources.
+add_test(NAME srcscan COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/srcscan_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
@@ -1573,8 +1657,11 @@ add_test(NAME ifc_model COMMAND ifc_model_test)
 add_test(NAME ifc_model_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_guard.py")
 add_test(NAME ifc_model_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(ifc_model_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
-    --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
+# In shares run side by side (each case a compile of its own): every 4th case from the I-th.
+foreach(_shard RANGE 0 3)
+  add_test(NAME playerjet_recovery_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
+      --build-dir "${CMAKE_BINARY_DIR}" --negative-controls --shard ${_shard}/4)
+endforeach()
 # Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
 add_executable(drill_heat_test EXCLUDE_FROM_ALL tests/drill_heat_test.cpp)
 target_link_libraries(drill_heat_test PRIVATE edf6common user32)
@@ -1588,7 +1675,7 @@ target_link_libraries(drill_sync_test PRIVATE edf6common user32)
 target_include_directories(drill_sync_test PRIVATE src common)
 target_compile_options(drill_sync_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(drill_sync_test PRIVATE /OPT:REF)
-add_dependencies(offline_checks drill_net_test drill_sync_test seat_net_test dreadnought_net_test dreadnought_deck_test)
+add_dependencies(offline_checks drill_net_test drill_sync_test seat_net_test object_net_test dreadnought_net_test dreadnought_deck_test)
 add_test(NAME drill_sync COMMAND drill_sync_test)
 add_executable(drill_launch_test EXCLUDE_FROM_ALL tests/drill_launch_test.cpp)
 target_link_libraries(drill_launch_test PRIVATE edf6common user32)
@@ -2208,6 +2295,7 @@ set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(mission_watch_test tests/mission_watch_test.cpp src/crash_dump.cpp)
 target_include_directories(mission_watch_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(mission_watch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_link_libraries(mission_watch_test PRIVATE edf6common)   # crash_dump.cpp's redirect: edf::PatchCode
 add_test(NAME mission_watch COMMAND mission_watch_test)
 # The plugin's crash dump (src/crash_dump.cpp): a child process per crash kind (access violation, C++ throw, stack
 # overflow, abort / terminate in ucrtbase and in the static CRT, an invalid CRT parameter, a filter set later, two
@@ -2223,7 +2311,7 @@ target_include_directories(crash_dump_test PRIVATE common)
 target_compile_definitions(crash_dump_test PRIVATE "CRASH_PEER_DLL=L\"$<TARGET_FILE:crash_flush_peer>\"")
 add_dependencies(crash_dump_test crash_flush_peer)
 target_compile_options(crash_dump_test PRIVATE /W4 /WX /utf-8 /permissive-)
-target_link_libraries(crash_dump_test PRIVATE dbghelp)
+target_link_libraries(crash_dump_test PRIVATE dbghelp edf6common)   # crash_dump.cpp's redirect: edf::PatchCode
 add_test(NAME crash_dump COMMAND crash_dump_test)
 # It crashes in the exe's own CRT too: the static one, the plugins' (cmake/toolcrt.cmake).
 set_target_properties(crash_dump_test PROPERTIES EDF6_STATIC_CRT ON)
@@ -2319,6 +2407,13 @@ target_link_libraries(code_owner_test PRIVATE edf6common)
 target_compile_options(code_owner_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks code_owner_test)
 add_test(NAME code_owner COMMAND code_owner_test)
+# edf::RedirectToThunk / RedirectToCode / AllocateCodeAbove (common/patch.cpp, memory.cpp) on a scratch code page.
+add_executable(redirect_thunk_test EXCLUDE_FROM_ALL tests/redirect_thunk_test.cpp)
+target_include_directories(redirect_thunk_test PRIVATE common)
+target_link_libraries(redirect_thunk_test PRIVATE edf6common)
+target_compile_options(redirect_thunk_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks redirect_thunk_test)
+add_test(NAME redirect_thunk COMMAND redirect_thunk_test)
 add_executable(fp_skin_test EXCLUDE_FROM_ALL tests/fp_skin_test.cpp src/fp_skin_gpu.cpp)
 target_include_directories(fp_skin_test PRIVATE src common)
 target_link_libraries(fp_skin_test PRIVATE edf6common d3d11)
@@ -2421,7 +2516,7 @@ target_compile_options(decal_depth_native_test PRIVATE /W4 /WX /utf-8 /permissiv
 add_dependencies(offline_checks decal_depth_native_test)
 add_test(NAME decal_depth_native COMMAND decal_depth_native_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(decal_depth_native PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
-target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp
+target_sources(EDF6VehicleCrew PRIVATE src/thermal.cpp src/native_pad.cpp src/thermal_models.cpp src/thermal_gpu.cpp src/scope_pip_gpu.cpp
     src/scope_lens.cpp src/gpufx/gpufx.cpp src/gpufx/gpufx_gpu.cpp)
 target_link_libraries(EDF6VehicleCrew PRIVATE d3d11 d3dcompiler windowscodecs)
 add_executable(debug_spawn_files_check EXCLUDE_FROM_ALL tests/debug_spawn_files_test.cpp)
@@ -2440,6 +2535,9 @@ add_dependencies(offline_checks edf41_sound_bank_test)
 add_test(NAME edf41_sound_bank COMMAND edf41_sound_bank_test)
 add_test(NAME edf41_sound_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_sound_lifecycle_test.py")
 add_test(NAME tracked_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_install.py")
+# The test processes' shared store of the tracked vehicles' builds (pylib/derivedcache.py): off for the installer, a hit
+# only for the same key, a torn entry built again, a stored build the same as a fresh one.
+add_test(NAME derived_cache COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_derivedcache.py")
 # Its lifecycle classes in one test, NativeRangeTests (a ~2 min build a vehicle) one vehicle a shard (EDF6_TEST_SHARD;
 # all in one run took ~330 s).
 add_test(NAME tracked_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_range.py"
@@ -2454,6 +2552,12 @@ target_compile_options(gpufx_sim_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks gpufx_sim_test)
 add_test(NAME gpufx_sim COMMAND gpufx_sim_test)
 set_tests_properties(gpufx_sim PROPERTIES TIMEOUT 60)
+add_executable(gpufx_glow_test EXCLUDE_FROM_ALL tests/gpufx_glow_test.cpp)
+target_include_directories(gpufx_glow_test PRIVATE src)
+target_compile_options(gpufx_glow_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks gpufx_glow_test)
+add_test(NAME gpufx_glow COMMAND gpufx_glow_test)
+set_tests_properties(gpufx_glow PROPERTIES TIMEOUT 60)
 add_executable(gpufx_gpu_test EXCLUDE_FROM_ALL tests/gpufx_gpu_test.cpp src/gpufx/gpufx_gpu.cpp)
 target_include_directories(gpufx_gpu_test PRIVATE src)
 target_link_libraries(gpufx_gpu_test PRIVATE d3d11)
@@ -2696,7 +2800,7 @@ add_test(NAME level_list COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/te
 add_test(NAME model_lod COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_lod.py")
 # The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
 # Its kinds in WT_TRACKED_SHARDS parts run side by side (EDF6_TEST_SHARD; all in one run took ~11 min).
-set(WT_TRACKED_SHARDS 4)
+set(WT_TRACKED_SHARDS 8)
 math(EXPR _wt_last "${WT_TRACKED_SHARDS} - 1")
 foreach(_shard RANGE ${_wt_last})
   add_test(NAME wt_tracked_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_wt_tracked.py")
@@ -3068,19 +3172,46 @@ target_link_libraries(barrel_recoil_test PRIVATE edf6common user32)
 target_compile_options(barrel_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks barrel_recoil_test)
 add_test(NAME barrel_recoil COMMAND barrel_recoil_test)
+# The aura trucks' pure rules (src/aura_logic.h): selection, one kind never stacked, the repair / ammo steps, the AFAU wire.
+add_executable(aura_logic_test EXCLUDE_FROM_ALL tests/aura_logic_test.cpp)
+target_compile_options(aura_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks aura_logic_test)
+add_test(NAME aura_logic COMMAND aura_logic_test)
+# The heli / jet mission phases (src/heli_logic.h, src/jet_logic.h; design-review-1126 step 8): transition tables, illegal
+# transitions rejected, Derive() over every bool combination the old code made, old-vs-new random sequences.
+foreach(t heli_phase_test jet_phase_test)
+  add_executable(${t} EXCLUDE_FROM_ALL tests/${t}.cpp)
+  target_compile_options(${t} PRIVATE /W4 /WX /utf-8 /permissive-)
+  add_dependencies(offline_checks ${t})
+endforeach()
+add_test(NAME heli_phase COMMAND heli_phase_test)
+add_test(NAME jet_phase COMMAND jet_phase_test)
+# The aura trucks' registries (tools/make_aura_vehicles.py, calls, vcobjects, cockpits, ledger, installer, range) and,
+# where the game is, their built models (each its marker under body).
+add_test(NAME aura_vehicles_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/aura_vehicles_guard.py")
 
 # Last, over every test above: one BLAS thread a test process. ctest runs -j N of them side by side and numpy's OpenBLAS
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.
 # And the installer's messages in Chinese (pylib/i18n.py EDF6_LANG) whatever the machine's display language: CI's
 # windows-latest is English, and the tests compare the Chinese words (tools/selftest.py installer_speaks_english: English).
+# And one store of the game-derived builds for every test process (pylib/derivedcache.py EDF6_DERIVED_CACHE): each test
+# built the same tracked vehicles from Root.cpk again (tools/selftest.py gives its workers the same folder).
 get_property(_all_tests DIRECTORY PROPERTY TESTS)
 foreach(_test IN LISTS _all_tests)
   get_test_property(${_test} ENVIRONMENT _env)
   if(NOT _env)
     set(_env)
   endif()
-  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh)
+  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh
+       "EDF6_DERIVED_CACHE=${CMAKE_BINARY_DIR}/derived-cache")
   set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${_env}")
+endforeach()
+
+# The firing modules' tests link HOLD FIRE's table as it is (src/unit_hold_fire.cpp; mapcmd.h UnitHoldsFire).
+foreach(check IN ITEMS map_command_runtime_check map_command_identity_test heli_command_test heli_player_input_test
+        support_infantry_route_test npc_core_check npc_gunners_online_test real_npc_crew_test npc_driver_payload_test
+        npc_action_look_test command_native_dispatch_test)
+    target_sources(${check} PRIVATE src/unit_hold_fire.cpp)
 endforeach()
 
 # Every test's domains as its LABELS (ctest -L <domain>; tools/check.py runs only the ones a change selects):

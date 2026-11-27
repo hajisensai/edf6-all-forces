@@ -11,7 +11,7 @@
 //  - SazabiMeleeKey / Button: the beam tomahawk drawn and swung (its strike a drill charge at each enemy in reach and
 //    one ahead for the buildings); pressed again mid-swing, another follows;
 //  - SazabiGuardKey / Button held: the shield up, the damage taken from ahead SazabiGuardShare of itself.
-// Beams are the plugin's rounds (crew.h EmcRound sz*: DemoIndirectFire objects of the Sazabi's team, jet_bay.cpp).
+// Beams are the plugin's rounds (bay_rounds.h EmcRound sz*: DemoIndirectFire objects of the Sazabi's team, jet_bay.cpp).
 // Funnels fly in the world (sazabi_funnels.h, after the games' and the film's) and are drawn there by their bones
 // (sazabi_pose.h Funnels).
 // The thrusters' flames and the funnels' are Booster flames (booster.cpp FlareFlames). Every effect has its sound
@@ -135,14 +135,9 @@ void Sfx(Mech& m,SzSfx which,const float* at) noexcept {
 // uses +8, weaks +0xC; the final weak release deletes the control through vtable slot 1.
 void AssignLockTarget(Arms& a,const ObjRef& next) noexcept {
     if(next.obj==a.lockOnTarget.obj && next.ctrl==a.lockOnTarget.ctrl)return;
-    if(next.ctrl)InterlockedIncrement(reinterpret_cast<volatile LONG*>(static_cast<unsigned char*>(const_cast<void*>(next.ctrl))+0xC));
+    objref::Retain(next.ctrl);
     const ObjRef old=a.lockOnTarget;a.lockOnTarget=next;
-    if(!old.ctrl)return;
-    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(old.ctrl));
-    if(InterlockedExchangeAdd(reinterpret_cast<volatile LONG*>(ctrl+0xC),-1)==1) {
-        using Delete=void(*)(void*);
-        (*reinterpret_cast<Delete* const*>(ctrl))[1](ctrl);
-    }
+    objref::Release(old.ctrl);
 }
 void DropLocalAim(Arms& a) noexcept {
     AssignLockTarget(a,{});

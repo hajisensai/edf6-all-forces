@@ -425,6 +425,8 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
                 if shell.get(key) is None or doc.root.get(key) is None:
                     raise ValueError(f'{source} / {stock}: missing {key}')
                 doc.root.set(key, copy.deepcopy(shell.get(key)))
+            if source == EMPLACEMENT_SHELL:   # the bursting shell's white smoke trail made a War Thunder tracer
+                vc.wt_tracer(doc.root, f'{source} / {stock}')
     if doc.root.get('xgs_scene_object_class') != 'Weapon_VehicleShoot':
         raise ValueError(f'{stock}: not a native vehicle gun')
     fire = doc.root.get('FireSe')
@@ -494,30 +496,51 @@ def animation_path(kind: str) -> str:
 
 
 _ASSETS: dict[tuple, tuple] = {}
+_INPUTS_MEMO: dict = {}   # buildcache.inputs' file hashes (by path, size and time), for every kind
+_RECIPES: dict[str, str] = {}   # each kind's generator closure: the code this process runs, read once
+
+
+def _assets_key(game: vc.Game, kind: str) -> dict:
+    """What a kind's build (_build_assets) reads, for the tests' store (pylib/derivedcache.py): the archive and the model
+    folders (buildcache.inputs, the installer's incremental-update key of the same build), the code (its generator's
+    import closure, from the source: the store is never on in the frozen installer) and whether the War Thunder models
+    are used (wt_tracked.ENABLED: tests switch it off)."""
+    import buildcache
+    import wt_tracked
+    if kind not in _RECIPES:
+        _RECIPES[kind] = buildcache.source_recipe(str(HERE.parent), kind)
+    return {'kind': kind, 'wt': wt_tracked.ENABLED, 'recipe': _RECIPES[kind],
+            'inputs': buildcache.inputs(game.root, kind, _INPUTS_MEMO)}
+
+
+def _build_assets(game: vc.Game, kind: str) -> tuple:
+    import tracked_combat_model as tracked
+    import tracked_collision
+    model = model_module(kind)
+    arc, md, _info = model.build_with_info(game)
+    assembly = tracked.Assembly(md)
+    model.parts(assembly)
+    shkt, binding, overrides, report = tracked_collision.build(game, kind, md, assembly.parts,
+                                                               layout=model.collision_layout())
+    return arc, md, shkt, binding, overrides, report
 
 
 def _assets(game: vc.Game, kind: str):
-    """One actual model/collision build a kind, shared by every reader in the process: it reads only the game's archive
-    (vc.Game is rootcpk's: Root.cpk, read only) and the repository's model folders, so it is the same build for the
-    same archive (its path, size and time). Until 2026-10-25 it was shared by one Game object only: authored(),
-    vehicle_sgo() and testrange's gen each open their own, and a reader of every kind's SGOs (gen_spawn_catalog,
-    tools/selftest.py spawn_catalog_archives_recorded_<i>) built each kind four or five times (85 builds, ~15 min)."""
-    import tracked_combat_model as tracked
-    import tracked_collision
+    """One actual model/collision build a kind (arc, md, shkt, binding, overrides, report), shared by every reader in
+    the process: it reads only the game's archive (vc.Game is rootcpk's: Root.cpk, read only) and the repository's model
+    folders, so it is the same build for the same archive (its path, size and time). Until 2026-10-25 it was shared by
+    one Game object only: authored(), vehicle_sgo() and testrange's gen each open their own, and a reader of every kind's
+    SGOs (gen_spawn_catalog) built each kind four or five times. Under the tests, also by every test process
+    (pylib/derivedcache.py, keyed by _assets_key)."""
+    import derivedcache
     import wt_tracked
     st = os.stat(game.cpk.path)
     # wt_tracked.ENABLED: the War Thunder models or the procedural ones (tests switch it off): another build.
     key = (os.path.normcase(os.path.abspath(game.cpk.path)), st.st_size, st.st_mtime_ns, wt_tracked.ENABLED, kind)
-    cache = _ASSETS
-    if key not in cache:
-        model = model_module(kind)
-        arc, md, _info = model.build_with_info(game)
-        assembly = tracked.Assembly(md)
-        model.parts(assembly)
-        shkt, binding, overrides, report = tracked_collision.build(game, kind, md, assembly.parts,
-                                                                   layout=model.collision_layout())
-        cache[key] = arc, md, shkt, binding, overrides, report
-    return cache[key]
+    if key not in _ASSETS:
+        _ASSETS[key] = derivedcache.fetch('tracked_assets', lambda: _assets_key(game, kind),
+                                          lambda: _build_assets(game, kind))
+    return _ASSETS[key]
 
 
 def vehicle_sgo(game: vc.Game, kind: str) -> bytes:

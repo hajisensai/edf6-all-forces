@@ -1,7 +1,7 @@
 // EDF6Coop.dll's member attribute table and mission player resolver (coop_attr.h): looked up while EDF6Coop is loaded,
 // again when the module changes (unloaded, or a harness loading it after us), logged once a change.
 #include "coop_attr.h"
-#include "crew.h"
+#include "plugin_log.h"
 #include <Windows.h>
 #include <atomic>
 

@@ -9,8 +9,14 @@
 //    an MSVC std::wstring of the upper-cased path (inline under 8 characters' capacity, +0x38).
 #include "stores.h"
 #include "store_burden.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "payload.h"
 #include "memory.h"
+#include "vhud.h"
+#include "vecmath.h"
+#include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -310,6 +316,13 @@ int ReadStores(unsigned char* v,Store* out,int most) noexcept {
 
 void TriggerStore(const Store& s) noexcept {
     if(s.weapon && s.ammo>0 && Readable(s.weapon+kWeaponTrigger,1,true))s.weapon[kWeaponTrigger]=1;
+}
+
+bool StoreLands(const Store& s,float reach,float* at,float* sec) noexcept {
+    RoundModel m{};
+    float from[3],dir[3];
+    return s.weapon && ReadRound(s.weapon,&m) && edf::MeanMuzzle(s.weapon,8,from,dir) && vec::Normalize(dir)
+           && RoundLands(s.weapon,m,from,dir,reach,at,sec);
 }
 
 const JetMass* JetMassOf(float mark) noexcept {

@@ -45,8 +45,8 @@ GENERATOR_NAME = os.path.splitext(installer.GENERATOR)[0]   # EDF6VehicleCrew.ge
 # soldier, a tank, every jet body and every pylon store built from Root.cpk import only cpk, crilayla, dsgo, gamedir,
 # graft_pure, ledger, mdb, mdb_jet, modfiles, rootcpk, sgo, support_loadout, vcobjects).
 GENERATOR_EXCLUDES = ('numpy', 'PIL', 'scipy', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
-                      'aircraft_collision', 'support_config', 'gamelease', 'urllib3', 'requests')
-RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'cockpits', 'wt_m163', 'wt_bmpt', 'wt_tunguska', 'wt_pzh2000', 'wt_sturmtiger', 'emp_phalanx', 'emp_flak88', 'wt_apocalypse', 'emp_gdf005', 'emp_laser', 'emp_railgun', 'wt_tos1', 'emp_patriot')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model / dreadnought_model / c130_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
+                      'aircraft_collision', 'gamelease', 'urllib3', 'requests')
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'salvo_tu1600', 'cockpits', 'wt_m163', 'wt_bmpt', 'wt_tunguska', 'wt_pzh2000', 'wt_sturmtiger', 'emp_phalanx', 'emp_flak88', 'wt_apocalypse', 'emp_gdf005', 'emp_laser', 'emp_railgun', 'wt_tos1', 'emp_patriot')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model / dreadnought_model / c130_model / helicarrier_model / salvo_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
 # and every ported X-Morph unit's folder (pylib/xm_units.py; the model pack's, never the repository's: the share package's
 # run_export.py EXTERNAL_MODELS lists the same folders, CLAUDE.md)
 RELEASE_MODELS += tuple(xm_units.folder(u.key) for u in xm_units.ported())
@@ -324,10 +324,10 @@ def build_exe(name: str, generator: str | None = None) -> str:
            '--specpath', WORK]
     for p in paths:
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'make_xm_maps', 'worldmap_pack', 'worldmap', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'make_stock_holds', 'ranger_hold', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
+    for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'make_xm_maps', 'worldmap_pack', 'worldmap', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'make_stock_holds', 'ranger_hold', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan', 'make_aura_vehicles',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'hkfile', 'hkshape', 'hk2014', 'shkt_check', 'vehicle_check', 'model_pieces', 'sk_map', 'sk_terrain', 'gen', 'catalog', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'make_ultimate', 'make_barrage', 'magic_circle', 'make_vulcan', 'make_bmpt', 'make_quadvulcan', 'make_emp_mid', 'make_emp_short', 'make_emp_long', 'make_tunguska', 'make_pzh2000', 'make_sturmtiger', 'make_ciws_phalanx', 'make_flak88', 'make_apocalypse', 'make_gdf005', 'make_laser', 'make_railgun', 'make_tos1', 'make_patriot', 'make_xmorph', 'xm_units', 'xm_heli', 'xm_jet', 'xm_air_model', 'car_model', 'xm_walker', 'xm_infantry', 'xm_rig', 'emplacement_model', 'quadvulcan_model', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'frozen_collision_probe', 'vulcan_model', 'bmpt_model',
-                'edf41_materials', 'edf41materials', 'goldcoat', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
+                'edf41_materials', 'edf41materials', 'goldcoat', 'centipede_model', 'dragonfly_model', 'buildcache', 'derivedcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
                 'make_sazabi', 'sazabi_model', 'sazabi_arms', 'make_dreadnought', 'dreadnought_model', 'make_c130', 'c130_model', 'make_helicarrier', 'helicarrier_model', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'cockpit_shapes', 'cockpit_tub', 'texfile_accel', 'bc7', 'model_workers', 'model_lod', 'mesh_simplify', 'mdb', 'edf6native', 'crilayla', 'wt_sound',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
@@ -411,7 +411,12 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--suffix', default='')
     ap.add_argument('--expect', default='')
+    ap.add_argument('--generator-to', default='', help='only freeze the slim generator and copy it to this file '
+                    '(tools/installer.py fresh_source_generator, run from source)')
     a = ap.parse_args(argv)
+    if a.generator_to:
+        shutil.copy2(build_generator(), a.generator_to)
+        return 0
     version = cmake_version()
     if a.expect and a.expect.lstrip('v') != version:
         raise SystemExit(f'CMakeLists.txt says {version}, expected {a.expect}: bump project(VERSION) first')

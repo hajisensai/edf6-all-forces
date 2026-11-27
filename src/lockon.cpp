@@ -18,20 +18,25 @@
 //    (IsPlayer), or a vehicle, one of whose seats has it among its holders (seat +0xC8, count +0xD8, the weapon at
 //    holder +0x10) with the player in it (docs/lockon-re.md §5).
 #include "lockon.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "hud.h"
 #include "memory.h"
+#include "salvo_volley.h"
 #include "stores.h"
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <initializer_list>
 
 namespace crew {
 namespace {
 constexpr std::size_t kLockList=0xC60,kLockCount=0xC68,kLocking=0xC70,kLockingCtrl=0xC78,kLockProgress=0xC80;
 constexpr std::size_t kLockFailed=0xCA0,kLockTime=0x6D4,kLockMost=0x6DC,kWeaponOwner=0x120,kWeaponNode=0x08;
 constexpr std::size_t kLockSoundTimer=0xCB8;
-constexpr std::size_t kRepeatLock=0x78E,kRepeatRule=0x691395;
-const unsigned char kRepeatRuleSig[]={0x44,0x38,0xA7,0x8E,0x07,0x00,0x00,0x0F,0x85,0x00,0x01,0x00,0x00};
 constexpr std::size_t kNodeEntry=0x10,kNodeCtrl=0x18,kEntryPoint=0x10;
 // The entry is the lock-target registry's record (heli.cpp kTargetObject / kTargetAim: object +0x8, aim point +0x10).
 constexpr std::size_t kEntryObject=0x8;
@@ -50,7 +55,18 @@ constexpr int kMostSkips=16,kMostNodes=64;
 using PickFn=std::uint64_t(__fastcall*)(void**,unsigned char*,unsigned char*);
 using EntryFn=void(__fastcall*)(void*);
 PickFn pickNext=nullptr;
-bool clearOk=false,dropOk=false,repeatOk=false;
+bool clearOk=false,dropOk=false;
+// The shot calls (call [rax+0x80]: the weapon's slot 16, Weapon_VehicleShoot's 0x6B3640) of the fire start (0x690BB0)
+// and of the burst step (0x6940BC), each checked with the instructions that set up its arguments.
+constexpr std::size_t kStartShot=0x690C7B,kStartShotCall=15,kBurstShot=0x6940DF,kBurstShotCall=22,kShotSlot=0x80/8;
+const unsigned char kStartShotSig[]={0x8B,0x93,0x48,0x02,0x00,0x00,0x48,0x8B,0x03,0x2B,0x93,0xE8,0x0B,0x00,0x00,
+                                     0xFF,0x90,0x80,0x00,0x00,0x00};
+const unsigned char kBurstShotSig[]={0xFF,0xC8,0x89,0x86,0x18,0x0E,0x00,0x00,0x48,0x8B,0x06,0x8B,0x96,0x48,0x02,0x00,
+                                     0x00,0x2B,0xD1,0x48,0x8B,0xCE,0xFF,0x90,0x80,0x00,0x00,0x00};
+const unsigned char kShotCall[]={0xFF,0x90,0x80,0x00,0x00,0x00};
+constexpr std::size_t kAmmoCount=0x248,kRoundsLeft=0xBE8,kBurstLeft=0xE18,kLockCursor=0xDC0,kLockShare=0x6B8;
+constexpr std::size_t kLockKept=0x6BC,kShotBlocked=0x144;
+static_assert(salvo::kRounds==static_cast<int>(kSalvoLockLimit),"the salvo locks at most one target a round");
 // The targets the player cycled away from on one weapon, last in its order until `until`.
 struct Skip { const unsigned char* weapon; const void* entries[kMostSkips]; int count; ULONGLONG until; } skip{};
 
@@ -162,11 +178,7 @@ const WeaponFacts& FactsOf(const unsigned char* w) noexcept {
         const auto* const spec=StoreOf(w);
         const bool salvo=IsSalvoStore(spec);
         facts={w,node,owner,frame,spec!=nullptr,PlayerHolds(w),salvo,{}};
-        if(salvo) {
-            facts.locks=AllocatedLocks(w);
-            if(repeatOk && Readable(w+kRepeatLock,1,true))
-                Put<unsigned char>(const_cast<unsigned char*>(w),kRepeatLock,1);
-        }
+        if(salvo)facts.locks=AllocatedLocks(w);
     }
     return facts;
 }
@@ -226,6 +238,82 @@ bool HookPick() noexcept {
     if(edf::PatchCode(image+kPick,kPickSig,patch,sizeof(patch)))return true;
     VirtualFree(t,0,MEM_RELEASE);pickNext=nullptr;
     return false;
+}
+
+// The salvo's volleys (salvo_volley.h). Every weapon of the base class shoots through the two patched calls, so the
+// test is cheap first: the salvo's magazine, distribution 0 (a node a shot) with the nodes kept (AutoTimeOut 0: the
+// cursor +0xDC0 picks the node), then its SGO.
+using ShotFn=void(__fastcall*)(unsigned char*,unsigned);
+bool IsSalvoWeapon(const unsigned char* w) noexcept {
+    __try {
+        return Readable(w+kLockShare,8) && At<std::int32_t>(w,kAmmoCount)==salvo::kRounds && At<std::int32_t>(w,kLockShare)==0 &&
+               At<unsigned char>(w,kLockKept)!=0 && IsSalvoStore(StoreOf(w));
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// The live lock nodes numbered by enemy (salvo::NumberEnemies), read once a volley: the shots never take nodes off a
+// list whose nodes are kept, and the search only runs in the weapon's update. -1 enemies: unread.
+struct VolleyTargets { int enemyOf[kSalvoLockLimit]; int nodes,enemies,count; };
+void ReadTargets(const unsigned char* w,VolleyTargets* t) noexcept {
+    t->nodes=t->enemies=0;t->count=-1;
+    __try {
+        const void* objects[kSalvoLockLimit];
+        EachLock(w,[&](const unsigned char* node) {
+            objects[t->nodes++]=Live(At<const unsigned char*>(node,kNodeCtrl)) ? LockEnemy(At<const unsigned char*>(node,kNodeEntry)) : nullptr;
+        },kSalvoLockLimit);
+        t->enemies=salvo::NumberEnemies(objects,t->nodes,t->enemyOf);
+        t->count=static_cast<int>(At<std::uint64_t>(w,kLockCount));
+    } __except(EXCEPTION_EXECUTE_HANDLER){t->nodes=t->enemies=0;t->count=-1;}
+}
+
+// Up to kVolley rounds now, each through the weapon's own shot (whatever its slot 16 holds, sends included). Before
+// each: the burst count left after it (the shot times the next by it: FireBurstInterval while rounds are left, else
+// FireInterval) and the cursor at its node (the list's end, past the last node: an unguided round, when no live node).
+// After: the burst runs on until the magazine is empty, however many locks it was started with.
+void SalvoVolley(unsigned char* w,unsigned index,ShotFn shot) noexcept {
+    VolleyTargets t;
+    ReadTargets(w,&t);
+    const int capacity=At<std::int32_t>(w,kAmmoCount);
+    for(int n=0;n<salvo::kVolley;++n) {
+        const int left=At<std::int32_t>(w,kRoundsLeft);
+        if(left<=0 || (n>0 && At<std::int32_t>(w,kShotBlocked)!=0))break;
+        const int round=n ? capacity-left : static_cast<int>(index);   // the stock's own: capacity - left too
+        Put<std::int32_t>(w,kBurstLeft,left-1);
+        if(t.count>=0) {
+            const int node=salvo::SalvoNode(round,t.enemyOf,t.nodes,t.enemies);
+            Put<std::int32_t>(w,kLockCursor,node>=0 ? node : t.count);
+        }
+        shot(w,static_cast<unsigned>(round));
+        if(At<std::int32_t>(w,kRoundsLeft)>=left)break;   // not taken
+    }
+    const int left=At<std::int32_t>(w,kRoundsLeft);
+    Put<std::int32_t>(w,kBurstLeft,left>0 ? left : 0);
+}
+
+void __fastcall ShotHook(unsigned char* w,unsigned index) {
+    const auto shot=reinterpret_cast<ShotFn>(At<void* const*>(w,0)[kShotSlot]);
+    if(IsSalvoWeapon(w))SalvoVolley(w,index,shot);
+    else shot(w,index);
+}
+
+// Both calls become call [rip+disp] (FF 15, the same 6 bytes) through one pointer near them.
+bool HookVolleys() noexcept {
+    if(!Matches(kStartShot,kStartShotSig,sizeof(kStartShotSig)) || !Matches(kBurstShot,kBurstShotSig,sizeof(kBurstShotSig)))
+        return false;
+    const auto hook=reinterpret_cast<std::uintptr_t>(&ShotHook);
+    unsigned char* const cell=static_cast<unsigned char*>(
+        edf::AllocateNearCode(image+kStartShot,reinterpret_cast<const unsigned char*>(&hook),sizeof(hook)));
+    if(!cell)return false;
+    bool ok=true;
+    for(unsigned char* const at:{image+kStartShot+kStartShotCall,image+kBurstShot+kBurstShotCall}) {
+        const std::int64_t disp=cell-(at+sizeof(kShotCall));
+        if(disp<INT32_MIN || disp>INT32_MAX){ok=false;break;}
+        const std::int32_t rel=static_cast<std::int32_t>(disp);
+        unsigned char call[sizeof(kShotCall)]={0xFF,0x15};
+        std::memcpy(call+2,&rel,4);
+        ok=edf::PatchCode(at,kShotCall,call,sizeof(call)) && ok;
+    }
+    return ok;   // the cell stays: a site already patched calls through it
 }
 }  // namespace
 
@@ -324,10 +412,10 @@ bool InstallLockon() noexcept {
         // Partial cancellation is available only with both halves of the stock cancellation path verified.
         dropOk=Matches(kDropLocking,kDropLockingSig,sizeof(kDropLockingSig)) &&
                Matches(kCancelLocking,kCancelLockingSig,sizeof(kCancelLockingSig));
-        repeatOk=Matches(kRepeatRule,kRepeatRuleSig,sizeof(kRepeatRuleSig));
         const bool pickOk=Matches(kPick,kPickSig,sizeof(kPickSig)) && HookPick();
-        Log("HOOK lockon pick=%d clearLock=%d dropLocking=%d (the player's weapons lock nearest the view first)",pickOk,
-            clearOk,dropOk);
+        const bool volleyOk=HookVolleys();
+        Log("HOOK lockon pick=%d clearLock=%d dropLocking=%d volleys=%d (the player's weapons lock nearest the view first; "
+            "the salvo fires %d rounds every %d frames)",pickOk,clearOk,dropOk,volleyOk,salvo::kVolley,salvo::kVolleyGap);
         return pickOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

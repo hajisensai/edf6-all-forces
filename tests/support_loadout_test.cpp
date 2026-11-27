@@ -134,15 +134,17 @@ int main() {
         Check(!ok && !l.On() && std::wcsstr(why,b.says),"a malformed loadout refused whole, the reason named");
     }
     // The weight a jet may carry (2026-10-25, "合理的改，不是完全随心所欲"): 40 % of its clean mass; the tank not weighed.
-    Check(PayloadBudgetKg(VehicleBody::strike)==8800 && PayloadBudgetKg(VehicleBody::fighter)==6400 &&
-          PayloadBudgetKg(VehicleBody::interceptor)==8000 && PayloadBudgetKg(VehicleBody::multirole)==7200 &&
+    // The clean masses (pylib/vcobjects.py JET_MASSES, their real prototypes'): strike 21.6 t, fighter 19.3 t,
+    // interceptor 27.2 t, multirole 21.2 t.
+    Check(PayloadBudgetKg(VehicleBody::strike)==8640 && PayloadBudgetKg(VehicleBody::fighter)==7720 &&
+          PayloadBudgetKg(VehicleBody::interceptor)==10880 && PayloadBudgetKg(VehicleBody::multirole)==8480 &&
           PayloadBudgetKg(VehicleBody::tank)==0 && PayloadBudgetKg(VehicleBody::none)==0,"each body's budget");
     l=Load(L"AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40",VehicleBody::interceptor,&ok,why);
-    Check(!ok && !l.On() && std::wcsstr(why,L"90000 kg") && std::wcsstr(why,L"8000 kg"),"200 AIM-54 refused, the weight and the budget named");
-    l=Load(L"MK82:40",VehicleBody::strike,&ok,why);Check(!ok && std::wcsstr(why,L"9200 kg"),"40 Mk 82 (9.2 t) over the strike jet's 8.8 t");
-    l=Load(L"MK82:19,MK82:19",VehicleBody::strike,&ok);Check(ok && LoadoutMassKg(l)==8740,"38 Mk 82 (8.74 t) within it");
-    l=Load(L"RKT:40,RKT:40,RKT:40,RKT:40,RKT:40",VehicleBody::fighter,&ok);
-    Check(ok && LoadoutMassKg(l)==6400,"exactly the budget is within it");
+    Check(!ok && !l.On() && std::wcsstr(why,L"90000 kg") && std::wcsstr(why,L"10880 kg"),"200 AIM-54 refused, the weight and the budget named");
+    l=Load(L"MK82:40",VehicleBody::strike,&ok,why);Check(!ok && std::wcsstr(why,L"9200 kg"),"40 Mk 82 (9.2 t) over the strike jet's 8.64 t");
+    l=Load(L"MK82:25,MK82:12",VehicleBody::strike,&ok);Check(ok && LoadoutMassKg(l)==8510,"37 Mk 82 (8.51 t) within it");
+    l=Load(L"AAM_L:12,AAM_M:10,RKT:25",VehicleBody::fighter,&ok);
+    Check(ok && LoadoutMassKg(l)==7720,"exactly the budget is within it");
     l=Load(L"AP,AP:40,AP:40,GLM:40,HE:40",VehicleBody::tank,&ok);Check(ok && l.count==4,"the tank is not weighed: its 4 pylons");
     {   // A peer's / a host list's variant over the weight decodes to nothing (never generated, never applied).
         VehicleLoadout over{};over.body=VehicleBody::interceptor;over.count=1;over.store[0]=3;over.rounds[0]=static_cast<std::uint8_t>(RoundCode(40));

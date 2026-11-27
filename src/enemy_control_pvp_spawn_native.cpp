@@ -3,6 +3,7 @@
 #include "memory.h"
 #include <cwchar>
 #include <cwctype>
+#include "edf_layout.h"
 
 namespace crew {
 bool EnemyControlNativePvpProfileReady(const char*) noexcept;

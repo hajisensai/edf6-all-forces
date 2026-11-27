@@ -1,7 +1,7 @@
 // Exact TypeEntity gate and generated x64 contracts are audited by the paired fixture.
 #include "enemy_control_deiroi_entity_aim.h"
 #include "enemy_control_deiroi_net.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include "edf/patch.h"
 #include <cstring>

@@ -1,5 +1,9 @@
 #include "support_source.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 #include "team_walk.h"
 #include "support_soldier.h"
@@ -11,11 +15,11 @@ constexpr unsigned kEnumAllTeams=0x5E0C80,kTeamManager=0x20B2978;
 constexpr unsigned char kEnumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,
     0x56,0x57,0x41,0x56,0x48,0x83};
 bool LiveSource(const unsigned char* object,ObjRef* out) noexcept {
-    if(!object || !Readable(object,kDead+1) || (object[0x18]&4) || object[kDead] ||
-       At<const void*>(object,kSelf)!=object)return false;
-    const auto* control=At<const unsigned char*>(object,kSelfCtrl);
-    if(!Readable(control,16) || At<LONG>(control,8)<=0)return false;
-    *out={object,control};return true;
+    // 本地自引用 +0x28 必须是对象自己（伪造的别名控制块不算来源身份）；其余判定走 objref::Alive。
+    if(!object || !Readable(object,kSelfCtrl+8) || At<const void*>(object,kSelf)!=object)return false;
+    const ObjRef ref=ObjRef::Of(object);
+    if(!objref::Alive(ref))return false;
+    *out=ref;return true;
 }
 std::uint64_t KeyOf(const unsigned char* id) noexcept {
     unsigned any=0;

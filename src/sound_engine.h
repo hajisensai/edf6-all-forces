@@ -17,8 +17,10 @@
 //
 // Who hears what (WT's split): the listener's own vehicle (the one the local player sits in) plays the player's event
 // (no rolloff of its own: its Distance curves are the mix), every other one (NPCs, the other players online: the same
-// on every machine, from what this machine sees of it) the AI's (FMOD's inverse rolloff between its min and max distance
-// times its Distance curves). Pure: tools/sound_engine_check.cpp checks it offline; jetsound.cpp and vehsound.cpp play it.
+// on every machine, from what this machine sees of it) the AI's (the ground's: FMOD's inverse rolloff between its min
+// and max distance times its Distance curves; the jets': none, their premaster's positioning curve, Event::distGain).
+// A WT low-pass (an EQ band's frequency automated over the distance, the cone or the load) is the layer's cutoff
+// (Heard::cutoff; WT's shelves and high-passes are not modelled); where WT has none, the caller's air (ours). Pure: tools/sound_engine_check.cpp checks it offline; jetsound.cpp and vehsound.cpp play it.
 #include "wt_clips.h"
 #include <cmath>
 #include <cstdint>
@@ -50,6 +52,16 @@ inline float At(const Curve& c,float x) noexcept {
     return c.p[c.n-1].value;
 }
 inline float Amp(float db) noexcept { return db<=-80.0f ? 0.0f : std::pow(10.0f,db/20.0f); }
+// A frequency (Hz) over a parameter: straight between its points in the log of the frequency (ours: FMOD draws an EQ
+// band's frequency on a log scale), held past its ends; none: 0.
+inline float HzAt(const Curve& c,float x) noexcept {
+    if(c.n<=0)return 0.0f;
+    Curve l=c;
+    for(int i=0;i<l.n;++i)l.p[i].value=std::log(c.p[i].value>1.0f ? c.p[i].value : 1.0f);
+    return std::exp(At(l,x));
+}
+// The lower of two cutoffs (0: none): two low-passes in a row heard as the lower one (ours).
+inline float LowerHz(float a,float b) noexcept { return !(a>0.0f) ? b : !(b>0.0f) ? a : (a<b ? a : b); }
 
 // An instrument's place on its sheet: heard from `lo` to `hi`, fading in up to `in` and out from `out` (amplitude
 // straight: FMOD's region fades), none past its ends.
@@ -71,11 +83,14 @@ inline float Pitch(const AutoPitch& a,float x,float min) noexcept {
 inline float Semitones(float st) noexcept { return std::pow(2.0f,st/12.0f); }
 
 // The parameters an engine's sheets and automation read.
-enum Param : int { kRpm, kLoad, kWep, kSpeed, kTurn, kSpeedShare, kParamCount };
+enum Param : int { kRpm, kLoad, kWep, kSpeed, kTurn, kSpeedShare, kSpeedRel, kDirection, kG, kSeed, kSeed2, kParamCount };
 struct Inputs { float v[kParamCount]; };
 // The sheets' ranges: the jets' rpm 800..2750 (the AI's to 2400), the ground's rpm_result 0..100, load / wep 0..1,
-// speed km/h 0..100, speed_relative 0..100 (% of its top speed), turn rad/s. A layer's sheetMin is its sheet's minimum
-// (its autopitch's).
+// speed km/h 0..100, speed share 0..100 (% of its top speed), turn rad/s. The listener's (the caller's, ours):
+// speed_relative (kSpeedRel) the source's velocity against the listener's, m/s (WT's sheet 0..800); Direction
+// (kDirection) where the source is round the listener's facing, 0 ahead .. 180 behind (degrees, either side). kG: the
+// load factor (g, 1 in level flight: WT's overload). kSeed, kSeed2: -0.5..0.5, drawn once a source (its pitch
+// randomizers: the master's and its groups'). A layer's sheetMin is its sheet's minimum (its autopitch's).
 
 struct Layer { int clip; Param on; Region r; float db,st; AutoPitch ap; float sheetMin; };
 struct Group {
@@ -86,6 +101,8 @@ struct Group {
     Curve gain[2]; Param gainOn[2];   // dB over its parameters (n 0: none)
     Curve conePitch;                  // semitones over the cone angle
     Curve pitch; Param pitchOn;       // semitones over a parameter
+    float randomSt;                   // its pitch randomizer (FMOD's: the range, semitones; kSeed2 picks in it)
+    Curve lp;                         // its low-pass's cutoff (Hz) over the distance (n 0: none)
 };
 // A one-shot set off when its parameter crosses `at`: up (+1), down (-1) or either way (0).
 struct Shot { int clip; Param on; float at; int way; float db; Curve gain; Param gainOn; };
@@ -93,15 +110,21 @@ struct Event {
     int groups; Group g[kMostGroups];
     int shots; Shot s[kMostShots];
     float db;                 // the event's master and its bus (WT's), with kTrimDb
-    float minD,maxD;          // the AI's inverse rolloff (m); 0: none (the player's: its Distance curves alone)
+    float minD,maxD;          // the AI's inverse rolloff (m), minD 0: none (the player's, the jets' AI); maxD also
+                              // where jetmix::FarGain carries 1/d on (0: none)
     float doppler;            // its Doppler scale (1: the whole shift)
     Curve dopplerCone;        // ...or over the cone angle (% : the jets' AI; n 0: `doppler`)
     Curve conePitch;          // the master's pitch over the cone (semitones)
+    Curve distGain;           // dB over the distance (m): the jets' AI premaster's positioning (they have no rolloff)
+    Curve dirGain;            // dB over the direction (kDirection)
+    float randomSt;           // the master's pitch randomizer (the range, semitones; kSeed picks in it)
+    Curve lp,lpCone,lpLoad;   // the master's low-passes (Hz) over the distance, the cone and the load (n 0: none)
 };
 
-// What a layer is heard as: its gain (linear: the event's, the group's and the region's fade) and its playback rate
-// (its autopitch, its own pitch and the groups' and the master's pitch automation; the Doppler ratio is the caller's).
-struct Heard { int clip; float gain,ratio; };
+// What a layer is heard as: its gain (linear: the event's, the group's and the region's fade), its playback rate
+// (its autopitch, its own pitch and the groups' and the master's pitch automation; the Doppler ratio is the caller's)
+// and its WT low-pass (Hz; 0: none of WT's, the caller's air).
+struct Heard { int clip; float gain,ratio,cutoff; };
 // Every layer of `e` in order (the flat index the caller keeps a voice for: Index), at the distance `d` (m) and the cone
 // angle `cone` (degrees).
 inline int LayerCount(const Event& e) noexcept {
@@ -114,19 +137,34 @@ inline float Rolloff(const Event& e,float d) noexcept {
     const float x=d<e.minD ? e.minD : d>e.maxD ? e.maxD : d;
     return e.minD/x;
 }
+// The event's own dB at `d`: its master and bus, its positioning over the distance and the direction.
+inline float MasterDb(const Event& e,const Inputs& in,float d) noexcept {
+    return e.db+At(e.distGain,d)+At(e.dirGain,in.v[kDirection]);
+}
 inline int Hear(const Event& e,const Inputs& in,float d,float cone,Heard* out) noexcept {
-    const float roll=Rolloff(e,d),master=Semitones(At(e.conePitch,cone));
+    const float roll=Rolloff(e,d),master=Semitones(At(e.conePitch,cone)+e.randomSt*in.v[kSeed]);
+    const float masterDb=MasterDb(e,in,d);
+    const float masterHz=LowerHz(LowerHz(HzAt(e.lp,d),HzAt(e.lpCone,cone)),HzAt(e.lpLoad,in.v[kLoad]));
     int k=0;
     for(int gi=0;gi<e.groups;++gi) {
         const Group& g=e.g[gi];
-        float db=e.db+g.db+At(g.distance,d)+At(g.cone,cone)+At(g.cone2,cone);
-        for(int j=0;j<2;++j)if(g.gain[j].n)db+=At(g.gain[j],in.v[g.gainOn[j]]);
-        const float st=At(g.conePitch,cone)+(g.pitch.n ? At(g.pitch,in.v[g.pitchOn]) : 0.0f);
+        // A curve at -80 dB or under is FMOD's silence; their sum is not floored there (ours: a quiet master and a
+        // quiet curve a quieter layer, not none at once: no step as a layer's curve runs out).
+        const float dist=At(g.distance,d),c1=At(g.cone,cone),c2=At(g.cone2,cone);
+        bool mute=dist<=-80.0f || c1<=-80.0f || c2<=-80.0f;
+        float db=masterDb+g.db+dist+c1+c2;
+        for(int j=0;j<2;++j)if(g.gain[j].n) {
+            const float v=At(g.gain[j],in.v[g.gainOn[j]]);
+            mute=mute || v<=-80.0f;
+            db+=v;
+        }
+        const float st=At(g.conePitch,cone)+(g.pitch.n ? At(g.pitch,in.v[g.pitchOn]) : 0.0f)+g.randomSt*in.v[kSeed2];
+        const float hz=LowerHz(masterHz,HzAt(g.lp,d));
         for(int li=0;li<g.n;++li,++k) {
             const Layer& l=g.layer[li];
             const float x=in.v[l.on];
-            const float gain=roll*Amp(db+l.db)*Fade(l.r,x);
-            out[k]=Heard{l.clip,std::isfinite(gain) ? gain : 0.0f,master*Semitones(st+l.st)*Pitch(l.ap,x,l.sheetMin)};
+            const float gain=mute ? 0.0f : roll*std::pow(10.0f,(db+l.db)/20.0f)*Fade(l.r,x);
+            out[k]=Heard{l.clip,std::isfinite(gain) ? gain : 0.0f,master*Semitones(st+l.st)*Pitch(l.ap,x,l.sheetMin),hz};
         }
     }
     return k;
@@ -149,7 +187,7 @@ inline unsigned Crossed(const Event& e,const Inputs& from,const Inputs& to) noex
 }
 inline float ShotGain(const Event& e,int i,const Inputs& in,float d) noexcept {
     const Shot& s=e.s[i];
-    return Rolloff(e,d)*Amp(e.db+s.db+(s.gain.n ? At(s.gain,in.v[s.gainOn]) : 0.0f));
+    return Rolloff(e,d)*Amp(MasterDb(e,in,d)+s.db+(s.gain.n ? At(s.gain,in.v[s.gainOn]) : 0.0f));
 }
 
 // --- The engines' parameters from the game (ours) -------------------------------------------------------------------
@@ -240,14 +278,19 @@ inline Pedal PedalOf(float speed,float stick) noexcept {
 }
 
 // A jet's engine (ours): its rpm (800 idle .. 2600 full military power .. 2750 with the afterburner) spooling up and
-// down, the afterburner's share (wep) lighting and going out, the load its throttle.
+// down, the afterburner's share (wep) lighting and going out, the load its throttle. The afterburner lights only once
+// the core is at military power (kJetLight): it was lit on the throttle alone, at 2 a second, so slamming it from idle
+// had it full in 0.5 s at ~1550 rpm, the jet_ab layer (+8 dB, low) over the spooling turbine at its loudest where the
+// core is quiet: a propeller's low thrum (the user, 2026-11-26: 「喷气机的音效怎么用的螺旋桨的」). Its ignition
+// (k_jet_ab_start, set off by wep crossing 0.01) comes with it, at the top of the spool.
 constexpr float kJetIdle=800.0f,kJetMil=2600.0f,kJetWep=2750.0f,kJetAiTop=2400.0f;
+constexpr float kJetLight=kJetMil-50.0f;
 constexpr float kJetSpoolUp=500.0f,kJetSpoolDown=650.0f;   // rpm / s: idle to full in about 4 s
 struct Spool { float rpm=kJetIdle,wep=0.0f,load=0.0f; };
 inline void Step(Spool& s,float power,bool burner,float dt) noexcept {
     const float p=std::isfinite(power) ? (power<0.0f ? 0.0f : power>1.0f ? 1.0f : power) : 0.0f;
     s.rpm=Toward(s.rpm,burner ? kJetWep : kJetIdle+(kJetMil-kJetIdle)*p,kJetSpoolUp,kJetSpoolDown,dt);
-    s.wep=Toward(s.wep,burner ? 1.0f : 0.0f,2.0f,1.5f,dt);
+    s.wep=Toward(s.wep,burner && s.rpm>=kJetLight ? 1.0f : 0.0f,2.0f,1.5f,dt);
     s.load=Toward(s.load,p,1.5f,1.5f,dt);
 }
 // The AI's sheets end at 2400: the player's range mapped onto theirs.
@@ -286,54 +329,73 @@ inline const Sample* Retarded(const Trail& t,const float* listener,std::uint64_t
 // --- The events -----------------------------------------------------------------------------------------------------
 using namespace wt;
 constexpr Curve kNone{0,{}};
-// The Typhoon's EJ200 the player flies (engine05_ej200_WEP; its bus -20): rear, front, afterburner and turbine groups.
+// The jets' trim (ours): WT's buses from the event to its "outside" bus (the player's: jet 0, aircraft +10, engines -4:
+// +6; the AI's: aircraft_jet -14, engines_ai -14: -28; the passby's: passbys -18; the wind's and the overload's:
+// noises -32, aircraft +10, engines -4: -26) all under kTrimDb - 6, so the player's own jet stays at its measured -22
+// (its master -20 + 6 - 8) and every other sound of the air keeps WT's level against it.
+constexpr float kJetTrimDb=kTrimDb-6.0f;
+// The Typhoon's EJ200 the player flies (engine05_ej200_WEP: its master's GainEffect -20, its bus +6): rear, side and
+// afterburner groups, at zoom 0 (the camera out of the cockpit: the plugin's only one) rear -2; overload the load
+// factor (kG). On PC (platform {79817437}: the extracted banks hold only its kept tracks' recordings) the event has no
+// turbine (rear_) or N1_ group and no master Multiband EQ (preset Aircraft_Player_Engine_Multiband EQ): all three are
+// excluded there, so none is played. The groups' shelves and its ThreeEQ (over the mach: supersonic only) not
+// modelled; on_ground (on the runway: onGroundJet, not extracted) and snapshot_existence (a mixer snapshot) not played.
 constexpr Curve kJetDist{5,{{0.0f,0.0f},{62.8f,-2.15f},{125.6f,-5.0f},{562.8f,-11.0f},{1000.0f,-80.0f}}};
 constexpr Curve kJetLoadPitch{3,{{0.0f,-0.354f},{0.5f,0.207f},{1.0f,0.768f}}};
 constexpr Region kJetIdleR{800.0f,800.0f,1100.0f,1500.0f},kJetMaxR{1100.0f,1500.0f,2750.0f,2750.0f};
 constexpr float kJ=kJetIdle;
-constexpr Event kJetPlayer{4,{
+constexpr Event kJetPlayer{3,{
     {2,{{k_jet_idle_rear,kRpm,kJetIdleR,6.0f,0.0f,{1000.0f,0.905f},kJ},
         {k_jet_max_rear,kRpm,kJetMaxR,6.0f,6.0f,{2600.0f,0.705f},kJ}},
-     0.0f,kJetDist,{2,{{0.0f,-6.0f},{180.0f,6.0f}}},kNone,{{2,{{0.0f,0.0f},{1.0f,-6.0f}}},{2,{{808.0f,3.0f},{1100.0f,6.0f}}}},
-     {kWep,kRpm},kNone,kNone,kRpm},
-    // The front group's Distance is not automated in the event: the rear's (ours).
+     -2.0f,kJetDist,{2,{{0.0f,-6.0f},{180.0f,6.0f}}},kNone,{{2,{{0.0f,0.0f},{1.0f,-6.0f}}},{2,{{808.0f,3.0f},{1100.0f,6.0f}}}},
+     {kWep,kRpm},kNone,kNone,kRpm,0.0f,kNone},
+    // The side group's Distance is not automated in the event: the rear's (ours).
     {2,{{k_jet_max_front,kRpm,kJetMaxR,10.0f,0.0f,{2600.0f,0.705f},kJ},
         {k_jet_idle_front,kRpm,kJetIdleR,10.0f,0.0f,{1000.0f,0.905f},kJ}},
-     0.0f,kJetDist,{2,{{0.0f,3.0f},{180.0f,-6.0f}}},kNone,{kNone,kNone},{kRpm,kRpm},kNone,kNone,kRpm},
+     0.0f,kJetDist,{2,{{0.0f,3.0f},{180.0f,-6.0f}}},kNone,{{3,{{-10.0f,-6.0f},{0.0f,0.0f},{10.0f,-6.0f}}},kNone},{kG,kRpm},
+     kNone,kNone,kRpm,0.0f,kNone},
     {1,{{k_jet_ab,kWep,{0.05f,0.55f,1.0f,1.0f},8.0f,0.0f,{0.0f,1.0f},0.0f}},
      0.0f,{4,{{0.0f,0.0f},{125.6f,-5.0f},{562.8f,-16.0f},{1000.0f,-80.0f}}},{2,{{0.0f,-8.0f},{180.0f,0.0f}}},
-     {3,{{100.0f,0.0f},{177.0f,7.0f},{180.0f,7.0f}}},{kNone,kNone},{kRpm,kRpm},kNone,kNone,kRpm},
-    {5,{{k_jet_turb_02,kRpm,{800.0f,800.0f,927.5f,1287.5f},6.0f,0.0f,{839.0f,0.905f},kJ},
-        {k_jet_turb_04,kRpm,{848.75f,1208.75f,1353.1f,1653.1f},3.0f,0.0f,{1580.0f,0.505f},kJ},
-        {k_jet_turb_06,kRpm,{1287.5f,1587.5f,1653.1f,2018.75f},0.0f,0.0f,{1970.0f,0.505f},kJ},
-        {k_jet_turb_08,kRpm,{1653.1f,2018.75f,2148.1f,2628.1f},0.0f,0.0f,{2018.75f,0.5f},kJ},
-        {k_jet_turb_085,kRpm,{2018.75f,2518.75f,2750.0f,2750.0f},0.0f,0.0f,{2433.1f,0.5f},kJ}},
-     0.0f,kJetDist,{2,{{0.0f,-6.0f},{180.0f,0.0f}}},kNone,{{2,{{0.0f,-1.92f},{1.0f,6.0f}}},kNone},{kLoad,kRpm},
-     {3,{{0.0f,0.0f},{90.0f,0.25f},{180.0f,0.5f}}},kJetLoadPitch,kLoad},
+     {3,{{100.0f,0.0f},{177.0f,7.0f},{180.0f,7.0f}}},{kNone,kNone},{kRpm,kRpm},kNone,
+     {3,{{-9.887f,-6.0f},{1.0f,0.0f},{10.0f,2.0f}}},kG,0.0f,kNone},
 },1,{{k_jet_ab_start,kWep,0.01f,+1,4.0f,kNone,kRpm}},
- -20.0f+kTrimDb,0.0f,0.0f,0.54f,kNone,{2,{{0.0f,0.0f},{180.0f,-1.0f}}}};
+ 6.0f-20.0f+kJetTrimDb,0.0f,0.0f,0.0f,{2,{{0.0f,30.0f},{180.0f,60.0f}}},{2,{{0.76f,0.0f},{179.2f,-1.0f}}},
+ kNone,kNone,0.0f,kNone,kNone,kNone};
 
-// Every other jet (engine05_ej200_WEP_ai, min 100 m, max 3000 m; its far layers the nested engine_jet_far_ai's, +3 and
-// its master +4). The afterburner by the speed against its top (speed_relative): the AI has no afterburner of its own.
+// Every other jet (engine05_ej200_WEP_ai and its nested engine_jet_far_ai): no rolloff (the event's min 100 m / max
+// 3000 m only its parameter's range); its premaster's positioning (the preset "Effect Chain Jet Aircraft AI
+// Positioning") a gain over the distance, the direction and is_enemy (-2: the EDF's are friends), its pitch randomized
+// (6.5 semitones), its Doppler over the cone. Groups: side_ai (+8; its low-pass over the distance; its low shelf not
+// modelled), moan (+6: the front recording on speed_relative, no autopitch), rip_air (+10: the afterburner's roar on
+// the rpm, over speed_relative), and the far event's (its master +4, its instrument +3: +7; its GainEffect -26 excluded on the PC platform {79817437}) rear
+// (far_low, the only layer with the load's pitch; the far loops, randomized 4.5 semitones) and front (+4, randomized
+// 4.5). Past the positioning's 2504 m (-10 dB; WT: -80 by 3000 m, the event culled) FarGain carries 1/d on and fades
+// it out by JetSoundFar (ours: no jet going silent at once). Its premaster's EQ (a high shelf over the distance, a
+// high-pass, one over is_visible) and ThreeEQ (the mach) not modelled: the caller's air dulls the groups with no
+// low-pass of their own.
 constexpr Region kAiMaxR{900.0f,1380.0f,2400.0f,2400.0f},kAiFarR{833.7f,1250.9f,2400.0f,2400.0f};
-constexpr Event kJetAi{5,{
+constexpr float kAiFarFrom=2504.24f;
+constexpr Curve kAiFarCone{3,{{0.0f,2.0f},{90.0f,-4.0f},{180.0f,2.0f}}},kAiRearCone{2,{{0.0f,-6.0f},{180.0f,0.0f}}};
+constexpr Event kJetAi{6,{
     {2,{{k_jet_max_rear,kRpm,kAiMaxR,8.0f,0.0f,{2276.9f,0.705f},kJ},
         {k_jet_idle_front,kRpm,{800.0f,800.0f,900.0f,1200.0f},0.0f,0.0f,{964.1f,0.905f},kJ}},
-     0.0f,{3,{{0.0f,10.0f},{487.0f,-3.87f},{1611.0f,-80.0f}}},kNone,kNone,{kNone,kNone},{kRpm,kRpm},kNone,kNone,kRpm},
-    // Its front group's region is not in the sheet's metadata: the rear's (ours).
-    {1,{{k_jet_max_front,kRpm,kAiMaxR,0.0f,0.0f,{2276.9f,0.705f},kJ}},
-     0.0f,{2,{{0.0f,0.0f},{1300.0f,-80.0f}}},kNone,kNone,{kNone,kNone},{kRpm,kRpm},{2,{{0.0f,6.0f},{180.0f,-6.0f}}},kNone,kRpm},
+     8.0f,{3,{{0.0f,10.0f},{487.3f,-3.87f},{1610.8f,-80.0f}}},kNone,kNone,{kNone,kNone},{kRpm,kRpm},kNone,kNone,kRpm,0.0f,
+     {2,{{0.0f,22000.0f},{3000.0f,20.0f}}}},
+    {1,{{k_jet_max_front,kSpeedRel,{150.0f,200.0f,800.0f,800.0f},0.0f,0.0f,{0.0f,1.0f},150.0f}},
+     6.0f,{2,{{0.0f,0.0f},{1300.0f,-80.0f}}},kNone,kNone,{kNone,kNone},{kRpm,kRpm},{2,{{0.0f,6.0f},{180.0f,-6.0f}}},kNone,
+     kRpm,0.0f,kNone},
     {1,{{k_jet_ab,kRpm,{900.0f,1700.0f,2400.0f,2400.0f},6.0f,0.0f,{0.0f,1.0f},kJ}},
-     0.0f,{3,{{0.0f,0.0f},{61.5f,0.0f},{1200.0f,-80.0f}}},{2,{{0.0f,-80.0f},{90.0f,0.0f}}},kNone,
-     {{2,{{0.0f,-10.0f},{97.0f,0.0f}}},kNone},{kSpeedShare,kRpm},kNone,kNone,kRpm},
-    {2,{{k_jet_far_low,kRpm,{800.0f,800.0f,833.7f,1250.9f},-6.0f,0.0f,{880.0f,0.9f},kJ},
-        {k_jet_far,kRpm,kAiFarR,0.0f,0.0f,{2160.0f,0.505f},kJ}},
-     7.0f,kNone,{3,{{0.0f,2.0f},{90.0f,-4.0f},{180.0f,2.0f}}},{2,{{0.0f,-6.0f},{180.0f,0.0f}}},{kNone,kNone},{kRpm,kRpm},
-     kNone,kJetLoadPitch,kLoad},
+     10.0f,{3,{{0.0f,0.0f},{61.5f,0.0f},{1200.0f,-80.0f}}},{2,{{0.0f,-80.0f},{90.1f,0.0f}}},kNone,
+     {{2,{{0.0f,-10.0f},{97.2f,0.0f}}},kNone},{kSpeedRel,kRpm},kNone,kNone,kRpm,0.0f,kNone},
+    {1,{{k_jet_far_low,kRpm,{800.0f,800.0f,833.7f,1250.9f},-6.0f,0.0f,{880.0f,0.9f},kJ}},
+     7.0f,kNone,kAiFarCone,kAiRearCone,{kNone,kNone},{kRpm,kRpm},kNone,kJetLoadPitch,kLoad,0.0f,kNone},
+    {1,{{k_jet_far,kRpm,kAiFarR,0.0f,0.0f,{2160.0f,0.505f},kJ}},
+     7.0f,kNone,kAiFarCone,kAiRearCone,{kNone,kNone},{kRpm,kRpm},kNone,kNone,kRpm,4.5f,kNone},
     {1,{{k_jet_approach,kRpm,kAiFarR,0.0f,0.0f,{2160.0f,0.505f},kJ}},
-     7.0f,kNone,{3,{{0.0f,2.0f},{90.0f,-4.0f},{180.0f,2.0f}}},{3,{{0.0f,0.0f},{100.0f,-14.0f},{180.0f,-80.0f}}},
-     {kNone,kNone},{kRpm,kRpm},kNone,kJetLoadPitch,kLoad},
-},0,{},-20.0f+kTrimDb,100.0f,3000.0f,0.54f,{2,{{0.0f,30.0f},{180.0f,80.0f}}},{2,{{0.0f,0.0f},{180.0f,-2.0f}}}};
+     11.0f,kNone,kAiFarCone,{3,{{0.0f,0.0f},{100.0f,-14.0f},{180.0f,-80.0f}}},{kNone,kNone},{kRpm,kRpm},kNone,kNone,kRpm,
+     4.5f,kNone},
+},0,{},-28.0f-2.0f+kJetTrimDb,0.0f,kAiFarFrom,0.0f,{2,{{0.0f,30.0f},{180.0f,80.0f}}},{2,{{0.25f,0.0f},{179.7f,-2.0f}}},
+ {3,{{0.0f,10.0f},{495.76f,4.0f},{kAiFarFrom,-10.0f}}},{2,{{0.0f,0.0f},{180.0f,4.0f}}},6.5f,kNone,kNone,kNone};
 
 // The ground's own (the player's events, bus -8; the diesel's and the petrol's Distance not automated: the abrams'
 // (ours)). rpm_result 0..100 and load 0..1.

@@ -7,7 +7,8 @@
 #include "enemy_control_walking_net.h"
 #include "enemy_control_pvp_berserker.h"
 #include "command_identity.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "scopereticle.h"
 #include "memory.h"
 #include "lazy_rows.h"
 #include <cmath>

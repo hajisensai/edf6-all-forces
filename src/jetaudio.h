@@ -36,7 +36,8 @@ bool Running() noexcept;   // Start succeeded (Beat keeps it going)
 // a rail gun's discharge near and far, its capacitors charging and its ready click; a 40 mm grenade launcher's thump, a
 // rocket off its rail and the next one latched on; the cases landing (a medium gun's brass, a tank gun's stub base, a
 // grenade's aluminium); the separate loading's breech opening, shell rammed, charge module and primer. Last the Q mark's
-// cues (qmark.cpp): this machine's player marked, a teammate marked, a mark let go (not heard where they are: UI cues).
+// cues (qmark.cpp): this machine's player marked, a teammate marked, a mark let go (not heard where they are: UI cues);
+// after the Sazabi's shield, the M map's order cues (mapcmd.cpp PlayCue: taken, altitude up / down, refused).
 enum Clip : int { kClipTurret, kClipTurretStop,
                   kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipMg, kClipGatling,
                   kClipBurstTail, kClipAutocannon, kClipBrass, kClipCaseSmall, kClipMissile, kClipSzBeamShot, kClipSzBeamHit,
@@ -46,7 +47,7 @@ enum Clip : int { kClipTurret, kClipTurretStop,
                   kClipGunHeavyNear, kClipGunHeavyFar, kClipRailShot, kClipRailFar, kClipRailCharge, kClipRailReady,
                   kClipGrenadeShot, kClipRocketRail, kClipRocketLoad, kClipCaseMedium, kClipCaseStub, kClipCaseGrenade,
                   kClipBreechOpen, kClipShellRam, kClipCharge, kClipPrimer, kClipMarkOwn, kClipMarkTeam, kClipMarkOff,
-                  kClipSzShieldBlock, kClipCount };
+                  kClipSzShieldBlock, kClipCmdAck, kClipCmdUp, kClipCmdDown, kClipCmdRefuse, kClipCount };
 // The Sazabi's one-shots' clips in sazabi_sound.h SzSfx's order (its missiles the vehicles' launch), its loops' in SzLoop's.
 constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kClipSzSaberOff,kClipSzWhoosh,kClipSzSaberHit,
                                 kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,
@@ -80,7 +81,15 @@ void PlayWt(int clip,int variant,const Heard& h) noexcept;
 // A looping voice of War Thunder's `group` (its first variant, the engines' layers: sound_engine.h), silent until
 // SetLoop, closed by CloseLoop; -1: not there (WtThere), or every loop voice in use.
 int OpenWtLoop(int group) noexcept;
+int OpenWtOnce(int group,int variant) noexcept;   // ...or once from its start (moved by SetLoop; closed by the caller)
+float WtSeconds(int group,int variant) noexcept;  // a variant's length (s); 0: not read
 int LoopsOpen() noexcept;                 // the loop voices in use (the log's voice count)
+int LoopsFree() noexcept;                 // ...and those still free (kLoopPool of them in all)
+// The loop voices (every engine's layers, the turrets' loops): 1024, from tools/jet_voice_bench.cpp (2026-11-27,
+// docs/feature-wt-sound.md 「声道的上限」): XAudio2 opened 2048 with no failure and no glitch; 1024 of them took 14% of
+// its mixing thread (one core of a Ryzen 7 9800X3D) and 0.3 ms a frame of SetLoop on the game's thread, 2048 twice
+// that. 1024 leaves a slower machine room; it is 250 jets at 4 layers each, more than a mission flies.
+constexpr int kLoopPool=1024;
 // Once a game frame: the game runs. With no beat for kQuietMs (paused, loading, a menu) the watchdog silences
 // everything until the next beat, at `volume` (the game's master and effect volume; each sound's own share is its
 // caller's: the engines' JetSoundVolume / VehicleEngineVolume in their Heard, the cockpit's Cfg().warnVolume here).

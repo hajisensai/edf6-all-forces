@@ -1,7 +1,8 @@
 // The scoped weapons' spread for the player's own rounds: scope_spread.h (the rule: scope_spread_logic.h; the reading:
 // docs/scope-accuracy-re.md; why: docs/feedback-2026-11-21-scope-accuracy.md).
 #include "scope_spread.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "heli.h"
 #include "host_settings.h"
 #include "memory.h"

@@ -32,7 +32,15 @@
 //    The azimuth is the turntable's: the stock 0x661C00 (called by 0x5FDDA0 with the turntable, +0x2AC8, on the body
 //    bone, +0x2AC4) has just written its world rows; its forward is read in the body bone's.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "launchers.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "katyusha_rack.h"
 #include "layout.h"

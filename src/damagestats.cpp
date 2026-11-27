@@ -13,7 +13,12 @@
 //    checked against the round's class and owner. No tag (melee, a ram, a derived round, a script's blast, an enemy's
 //    attack): the attacker itself names the source (an enemy's kind is its weapon).
 // 0x54A586 itself is left alone: subcarrier.cpp checks that its call still reaches 0x547C30 (DamageCallReaches).
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "seats.h"
+#include "playarea.h"
 #include "damagestats.h"
 #include "dmgnum.h"
 #include "edf/host.h"
@@ -22,6 +27,7 @@
 #include "hudtext.h"
 #include "layout.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include "stores.h"
 #include <cwchar>
 
@@ -154,7 +160,7 @@ dmgstat::Group GroupOf(unsigned char* o,std::int32_t team,wchar_t* name,std::siz
 struct Tag { const unsigned char* round; const void* vtable; const void* owner; std::uint64_t seq; dmgstat::Side side;
              wchar_t name[dmgstat::kNameLen]; };
 constexpr int kTags=4096;   // two ways per hash: a round lives a few seconds at most, a few hundred in flight
-Tag tags[kTags];
+LazyRows<Tag,kTags> tags;   // heap from the first tagged round (plugin_image_size_guard: no image table)
 std::uint64_t tagSeq=0;   // the fires so far: a pair's older tag is the one replaced
 SRWLOCK tagLock=SRWLOCK_INIT;
 int TagHome(const void* round) noexcept {
@@ -176,6 +182,7 @@ void TagRound(unsigned char* round,const unsigned char* param) noexcept {
     const auto owner=At<unsigned char*>(round,kRoundOwner);
     if(owner && Readable(owner,kTeam+4))t.side=EnemyTeam(At<std::int32_t>(owner,kTeam)) ? dmgstat::Side::enemy : SideOf(owner,w);
     WeaponName(w,t.name,dmgstat::kNameLen);
+    if(!tags.Allocate("DAMAGE round tags"))return;
     AcquireSRWLockExclusive(&tagLock);
     t.seq=++tagSeq;
     const int home=TagHome(round);
@@ -190,7 +197,7 @@ void TagRound(unsigned char* round,const unsigned char* param) noexcept {
 // left by another round at the same address (one never tagged: a derived round) is cleared.
 bool TagOf(const unsigned char* gdi,const void* attacker,Tag* out) noexcept {
     const unsigned char* round=gdi-kRoundGdi;
-    if(!Readable(round,kRoundOwnerCtrl+8))return false;
+    if(!tags.Allocated() || !Readable(round,kRoundOwnerCtrl+8))return false;   // no round tagged yet
     const void* const vtable=At<const void*>(round,0);
     const void* const owner=At<const void*>(round,kRoundOwner);
     bool found=false;
@@ -404,7 +411,7 @@ bool InstallDamageStats() noexcept {
 void ResetDamageStats() noexcept {
     LogDamageNumbers();
     AcquireSRWLockExclusive(&tagLock);
-    std::memset(tags,0,sizeof(tags));
+    for(auto& t:tags)t=Tag{};
     ReleaseSRWLockExclusive(&tagLock);
     AcquireSRWLockExclusive(&lock);
     if(book.sources || book.targets)Summary("the mission before");

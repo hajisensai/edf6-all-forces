@@ -11,6 +11,8 @@
 #include "preload_set.h"
 #include "online_authority.h"
 #include "support_aircraft.h"
+#include "support_loadout.h"
+#include "stores.h"
 #include "pvp.h"
 #include "support_drone.h"
 #include "support_firepower.h"
@@ -19,6 +21,11 @@
 #include "real_driver_native.h"
 #include <cstdio>
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "plugin_body.h"
+#include "strikes.h"
+#include "mapbounds.h"
 
 namespace crew {
 bool NpcDriver(const unsigned char* vehicle) noexcept;
@@ -465,7 +472,7 @@ void jet::ResetSupportDrones() noexcept {
 }
 
 bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target,bool airborne,
-                             const sortie::RunSpec& run) noexcept {
+                             const sortie::RunSpec& run,const spread::Place& place) noexcept {
     // Only the actual pilot authorizes takeoff; an empty seat/Dummy never passes this gate.
     if(!vehicle || !target || !NpcDriver(vehicle))return false;
     if(spec.heli>=0) {
@@ -491,13 +498,18 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
         const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
         const float none[3]={0.0f,0.0f,0.0f};
         SortieBegin(*entry,static_cast<SortiePass>(spec.sortie),target,reinterpret_cast<const float*>(vehicle+kPosition),
-                    airborne ? m+8 : none,GameMs(),run);
+                    airborne ? m+8 : none,GameMs(),run,place);
     }
     return true;
 }
 
 float SupportPassTurn(const SupportAircraft& spec) noexcept {
     return spec.transportPlane ? FerryTurn(KindOf(Row(Body::transportPlane).role)) : 0.0f;
+}
+float SupportRunIn(const SupportAircraft& spec,float runHalf) noexcept {
+    if(spec.jet<0 || spec.heli>=0 || spec.transportPlane)return 0.0f;
+    const Kind& k=KindOf(Row(SupportBody(spec)).role);
+    return sortie::StraightRunIn(static_cast<SortiePass>(spec.sortie)==SortiePass::gunRun,runHalf,k.attack,k.diveStart);
 }
 
 void SupportAircraftFrame(unsigned char* v) noexcept {
@@ -540,6 +552,38 @@ void AddSupportAircraftItems(const SupportAircraft& spec,preload::Set& out) noex
 
 bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
     return spawnOk && SupportSpecValid(spec) && Preloaded(SupportBody(spec));
+}
+
+bool SupportRunLoad(const SupportAircraft& spec,const VehicleLoadout* pylons,sortie::RunLoad* load,float* speed) noexcept {
+    if(!load || !speed || spec.heli>=0 || spec.transportPlane || spec.jet<0 || spec.jet>=kLaunchCount)return false;
+    const BodyRow& row=Row(SupportBody(spec));
+    *load={};
+    *speed=KindOf(row.role).attack;
+    const auto add=[&](bool bomb,bool rocket,bool missile,int rounds){
+        if(bomb)load->bombs+=rounds;else if(rocket)load->rockets+=rounds;else if(missile)load->missiles+=rounds;
+    };
+    if(pylons && pylons->On()) {
+        for(int i=0;i<pylons->count && i<kPylonsMost;++i)
+            if(const LoadStore* s=LoadStoreOf(pylons->store[i]))
+                add(s->role==LoadRole::bomb,s->role==LoadRole::rocket,s->role==LoadRole::ground,kRoundCounts[pylons->rounds[i]&0xF]);
+        return true;
+    }
+    // Stock: its mark's weapon files, each EDF6VC_<STORE>_<rounds>.SGO (vcobjects.store_file); the guns are no store.
+    for(int i=0;const JetWeaponRow* w=JetWeapon(i);++i) {
+        if(w->mark!=row.mark)continue;
+        const wchar_t* name=std::wcsrchr(w->sgo,L'/');
+        name=name ? name+1 : w->sgo;
+        const wchar_t* cut=std::wcsrchr(name,L'_');
+        if(!cut)continue;
+        wchar_t prefix[48];
+        const std::size_t n=static_cast<std::size_t>(cut-name)+1;
+        if(n>=std::size(prefix))continue;
+        wcsncpy_s(prefix,name,n);
+        const StoreSpec* s=StoreSpecOfPrefix(prefix);
+        const int rounds=static_cast<int>(std::wcstol(cut+1,nullptr,10));
+        if(s && rounds>0)add(s->role==StoreRole::bomb,s->role==StoreRole::rocket,s->role==StoreRole::ground,rounds);
+    }
+    return true;
 }
 
 const wchar_t* SupportAircraftFile(const SupportAircraft& spec) noexcept {

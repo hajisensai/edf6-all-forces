@@ -21,6 +21,7 @@
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea: it wades).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "py_consts.inc"
 #include "exhaust_pose.h"
 #include "firstperson.h"
 #include "fp_view.h"
@@ -41,12 +42,23 @@
 #include "vehicle_look.h"
 #include <cmath>
 #include <cstring>
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "boarding.h"
+#include "plugin_body.h"
+#include "netprobe.h"
+#include "sazabi.h"
+#include "booster.h"
 
 namespace crew {
 namespace {
 using vec::Clamp;using vec::Len;
 using namespace szarms;
-constexpr float kSazabiMark=7401.0f;   // pylib/vcobjects.py SAZABI_MARK (tools/selftest.py sazabi_bones_agree)
+constexpr float kSazabiMark=pyconst::kSazabiMark;   // pylib/vcobjects.py SAZABI_MARK (src/py_consts.inc)
 constexpr std::size_t kBody=0x1650;
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr std::size_t kAreaInset=0xE00;   // playerjet.cpp: the move-area clamp's inset
@@ -109,9 +121,7 @@ bool testBoarded=false;   // SazabiTestBoard: once a mission
 ULONGLONG firstSeenMs=0;
 
 bool Live(const Mech& m) noexcept {
-    const auto ctrl=static_cast<const unsigned char*>(m.ref.ctrl);
-    return m.vehicle && Readable(ctrl,12) && At<std::int32_t>(ctrl,8)>0 && m.ref.Is(m.vehicle) && !(m.vehicle[0x18]&4) &&
-           !m.vehicle[kDead];
+    return m.vehicle && m.ref.obj==m.vehicle && objref::Alive(m.ref);
 }
 Mech* Find(const unsigned char* v) noexcept {
     for(auto& m:mechs)if(m.vehicle==v && m.ref.Is(v))return &m;
@@ -466,7 +476,7 @@ bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noex
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-// The HUD's view of the player's Sazabi (crew.h SazabiCue): published each frame it is driven (PublishCue).
+// The HUD's view of the player's Sazabi (sazabi.h SazabiCue): published each frame it is driven (PublishCue).
 bool PlayerSazabiCue(SazabiCue* out) noexcept {
     if(!out || !stepfresh::Fresh(cueStep))return false;
     *out=cue;

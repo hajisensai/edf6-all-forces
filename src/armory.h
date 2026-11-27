@@ -44,6 +44,13 @@ bool TakePvpRequest() noexcept;
 // The world map asked (the HQ's 任务 tab chosen, or the 任务 page's world map row): true once per request; room_ui
 // presses the screen's own mission select button (closed already).
 bool TakeMapRequest() noexcept;
+// room_ui after it tried the press (true: pressed): 整备, still drawn since it closed for the map, keeps drawn while the
+// select comes (no frame of the screen's own menu between them) or, not pressed, stops.
+void MapPressed(bool pressed) noexcept;
+// Render thread, the select's Draw (worldmap.cpp): it drew / is in place (its windows still). In place, 整备 held for
+// the map is no longer drawn.
+void MapDrawn() noexcept;
+void MapShown() noexcept;
 // The world map's title bar (worldmap.cpp): a tab other than the map's clicked; the select is closed the stock way and
 // the next frame its screen (the HQ / the room) has its input, room_ui opens 整备 at `tab` (TakeOpenAsk: once, -1 none).
 void AskOpen(int tab) noexcept;

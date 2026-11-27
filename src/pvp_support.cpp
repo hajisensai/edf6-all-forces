@@ -10,6 +10,7 @@
 #include "support_soldier.h"
 #include "memory.h"
 #include <cstring>
+#include "netprobe.h"
 
 namespace crew {
 namespace {
@@ -41,10 +42,7 @@ bool ResolveOwner(const unsigned char (&requester)[32],const ObjRef* expected,ED
     *out=owner;return true;
 }
 bool LiveParent(const ObjRef& parent) noexcept {
-    const auto* object=static_cast<const unsigned char*>(parent.obj);
-    return parent.ctrl && Readable(parent.ctrl,16) && At<LONG>(parent.ctrl,8)>0 &&
-        object && Readable(object,kDead+1) && At<const void*>(object,kSelfCtrl)==parent.ctrl &&
-        !(object[0x18]&4) && !object[kDead];
+    return objref::Alive(parent);
 }
 }
 

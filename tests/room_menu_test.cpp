@@ -347,7 +347,7 @@ void VehicleLimits() {
 void VehicleWeight() {
     Ini ini;
     Menu m;
-    OpenAt(m,ini,L"INTERCEPTOR",false);   // 8000 kg
+    OpenAt(m,ini,L"INTERCEPTOR",false);   // 10880 kg
     Tap(m,&Keys::confirm);                 // guns alone
     Unit& u=m.unit[m.unitAt];
     Expect(Tap(m,&Keys::add)==Act::changed && u.vehicle.store[0]==1 && kRoundCounts[u.vehicle.rounds[0]]==2,"a new pylon: 2 AIM-9X");
@@ -361,10 +361,10 @@ void VehicleWeight() {
         Expect(WithinPayload(u.vehicle),"every store stepped to keeps the weight (its rounds cut to fit)");
     }
     Tap(m,&Keys::cancel);
-    // Fill it up with AIM-54 x12 (5.4 t) pylons by hand: a second does not fit 12, adding offers what still fits.
-    u.vehicle.count=1;u.vehicle.store[0]=3;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(12));
+    // Fill it up with AIM-54 x15 (6.75 t) pylons by hand: a second does not fit 15, adding offers what still fits.
+    u.vehicle.count=1;u.vehicle.store[0]=3;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(15));
     Expect(Tap(m,&Keys::add)==Act::changed && WithinPayload(u.vehicle) && u.vehicle.count==2,"a pylon added within the weight");
-    u.vehicle.count=1;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(15));   // 6750 kg: 1250 kg left
+    u.vehicle.count=1;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(19));   // 8550 kg: 2330 kg left
     for(int i=0;i<4;++i)Tap(m,&Keys::add);
     Expect(WithinPayload(u.vehicle),"as many pylons as fit, each within the weight");
     u.vehicle.count=1;u.vehicle.store[0]=7;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(40));   // RKT x40 1280 kg
@@ -372,12 +372,12 @@ void VehicleWeight() {
     Unit fighter=u;fighter.body=VehicleBody::fighter;fighter.vehicle=full;
     fighter.vehicle.count=5;for(int i=0;i<5;++i){fighter.vehicle.store[i]=7;fighter.vehicle.rounds[i]=static_cast<std::uint8_t>(RoundCode(40));}
     Expect(WithinPayload(fighter.vehicle) && !CanAddPylon(fighter),"five full pylons: nothing more (no sixth anyway)");
-    // 5400 + 920 + 50 = 6370 of 6400 kg: two pylons free, but not one round of anything (Hydra 70 32 kg) fits.
+    // 5400 + 1520 + 800 = 7720 of 7720 kg: two pylons free, but not one round of anything (Hydra 70 32 kg) fits.
     fighter.vehicle.count=3;
     fighter.vehicle.store[0]=3;fighter.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(12));
-    fighter.vehicle.store[1]=6;fighter.vehicle.rounds[1]=static_cast<std::uint8_t>(RoundCode(4));
-    fighter.vehicle.store[2]=5;fighter.vehicle.rounds[2]=static_cast<std::uint8_t>(RoundCode(1));
-    Expect(WithinPayload(fighter.vehicle) && LoadoutMassKg(fighter.vehicle)==6370 && !CanAddPylon(fighter),
+    fighter.vehicle.store[1]=2;fighter.vehicle.rounds[1]=static_cast<std::uint8_t>(RoundCode(10));
+    fighter.vehicle.store[2]=7;fighter.vehicle.rounds[2]=static_cast<std::uint8_t>(RoundCode(25));
+    Expect(WithinPayload(fighter.vehicle) && LoadoutMassKg(fighter.vehicle)==7720 && !CanAddPylon(fighter),
            "free pylons but no weight left: no pylon offered");
     fighter.vehicle.count=2;
     Expect(CanAddPylon(fighter),"weight left: a pylon offered");

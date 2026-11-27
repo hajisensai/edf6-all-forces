@@ -47,7 +47,8 @@
 #include "frame_rate_logic.h"
 #include "fp_view.h"
 #include "heli.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include <cstring>
 #include <new>

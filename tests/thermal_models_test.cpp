@@ -1,6 +1,6 @@
 // Link this fixture with the separate production src/thermal_models.cpp unit.
 // No native code is loaded/executed: a private PE/RTTI image carries its layout.
-#include "../src/crew.h"
+#include "../src/edf_layout.h"
 #include "../src/thermal_models.h"
 #include "edf/memory.h"
 #include <array>

@@ -21,7 +21,27 @@
 //  - the threats: missiles homing on it, jets locking it (the jets' threat ring's sources).
 // A stock heli gets only the stores here (its sight is helisight.cpp's, its instruments HeliHud's). With the HUD on, the
 // player's seat's stock aim lines are hidden (crew.cpp AimLines, PlayerStockOwnSight): its impact points replace them.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "heli.h"
+#include "highcam.h"
+#include "hud.h"
+#include "jet.h"
+#include "launchers.h"
+#include "missile.h"
+#include "sightzoom_api.h"
+#include "stab_api.h"
+#include "subcarrier.h"
+#include "turretcam_api.h"
+#include "vhud.h"
+#include "payload.h"
+#include "proteus.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "layout.h"
 #include "memory.h"
 #include "lockon.h"
@@ -414,7 +434,8 @@ void StockHudFrame(unsigned char* v) noexcept {
             for(int k=0;k<triggers;++k)if(triggered[k]==w)a.armed=true;
             // The range to what it is aimed at: the pick's, and every gun on a trigger (each keeps its own sight, hud.cpp
             // OtherTriggerSight: the Titan's Requiem cannon while its machine gun is picked).
-            Arm(w,!r.heli && (a.coFired || a.armed),a,(w==sight || a.armed) && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
+            // V605's cannon while the Balam's marker draws its sweep (barga_aim.cpp): not one more point for the live muzzle.
+            Arm(w,!r.heli && (a.coFired || a.armed) && !BargaOwnsCannon(w),a,(w==sight || a.armed) && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
             a.side=SideOf(v,seat,holders[i]);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }

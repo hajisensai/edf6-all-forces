@@ -1,4 +1,4 @@
-// nix.cpp: the Nix's torso twist (README 尼克斯, docs/nix-re.md, ini NixTorsoTwist). Included by crew.h.
+// nix.cpp: the Nix's torso twist (README 尼克斯, docs/nix-re.md, ini NixTorsoTwist).
 #pragma once
 namespace crew {
 // At load: checks the code it rests on and chains the Nix's update (Vehicle612_nix slot 4). False: left stock.

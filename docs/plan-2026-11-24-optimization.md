@@ -238,6 +238,10 @@ cpu-5 原版 AI 热点先找算法问题；cpu-6 Havok worker 数对齐；cpu-7 
 - 第二批：hitch-2 同步加载探测；hitch-3 M 地图 120–220 ms 尖峰、hitch-6 暂停菜单 868 ms / 603 输入 293 ms（靠 A 的慢帧栈定位）；
   hitch-4 + mem-1 + mem-5 预载按房间并集收窄（P：房主汇总下发预载集合）；mem-2 同场档案重复贴图 134 MB；mem-3 任务循环内存涨 9 MB/轮归因；
   mem-4 `.data` 120 MB 静态网络缓冲改按需分配；hitch-10 驱动着色器首用编译（有数据才做）。
+  - mem-4 复发（2026-11-27，分支 `wave2-data`）：`.data` 又顶到 28 MB 上限。按链接 map 排序，最大的是载具武器 SGO 读缓冲（2 MB）、
+    PVP 租约 / 子弹绑定 / 出生记录 / 发射器 / 保存表（约 3.5 MB）、伤害统计的弹头标签、运输行程，都只在对应功能用到时才有用；
+    改成 `crew::LazyRows` 后 VirtualSize 20.64 MB（RawSize 11.28→7.84 MB，DLL 22.17→18.72 MB）。插件链接加 `/MAP`
+    （`build/EDF6VehicleCrew.map`，不进发布包），`plugin_image_size_guard` 离上限 2 MB 内时列出前 10 大对象，`--top` 随时列。
 
 ### 2026-11-26 后续优化
 

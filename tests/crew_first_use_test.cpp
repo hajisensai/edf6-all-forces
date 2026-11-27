@@ -1,5 +1,6 @@
 // Run the production auto-crew and boarding-entrance paths against native-layout seats.
 #include "../src/crew.cpp"
+#include "../src/modules.cpp"   // the passes crew.cpp's frame tick runs (module.h); /Gw drops the load's tables it never runs
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
@@ -15,6 +16,10 @@ bool BoardingUnderway() noexcept { return false; }
 bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
+void FlushLog() noexcept {}
+namespace modules {   // the reset pass is modules_load.cpp's (not linked here): a module taken off has nothing to reset
+ResetRun ResetModule(Id) noexcept { return {}; }
+}  // namespace modules
 // map.cpp's wheel for the magnified sight: SceneOver lets it go (the scene-end case).
 int scopeWheelHeld=-1;
 int TakeScopeWheel(bool hold) noexcept { scopeWheelHeld=hold ? 1 : 0;return 0; }
@@ -143,6 +148,7 @@ void EmcTick(void) noexcept{unexpectedHook();return;}
 void SazabiSoundTick(void) noexcept{unexpectedHook();return;}
 void BlastSoundTick(void) noexcept{unexpectedHook();return;}
 void SidecarFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void AuraVehicleFrame(unsigned char *) noexcept{unexpectedHook();return;}
 bool SidecarBoard(unsigned char *,unsigned char *) noexcept{unexpectedHook();return {};}
 void HighCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void SightZoomStock(unsigned char *) noexcept{unexpectedHook();return;}
@@ -165,6 +171,7 @@ void SupportFollowUpTick() noexcept{}   // ...and the sorties' second waves (air
 namespace gravity { void Frame() noexcept{} namespace net { void Frame() noexcept{} } }   // crew.cpp's GravityTick calls these (gravity.cpp, gravitygun.cpp, floatgun.cpp, not linked here)
 void GravityGunTick() noexcept{}
 void MapCommandQueueTick() noexcept{}   // crew.cpp's SharedFrameTick advances the map's queues (mapcmd.cpp, not linked here)
+void AuraTick() noexcept{}   // crew.cpp's SharedFrameTick applies the aura trucks (aura.cpp, not linked here)
 void FloatGunTick() noexcept{}
 void KeyConfigTick() noexcept{}   // crew.cpp's FrameTick follows the game's key config (keyconfig.cpp, not linked here)
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
@@ -187,6 +194,7 @@ void HudSee(unsigned char *) noexcept{unexpectedHook();return;}
 void HudPublish(void) noexcept{unexpectedHook();return;}
 bool PlayerStockOwnSight(void const *) noexcept{unexpectedHook();return {};}
 void StockHudFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void BargaAimFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void PlayAreaTick(void) noexcept{unexpectedHook();return;}
 void PayloadFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void TwinBarrelFrame(unsigned char *) noexcept{unexpectedHook();return;}

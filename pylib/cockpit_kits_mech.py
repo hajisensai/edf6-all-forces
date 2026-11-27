@@ -32,7 +32,7 @@ import cockpits
 import obj_model as om
 from cockpit_room import MARGIN, Cabin, _materials, _room
 from cockpit_shapes import basis, box, cylinder, frame, merge, panel
-from cockpits import Kit, KitMaterial, Screen
+from cockpits import InstrumentControl, Kit, KitMaterial, Screen
 
 SEAT_ASSET = 'parts/pp-scifi-cockpit-revert/the_cockpit.glb'
 SEAT_EYE = (0.33, 0.25, 0.0)    # asset frame (it faces -x, +y up): a seated pilot's eye over the seat cushion
@@ -61,10 +61,11 @@ def _military(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
 
 
 @functools.lru_cache(maxsize=1)
-def _seat_mesh() -> tuple[tuple[str, tuple[int, int, int], np.ndarray, np.ndarray, np.ndarray], ...]:
+def _seat_mesh() -> tuple[tuple[str, tuple[int, int, int], np.ndarray, np.ndarray, np.ndarray, np.ndarray], ...]:
     """The seat asset in the eye's frame at 1 asset unit = 1 m, eye at the origin, less the screen tower in front of
     the eye and the roof bar over it (whole mesh nodes, by their centres): per material its name, sRGB colour,
-    positions (n, 3), normals (n, 3) and triangles (m, 3)."""
+    positions (n, 3), normals (n, 3), triangles (m, 3) and each triangle's piece (m,: the asset's closed solids, the
+    triangles joined through shared corners, so _seat keeps or drops a solid whole)."""
     import gltf
     s = gltf.read(os.path.join(cockpits.asset_root(), SEAT_ASSET))
     centre = {}
@@ -87,18 +88,47 @@ def _seat_mesh() -> tuple[tuple[str, tuple[int, int, int], np.ndarray, np.ndarra
         if not len(tris):
             continue
         used, inv = np.unique(tris.reshape(-1), return_inverse=True)
-        out.append((f'seat{k}', _military(_srgb(mat.base)), pos[used], nrm[used], inv.reshape(-1, 3)))
+        tri = inv.reshape(-1, 3)
+        out.append((f'seat{k}', _military(_srgb(mat.base)), pos[used], nrm[used], tri, _pieces(pos[used], tri)))
     return tuple(out)
 
 
+def _pieces(pos: np.ndarray, tris: np.ndarray) -> np.ndarray:
+    """Each triangle's piece: triangles sharing a corner (by position: the asset splits corners at hard edges) are one."""
+    _, vid = np.unique(np.round(pos, 5), axis=0, return_inverse=True)
+    parent = np.arange(vid.max() + 1)
+
+    def root(a: int) -> int:
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+    for a, b, c in vid.reshape(-1)[tris]:
+        ra = root(a)
+        parent[root(b)] = ra
+        parent[root(c)] = ra
+    return np.array([root(v) for v in vid.reshape(-1)[tris[:, 0]]])
+
+
 def _seat(scale: float, lo: Vec3, hi: Vec3) -> tuple[list[om.Part], dict[str, KitMaterial]]:
-    """The seat at `scale` (metres per asset unit), only its triangles wholly inside the box lo..hi (eye frame)."""
+    """The seat at `scale` (metres per asset unit), only its pieces (_pieces) wholly inside the box lo..hi (eye frame).
+    A piece cut at the box loses all of it: a cut solid left its few inner faces floating, plain to see once a panoramic
+    pod's walls no longer stood behind them (the user, 2026-11-26: 「这里有多余的东西」, dark slabs over and under
+    the console)."""
     parts, mats = [], {}
     lo_a, hi_a = np.array(lo), np.array(hi)
-    for name, rgb, pos, nrm, tris in _seat_mesh():
+    kept, cut = [], []    # (material index, piece, its box lo, hi, triangles)
+    for m, (name, rgb, pos, nrm, tris, piece) in enumerate(_seat_mesh()):
         q = pos * scale
-        inside = ((q >= lo_a) & (q <= hi_a)).all(1)
-        t = tris[inside[tris].all(1)]
+        inside = ((q >= lo_a) & (q <= hi_a)).all(1)[tris].all(1)
+        out = set(np.unique(piece[~inside]).tolist())
+        for p in np.unique(piece):
+            corners = q[tris[piece == p].reshape(-1)]
+            (cut if p in out else kept).append((m, p, corners.min(0), corners.max(0), int((piece == p).sum())))
+    drop = {(m, p) for m, p, *_ in cut} | {(m, p) for m, p, *_ in _orphans(kept, cut)}
+    for m, (name, rgb, pos, nrm, tris, piece) in enumerate(_seat_mesh()):
+        q = pos * scale
+        t = tris[[(m, int(p)) not in drop for p in piece]]
         if not len(t):
             continue
         used, inv = np.unique(t.reshape(-1), return_inverse=True)
@@ -107,6 +137,27 @@ def _seat(scale: float, lo: Vec3, hi: Vec3) -> tuple[list[om.Part], dict[str, Ki
         parts.append(om.Part(name, name, verts, tri))
         mats[name] = KitMaterial(rgb)
     return parts, mats
+
+
+RAIL = 0.3     # metres: a kept piece this long beside a cut solid was its rail (the armrests' under the console)
+TOUCH = 0.005  # metres: boxes this near touch
+
+
+def _touch(a: tuple, b: tuple) -> bool:
+    return bool((a[2] - TOUCH <= b[3]).all() and (b[2] - TOUCH <= a[3]).all())
+
+
+def _orphans(kept: list[tuple], cut: list[tuple]) -> list[tuple]:
+    """The kept pieces left hanging once the cut ones went: a long rail beside a cut solid (40 triangles or more: its
+    beam, not a bolt), and, again until none is left, a piece touching no other kept one (floating in the air)."""
+    gone = {i for i, k in enumerate(kept)
+            if float((k[3] - k[2]).max()) > RAIL and any(c[4] >= 40 and _touch(k, c) for c in cut)}
+    while True:
+        left = [i for i in range(len(kept)) if i not in gone]
+        alone = {i for i in left if not any(j != i and _touch(kept[i], kept[j]) for j in left)}
+        if not alone:
+            return [kept[i] for i in sorted(gone)]
+        gone |= alone
 
 
 def _toward_eye(c: Vec3) -> Vec3:
@@ -232,6 +283,40 @@ def _boot_tiles(L: float, R: float, U: float, D: float, A: float, B: float, half
     return parts
 
 
+# The seat's two control sticks (the user, 2026-11-26: 「这些座椅加上手柄吧，并且这个手柄还会跟着动最好」): at the
+# pilot's hands either side ahead of the seat, each on its own bone that the plugin leans with the seat's sticks
+# (src/cockpit_instruments.h StickPose: the left with the left stick, the move; the right with the right, the aim).
+STICK_AT = (0.27, -0.42, 0.34)   # the left stick's foot at full size (x mirrored for the right), metres from the eye
+STICK_THROW = 18                 # degrees a stick leans at full throw
+STICK_MATERIALS = {
+    'stick_grip': KitMaterial((38, 41, 38)),
+    'stick_boot': KitMaterial((24, 26, 24)),
+    'stick_red': KitMaterial((176, 44, 32)),
+    'stick_amber': KitMaterial((196, 136, 34)),
+}
+
+
+def _sticks(k: float, L: float, R: float, D: float) -> tuple[list[om.Part], list[InstrumentControl]]:
+    """The two sticks (parts stick_l / stick_r, each one moving control j_<hand>_<throw>_0 about its foot) at `k`
+    of full size, kept off the side walls and over the floor."""
+    parts, controls = [], []
+    for hand, sign, wall, top in ((0, 1.0, L, 'stick_amber'), (1, -1.0, R, 'stick_red')):
+        name = ('stick_l', 'stick_r')[hand]
+        x = sign * min(STICK_AT[0] * k, wall - MARGIN - 0.05 * k)
+        foot = (x, max(STICK_AT[1] * k, -D + MARGIN + 0.05 * k), STICK_AT[2] * k)
+
+        def at(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> Vec3:
+            return (foot[0] + dx * k, foot[1] + dy * k, foot[2] + dz * k)
+        parts += [box(name, 'console_shell', at(dy=-0.025), (0.09 * k, 0.04 * k, 0.09 * k)),
+                  cylinder(name, 'stick_boot', at(dy=-0.006), at(dy=0.03), 0.028 * k, 12),
+                  cylinder(name, 'metal_dark', at(dy=0.02), at(dy=0.1), 0.009 * k, 10),
+                  box(name, 'stick_grip', at(dy=0.15, dz=0.008), (0.036 * k, 0.1 * k, 0.042 * k)),
+                  cylinder(name, top, at(dy=0.2), at(dy=0.208), 0.011 * k, 10),
+                  box(name, top, at(dy=0.17, dz=0.033), (0.016 * k, 0.03 * k, 0.012 * k))]
+        controls.append(InstrumentControl(name, f'j_{hand}_{STICK_THROW}_0', foot, (0.0, 0.0, 1.0), (0.0, 1.0, 0.0)))
+    return parts, controls
+
+
 LEAST = {'left': 0.2, 'right': 0.2, 'up': 0.15, 'down': 0.25, 'ahead': 0.35, 'back': 0.15}
 SIDE_SCREEN = (34.0, -19.0)   # degrees left (right for the other) and down of the sight line: the view's lower corners
 
@@ -277,6 +362,8 @@ def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str
     # The seat, its consoles and control arms, cut to the walls.
     seat, seat_mats = _seat(SEAT_SCALE * k, (-R + MARGIN, -D + MARGIN, -B + MARGIN), (L - MARGIN, U - MARGIN, A - 0.08))
     parts += seat
+    sticks, controls = _sticks(k, L, R, D)
+    parts += sticks
     # The screens, each in its bezel: `sides` at the view's lower corners (as near as the walls let them be), `middle`
     # on the console.
     screens = []
@@ -301,8 +388,9 @@ def _pod(cabin: Cabin, kit: str, want: Cabin, middle: str, sides: tuple[str, str
     screens.append(scr)
     mats = _materials('mech_plate','mech_frame','metal_dark','screen')
     mats.update(CONSOLE_MATERIALS)
+    mats.update(STICK_MATERIALS)
     mats.update(seat_mats)
-    return Kit(_merged(parts), mats, screens=tuple(screens))
+    return Kit(_merged(parts), mats, screens=tuple(screens), controls=tuple(controls))
 
 
 def _panoramic(L: float, R: float, U: float, D: float, A: float, B: float, k: float, middle: str,
@@ -321,6 +409,8 @@ def _panoramic(L: float, R: float, U: float, D: float, A: float, B: float, k: fl
             parts.append(box(f'rib{n}{z:.2f}', 'metal_dark', (x, (U - D) / 2, z), (0.04, U + D - 0.02, 0.06)))
     seat, seat_mats = _seat(SEAT_SCALE * k, (-R + MARGIN, -D + MARGIN, -B + MARGIN), (L - MARGIN, U - MARGIN, A - 0.08))
     parts += seat
+    sticks, controls = _sticks(k, L, R, D)
+    parts += sticks
     screens = []
     w, h = 0.21 * k, 0.155 * k
     for kind, sign, wall in ((sides[0], 1.0, L), (sides[1], -1.0, R)):
@@ -338,15 +428,17 @@ def _panoramic(L: float, R: float, U: float, D: float, A: float, B: float, k: fl
     mats = _materials('mech_plate', 'metal_dark', 'screen')
     mats.update(CONSOLE_MATERIALS)
     mats.update(BOOT_MATERIALS)
+    mats.update(STICK_MATERIALS)
     mats.update(seat_mats)
-    return Kit(_merged(parts), mats, screens=tuple(screens), panoramic=True)
+    return Kit(_merged(parts), mats, screens=tuple(screens), controls=tuple(controls), panoramic=True)
 
 
 def _merged(parts: list[om.Part]) -> list[om.Part]:
-    """One part per material (fewer meshes in the model); a boot tile's parts one per step and kind (each its bone)."""
+    """One part per material (fewer meshes in the model); a boot tile's parts one per step and kind, a stick's one per
+    stick (each its bone)."""
     by: dict[tuple[str, str], list[om.Part]] = {}
     for p in parts:
-        by.setdefault((p.material, p.name if p.name.startswith('boot_') else ''), []).append(p)
+        by.setdefault((p.material, p.name if p.name.startswith(('boot_', 'stick_')) else ''), []).append(p)
     return [merge(ps, name or f'{m}_all') if len(ps) > 1 else ps[0] for (m, name), ps in by.items()]
 
 

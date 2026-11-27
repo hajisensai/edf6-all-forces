@@ -4,11 +4,17 @@
 #include "../tools/hud_view.cpp"
 #undef wmain
 #include <cstdlib>
+#include "../src/edf_layout.h"
+#include "../src/mapcmd.h"
 namespace {
 int checks=0;
 void Check(bool yes,const char* why) {++checks;if(!yes){std::printf("FAIL enemy HUD: %s\n",why);std::exit(1);}}
 bool Cross(const Drew& a,const Drew& b) {
     return a.x0<b.x1-0.6f && b.x0<a.x1-0.6f && a.y0<b.y1-0.6f && b.y0<a.y1-0.6f;
+}
+// A text drawn whole, or cut to its slot with "..." (hud_text.cpp FitLine: the catalogue's long names do not fit).
+bool Shown(const std::wstring& t,const std::wstring& full) {
+    return t==full || (t.size()>3 && !t.compare(t.size()-3,3,L"...") && !full.compare(0,t.size()-3,t,0,t.size()-3));
 }
 bool TextHas(const wchar_t* part) { for(const auto& line:drew)if(line.text.find(part)!=std::wstring::npos)return true;return false; }
 void CheckDrawing(float width,float height) {
@@ -107,9 +113,9 @@ void HudCase(int uiW,int uiH,int width,int height,float user,bool health) {
     bool nameTopLeft=false,keysBottomRight=false;int attackNames=0;
     wchar_t title[256]{};_snwprintf_s(title,_countof(title),_TRUNCATE,Tr(Tx::enemyControlActive),sceneEnemy.snapshot.name);
     for(const auto& line:drew) {
-        if(line.text==title)nameTopLeft=line.x0<w*0.5f && line.y1<h*0.5f;
+        if(Shown(line.text,title))nameTopLeft=line.x0<w*0.5f && line.y1<h*0.5f;
         if(line.text==std::wstring(Tr(Tx::enemyKeyMouseLeft))+L" / RT")keysBottomRight=line.x0>w*0.45f && line.y0>h*0.25f;
-        for(int i=0;i<sceneEnemy.count;++i)if(line.text==sceneEnemy.ability[i].name)++attackNames;
+        for(int i=0;i<sceneEnemy.count;++i)if(Shown(line.text,sceneEnemy.ability[i].name))++attackNames;
     }
     Check(nameTopLeft,"the controlled enemy's name is in the armor gauge's corner");
     Check(keysBottomRight,"each attack's own key and pad button on the right, where the weapon gauges were");

@@ -1,4 +1,7 @@
-#include "crew.h"
+#include "edf_layout.h"
+#include "jet.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>
@@ -10,7 +13,7 @@ bool CommandVehicleLive(const ObjRef& ref) noexcept {
     __try {
         auto* v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
         // Its NPC driver at the controls, or a drone of the plugin's, flown with no one aboard (jet_internal.h Unmanned).
-        return v && Readable(v,kSeatCount+8) && !v[kDead] && ref.Is(v) && SeatCount(v)>0 &&
+        return objref::Alive(ref) && Readable(v,kSeatCount+8) && SeatCount(v)>0 &&
                (NpcDriver(v) || JetFliesItself(v));
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

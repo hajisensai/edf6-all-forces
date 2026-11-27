@@ -10,6 +10,10 @@
 #include "nacelle_reach.h"
 #include "support_entry.h"
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "booster.h"
+#include "mapbounds.h"
 
 namespace crew {
 namespace jet {
@@ -32,7 +36,7 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 // commanded 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never
 // flown. Since 2026-10-04 a jet body gets its own copy of the motion properties with a 600 m/s cap
 // (jetprops.cpp), so the old 200 m/s Havok cap no longer binds. Past 250 the 5 g turn radius (1275 m) times the
-// wall margin (Guard) no longer fits inside the world walls (the play edge, crew.h PlayEdge).
+// wall margin (Guard) no longer fits inside the world walls (the play edge, world.h PlayEdge).
 // Patrol: the speed that holds the patrol circle at a 60 degree bank (tan 1.73, 2 g), between kLoiterMin
 // times the stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time; at
 // 45 degrees (until 2026-10-04) it crawled round at 100 m/s.
@@ -53,7 +57,7 @@ constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.17f,kAoaTau=0.3f;
 // and is forgotten kWallLifeMs after it was last met.
 constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.0f,kWallSpan=400.0f;
 constexpr ULONGLONG kBlockedMs=250,kWallLifeMs=120000;
-// The Havok broadphase ends at 3000 m a side: the play edge (crew.h PlayEdge: 2400 stock, the big map's ground edge)
+// The Havok broadphase ends at 3000 m a side: the play edge (world.h PlayEdge: 2400 stock, the big map's ground edge)
 // keeps the jets in (jet.cpp deletes one past kWorldGoneIn of the world's edge), with its soft edge inside it (SoftEdge,
 // airbound.h): no learned wall takes its place.
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus the sink (gravity
@@ -158,6 +162,16 @@ float RollToLift(const Jet& j) noexcept {
     return std::acos(Clamp(Dot(up,lift),-1.0f,1.0f));
 }
 
+// The path's turn time constant for kind `k` pulling at most `maxG`, no shorter than `least`: no shorter than the time
+// its roll rate takes to bring it out of its steepest bank either. Closing on its heading at angle/tau the turn asks the
+// bank to come off at bank/tau; asked faster than k.roll, the bank lags its command and the heading runs on past and
+// back (the gunship, 0.3 rad/s: 27 deg of bank still swinging 20 s after a 30 deg heading step; --wobble-suite).
+float SteerTau(const Kind& k,float maxG,float least) noexcept {
+    const float bank=maxG>1.0f ? std::acos(1.0f/maxG) : 0.0f;   // the level turn's bank at maxG
+    const float rollOut=k.roll>0.0f ? bank/k.roll : 0.0f;
+    return rollOut>least ? rollOut : least;
+}
+
 // A wing's flight step. The lift it wants: gravity held up plus the turn toward `want` (unit), at most
 // maxG; `up` gets that lift's direction across the path, where Attitude rolls the body. The lift it gets
 // is only along the body's up as it is (`bodyUp`), at most maxG and kNegG pushing: so it banks first and
@@ -168,24 +182,36 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     // Its stores (BurdenOf): the same wing lifts fewer g of a heavier jet, the same engine speeds it up less, and
     // their drag takes off top speed (drag ~ v^2: the speed it can hold falls as the root of 1 + their share).
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
-    const float maxG=(bombing ? kBombG : k.maxG)/mass,tau=bombing ? kBombTau : kSteerTau;
+    const float maxG=(bombing ? kBombG : k.maxG)/mass,tau=SteerTau(k,maxG,bombing ? kBombTau : kSteerTau);
     speed/=std::sqrt(1.0f+(j.burden.drag>0.0f ? j.burden.drag : 0.0f));
     float dir[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
     float s=Len(dir);
     if(s<1.0f || !Normalize(dir)){std::memcpy(dir,fwd,12);s=k.minSpeed;}
     const float most=maxG*kG/(s>k.minSpeed ? s : k.minSpeed)*dt;
-    const float angle=std::acos(Clamp(Dot(dir,want),-1.0f,1.0f));
+    // The angle off `want` from its sine and cosine both (atan2): acos alone rounds every angle under ~3.5e-4 rad to 0
+    // in float (its cosine reads 1). That 0 had the path snapped onto `want` in one frame, the lift asking the whole
+    // residual over dt instead of over kSteerTau (30x the gain): on a level run the body rolled +-5 deg every 0.45 s
+    // round a heading off by 2e-4 rad (the user, 2026-11-27: 「飞机会左右摇摆，即便是在平飞的时候」; --wobble-suite).
+    float axis[3];Cross(dir,want,axis);
+    const float sine=Len(axis),angle=std::atan2(sine,Dot(dir,want));
     const float eased=angle*(dt<tau ? dt/tau : 1.0f);
     const float turn=eased<most ? eased : most;
     float next[3];
-    if(angle<1e-5f)std::memcpy(next,want,12);
-    else {
-        float axis[3];Cross(dir,want,axis);
-        if(!Normalize(axis)){axis[0]=0;axis[1]=1;axis[2]=0;}
+    if(sine>1e-6f) {
+        for(int i=0;i<3;++i)axis[i]/=sine;
         float side[3];Cross(axis,dir,side);   // in the turn plane, toward `want`
         for(int i=0;i<3;++i)next[i]=dir[i]*std::cos(turn)+side[i]*std::sin(turn);
-        Normalize(next);
+    } else if(angle<1.0f) {
+        // On it to float's resolution: the same share of what is left (no plane to turn in, none needed).
+        const float share=angle>0.0f ? turn/angle : 0.0f;
+        for(int i=0;i<3;++i)next[i]=dir[i]+(want[i]-dir[i])*share;
+    } else {
+        // Straight away from it: any turn plane, the world's up square to the path (else its x).
+        float side[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};
+        if(!Normalize(side)){side[0]=1;side[1]=0;side[2]=0;}
+        for(int i=0;i<3;++i)next[i]=dir[i]*std::cos(turn)+side[i]*std::sin(turn);
     }
+    if(!Normalize(next))std::memcpy(next,dir,12);
     float lift[3]={0,kG,0};
     for(int i=0;i<3;++i)lift[i]+=(next[i]-dir[i])/dt*s;
     const float along=Dot(lift,dir);
@@ -318,9 +344,22 @@ void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept {
     j.mode=m;j.modeAt=ms;
 }
 
+bool EnterPhase(Jet& j,jetphase::Event e,ULONGLONG ms) noexcept {
+    const jetphase::Phase was=j.phase;
+    if(!jetphase::Transition(j.phase,e))return false;
+    j.phaseAt=ms;
+    if(jetphase::Leaving(j.phase) || jetphase::Leaving(was)) {
+        if(Cfg().debug && j.mode!=Mode::patrol)
+            Log("JET v=%p %s -> patrol (%s)",j.Vehicle(),kModeNames[static_cast<int>(j.mode)],jetphase::Name(j.phase));
+        j.mode=Mode::patrol;j.modeAt=ms;
+    }
+    if(Cfg().debug && j.phase!=was)Log("JET v=%p phase %s -> %s",j.Vehicle(),jetphase::Name(was),jetphase::Name(j.phase));
+    return true;
+}
+
 void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
-    if(j.mode==Mode::withdraw)return;
-    j.why=why;SetMode(j,Mode::withdraw,ms);
+    if(!EnterPhase(j,jetphase::Event::withdraw,ms))return;   // withdrawing already
+    j.why=why;
     Log("JET v=%p withdraws: %s",j.Vehicle(),why);
 }
 
@@ -329,7 +368,7 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     const bool bomber=j.bay.bombSpeed>0.0f;
     const bool sortie=j.sortie.pass!=SortiePass::none;
     float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
-    if(sortie)std::memcpy(away,j.sortie.line.dir,12);
+    if(sortie)SortieAway(j,away);   // its lane's break: the flight fans out (flight_spread.h)
     else if(bomber)std::memcpy(away,j.bay.bombDir,12);
     if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
     const float top=CeilingY()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
@@ -349,7 +388,7 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
     const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
     const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
-    const bool stalled=gone>kWithdrawNear && (ms-j.modeAt>kWithdrawStuckMs || edge);
+    const bool stalled=gone>kWithdrawNear && (ms-j.phaseAt>kWithdrawStuckMs || edge);
     if(gone>kWithdrawFar || stalled) {
         if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
         j.reap=true;
@@ -610,13 +649,33 @@ const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept {
 namespace {
 // The horizontal soft edge and the soft ceiling (CeilingY less kCeilingGap less ini AirSoftCeil): `want` turned so its
 // turn back (or its push over) ends on them. Logged as it goes past the soft line and as it is back inside.
-void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
+void SoftEdge(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const Kind& k=KindOf(j);
     const float s=std::sqrt(j.m.vel[0]*j.m.vel[0]+j.m.vel[2]*j.m.vel[2]),s3=Len(j.m.vel);
     const float r=TurnRadiusOf(k,j.burden.mass,s);
     const float react=kReact+0.5f*kPi*0.5f/(k.roll>0.1f ? k.roll : 0.1f);
     float band=0.0f;
-    const airbound::Box soft=JetSoftBox(j,&band);
+    const airbound::Box own=JetSoftBox(j,&band);
+    // Made past it (a call's arrival from off the map, a sortie on its pass's line or not), it is arriving: held in its
+    // arrival box (airbound.h ArriveBox), drawn in after it, until that is its soft box. Taken as one that had flown out
+    // past it, it was turned "back in first" on its first frame, levelled and, past two sides, flown round in circles at
+    // the edge (2026-11-27 log: gun runs 13 s, a missile rain 29 s round its target 117 m inside the third side).
+    if(!j.m.edgeSeen) {
+        j.m.edgeSeen=true;
+        j.m.arriving=!airbound::Inside(own,pos);
+        if(j.m.arriving) {
+            j.m.arrive=airbound::ArriveBox(own,pos);
+            Log("JET v=%p arriving from past its soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f; held in "
+                "x %.0f..%.0f z %.0f..%.0f, drawn in after it",j.Vehicle(),pos[0],pos[2],own.lo[0],own.hi[0],own.lo[1],own.hi[1],band,
+                j.m.arrive.lo[0],j.m.arrive.hi[0],j.m.arrive.lo[1],j.m.arrive.hi[1]);
+        }
+    }
+    if(j.m.arriving && airbound::Arrive(own,j.m.arrive,pos)) {
+        j.m.arriving=false;j.m.edgeBack=false;j.m.edgeTurn=0;
+        Log("JET v=%p arrived inside its soft edge at (%.0f,%.0f), %llu ms after it was made: held by it from here",j.Vehicle(),
+            pos[0],pos[2],static_cast<unsigned long long>(ms-j.bornAt));
+    }
+    const airbound::Box soft=j.m.arriving ? j.m.arrive : own;
     const bool was=j.m.edgeBack;
     // A gun dive at a point on the ground inside the soft box keeps its line: it ends at that point (Strike pulls out
     // gunClose short of it), and the band past the soft line holds its turn's reach (JetSoftBox), so the pull-out turns
@@ -633,12 +692,13 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     // away from it: it flew round inside under RTB for the rest of the mission (tools/jet_obstacle_sim --withdraw-suite).
     float kept[3]={want[0],want[1],want[2]};
     const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
-    const bool line=j.ferry && SoftEdgeHolds(j);
+    const bool line=j.phase==jetphase::Phase::ferry;   // (withdrawing it is no ferry: jet_logic.h)
     const bool leaving=!SoftEdgeHolds(j);
     airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
     if(j.m.edgeBack!=was && !line && !leaving)
         Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
-            was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,was ? "" : ": back in first");
+            was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,
+            was ? "" : j.m.arriving ? ": back in first (arriving: the box it came in by)" : ": back in first");
     // Over the top it pushes over: its lift down at most kNegG, gravity with it (JetSteer), a radius of s^2 / ((1 + kNegG) g).
     const float top=CeilingY()-kCeilingGap-Cfg().airSoftCeil;
     airbound::CapClimb(pos[1],j.m.vel[1],s3,top,airbound::TurnRadius(s3,1.0f+kNegG)*kTurnWide,react,0.15f,want);
@@ -671,7 +731,7 @@ void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcep
     const float r=s*s/(k.maxG*kG);
     for(const auto& w:learned)if(Holds(w,pos,ms))TurnOff(w,j,pos,r,want);
     // The soft edge last: coming back in comes before its fight, its target out there, a learned wall.
-    SoftEdge(j,pos,want);
+    SoftEdge(j,pos,want,ms);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
     const float here=clear,there=GroundClearance(probe);
@@ -843,11 +903,19 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
 // over the map (2026-10-10).
 float FerrySpeed(const Kind& k) noexcept { return Clamp(k.minSpeed*kLoiterMin,k.minSpeed,k.cruise); }
 float FerryTurn(const Kind& k) noexcept { return TurnRadiusOf(k,1.0f,FerrySpeed(k)); }
+
+void BombLine(const float* pos,const float* at,const float* dir,float lead,float height,float* want) noexcept {
+    const float rel[3]={pos[0]-at[0],0.0f,pos[2]-at[2]};
+    const float along=Dot(rel,dir)+lead;
+    const float to[3]={at[0]+dir[0]*along-pos[0],0.0f,at[2]+dir[2]*along-pos[2]};
+    Level(pos,to,height,want);
+}
+float BombLead(float speed) noexcept { const float r=airbound::TurnRadius(speed,std::sqrt(kBombG*kBombG-1.0f));return r>ferry::kLeadLeast ? r : ferry::kLeadLeast; }
 float Ferry(Jet& j,const float* pos,float height,float* want) noexcept {
     const Kind& k=KindOf(j);
     float way[3];
-    if(ferry::Steer(j.ferryLine,j.ferryPass,pos,j.m.vel,ferry::Lead(FerryTurn(k)),way) && !j.ferryGone) {
-        j.ferryGone=true;
+    if(ferry::Steer(j.ferryLine,j.ferryPass,pos,j.m.vel,ferry::Lead(FerryTurn(k)),way) && !j.reap) {
+        j.reap=true;   // deleted there (JetReap)
         Log("JET v=%p ferry: its last pass is over at (%.0f,%.0f), off the map: deleting",j.Vehicle(),pos[0],pos[2]);
     }
     Level(pos,way,height,want);

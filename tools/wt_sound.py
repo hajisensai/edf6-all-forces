@@ -187,13 +187,30 @@ ENGINES = (
     ('su_load', TANK, ((2250, 'suspension_load-001'), (1897, 'suspension_load-002'))),
 )
 ENGINE_SOURCES = {n: [f'{bank}.assets.bank/{sub:04d}_{stream}.wav' for sub, stream in v] for n, bank, v in ENGINES}
+# The jets' air (src/jet_air.h), from War Thunder's own sound/aircraft_effects.assets.bank the same way: Master/aircraft/
+# effects/jet_plane_passby (its close, med and far MultiSounds: 4 of the close's 6 recordings, 3 of the med's 5, 2 of the
+# far's 4; its speed sheet's passby_jet_close: the -003 (0 dB) and the -001 (-3 dB) of 3: the size limit), .../effects/
+# wind (wind_low, wind_hi_4) and Master/aircraft/common/vibration_overload (plane_overload_loop).
+FX = 'aircraft_effects'
+AIR_EFFECTS = (
+    ('jet_passby_close', FX, ((13, 'jet_passby_close-001'), (584, 'jet_passby_close-002'), (181, 'jet_passby_close-003'),
+                              (56, 'jet_passby_close-004'))),
+    ('jet_passby_med', FX, ((200, 'jet_passby_med-002'), (277, 'jet_passby_med-003'), (376, 'jet_passby_med-005'))),
+    ('jet_passby_far', FX, ((486, 'jet_passby_far-001'), (572, 'jet_passby_far-003'))),
+    ('jet_passby_fast', FX, ((111, 'passby_jet_close-003'), (58, 'passby_jet_close-001'))),
+    ('jet_wind_low', FX, ((470, 'wind_low'),)), ('jet_wind_high', FX, ((542, 'wind_hi_4'),)),
+    ('jet_overload', FX, ((567, 'plane_overload_loop'),)),
+)
+EFFECT_SOURCES = {n: [f'{bank}.assets.bank/{sub:04d}_{stream}.wav' for sub, stream in v] for n, bank, v in AIR_EFFECTS}
+EFFECT_LOOPS = {'jet_wind_low', 'jet_wind_high', 'jet_overload'}
+EFFECT_MAX_MB = 10     # the air's share of the size limit
 # The engines' one-shots (the rest are loops).
 ENGINE_SHOTS = {'jet_ab_start', 'di_switch', 'di_hiss_load', 'di_off', 'pe_revv', 'pe_release', 'tr_stop', 'su_load'}
 ENGINE_LOOPS = set(ENGINE_SOURCES) - ENGINE_SHOTS
 ENGINE_PEAK = 0.9      # the engines' set scaled so its loudest file peaks here (one gain for them all)
 ENGINE_MAX_MB = 40     # the engines' share of the size limit
 LOOP_FADE = 0.1        # s: an engine loop's end cross-faded into its start (loop_seam)
-ALL_SOURCES = {**SOURCES, **ENGINE_SOURCES}
+ALL_SOURCES = {**SOURCES, **ENGINE_SOURCES, **EFFECT_SOURCES}
 
 
 def clip_table(path: str = CLIPS_H) -> dict[str, int]:
@@ -221,7 +238,12 @@ def out_names() -> list[str]:
 
 def is_mono(name: str) -> bool:
     """Whether the group `name` (a file's name without _<i>.wav) is written in mono."""
-    return name in MONO or name in ENGINE_SOURCES
+    return name in MONO or name in ENGINE_SOURCES or name in EFFECT_SOURCES
+
+
+def is_loop(name: str) -> bool:
+    """Whether the group `name` is an engine's or the air's loop (kept whole, made seamless)."""
+    return name in ENGINE_LOOPS or name in EFFECT_LOOPS
 
 
 def read_wav(path: str):
@@ -303,7 +325,7 @@ def _read_all(root: str, table: dict, mono, label: str) -> dict:
             if not os.path.isfile(path):
                 raise SystemExit(f'missing {label} source: {rel}')
             done[f'{name}_{i}.wav'] = (name, rel, process(path, mono(name), MAX_SECONDS.get(name, 0.0),
-                                                          name in ENGINE_LOOPS))
+                                                          is_loop(name)))
     return done
 
 
@@ -312,19 +334,23 @@ def build(src: str, engine_src: str, out: str) -> None:
     validate_tables()
     guns = _read_all(src, SOURCES, lambda n: n in MONO, 'gun')
     engines = _read_all(engine_src, ENGINE_SOURCES, lambda n: True, 'engine')
+    effects = _read_all(engine_src, EFFECT_SOURCES, lambda n: True, 'air effect')
     peak = max(float(np.abs(y).max()) for _, _, y in guns.values())
     gain = min(1.0, PEAK_LIMIT / peak)
     engine_peak = max(float(np.abs(y).max()) for _, _, y in engines.values())
     engine_gain = ENGINE_PEAK / engine_peak
-    done = {**guns, **engines}
+    done = {**guns, **engines, **effects}
     os.makedirs(out, exist_ok=True)
     for stale in os.listdir(out):
         if stale.endswith('.wav') and stale not in done:
             os.remove(os.path.join(out, stale))
-    lines, engine_lines, total, engine_total = [], [], 0, 0
+    lines, engine_lines, effect_lines, total, engine_total, effect_total = [], [], [], 0, 0, 0
+    effect_peak = 0.0
     for fn, (name, rel, y) in done.items():
-        engine = name in ENGINE_SOURCES
-        z = finish(y, engine_gain if engine else gain, name in (ENGINE_LOOPS if engine else LOOPS))
+        engine, effect = name in ENGINE_SOURCES, name in EFFECT_SOURCES
+        z = finish(y, engine_gain if engine or effect else gain, is_loop(name) if engine or effect else name in LOOPS)
+        if effect:
+            effect_peak = max(effect_peak, float(np.abs(z).max()))
         write_wav(os.path.join(out, fn), z)
         size = os.path.getsize(os.path.join(out, fn))
         total += size
@@ -332,8 +358,13 @@ def build(src: str, engine_src: str, out: str) -> None:
         if engine:
             engine_total += size
             engine_lines.append(row)
+        elif effect:
+            effect_total += size
+            effect_lines.append(row)
         else:
             lines.append(row)
+    if effect_peak > PEAK_LIMIT:
+        raise SystemExit(f'the air effects peak {effect_peak:.3f} at the engines\' gain: over {PEAK_LIMIT}')
     head = (
         '# War Thunder gun, explosion, passby and engine sounds (assets/sound/wt)\n\n'
         f'Source: {UPSTREAM} , commit `{COMMIT}`.\n'
@@ -363,14 +394,25 @@ def build(src: str, engine_src: str, out: str) -> None:
         f'One gain for the engines: **{engine_gain:.6f}** (their peak before gain {engine_peak:.6f}, after it {ENGINE_PEAK}).\n\n'
         f'Files: {len(engines)}, {engine_total} bytes ({engine_total / 1048576:.2f} MiB, limit {ENGINE_MAX_MB} MiB).\n\n'
         '| file | source | channels | seconds | bytes |\n|---|---|---|---|---|\n')
+    effect_head = (
+        '\n## The jets\' air (src/jet_air.h)\n\n'
+        'Source: War Thunder\'s own `sound/aircraft_effects.assets.bank` (the streams of the events jet_plane_passby, wind\n'
+        'and vibration_overload), decoded by vgmstream and made as the engines are: mono, the same resampling and high-pass,\n'
+        f'loops ({", ".join(f"`{n}`" for n in sorted(EFFECT_LOOPS))}) made seamless, the engines\' gain (their levels are\n'
+        f'their events\', against the engines\'); peak after it {effect_peak:.6f}.\n\n'
+        f'Files: {len(effects)}, {effect_total} bytes ({effect_total / 1048576:.2f} MiB, limit {EFFECT_MAX_MB} MiB).\n\n'
+        '| file | source | channels | seconds | bytes |\n|---|---|---|---|---|\n')
     with open(os.path.join(out, 'SOURCE.md'), 'w', encoding='utf-8', newline='\n') as f:
-        f.write(head + '\n'.join(lines) + '\n' + engine_head + '\n'.join(engine_lines) + '\n')
+        f.write(head + '\n'.join(lines) + '\n' + engine_head + '\n'.join(engine_lines) + '\n' + effect_head +
+                '\n'.join(effect_lines) + '\n')
     print(f'{len(done)} files, {total} bytes ({total / 1048576:.2f} MiB), gain {gain:.6f}; engines {len(engines)} files, '
           f'{engine_total} bytes ({engine_total / 1048576:.2f} MiB), gain {engine_gain:.6f}')
     if total > MAX_MB * 1048576:
         raise SystemExit(f'over the {MAX_MB} MB limit')
     if engine_total > ENGINE_MAX_MB * 1048576:
         raise SystemExit(f'the engines over their {ENGINE_MAX_MB} MB limit')
+    if effect_total > EFFECT_MAX_MB * 1048576:
+        raise SystemExit(f'the air effects over their {EFFECT_MAX_MB} MB limit')
 
 
 def seam(path: str, edge: int = 4800) -> tuple[int, int]:
@@ -400,7 +442,7 @@ def check(out: str) -> list[str]:
         errors.append(f'unexpected {f}')
     md = os.path.join(out, 'SOURCE.md')
     text = open(md, encoding='utf-8').read() if os.path.isfile(md) else ''
-    total = engine_total = 0
+    total = engine_total = effect_total = 0
     for f in sorted(names & have):
         p = os.path.join(out, f)
         group = f.rsplit('_', 1)[0]
@@ -408,13 +450,15 @@ def check(out: str) -> list[str]:
         total += size
         if group in ENGINE_SOURCES:
             engine_total += size
+        if group in EFFECT_SOURCES:
+            effect_total += size
         if f'| {f} |' not in text:
             errors.append(f'SOURCE.md does not list {f}')
         with wave.open(p, 'rb') as w:
             ch, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
         if width != 2 or rate != RATE or ch not in (1, 2) or (is_mono(group) and ch != 1):
             errors.append(f'{f}: {ch} ch, {width * 8}-bit, {rate} Hz')
-        elif group in ENGINE_LOOPS:
+        elif is_loop(group):
             jump, step = seam(p)
             if jump > step:
                 errors.append(f'{f}: the loop jumps {jump} at its seam, its steps there at most {step}')
@@ -422,6 +466,8 @@ def check(out: str) -> list[str]:
         errors.append(f'total {total} bytes over {MAX_MB} MB')
     if engine_total > ENGINE_MAX_MB * 1048576:
         errors.append(f'the engines {engine_total} bytes over {ENGINE_MAX_MB} MB')
+    if effect_total > EFFECT_MAX_MB * 1048576:
+        errors.append(f'the air effects {effect_total} bytes over {EFFECT_MAX_MB} MB')
     return errors
 
 

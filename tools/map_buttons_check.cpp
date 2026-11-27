@@ -3,7 +3,9 @@
 // in their order (left to right, row by row upwards), each row centred; a button wider than the row shrunk to it;
 // a click on a button finds it and only it, a click in the gap between two finds none; no room for a row: fewer rows.
 //   cmake --build build --target map_buttons_check && build\map_buttons_check.exe      (exit code 1 on a failure)
+#include "../src/map_loadout.h"
 #include "../src/map_buttons.h"
+#include "../src/mapcmd_cue.h"
 #include <cmath>
 #include <cstdio>
 #include <cwchar>
@@ -21,10 +23,11 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
+    static_assert(kCount==26,"a width for every button");
     const float widths[][kCount]={
-        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,150,190,120},     // English-ish
-        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,120,170,100},         // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,110,120,120,110,100,90,80,80,150,190,120,100},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,80,80,80,80,70,70,70,70,120,170,100,80},           // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150,40},           // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];
@@ -82,19 +85,27 @@ void Card() {
         shown+=Shown(b,vehicle,false);
         squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation);
     }
-    Check(shown==6 && !squadOnly,"a vehicle selected: move, attack-move, hold, stop, the sweep and its switch; no squad order or tool",shown);
+    Check(shown==9 && !squadOnly && Shown(Id::guard,vehicle,false) && Shown(Id::smoke,vehicle,false) && !Available(Id::smoke,vehicle) &&
+          !Shown(Id::pace,vehicle,false),
+          "a vehicle selected: move, attack-move, guard, hold, stop, smoke / decoy (greyed), the sweep and its switch; no squad order or tool",shown);
     // HOLD (H, 2026-10-19): an order button that acts at once (each unit's own spot, no click on the map).
     Check(OrderOf(Id::hold)==Order::hold && !Arms(Id::hold) && OnCard(Id::hold),"HOLD: its button, acting at once");
-    // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): GUARD, ENGAGE AT WILL and
-    // FOCUS FIRE have no button whatever the selection takes (G / the right button / H give them); ALL OUT has one.
+    // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): ENGAGE AT WILL and FOCUS FIRE
+    // have no button whatever the selection takes (the right button gives a focus); ALL OUT has one. GUARD is back on
+    // the card with Broken Arrow's controls (2026-11-27), arming a click as the point orders do.
     const std::uint32_t every=0xFFFFFFFFu;
-    Check(!Shown(Id::guard,every,true) && !Shown(Id::engage,every,true) && !Shown(Id::focus,every,true),
-          "no GUARD / ENGAGE / FOCUS button");
+    Check(Shown(Id::guard,every,true) && Arms(Id::guard) && !Shown(Id::engage,every,true) && !Shown(Id::focus,every,true),
+          "a GUARD button; no ENGAGE / FOCUS button");
+    // Broken Arrow's orders: the moves arm a click, the switches act at once; the paced march a squad tool.
+    Check(Arms(Id::fastMove) && Arms(Id::reverseMove) && Arms(Id::unloadAt) && !Arms(Id::holdFire) && !Arms(Id::altitude) &&
+          !Arms(Id::sprint) && !Arms(Id::smoke) && !Arms(Id::decoy) && OrderOf(Id::holdFire)==Order::holdFire &&
+          OrderOf(Id::decoy)==Order::decoy && OrderOf(Id::pace)==Order::none,"Broken Arrow's buttons: the moves arm a click, the rest at once");
+    Check(Shown(Id::pace,0u,true) && !Shown(Id::pace,0u,false) && Available(Id::pace,0u),"the paced march's switch: a squad tool");
     Check(Shown(Id::dismountAll,1u<<static_cast<unsigned>(Order::dismountAll),false) && OrderOf(Id::dismountAll)==Order::dismountAll &&
           !Arms(Id::dismountAll) && OrderOf(Id::withdraw)==Order::withdraw,"ALL OUT: its button, acting at once");
     int card=0;
     for(int i=0;i<kCount;++i)card+=OnCard(static_cast<Id>(i));
-    Check(card==kCardCount && card==kCount-3,"every button but the three cut is on the card once",card);
+    Check(card==kCardCount && card==kCount-2,"every button but the two cut is on the card once",card);
     int idle=0;
     for(int i=0;i<kCount;++i)idle+=Shown(static_cast<Id>(i),0u,false);
     Check(idle==2 && Shown(Id::sweep,0u,false) && Shown(Id::health,0u,false),"nothing selected: the sweep and its switch alone",idle);
@@ -142,6 +153,12 @@ void Support() {
     Check(Hit(hits,k,x0+20.0f,row[0].y1+gap*0.5f)<0,"a click in the gap between rows: none");
     // Not enough room: the rows that fit.
     Check(Column(g,rows,x0,x1,top,top+3.0f*(rowH+gap),rowH,gap,inset,row,chip)==3,"a short column: the rows that fit");
+    // A tab longer than its column (2026-11-27: every flown support in one tab): the window the wheel scrolls, kept
+    // inside the rows, moved the least to show the row [ ] picked.
+    Check(ColumnFit(0.0f,29.0f*3.0f,26.0f,3.0f)==3 && ColumnFit(0.0f,25.0f,26.0f,3.0f)==0 && ColumnFit(0.0f,26.0f,26.0f,3.0f)==1,
+          "a column's rows that fit");
+    Check(ColumnWindow(20,6,-3,-1)==0 && ColumnWindow(20,6,99,-1)==14 && ColumnWindow(4,6,2,-1)==0,"the window inside the rows");
+    Check(ColumnWindow(20,6,0,9)==4 && ColumnWindow(20,6,12,9)==9 && ColumnWindow(20,6,5,7)==5,"the window moved the least to show a pick");
     // The bar's tabs in its hit list: codes below every entry and below -1 (none), each tab back from its code.
     Check(SupportTabHit(0)<-1 && SupportTabOfHit(SupportTabHit(3))==3 && SupportTabOfHit(-1)<0 && SupportTabOfHit(5)<0,
           "a tab's hit code, never an entry's or none");
@@ -231,8 +248,103 @@ void Compose() {
         }
     }
 }
+// The order cues and the selection's altitude (mapcmd_cue.h): a refused order the low cue whatever it was, ALTITUDE up /
+// down by its way, any other the short one; the button's state from the counts, another machine's alone unknown; V up
+// unless every one this machine knows is high; a switched tag blinks, then stays lit.
+void Cues() {
+    using namespace mapcue;
+    Check(ForOrder(false,false,0)==Cue::refuse && ForOrder(true,true,0)==Cue::refuse,"none took it: refused");
+    Check(ForOrder(true,true,2)==Cue::up && ForOrder(true,false,1)==Cue::down,"altitude up / down");
+    Check(ForOrder(false,true,3)==Cue::ack,"another order: the short cue");
+    Check(StateOf({})==AltState::none,"no aircraft: none");
+    Check(StateOf({2,0,0})==AltState::high && StateOf({0,1,0})==AltState::low,"all high / all low");
+    Check(StateOf({1,1,0})==AltState::mixed && StateOf({1,1,3})==AltState::mixed,"mixed");
+    Check(StateOf({0,0,2})==AltState::unknown && StateOf({1,0,2})==AltState::high,"another machine's alone: unknown");
+    Check(VGoesHigh({0,1,0}) && VGoesHigh({1,1,0}) && !VGoesHigh({2,0,0}),"V: up unless all high");
+    Check(!VGoesHigh({1,0,4}),"V: another machine's (not given it) do not keep it up");
+    Check(VGoesHigh({0,0,2}),"V: none known: up");
+    Check(TagLit(0) && !TagLit(kBlinkMs) && TagLit(2*kBlinkMs),"a switched tag blinks");
+    Check(TagLit(kSwitchMs) && TagLit(0xFFFFFFFFu),"then stays lit");
+}
+// Broken Arrow's action grid and selection cards (Grid, Cards, GroupCards).
+void Broken() {
+    Rect r[32]{};
+    // 25 cells 110 wide on 1920, the right 1500 px: 13 a row, two rows, right-aligned, the top row filled first.
+    const int rows=Grid(25,110.0f,1920.0f,1526.0f/1920.0f,938.0f,30.0f,6.0f,16.0f,r);
+    Check(rows==2,"grid: 25 in two rows",rows);
+    Check(std::fabs(r[12].x1-(1920.0f-16.0f))<0.01f,"grid: the top row's last cell on the right margin",r[12].x1);
+    Check(std::fabs(r[0].y1-(938.0f-36.0f))<0.01f && std::fabs(r[13].y1-938.0f)<0.01f,"grid: the top row first, the bottom row on `bottom`",r[0].y1,r[13].y1);
+    Check(std::fabs(r[13].x0-r[0].x0)<0.01f,"grid: the rows' columns line up",r[13].x0,r[0].x0);
+    bool apart=true,inside=true;
+    for(int i=0;i<25;++i) {
+        inside=inside && r[i].x0>=1920.0f-1526.0f-0.01f && r[i].x1<=1904.01f;
+        for(int j=0;j<i;++j)apart=apart && !(r[i].x0<r[j].x1 && r[j].x0<r[i].x1 && r[i].y0<r[j].y1 && r[j].y0<r[i].y1);
+    }
+    Check(apart,"grid: no two cells overlap");
+    Check(inside,"grid: within its share");
+    Check(Hit(r,25,r[7].x0+1.0f,r[7].y0+1.0f)==7 && Hit(r,25,r[7].x1+3.0f,r[7].y0+1.0f)<0,"grid: a click finds its cell, the gap none");
+    Check(Grid(25,110.0f,1920.0f,1526.0f/1920.0f,60.0f,30.0f,6.0f,16.0f,r)==1,"grid: no room for two rows: one",0);
+    Check(Grid(0,110.0f,1920.0f,1.0f,938.0f,30.0f,6.0f,16.0f,r)==0,"grid: none");
+    Check(Grid(3,110.0f,1920.0f,1.0f,938.0f,30.0f,6.0f,16.0f,r)==1 && std::fabs(r[2].x1-1904.0f)<0.01f,"grid: a few in one row, on the right");
+    // Cards: left to right, the bottom row first, no higher than `top`.
+    Rect c[8]{};
+    const int placed=Cards(8,176.0f,66.0f,16.0f,400.0f,860.0f,938.0f,6.0f,c);
+    Check(placed==2,"cards: two fit in one row of 66 under 78 px",placed);
+    Check(std::fabs(c[0].x0-16.0f)<0.01f && std::fabs(c[1].x0-198.0f)<0.01f && std::fabs(c[0].y1-938.0f)<0.01f,"cards: from the left, on the bottom");
+    Check(Cards(5,176.0f,30.0f,16.0f,400.0f,800.0f,938.0f,6.0f,c)==5 && c[2].y1<c[0].y0,"cards: a second row above the first");
+    Check(Cards(3,176.0f,30.0f,16.0f,100.0f,800.0f,938.0f,6.0f,c)==0,"cards: narrower than one: none");
+    // GroupCards: alike and of one owner stacked, in the order first seen.
+    const char* kind[]={"Ranger x4","Ranger x2","Fencer x2","Ranger x6","Nix"};
+    const int owner[]={0,0,0,1,0};
+    CardGroup g[8]{};
+    const int groups=GroupCards(kind,owner,5,g,8);
+    Check(groups==4,"groups: rangers of one owner stacked, another owner's apart",groups);
+    Check(g[0].first==0 && g[0].count==2 && g[1].first==2 && g[2].first==3 && g[3].first==4,"groups: in the order first seen");
+    Check(GroupCards(kind,owner,5,g,2)==2,"groups: at most `most`");
+}
+
+// The M map's loadout panel's rows (map_loadout.h): variant file names decoded back, the rows built from them.
+void Loadout() {
+    using namespace crew;
+    using namespace crew::maploadout;
+    VehicleLoadout a{},b{},c{},t{};wchar_t why[80]{};
+    const bool parsed=ParseVehicleLoadout(L"AAM_M:4,AAM_M:4,AAM_L:2",VehicleBody::interceptor,&a,why,80) &&
+                      ParseVehicleLoadout(L"AGM:4,AGM:4,MK82:2",VehicleBody::interceptor,&b,why,80) &&
+                      ParseVehicleLoadout(L"AAM_S:8,AAM_S:8",VehicleBody::interceptor,&c,why,80) &&
+                      ParseVehicleLoadout(L"AP,GLM:4",VehicleBody::tank,&t,why,80);
+    Check(parsed,"loadout: the test values parse");
+    wchar_t fa[kFileMost],fb[kFileMost],fc[kFileMost],ft[kFileMost];
+    Check(VehicleVariantFile(a,fa,kFileMost) && VehicleVariantFile(b,fb,kFileMost) && VehicleVariantFile(c,fc,kFileMost) &&
+          VehicleVariantFile(t,ft,kFileMost),"loadout: the variant files named");
+    VehicleLoadout back{};
+    Check(VariantOfFile(fa,VehicleBody::interceptor,&back) && roommenu::SameVehicle(back,a),"loadout: a variant file decodes to its loadout");
+    wchar_t lower[kFileMost];wcscpy_s(lower,fa);for(wchar_t* q=lower;*q;++q)*q=static_cast<wchar_t>(std::towlower(*q));
+    Check(VariantOfFile(lower,VehicleBody::interceptor,nullptr),"loadout: names compare as the file system does");
+    Check(!VariantOfFile(fa,VehicleBody::fighter,nullptr) && !VariantOfFile(ft,VehicleBody::interceptor,nullptr),"loadout: another body's file: no");
+    wchar_t bad[kFileMost];wcscpy_s(bad,fa);bad[std::wcslen(L"EDF6VC_LO_INTERCEPTOR_")]=L'G';
+    Check(!VariantOfFile(bad,VehicleBody::interceptor,nullptr),"loadout: not hex: no");
+    Check(!VariantOfFile(L"EDF6VC_LO_INTERCEPTOR_0123.SGO",VehicleBody::interceptor,nullptr) &&
+          !VariantOfFile(L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",VehicleBody::interceptor,nullptr),"loadout: other names: no");
+    // Rows: stock first, the current loadout next, the rest in the list's order, the current one not twice, other bodies'
+    // and other files skipped.
+    const wchar_t* names[]={L"EDF6VC_DN_SUPPORT_INTERCEPTOR.SGO",fc,ft,fa,fb,fb};
+    const auto nameOf=[&](int i) noexcept {return names[i];};
+    const auto stateOf=[&](const wchar_t* f) noexcept {return !std::wcscmp(f,fb) ? State::next : State::ready;};
+    Row rows[kRowsMost]{};
+    int n=BuildRows(VehicleBody::interceptor,b,6,nameOf,stateOf,rows,kRowsMost);
+    Check(n==4,"loadout: stock, the current, two others",n);
+    Check(rows[0].state==State::stock && !rows[0].current && !rows[0].value[0] && !rows[0].file[0],"loadout: stock first, an empty value");
+    Check(rows[1].current && !std::wcscmp(rows[1].value,L"AGM:4,AGM:4,MK82:2") && !std::wcscmp(rows[1].file,fb) && rows[1].state==State::next,
+          "loadout: the current one second, its value as the ini has it");
+    Check(!std::wcscmp(rows[2].file,fc) && !std::wcscmp(rows[3].file,fa) && !rows[2].current && rows[3].state==State::ready,"loadout: the others in the list's order");
+    n=BuildRows(VehicleBody::interceptor,VehicleLoadout{},6,nameOf,stateOf,rows,kRowsMost);
+    Check(n==4 && rows[0].current && !rows[1].current && !std::wcscmp(rows[3].file,fb),"loadout: stock set: the stock row lit, every variant listed once",n);
+    Check(BuildRows(VehicleBody::interceptor,VehicleLoadout{},6,nameOf,stateOf,rows,2)==2,"loadout: at most `most`");
+    Check(BuildRows(VehicleBody::none,VehicleLoadout{},6,nameOf,stateOf,rows,kRowsMost)==0,"loadout: no body: none");
+}
+
 int main() {
-    Layouts();Card();Support();Menu();Compose();
+    Layouts();Card();Support();Menu();Compose();Cues();Broken();Loadout();
     std::printf(failures ? "map_buttons_check: %d of %d FAILED\n" : "map_buttons_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

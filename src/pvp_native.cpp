@@ -5,9 +5,17 @@
 #include "mission_crew_radar.h"
 #include "enemy_control_identity.h"
 #include "coop_extension_api.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "seats.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "edf41classes.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include "team_walk.h"
 #include "mission_participants.h"
 #include "pvp_match.h"
@@ -43,13 +51,13 @@ struct Saved {
 // Each table fills its first free slot and clears a released slot to {}, so every slot at or
 // past its high-water mark is empty. Scans stop at the mark instead of walking the whole table
 // every frame (only a few dozen slots are normally in use).
-Saved saved[kMaxObjects]{};unsigned savedUsed=0;
+LazyRows<Saved,kMaxObjects> saved;unsigned savedUsed=0;   // heap from the first Reserve (plugin_image_size_guard)
 // SceneObject caches retain their own weak identity: an active beam can outlive its holder and body.
 constexpr unsigned kMaxNativeEmitters=8192,kMaxWeaponEmitters=1025;
 struct NativeEmitter {
     controlled_pvp::Emitter binding{};int originalTeam=0;unsigned seen=0;bool changed=false;
 };
-NativeEmitter nativeEmitters[kMaxNativeEmitters]{};unsigned emitterEpoch=0,emittersUsed=0;
+LazyRows<NativeEmitter,kMaxNativeEmitters> nativeEmitters;unsigned emitterEpoch=0,emittersUsed=0;
 // CaptureWeapon's enumeration buffer (about 57 KB): a local would be zeroed on every call for every
 // weapon each frame. Only the game thread uses it and CaptureWeapon never nests (its callees only
 // read), and only the first `count` entries written by PvpNativeWeaponEmitters are ever read.
@@ -66,7 +74,7 @@ enemy_identity::State Identity(const ObjRef& ref) noexcept {
     return enemy_identity::Read(ref.obj,ref.ctrl,kObjectFlags+4);
 }
 bool Live(const ObjRef& ref) noexcept {
-    return Identity(ref)==enemy_identity::State::current && !(At<unsigned char>(ref.obj,0x18)&4);
+    return objref::Exists(ref) && Readable(ref.obj,kObjectFlags+4);
 }
 bool PuidValid(const char* text) noexcept {
     if(!text || !text[0] || !std::memchr(text,0,65))return false;
@@ -247,7 +255,7 @@ Saved* Find(const ObjRef& ref) noexcept {
     for(unsigned i=0;i<savedUsed;++i)if(saved[i].ref.obj==ref.obj && saved[i].ref.ctrl==ref.ctrl)return &saved[i];
     // An empty ref (e.g. PvpNativeForgetSupport for an unused jet slot) matched the first empty
     // slot of the full table; past the mark that is exactly the slot at the mark.
-    if(!ref.obj && !ref.ctrl && savedUsed<kMaxObjects)return &saved[savedUsed];
+    if(!ref.obj && !ref.ctrl && savedUsed<kMaxObjects && saved.Allocate("PVP native saved objects"))return &saved[savedUsed];
     return nullptr;
 }
 bool RetainStrong(unsigned char* control) noexcept {
@@ -338,6 +346,7 @@ bool InstallVehicleOwnership() noexcept {
 bool Restore(Saved& item) noexcept;
 Saved* Reserve(const Desired& desired) noexcept {
     if(Saved* item=Find(desired.ref))return item;
+    if(!saved.Allocate("PVP native saved objects"))return nullptr;
     // The first empty slot is at or below the mark; the search may reach it at the mark itself.
     for(unsigned i=0;i<kMaxObjects;++i) {
         auto& item=saved[i];
@@ -457,6 +466,7 @@ bool CaptureWeapon(const unsigned char* weapon,const ObjRef& owner,int baselineT
         int baseline=-1;
         if(PvpNativeReadWeaponEmitter(current[i],&baseline)!=controlled_pvp::Life::live)return false;
         if(previouslyApplied)baseline=inherited;
+        if(!nativeEmitters.Allocate("PVP native weapon emitters"))return false;
         NativeEmitter* slot=nullptr;unsigned slotIndex=0;
         for(unsigned j=0;j<kMaxNativeEmitters;++j)if(!nativeEmitters[j].binding.object){slot=&nativeEmitters[j];slotIndex=j;break;}
         if(!slot || !current[i].storage.ctrl || !Readable(current[i].storage.ctrl,16) || At<LONG>(current[i].storage.ctrl,8)<=0)return false;

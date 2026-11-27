@@ -34,7 +34,17 @@
 //    it is. Only the thrower's game: in an online game the others see the stock patroller (their copy's owner is no
 //    local player). Kills are the drone's (an NPC friend's), as a flown support's jets' are.
 // Without the plugin the thrown drones are plain Patrollers, the vehicle requests the stock requests of their vehicles.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "campaign.h"
+#include "heli.h"
+#include "jet.h"
+#include "strikes.h"
+#include "view.h"
+#include "npcai.h"
+#include "transport.h"
 #include "hudtext.h"
 #include "support_call.h"
 #include "support_aircraft.h"
@@ -77,7 +87,7 @@ using DeleteFn=void(*)(void*);
 // What a support brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
 // (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
-// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (crew.h SortiePass, 0 none), `then` the kCalls index of
+// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (jet.h SortiePass, 0 none), `then` the kCalls index of
 // its second wave (-1 none), called onto the same mark `thenMs` after this one went out (SupportFollowUpQueue). `pt`
 // its price on the map's bar (tools/calls.py Call.pt).
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
@@ -507,13 +517,16 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
 // say (support_net).
 namespace {
 // `request`: the first wave's online request still open (0: the first is out, `due` set).
-struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; std::uint32_t request=0; DWORD afterMs=0; };
+// `run`: the first wave's way in (its line too where the second flies one: SupportGroundRun).
+struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; std::uint32_t request=0; DWORD afterMs=0;
+                  sortie::RunSpec run{}; };
 FollowUp followUps[8]{};
 }  // namespace
-void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request) noexcept {
+void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request,const sortie::RunSpec& run) noexcept {
     if(catalog<0 || catalog>=kCallCount || kCalls[catalog].then<0 || !target)return;
     for(auto& f:followUps)if(f.catalog<0) {
         f=FollowUp{};f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.afterMs=kCalls[catalog].thenMs;
+        f.run=run.half>0.0f && !SupportGroundRun(f.catalog) ? sortie::HeadingRun(run.x,run.z) : run;
         f.request=request;
         if(!request)f.due=GameMs()+f.afterMs;
         if(request)Log("SUPPORT %s: its second wave (%s) %lu s after request %u is out",kCalls[catalog].name,
@@ -544,7 +557,7 @@ void SupportFollowUpTick() noexcept {
         const FollowUp now=f;
         f=FollowUp{};
         wchar_t note[128]{};
-        const bool ok=SupportCallUnpaidAt(now.catalog,now.at,note,_countof(note));   // paid with the first; no wave of its own
+        const bool ok=SupportCallUnpaidAt(now.catalog,now.at,note,_countof(note),now.run);   // paid with the first; no wave of its own
         Log("SUPPORT second wave %s: accepted=%d",kCalls[now.catalog].name,ok);
         if(!ok)StrikeCue(hudtext::Tr(hudtext::Tx::followUpRefused),note[0] ? note : L"-");
     }
@@ -647,14 +660,18 @@ bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t ca
     return started;
 }
 namespace {
-support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
-                             bool logged) noexcept {
+support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,const float* observer,const float* heading,
+                             float runHalf,support::Route* route,bool logged) noexcept {
     // A spec that brings an aircraft: a jet row, a heli row, or the paratroop plane (no row of either).
     if(!route || !target || (spec.jet<0 && spec.heli<0 && !spec.transportPlane) || spec.count<1)return support::Refusal::unsupported;
     if(!OpenSky(target))return support::Refusal::noSky;
     float direction[3]={0,0,1};
     // Host chooses the entire plan once. Peers receive its explicit matrices.
-    if(observer) {
+    // The way in asked for (the requester's, support_dispatch.cpp Plan), else from the observer toward the target.
+    if(heading && std::hypot(heading[0],heading[2])>1e-4f) {
+        const float d=std::hypot(heading[0],heading[2]);
+        direction[0]=heading[0]/d;direction[2]=heading[2]/d;
+    } else if(observer) {
         const float x=target[0]-observer[0],z=target[2]-observer[2],d=std::hypot(x,z);
         if(d>0.1f){direction[0]=x/d;direction[2]=z/d;}
     }
@@ -684,20 +701,25 @@ support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,con
         }
         return true;
     };
-    const auto refusal=support::AirRoute(area,reach,target,observer,direction,altitude,SupportPassTurn(spec),entry,EntryHeight,*route);
+    // Far enough out for its pass to be flown straight in (sortie_plan.h StraightRunIn; a jet's gun run).
+    const float runIn=SupportRunIn(spec,runHalf);
+    const auto refusal=support::AirRoute(area,reach,target,observer,direction,altitude,SupportPassTurn(spec),entry,EntryHeight,*route,
+                                         runIn);
     if(logged && refusal==support::Refusal::none)
-        Log("SUPPORT air entry (%.0f,%.0f,%.0f): %.0f m from the target, %.0f m from the caller (draws to %.0f m: %s), the physical "
-            "square +-%.0f",route->from[0],route->from[1],route->from[2],support::FlatDistance(route->from,target),
-            observer ? support::FlatDistance(route->from,observer) : -1.0f,reach.draw,route->beyond ? "past it" :
+        Log("SUPPORT air entry (%.0f,%.0f,%.0f): %.0f m from the target (its run in %.0f m), %.0f m from the caller (draws to %.0f m: "
+            "%s), the physical square +-%.0f",route->from[0],route->from[1],route->from[2],support::FlatDistance(route->from,target),
+            runIn,observer ? support::FlatDistance(route->from,observer) : -1.0f,reach.draw,route->beyond ? "past it" :
             "none past it in the square, the farthest taken",reach.half);
     return refusal;
 }
 }  // namespace
-support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
-    return AirRouteFor(spec,target,observer,route,true);
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
+                                const float* heading,float runHalf) noexcept {
+    return AirRouteFor(spec,target,observer,heading,runHalf,route,true);
 }
-support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
-    return AirRouteFor(spec,target,observer,route,false);
+support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
+                                 const float* heading,float runHalf) noexcept {
+    return AirRouteFor(spec,target,observer,heading,runHalf,route,false);
 }
 
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,

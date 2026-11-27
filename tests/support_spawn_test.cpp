@@ -1,6 +1,7 @@
 // Runs the production transaction against explicitly synthetic native-service callbacks. No game
 // process, DLL entry point, renderer, Havok, or installation is touched.
 #include <cwchar>
+#include "../src/scene.h"
 // Whether the installer wrote Mods/OBJECT/<file>: the fixture's answer (the drill transport's SGO).
 namespace fixture {
 bool drillFile=true;int drillFileAsked=0;

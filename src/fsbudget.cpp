@@ -29,7 +29,11 @@
 // before the application's init reaches 0x73D10 (the file-system manager EDF+0x20B2880 is still null then; with it set,
 // the library is up already and nothing is changed).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "patches.h"
+#include "debug_spawn.h"
 #include "memory.h"
 #include "edf/host.h"
 #include "spawn_catalog_archives.h"

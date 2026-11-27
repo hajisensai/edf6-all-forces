@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include "../src/jet.h"
+#include "../src/netprobe.h"
 
 namespace crew {
 bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }

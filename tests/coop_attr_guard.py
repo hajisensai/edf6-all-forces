@@ -9,6 +9,8 @@ import glob
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 checks = failed = 0
@@ -67,8 +69,7 @@ check('RedirectCall(image+kSyncCall,image+kSyncRecord' in mission, 'the call at 
 NL = chr(10)
 
 
-def body(text: str, head: str) -> str:
-    return text.split(head, 1)[1].split(NL + '}', 1)[0] if head in text else ''
+body = srcscan.body
 
 
 offline = body(mission, 'std::uintptr_t __fastcall PreloadHook(')

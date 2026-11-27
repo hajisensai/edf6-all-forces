@@ -7,7 +7,8 @@
 #include "support_config.h"
 #include "support_loadout.h"
 #include "support_protocol.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include <string>
 #include <cwchar>

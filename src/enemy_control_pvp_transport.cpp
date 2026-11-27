@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cwchar>
 #include <limits>
+#include <initializer_list>
 
 namespace crew {
 bool EnemyControlNativePvpSpawnProof(const wchar_t*,controlled_pvp::SpawnProof*) noexcept;
@@ -82,8 +83,7 @@ Life Identity(const ObjRef& ref) noexcept {
     return At<const void*>(ref.obj,kSelf)==ref.obj ? Life::live : Life::invalid;
 }
 bool KnownCurrent(const ObjRef& ref) noexcept {
-    return ref.obj && ref.ctrl && Readable(ref.ctrl,16) && At<LONG>(ref.ctrl,8)>0 && Readable(ref.obj,0x560) &&
-        At<const void*>(ref.obj,kSelf)==ref.obj && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl;
+    return objref::Identity(ref)>=objref::Life::removed && Readable(ref.obj,0x560);
 }
 bool Hold(const ObjRef& ref,bool acceptedDeleted=false) noexcept {
     if((acceptedDeleted ? !KnownCurrent(ref) : Identity(ref)!=Life::live) || !Readable(ref.ctrl,16,true))return false;

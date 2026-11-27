@@ -10,6 +10,7 @@
 //    glyph cache is not safe from another thread (glyphs.cpp locks it for that).
 //  - Sprites: an antialiased disc and ring (the pins, the current mission's ring), made once per device.
 #include "hudtext.h"
+#include "text_fit.h"
 #include "ui_gpu.h"
 
 #include <cstdint>
@@ -26,6 +27,12 @@ struct Label {
     float w=0.f,h=0.f;                        // design units
 };
 
+// How a line goes into a width (src/text_fit.h): maxW 0 not fitted; `policy` text_fit's (shrink: smaller then cut;
+// ellipsis: cut at its size; wrap: two rows before smaller, `size2` tall or the line's size); minSize 0 text_fit's floor
+// (MinSizeOf); size2 > 0 with shrink: when one row does not fit even shrunk it may take two, `size2` tall. Two rows:
+// their tops at rowY[0] / rowY[1].
+struct Fit { float maxW=0.f,minSize=0.f,size2=0.f; float rowY[2]{}; textfit::Policy policy=textfit::Policy::shrink; };
+
 class Labels {
 public:
     Labels() noexcept;
@@ -39,11 +46,14 @@ public:
     // White, alpha the shape, 64 x 64: a disc filling it, a ring 6 / 64 thick at its edge.
     ID3D11ShaderResourceView* Disc(uigpu::Painter& paint) noexcept;
     ID3D11ShaderResourceView* Ring(uigpu::Painter& paint) noexcept;
-    // `text` drawn with its anchor at (x, y): the top of the line, its left / centre / right by `align`; cut at `maxW`
-    // design units wide (0: not cut) from the anchor's side; a dark copy 1.5 units down-right first when `shadow`. The
-    // label's size (zero when not made).
+    // `text` drawn with its anchor at (x, y): the top of the line, its left / centre / right by `align`; at most `maxW`
+    // design units wide (0: any width) from the anchor's side, fitted as text_fit.h says (smaller, then cut with an
+    // ellipsis); a dark copy 1.5 units down-right first when `shadow`. What was drawn: its width, its height (both rows),
+    // the first row's view (null when nothing was made).
     Label Draw(uigpu::Painter& paint,const wchar_t* text,float x,float y,float size,std::uint32_t argb,Align align,bool bold,
                hudtext::Lang lang,unsigned frame,float maxW=0.f,bool shadow=false) noexcept;
+    Label DrawFit(uigpu::Painter& paint,const wchar_t* text,float x,float y,float size,std::uint32_t argb,Align align,
+                  bool bold,hudtext::Lang lang,unsigned frame,const Fit& fit,bool shadow=false) noexcept;
     // Every texture released (the screen gone; with the renderer's Reset).
     void Reset() noexcept;
 

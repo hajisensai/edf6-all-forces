@@ -3,7 +3,7 @@
 // Existing readers see the published prefix as of begin(), even if a new row is appended mid-loop.
 // The caller serializes binding and resetting row contents, as it does for native object state.
 #pragma once
-#include "crew.h"
+#include "plugin_log.h"
 #include <atomic>
 #include <cstddef>
 #include <new>

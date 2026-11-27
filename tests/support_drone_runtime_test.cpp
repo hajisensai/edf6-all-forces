@@ -3,6 +3,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/plugin_body.h"
+#include "../src/strikes.h"
+#include "../src/mapbounds.h"
+#include "../src/proteus.h"
 
 namespace fixture {
 using namespace crew;
@@ -47,6 +53,7 @@ void Jump(unsigned rva,const void* target) {
 }
 namespace crew {
 const JetWeaponRow* JetWeapon(int) noexcept {return nullptr;}   // stores.cpp (not linked here): no jet weapons to preload
+const StoreSpec* StoreSpecOfPrefix(const wchar_t*) noexcept {return nullptr;}   // stores.cpp (not linked here): no stores
 unsigned char* image=nullptr;
 const Config& Cfg() noexcept {return fixture::config;}
 void Log(const char*,...) noexcept {}
@@ -81,7 +88,7 @@ void PvpForgetSupportObject(const ObjRef&) noexcept {++fixture::forgets;fixture:
 void PreloadUltimate(void*) noexcept {}   // jet_spawn.cpp's PreloadJets loads the ultimate's circles (ultimate.cpp, not linked here)
 namespace jet {
 Jet jets[kMaxJets]{};
-void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG,const sortie::RunSpec&) noexcept {}
+void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG,const sortie::RunSpec&,const spread::Place&) noexcept {}
 float FerryTurn(const Kind&) noexcept {return 0;}
 bool Alive(const ObjRef& ref) noexcept {
     return ref.obj && ref.ctrl && At<LONG>(ref.ctrl,8)>0 && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl &&

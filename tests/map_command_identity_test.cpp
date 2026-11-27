@@ -20,6 +20,21 @@ bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t) noexc
 bool EnemyControlExit(const enemy_control::Snapshot& snapshot) noexcept {++enemyExitCalls;enemyLastRequest=snapshot;return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
+// The map's cues (mapcmd.cpp PlayCue; jetaudio.cpp, jetsound.cpp: not linked here): counted, never heard.
+int cuesPlayed=0;
+namespace audio {
+bool ClipsReady() noexcept { return true; }
+void Beat(float) noexcept {}
+void PlayOnce(int,const Heard&) noexcept { ++cuesPlayed; }
+}
+float GameEffectVolume() noexcept { return 1.0f; }
+// The loadout panel's world: no call has a vehicle loadout here (map_command_runtime_check covers the panel).
+int SupportHullCatalog(int) noexcept { return -1; }
+const wchar_t* SupportCallKey(int) noexcept { return nullptr; }
+const SupportConfig& SupportCfg() noexcept { static const SupportConfig c{}; return c; }
+bool SaveSupportLoadout(LoadoutField,const wchar_t*,const wchar_t*,wchar_t*,std::size_t) noexcept { return false; }
+bool SupportVariantReady(const wchar_t*) noexcept { return false; }
+bool SupportPeersHaveVariantFile(std::uint64_t) noexcept { return true; }
 int SupportMenuCount() noexcept { return 3; }
 const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
@@ -33,8 +48,11 @@ std::int32_t SupportPointsMost() noexcept { return 30000; }
 void WarnPreview(int,const float*,const float*,const float*) noexcept {}
 int SupportCatalogStrike(int) noexcept {return -1;}
 bool SupportGroundRun(int) noexcept {return false;}
+float SupportRunLeast(int) noexcept {return 0.0f;}
+bool SupportCatalogFlown(int) noexcept {return false;}
+void SupportStrikeHeading(const float*,float* out) noexcept {out[0]=0.0f;out[1]=0.0f;out[2]=1.0f;}
 int SupportStrikeBarrage(int) noexcept {return -1;}
-SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
+SupportTab SupportCallTab(int) noexcept { return SupportTab::sortie; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
 bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity,const float*,const sortie::RunSpec&) noexcept {
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};
@@ -72,6 +90,9 @@ bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=netwo
 bool MapCommandNetworkReady() noexcept {return true;}
 void SyncMapCommandWays(const MapCommandWays*,unsigned) noexcept {}
 unsigned ReadMapCommandWays(const ObjRef&,Command*,float (*)[3],unsigned) noexcept {return 0;}
+bool SendMapPing(const ObjRef&,const float*,unsigned) noexcept {return false;}
+bool TakeMapPing(MapPingHeard*) noexcept {return false;}
+bool SupportWithdrawVehicle(const void*) noexcept {return false;}
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {
@@ -113,7 +134,7 @@ bool NpcSweepOn() noexcept {return false;}
 bool NpcPickupHealthToggle() noexcept {return false;}
 bool NpcPickupHealthOn() noexcept {return false;}
 int NpcMarchShape() noexcept {return 0;}
-const wchar_t* FormationText(int) noexcept {return L"";}
+const wchar_t* FormationText(int,bool) noexcept {return L"";}
 bool NpcMarkEnemy(const void*,const float*,bool) noexcept { return false; }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
 PlayerFix player{};
@@ -136,7 +157,7 @@ const void* TransportTripTo(const void*,const float*,float) noexcept { return nu
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
-bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }
+bool JetCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool TankCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept { return false; }
 NpcCommandResult NpcMapCommandForRequester(const ObjRef&,const Command&,const ObjRef&,const ObjRef&) noexcept {return {};}

@@ -3,7 +3,8 @@
 // tests/*_native_audit.py), one check for all of them. A mismatch (or an unreadable page) is logged as
 // "<tag> REFUSED: code at EDF+0x... is not the expected (n bytes)" and the module stays off.
 #pragma once
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include <cstddef>
 
 namespace crew {

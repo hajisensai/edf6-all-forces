@@ -1,4 +1,4 @@
-// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp included whole, its draw run on a
+// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp and its parts included whole, its draw run on a
 // stand-in "EDF.dll" image whose quad and text functions (the RVAs hud.cpp calls) jump to recorders here, for a few
 // scenes of the warnings (warn.h) on a jet (one low on fuel: the fuel readout that replaces the stock FUEL gauge, LOW
 // FUEL lit), a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the drill tank, a Nix, the Proteus
@@ -28,17 +28,38 @@
 //
 //   hud_view [--out DIR] [--lang en|zh-CN|zh-TW|ja]      (default %TEMP%\edf6_hud_view, every language), then:
 //   python tools/hud_view.py DIR
+#include "../src/map_loadout.h"   // before the HUD (its hudi names): the loadout scene builds rows
 #include "../src/turretcam.h"
-#include "../src/hud.cpp"
+#include "../src/hud.cpp"   // the HUD whole: hud.cpp and its parts (src/hud_internal.h)
+#include "../src/hud_text.cpp"
+#include "../src/hud_vehicle.cpp"
+#include "../src/hud_air.cpp"
+#include "../src/hud_map.cpp"
+#include "../src/hud_scope.cpp"
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
 #include <array>
+#include <cstdarg>
 #include <cstdio>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/scene.h"
+#include "../src/debug_spawn_api.h"
+#include "../src/ground.h"
+#include "../src/highcam.h"
+#include "../src/sightzoom_api.h"
+#include "../src/strikes.h"
+#include "../src/subcarrier.h"
+#include "../src/damagestats.h"
+#include "../src/mapcmd.h"
+#include "../src/qmark.h"
+#include "../src/infantryscope.h"
 
 namespace crew {
 bool VehicleLookHint(bool*) noexcept { return false; }
@@ -60,6 +81,8 @@ void NextStep() noexcept { stepfresh::See(stepfresh::Now()+1); }
 bool mapEasing=false;   // the map's camera easing back to the player: its view, no readout (map.cpp Camera)
 MapReadout sceneMap{};
 bool hasMapPayload=false;PayloadReadout sceneMapPayload{};
+// The map scene's aircraft picked and just given ALTITUDE (MapScene: their tags, the stalks, the button's state, the note).
+bool sceneAirPick=false;
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
@@ -113,6 +136,7 @@ float Width(const wchar_t* text) {
 struct Drew { float x0,y0,x1,y1; std::wstring text; bool world=false; std::uint64_t key=0; };
 std::vector<Drew> drew;
 std::set<std::pair<wchar_t,int>> glyphs;
+std::set<std::string> fitCuts;   // the lines FitLine cut with "..." ("<language> <text>", UTF-8): a slot's too-long text
 
 // The recorders the stand-in image's functions jump to.
 struct PanelBox { float x0,y0,x1,y1; };
@@ -210,6 +234,14 @@ void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar
         owedRestore=false;
     }
     if(rgba[3]<=0.0f)return;   // the world lines' restore (hud.cpp RestoreOrtho): nothing to see
+    if(recording) {   // a line FitLine cut (past kMinScale, "..." after it): listed in the summary, by language
+        const std::size_t n=std::wcslen(text);
+        if(n>3 && !std::wcscmp(text+n-3,L"...")) {
+            char narrow[256];
+            WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
+            fitCuts.insert(std::string(hudtext::Name(hudtext::InUse()))+" "+narrow);
+        }
+    }
     tallest=std::fmax(tallest,y1-y0);
     if(boxing){++drawn;Grow(x0,y0);Grow(x1,y1);}
     if(recording) {
@@ -230,13 +262,20 @@ void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
 }
 }  // namespace
 const Config& Cfg() noexcept { return config; }
-void Log(const char*,...) noexcept {}
+// The HUD losing text (LineSink: its lines full; TextWritten: a line cut at its characters): printed, a failure (lineLosses).
+static int lineLosses=0;
+void Log(const char* format,...) noexcept {
+    if(std::strncmp(format,"HUD lines full",14)!=0 && std::strncmp(format,"HUD a line's text cut",21)!=0)return;
+    va_list args;va_start(args,format);std::vprintf(format,args);va_end(args);
+    std::printf("\n");++lineLosses;
+}
 ULONGLONG GameMs() noexcept { return GetTickCount64(); }
 bool GamePaused() noexcept { return paused; }
 bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return hasJet; }
 bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;return hasHeli; }
 bool WarnLatest(Warnings* o) noexcept { if(hasWarn){*o=sceneWarn;o->step=stepfresh::Now();}return hasWarn; }
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
+bool PlayerBargaAim(bargaaim::Readout*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
 bool PlayerPayload(PayloadReadout* o) noexcept { if(hasMapPayload){*o=sceneMapPayload;return true;}if(hasHeli || hasStock){*o=PayloadReadout{};o->choices=hasStock ? sceneStock.arms : 3;o->switchButton=0x10;o->keys=hasHeli ? sceneHeli.f.keys : true;}return hasHeli || hasStock; }
@@ -353,7 +392,10 @@ bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
 // The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
 bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
+namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.
+bool AuraViewNow(AuraView*) noexcept { return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
 bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
@@ -431,11 +473,17 @@ void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n)
 }
 // The support bar's rows and chips as drawn (hud.cpp MapSupportBar).
 float sceneSupportHits[kMapSupports*2][4]{};int sceneSupportEntry[kMapSupports*2]{},sceneSupportHitCount=0;
-void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept {
-    sceneSupportHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
+int sceneSupportTop=0,sceneSupportRows=0,sceneSupportFit=0;
+void MapCommandSupportButtons(const float* r,const int* entries,int n,int top,int rows,int fit) noexcept {
+    sceneSupportHitCount=n;sceneSupportTop=top;sceneSupportRows=rows;sceneSupportFit=fit;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
 }
 // The support composition panel's seats and kinds as drawn (hud.cpp MapComposePanel).
 float sceneComposeHits[mapbtn::kComposeItems][4]{};int sceneComposeCode[mapbtn::kComposeItems]{},sceneComposeHitCount=0;
+// The loadout panel's rows as drawn (hud_map.cpp MapLoadoutPanel); `sceneLoadout`: the scene arms a jet with four.
+float sceneLoadoutHits[maploadout::kRowsMost][4]{};int sceneLoadoutHitCount=0;bool sceneLoadout=false;
+void MapCommandLoadoutButtons(const float* r,const int* codes,int n) noexcept {
+    (void)codes;sceneLoadoutHitCount=n;for(int i=0;i<n;++i)std::memcpy(sceneLoadoutHits[i],r+i*4,16);
+}
 void MapCommandComposeButtons(const float* r,const int* codes,int n) noexcept {
     sceneComposeHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneComposeHits[i],r+i*4,16);sceneComposeCode[i]=codes[i];}
 }
@@ -600,8 +648,15 @@ int WorldTextAgainstFlat(const wchar_t* name,const std::vector<Drew>& world,int 
     for(const Drew& w:world) {
         if(w.text.find_first_not_of(L' ')==std::wstring::npos)continue;
         if(w.world && w.key==kGroundKey){++ground;continue;}
+        // Its flat line: the nearest of the same text (a word can be on a panel too: the selection's cards' orders).
+        const Drew* nearest=nullptr;float best=0.0f;
         for(const Drew& f:flat) {
             if(f.text!=w.text)continue;
+            const float dx=(w.x0+w.x1-f.x0-f.x1)*0.5f,dy=(w.y0+w.y1-f.y0-f.y1)*0.5f,d=dx*dx+dy*dy;
+            if(!nearest || d<best){nearest=&f;best=d;}
+        }
+        for(const Drew* fp=nearest;fp;fp=nullptr) {
+            const Drew& f=*fp;
             ++matched;
             const float wx=(w.x0+w.x1)*0.5f,wy=(w.y0+w.y1)*0.5f,fx=(f.x0+f.x1)*0.5f,fy=(f.y0+f.y1)*0.5f;
             const float fh=f.y1-f.y0,fw=f.x1-f.x0,k=(w.y1-w.y0)/fh;
@@ -730,6 +785,15 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerHeli;
     cmdUnit(jet,true,"fighter",Order::follow,nullptr,false);
     sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerJet;
+    {   // Their altitude (mapcmd_cue.h): the heli low 80 m over the ground (online: another machine's, unknown), the jet high;
+        // picked, the jet just switched (its tag blinking) and both selected.
+        CmdMark& h=sceneCmd.unit[0];CmdMark& j=sceneCmd.unit[1];
+        h.high=online ? -1 : 0;h.agl=80.0f;j.high=1;j.agl=300.0f;
+        if(sceneAirPick) {
+            h.selected=j.selected=true;sceneCmd.selected+=2;j.altSince=0;
+            sceneCmd.altitudes={1,online ? 0 : 1,online ? 1 : 0};sceneCmd.highOn=true;
+        }
+    }
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
     sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
@@ -782,15 +846,15 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<sceneCmd.supports;++i){sceneCmd.support[i].price=1800+(i*1300)%13200;sceneCmd.support[i].afford=sceneCmd.support[i].price<=sceneCmd.points;}
     sceneCmd.support[sceneCmd.supports-1].price=15000;sceneCmd.support[sceneCmd.supports-1].afford=false;
     sceneWarnings=!pad;
-    // Their tabs (support_call.h SupportTab): the strikes by their icons, the infantry and vehicles on the ground, the
-    // sorties by their names (no "·"), the rest in the air.
+    // Their tabs (support_call.h SupportTab): the strikes by their icons, the infantry and vehicles on the ground, every
+    // flown one in the sortie tab.
     for(int i=0;i<sceneCmd.supports;++i) {
         const SupportIcon ic=sceneCmd.support[i].icon;
         sceneCmd.support[i].tab=ic==SupportIcon::barrage || ic==SupportIcon::satellite ? SupportTab::strike :
             ic==SupportIcon::squad || ic==SupportIcon::platoon || ic==SupportIcon::tank || ic==SupportIcon::apc || ic==SupportIcon::truck ?
-            SupportTab::ground : !mapbtn::VariantOf(sceneCmd.support[i].name) && ic!=SupportIcon::sub ? SupportTab::sortie : SupportTab::air;
+            SupportTab::ground : SupportTab::sortie;
     }
-    sceneCmd.supportTab=static_cast<int>(SupportTab::air);
+    sceneCmd.supportTab=static_cast<int>(SupportTab::sortie);
     sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
     // The payload scenes arm the platoon row and open its composition (map_buttons.h ComposePanel): two squads in, a
     // Wing Diver and a Fencer one, of its twelve seats.
@@ -799,6 +863,25 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=10;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
         sceneCmd.supportTab=static_cast<int>(SupportTab::ground);   // the platoon's tab shown
         for(int i=0;i<4;++i){sceneCmd.compose.soldier[i]=SupportWeapon::wingLance;sceneCmd.compose.soldier[4+i]=SupportWeapon::fencerCannon;}
+    }
+    // The loadout scene (map_loadout.h): the interceptor armed, stock, the loadout set now (ready), one for the next
+    // mission and one a peer lacks; the rows built as mapcmd.cpp LoadoutRows builds them, from variant file names.
+    sceneCmd.loadout=MapLoadoutReadout{};
+    if(sceneLoadout) {
+        sceneCmd.supportArmed=sceneCmd.supportPick=0;sceneCmd.supportTab=static_cast<int>(SupportTab::sortie);
+        static const wchar_t* const kValues[]={L"AAM_M:4,AAM_M:4,AAM_L:2",L"AGM:4,AGM:4,MK82:2",L"AAM_S:8,AAM_S:8"};
+        static wchar_t names[3][maploadout::kFileMost];
+        VehicleLoadout l[3]{};wchar_t why[80];
+        for(int i=0;i<3;++i)
+            if(!ParseVehicleLoadout(kValues[i],VehicleBody::interceptor,&l[i],why,80) || !VehicleVariantFile(l[i],names[i],maploadout::kFileMost))
+                {++textFailed;std::printf("FAIL loadout scene value %d: %ls\n",i,why);}
+        sceneCmd.loadout.rows=maploadout::BuildRows(VehicleBody::interceptor,l[0],3,[](int i) noexcept {return static_cast<const wchar_t*>(names[i]);},
+            [](const wchar_t* f) noexcept {
+                return !std::wcscmp(f,names[1]) ? maploadout::State::next : !std::wcscmp(f,names[2]) ? maploadout::State::peerMissing : maploadout::State::ready;
+            },sceneCmd.loadout.row,maploadout::kRowsMost);
+        if(sceneCmd.loadout.rows!=4){++textFailed;std::printf("FAIL loadout scene rows: %d\n",sceneCmd.loadout.rows);}
+        sceneCmd.loadout.entry=0;
+        if(width<1600)wcscpy_s(sceneCmd.loadout.shared,L"截击机·守点");
     }
     sceneCmd.supportReady=payload ? SupportReadiness{SupportReady::cooldown,17} : SupportReadiness{SupportReady::ready,0};
     if(payload)wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");
@@ -832,6 +915,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.squadTally=SquadTally{};sceneCmd.squadTally.total=sceneCmd.squads;
     for(int i=0;i<sceneCmd.squads;++i)sceneCmd.squadTally.scripted+=sceneCmd.squad[i].rank==3;
     sceneCmd.noteFresh=true;
+    if(sceneAirPick)std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdAltitudeResult),Tr(Tx::altHigh),1,L"");
     sceneCmd.placeOn=place>0;sceneCmd.placeOpen=place>=2;sceneCmd.placeOnline=place==3;
     sceneCmd.placeCategory=static_cast<int>(debugspawn::Category::enemy41);sceneCmd.placePick=14;
     sceneCmd.placeArmed=place>=2 && !pad ? debugspawn::RowOf(debugspawn::Category::enemy41,14) : -1;
@@ -900,10 +984,39 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 }
             }
         } else if(sceneComposeHitCount){++textFailed;std::printf("FAIL composition clickable with none armed: %d\n",sceneComposeHitCount);}
-        // Every entry of the tab shown reachable, every tab too (support_call.h SupportTab, map_buttons.h SupportTabHit).
-        int reached=0,onTab=0;
-        for(int i=0;i<sceneCmd.supports;++i)if(static_cast<int>(sceneCmd.support[i].tab)==sceneCmd.supportTab){++onTab;reached+=reach[i];}
-        if(reached!=onTab){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,onTab);}
+        // The loadout panel: every row clickable, on the screen, clear of the command card and of the bar.
+        if(sceneCmd.loadout.entry>=0) {
+            if(sceneLoadoutHitCount!=sceneCmd.loadout.rows){++textFailed;std::printf("FAIL loadout clicks: %d of %d\n",sceneLoadoutHitCount,sceneCmd.loadout.rows);}
+            for(int i=0;i<sceneLoadoutHitCount;++i) {
+                const float* b=sceneLoadoutHits[i];
+                if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL loadout row %d off the screen\n",i);}
+                for(int k=0;k<sceneButtons;++k) {
+                    const float* q=sceneButton[k];
+                    if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL loadout row under button %d\n",sceneButtonId[k]);}
+                }
+                for(int k=0;k<sceneSupportHitCount;++k) {
+                    const float* q=sceneSupportHits[k];
+                    if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL loadout row over the support bar %d\n",k);}
+                }
+            }
+        } else if(sceneLoadoutHitCount){++textFailed;std::printf("FAIL loadout clickable with none armed: %d\n",sceneLoadoutHitCount);}
+        // Every entry of the tab's rows in the window shown reachable (map_buttons.h ColumnWindow: the wheel scrolls to
+        // the rest), at least one row in it, and every tab (support_call.h SupportTab, map_buttons.h SupportTabHit).
+        {
+            const wchar_t* tabNames[kMapSupports];int tabIdx[kMapSupports];int onTab=0;
+            for(int i=0;i<sceneCmd.supports;++i)
+                if(static_cast<int>(sceneCmd.support[i].tab)==sceneCmd.supportTab){tabNames[onTab]=sceneCmd.support[i].name;tabIdx[onTab++]=i;}
+            mapbtn::Group tabRows[kMapSupports];
+            const int rows=mapbtn::GroupSupport(tabNames,onTab,tabRows,kMapSupports);
+            int reached=0,windowed=0;
+            for(int k=sceneSupportTop;k<rows && k<sceneSupportTop+sceneSupportFit;++k)
+                for(int e=tabRows[k].first;e<tabRows[k].first+tabRows[k].count;++e){++windowed;reached+=reach[tabIdx[e]];}
+            if(rows!=sceneSupportRows || sceneSupportFit<1 || reached!=windowed || (rows<=sceneSupportFit && windowed!=onTab)) {
+                ++textFailed;
+                std::printf("FAIL support entries clickable: %d of %d in rows %d..%d of %d\n",reached,windowed,sceneSupportTop,
+                            sceneSupportTop+sceneSupportFit,rows);
+            }
+        }
         int tabs=0;for(int i=0;i<sceneSupportHitCount;++i)tabs+=mapbtn::SupportTabOfHit(sceneSupportEntry[i])>=0;
         if(tabs!=kSupportTabs){++textFailed;std::printf("FAIL support tabs clickable: %d\n",tabs);}
         for(int i=0;i<sceneButtons;++i) {
@@ -917,7 +1030,13 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 if(inside)++own;
                 else{++textFailed;std::printf("FAIL map button %d covers %s\n",sceneButtonId[i],Narrow(d.text).c_str());}
             }
-            if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
+            // Its word, and its key's badge in its corner when it has a key (hud_map.cpp MapButtons, Broken Arrow's).
+            const mapbtn::Id id=static_cast<mapbtn::Id>(sceneButtonId[i]);
+            const bool keyed=id==mapbtn::Id::attackMove || id==mapbtn::Id::release || id==mapbtn::Id::withdraw ||
+                id==mapbtn::Id::fastMove || id==mapbtn::Id::reverseMove || id==mapbtn::Id::unloadAt || id==mapbtn::Id::holdFire ||
+                id==mapbtn::Id::altitude || id==mapbtn::Id::sprint || id==mapbtn::Id::smoke || id==mapbtn::Id::decoy ||
+                id==mapbtn::Id::dismountAll;
+            if(own!=(keyed ? 2 : 1)){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
         }
     }
     // The 「摆放」 panel: clickable with the mouse alone (its tab shut; open, its title, six tabs, the rows of the window
@@ -950,6 +1069,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         for(int k=0;k<scenePlaceHitCount;++k)targets.push_back({scenePlaceHits[k][0],scenePlaceHits[k][1],scenePlaceHits[k][2],scenePlaceHits[k][3]});
         for(int k=0;k<scenePvpCount;++k)targets.push_back({scenePvpRects[k][0],scenePvpRects[k][1],scenePvpRects[k][2],scenePvpRects[k][3]});
         for(int k=0;k<sceneComposeHitCount;++k)targets.push_back({sceneComposeHits[k][0],sceneComposeHits[k][1],sceneComposeHits[k][2],sceneComposeHits[k][3]});
+        for(int k=0;k<sceneLoadoutHitCount;++k)targets.push_back({sceneLoadoutHits[k][0],sceneLoadoutHits[k][1],sceneLoadoutHits[k][2],sceneLoadoutHits[k][3]});
         for(int k=0;k<sceneSquadButtonCount;++k)targets.push_back({sceneSquadButtons[k][0],sceneSquadButtons[k][1],sceneSquadButtons[k][2],sceneSquadButtons[k][3]});
         auto hits=[](const float* a,const std::array<float,4>& q){ return a[0]<q[2] && q[0]<a[2] && a[1]<q[3] && q[1]<a[3]; };
         if(sceneLegendOn) {
@@ -2638,7 +2758,7 @@ int Scenes(const std::wstring& dir) {
         bool named=false,apart=true;
         for(std::size_t i=0;i<drew.size();++i) {
             const Drew& p=drew[i];
-            if(p.text.find(FormationText(sceneFormation))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
+            if(p.text.find(FormationText(sceneFormation,false))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
                 named=p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f;
             for(std::size_t k=i+1;k<drew.size();++k) {
                 const Drew& q=drew[k];
@@ -2737,6 +2857,16 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
     MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
+    // ALTITUDE's feedback (V; the user, 2026-11-27: 「按v上下高度一点反馈没有」): the aircraft picked, one just switched high.
+    sceneAirPick=true;
+    MapScene(dir,L"map_air_altitude",700.0f,60.0f,20.0f,false);
+    MapScene(dir,L"map_air_altitude_online",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,true);
+    sceneAirPick=false;
+    // The armed support's loadout (the user, 2026-11-27: 「包括m里面装配东西」): installer menu 8's value switched here.
+    sceneLoadout=true;
+    MapScene(dir,L"map_loadout",700.0f,60.0f,20.0f,false);
+    MapScene(dir,L"map_loadout_narrow",700.0f,60.0f,20.0f,false,4,1280);
+    sceneLoadout=false;
     // The test range's 「摆放」 panel (range_place.h): shut, open (mouse, a pad, a narrow screen, the payload panel up),
     // online.
     MapScene(dir,L"map_place_shut",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,1);
@@ -2876,6 +3006,10 @@ int wmain(int argc,wchar_t** argv) {
     std::printf(textFailed ? "text: %d FAILED\n" : "text: on the screen, inside its panels, no overlap English lacks, in every language\n",textFailed);
     std::printf("glyphs: at most %zu in one scene (%s)\n",mostGlyphs,mostGlyphsAt.c_str());
     failed+=textFailed;
+    std::printf(lineLosses ? "lines: %d lost (LineSink / TextWritten above)\n" : "lines: none lost\n",lineLosses);
+    failed+=lineLosses;
+    std::printf("fit: %zu texts cut with ... by FitLine (past kMinScale in their slot)\n",fitCuts.size());
+    for(const std::string& c:fitCuts)std::printf("      %s\n",c.c_str());
     config.hudLanguage=1;hudtext::Use(hudtext::Lang::en);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     // The HUD's scale (src/hudscale.h).

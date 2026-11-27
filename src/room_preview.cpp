@@ -19,7 +19,7 @@
 #include "room_preview_logic.h"
 #include "preview_camera.h"
 #include "code_signatures.h"
-#include "crew.h"
+#include "scene.h"
 #include "edf/memory.h"
 #include "edf/patch.h"
 #include <cstddef>

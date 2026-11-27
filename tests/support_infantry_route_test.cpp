@@ -27,7 +27,7 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {if(ref.obj)++routePvpFo
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
-void SupportFollowUpQueue(int,const float*,std::uint32_t) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
+void SupportFollowUpQueue(int,const float*,std::uint32_t,const sortie::RunSpec&) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
 void SupportFollowUpSettle(std::uint32_t,bool) noexcept{}
 const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
 const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
@@ -41,8 +41,8 @@ std::uint32_t SupportStrikePt(int) noexcept{return 0;}
 bool SupportGroundRun(int) noexcept {return false;}
 int SupportStrikeBarrage(int) noexcept{return -1;}
 bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t,const float*) noexcept{return false;}
-support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
-void WarnDeployment(const support_net::Plan&) noexcept{}
+support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*,const float*,float) noexcept{return support::Refusal::unsupported;}
+void WarnDeployment(const support_net::Plan&,const ObjRef&) noexcept{}
 std::int32_t SupportPoints() noexcept{return 1000000;}
 std::int32_t SupportPointsPrice(std::uint32_t) noexcept{return 0;}
 bool SupportPointsHold(std::int32_t) noexcept{return true;}
@@ -88,9 +88,9 @@ bool ResolveSupportSource(std::uint64_t,ObjRef*) noexcept{return false;}
 bool ResolveMarkIdentities(const unsigned char*,const unsigned char*,MarkIdentities*) noexcept{return false;}
 bool SupportCommandRequesterMatches(void*,const char*) noexcept{return false;}
 bool SubmitCarrierDroneNetworkRequest(const unsigned char*,unsigned,unsigned,const float*) noexcept{return false;}
-support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
+support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*,const float*,float) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&) noexcept{return false;}
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&,const spread::Place&) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}
@@ -117,6 +117,7 @@ bool SupportPeersAcceptTransports() noexcept{return true;}
 bool SupportPeersAcceptLoadout() noexcept{return true;}
 bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
 const wchar_t* SupportAircraftFile(const SupportAircraft&) noexcept {return L"EDF6VC_TEST.SGO";}
+bool SupportRunLoad(const SupportAircraft&,const VehicleLoadout*,sortie::RunLoad*,float*) noexcept {return false;}
 bool TransportDeliver(const void*,const void* const*,int,const float*,bool) noexcept{return false;}
 bool TransportParadrop(const void*,const float*) noexcept{return false;}
 bool JetFerry(const void*,const float*,const float*) noexcept{return false;}
@@ -166,7 +167,7 @@ bool ReadMissionParticipants(void**,unsigned,unsigned*,unsigned*) noexcept{retur
 namespace support_net {bool ValidPlan(const Plan& p,bool) noexcept{return p.count>0&&p.count<=kMaxUnits;}}
 bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept{return false;}
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
-bool JetCommand(const void*,const Command&,const ObjRef&) noexcept{return false;}
+bool JetCommand(const void*,const Command&,const ObjRef&,const ObjRef&) noexcept{return false;}
 SupportEntry JetSupportEntry(const void*,const float*) noexcept{return SupportEntry::flying;}
 SupportEntry HeliSupportEntry(const void*,const float*) noexcept{return SupportEntry::flying;}
 PlayArea MapPlayArea() noexcept{return {{-930,-930},{930,930},true,0,true};}

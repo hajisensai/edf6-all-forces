@@ -4,7 +4,8 @@
 // cockpit by the installer (pylib/cockpits.py; the stock models through vehicle_optics.py, the plugin's own in their
 // generators). One place holds where each seat's eye and cockpit are: the model. A seat without a marker (no cockpit
 // installed, or another mod's model) keeps the stock camera: no first person sitting in the air.
-#include "crew.h"
+#include "edf_layout.h"
+#include "heli.h"
 #include "firstperson.h"
 #include "fp_view.h"
 #include "vhud.h"

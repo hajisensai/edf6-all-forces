@@ -14,7 +14,11 @@
 // the same code (their hits and bursts at the same calls): heard the same, with no message of ours.
 // The rounds going by and coming down (ini FlybyVolume): the bullet system's list walked once a frame (Flyby below).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "sound.h"
 #include "jetaudio.h"
 #include "sound_event.h"
 #include "surround.h"

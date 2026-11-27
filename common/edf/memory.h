@@ -24,9 +24,12 @@ void PrefetchReadableSpans(const ReadSpan* spans,int n) noexcept;
 // asks cost. QPC ticks in the working-set and VirtualQuery calls.
 struct ReadableStats { unsigned long long asks,pageHits,wsCalls,wsPages,vqCalls,wsTicks,vqTicks; };
 ReadableStats TakeReadableStats() noexcept;
-// A 12-byte absolute jump to `target` in a page within rel32 reach of `anchor`, or nullptr.
 // Copies `size` bytes of code into a fresh executable page within rel32 reach of `anchor`.
 void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept;
+// The same in the first free page at or above `from` (rounded up to the allocation granularity) ending at or below
+// `below` (a jump table's unsigned 32-bit offsets from an image base: EDF.dll's end, its base + 2 GB), or nullptr.
+void* AllocateCodeAbove(const void* from,const void* below,const unsigned char* code,std::size_t size) noexcept;
+// A 12-byte absolute jump to `target` in a page within rel32 reach of `anchor`, or nullptr.
 void* AllocateNearThunk(const void* anchor,void* target) noexcept;
 // Points the rel32 call (E8) or tail jump (E9) at `callSite` to `replacement` (through a near thunk), only
 // while it still targets `expectedTarget`. `changed`: whether the site was written. The site's 5 bytes are claimed for

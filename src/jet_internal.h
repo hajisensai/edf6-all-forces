@@ -9,7 +9,13 @@
 //   jet_hooks.cpp   the 506 physics step (body506.cpp hands it here), the bullets' pass-through, install
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
-#include "crew.h"
+#include "edf_layout.h"
+#include "scene.h"
+#include "heli.h"
+#include "jet.h"
+#include "payload.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "body506.h"
 #include "memory.h"
 #include "scene_object.h"
@@ -18,6 +24,8 @@
 #include "air_chase.h"
 #include "sortie_plan.h"
 #include "support_aircraft.h"
+#include "jet_escort.h"
+#include "jet_logic.h"
 #include <cmath>
 
 namespace crew {
@@ -35,7 +43,7 @@ constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
 constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
 constexpr std::size_t kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
-constexpr unsigned kDelete=scene::kDeleteObject,kCreateObject=scene::kCreateObject,kInitParamVtable=scene::kInitParamBaseVtable;   // SetTeam: crew.h kSetTeam
+constexpr unsigned kDelete=scene::kDeleteObject,kCreateObject=scene::kCreateObject,kInitParamVtable=scene::kInitParamBaseVtable;   // SetTeam: edf_layout.h kSetTeam
 constexpr std::size_t kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
 constexpr std::int32_t kTeamEnemy=1;   // the game's team relations: 0 (player) and 2 (friends) are both hostile to 1
@@ -46,6 +54,7 @@ using SetTeamFn=void(*)(void*,std::int32_t,bool);
 using DeleteFn=void(*)(void*);
 
 constexpr float kPi=3.14159265f,kG=9.8f,kGravity=14.7f;
+constexpr float kBombReach=4000.0f;   // m a bomb's path is followed for where it lands (StoreLands; the carpet's: ~1.6 km from 260 m)
 // m/s no jet is commanded past (see jet_flight.cpp JetSteer and jetprops.cpp).
 constexpr float kBodyTop=250.0f;
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this
@@ -307,7 +316,7 @@ constexpr bool KindsInOrder() noexcept {
 static_assert(KindsInOrder(),"kKinds is indexed by Role, each row's body is of its role, rotor craft lean, charges trigger and blast");
 constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r)]; }
 
-// The roles a launch asks for (crew.h JetRole) and the body each flies in. The blast and doll carriers are
+// The roles a launch asks for (jet.h JetRole) and the body each flies in. The blast and doll carriers are
 // carriers whose own bodies' marks name their drones. The support deployment's strike jet, fighter, interceptor and
 // multirole fly their kinds' Dreadnought-model bodies, its carriers the Helicarrier ones and its gunship the AC-130
 // (Body::sup*, Body::c130Gunship; the plain bodies stay the player's parked / requested twins' and the test range's).
@@ -326,9 +335,11 @@ static_assert(kLaunchCount==static_cast<int>(JetRole::salvo)+1,"a launch row per
 static_assert(LaunchRowsInOrder(),"kLaunchRows is indexed by JetRole, each a jet body");
 
 // --- A jet's state ---
-enum class Mode { takeoff, patrol, approach, dive, pull, extend, chase, runOut, withdraw, bomb, missile, crank, recover };
-inline const char* const kModeNames[]={"takeoff","patrol","approach","dive","pull","extend","chase","runOut","withdraw","bomb","missile",
-                                       "crank","recover"};
+// How it flies this frame (its tactic). Its mission phase (withdrawing, recovering to its carrier, a ferry) is Jet::phase
+// (jet_logic.h), not a Mode: on its way out the phase flies it (Guide: Away / Recover) and its mode stays patrol.
+enum class Mode { takeoff, patrol, approach, dive, pull, extend, chase, runOut, bomb, missile, crank };
+inline const char* const kModeNames[]={"takeoff","patrol","approach","dive","pull","extend","chase","runOut","bomb","missile",
+                                       "crank"};
 
 // Bones the plugin hinges along their local X (elevons, thrusters): their records, bind locals, angles.
 constexpr int kMaxSurfaces=4;
@@ -369,8 +380,13 @@ struct Motion {
     float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
     ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it or off its track
     std::int8_t obstSide;    // ...too steep to climb: the side it turns off to (+1 / -1, picked once; 0 none)
-    bool edgeBack;           // past its soft edge: flying back in first (airbound.h KeepIn), its targets out there let be
+    bool edgeBack;           // past its soft edge (its arrival box, arriving): flying back in first (airbound.h KeepIn),
+                             // its targets out there let be
     signed char edgeTurn;    // ...turning back from it: the side it turns on (KeepIn: +1 left, -1 right, 0 none)
+    // Its arrival (airbound.h ArriveBox / Arrive): made past its soft edge (a call's, off the map), it keeps inside
+    // `arrive`, drawn in after it as it flies in, until that is its soft box; `edgeSeen` once SoftEdge first saw it.
+    bool edgeSeen,arriving;
+    airbound::Box arrive;
 };
 // What it goes for (Pick, Lead) and its guns' and missiles' state (Fire, Missile).
 struct Aim {
@@ -513,6 +529,12 @@ struct Sortie {
     const void* struck[8]{};
     int struckCount=0;
     sortie::Lap lap{};
+    // A marked strafe's (gunRun with runHalf): the lead its nose keeps on the line ahead (sortie_plan.h StrafeLead, set as
+    // its window opens), whether it came round once already after a miss (only once), and the side it came round on.
+    float strafeLead=0.0f;
+    bool reentered=false;
+    float reenterSide=1.0f;
+    spread::Place place{};   // its slot in its call's formation (flight_spread.h: its lane, its break)
 };
 struct Jet {
     ObjRef ref;              // the vehicle: address and weak-this control block, on which a weak reference is
@@ -556,6 +578,11 @@ struct Jet {
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     bool barrelsLogged=false;   // its guns' barrels against its nose logged (JetBarrelLog: once a jet, they do not move)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
+    // The map's Broken Arrow orders (JetCommand): DECOY a pair of its flares dropped next frame (NpcFlares), ALTITUDE high
+    // (kind.alt times mapcmd::kJetHighShare), SPRINT its afterburner until burnUntil (game ms; mapcmd::kAfterburnerSpeed).
+    // `heightOrdered` once an ALTITUDE order came: arriving (Entering) it flies that, not the height it came at.
+    bool flareNow=false,high=false,heightOrdered=false;
+    ULONGLONG burnUntil=0;
     PrimerState primer;
     bool cmdMoving=false;       // reach a new map order before taking another target
     Command cmd{};              // a map command (JetCommand, mapcmd.cpp): what it works round instead (jet.cpp JetFrame)
@@ -566,8 +593,11 @@ struct Jet {
     // A ferry (JetFerry, transport.cpp: the paratroop plane): kFerryAlt m over its drop point, taking no target at all on
     // the way or after (it carries soldiers, not bombs). Its passes (Ferry, ferry_line.h): along `ferryLine`, the straight
     // line from off the map through the point to off the map past it, either way in turn (`ferryPass`) until its stick is
-    // out (JetFerryDone); past the end of that pass `ferryGone`: deleted there (JetFrame reaps it), off the map.
-    bool ferry=false,ferryGone=false;
+    // out (JetFerryDone); past the end of that pass: deleted there (Ferry sets reap), off the map.
+    // Its mission phase (jet_logic.h: fly / ferry / recover / withdraw), changed only by EnterPhase (jet_flight.cpp), and
+    // the game ms it entered it (Away's kWithdrawStuckMs).
+    jetphase::Phase phase=jetphase::Phase::fly;
+    ULONGLONG phaseAt=0;
     // Held by a Dreadnought's hangar (JetHangarHold: on its lift, being brought in, launched off its deck): the hangar's
     // velocity and spin are its motion (m.vel / m.omega), whoever sits in it; fresh while heldFrame is this frame or the last.
     bool held=false;
@@ -575,6 +605,16 @@ struct Jet {
     support::PassLine ferryLine{};
     ferry::Pass ferryPass{};
     Sortie sortie{};            // a sortie call's one pass (jet_sortie.cpp)
+    // A follow order another machine's player gave it (JetCommand's requester; online the order is run here, where the
+    // jet flies): held weakly (HoldRef) until another order; `followAt` where they are this frame, `followSeen` while
+    // they are there (JetFrame). This machine's player's follow order holds none: player.pos is theirs.
+    ObjRef followBy{};
+    float followAt[3]{};
+    bool followSeen=false;
+    // Flying escort on the player it follows this frame (JetFrame; jet_escort.h): no target, its guns' weapon, the
+    // anchor the player (a follow order, a call's follow variant); `escortTrack` their motion.
+    bool escorting=false;
+    jetescort::Track escortTrack{};
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -596,7 +636,7 @@ inline void ApplyMapCommand(Jet& j,const Command& cmd,ULONGLONG ms) noexcept {
     j.cmd=cmd;j.cmdMoving=cmd.order!=Order::none;j.focus={};
     j.t.target=nullptr;j.t.trackFrame=0;j.t.lockAt=0;j.t.lockSeen=0;
     j.carrier.stationFor=nullptr;j.carrier.evadeUntil=0;
-    if(j.mode!=Mode::takeoff && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::bomb)
+    if(!jetphase::Leaving(j.phase) && j.mode!=Mode::takeoff && j.mode!=Mode::bomb)
         {j.mode=Mode::patrol;j.modeAt=ms;}
 }
 
@@ -606,7 +646,7 @@ inline void ApplyMapFocus(Jet& j,const ObjRef& target,ULONGLONG ms) noexcept {
     j.focus=target;
     j.t.target=nullptr;j.t.trackFrame=0;j.t.lockAt=0;j.t.lockSeen=0;
     j.carrier.stationFor=nullptr;j.carrier.evadeUntil=0;
-    if(j.mode!=Mode::takeoff && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::bomb)
+    if(!jetphase::Leaving(j.phase) && j.mode!=Mode::takeoff && j.mode!=Mode::bomb)
         {j.mode=Mode::patrol;j.modeAt=ms;}
 }
 
@@ -627,6 +667,7 @@ inline bool MapCommandMoving(Jet& j,const float* pos,const float* anchor,float r
 // follow (while they are seen), else `own` (its call's strike point, the player it escorts, where it was placed).
 inline const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
     if(j.cmd.order==Order::guard)return j.cmd.at;
+    if(j.cmd.order==Order::follow && j.followBy.ctrl)return j.followSeen ? j.followAt : own;   // another machine's player
     if(j.cmd.order==Order::follow && follow)return player.pos;
     return own;
 }
@@ -635,7 +676,7 @@ inline const float* CommandAnchor(const Jet& j,bool follow,const float* own) noe
 // cmdMoving on its ring, a gunship's inside its reach), never a distance the dispatcher picks. A focus order the player
 // gave it meanwhile takes it at its enemy first: still flying in.
 inline SupportEntry SupportEntryOf(const Jet& j,const float* target) noexcept {
-    if(j.reap || j.mode==Mode::withdraw || j.mode==Mode::recover)return SupportEntry::gone;
+    if(j.reap || jetphase::Leaving(j.phase))return SupportEntry::gone;
     if(j.sortie.pass!=SortiePass::none)return SupportEntry::sortie;   // its one pass, then away (jet_sortie.cpp)
     if(j.cmd.order!=Order::guard || j.cmd.at[0]!=target[0] || j.cmd.at[1]!=target[1] || j.cmd.at[2]!=target[2])
         return SupportEntry::superseded;
@@ -694,6 +735,9 @@ inline bool Entering(const Jet& j,ULONGLONG ms) noexcept { return j.launched && 
 
 // --- jet_flight.cpp ---
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept;
+// Its mission phase's one way of changing (jetphase::Transition): false, unchanged, for an illegal one. Into or out of
+// recover / withdraw its mode goes to patrol at `ms` (as SetMode to the old Mode::withdraw / recover, and back, did).
+bool EnterPhase(Jet& j,jetphase::Event e,ULONGLONG ms) noexcept;
 void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept;
 // Withdrawing it climbs kWithdrawClimb over `viewer` and flies away from them (a bomber on along its run) at full speed,
 // off the map, and is deleted only out there (never in front of the player): kWithdrawFar from them, or kWithdrawNear once past
@@ -704,7 +748,7 @@ constexpr ULONGLONG kWithdrawStuckMs=60000;
 // that one leaves the map (the user, 2026-10-26: 「空中支援不会退场」). Held in, a withdrawal never got kWithdrawNear from a
 // player in the middle of a map whose soft box is under ~900 m a side of them (a stock map's ground ~1500 m: soft +-750
 // m), and flew round inside it under RTB for the rest of the mission.
-inline bool SoftEdgeHolds(const Jet& j) noexcept { return j.mode!=Mode::withdraw; }
+inline bool SoftEdgeHolds(const Jet& j) noexcept { return j.phase!=jetphase::Phase::withdraw; }
 // Withdrawing: its guidance (`want`, `speed`) away from `viewer`, and its reap once out of sight (see kWithdrawFar). `walled`:
 // Sense found it held by a wall this frame.
 void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float* viewer,bool walled,ULONGLONG ms,float* want,
@@ -717,9 +761,11 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept;
 bool NearWall(const Jet& j,const float* pos,float range,ULONGLONG ms) noexcept;
 // `clear`: GroundClearance(pos) this frame (the frame step has it: no second ray).
 void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcept;
-// The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (crew.h PlayEdge) less its band (ini
+// The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (world.h PlayEdge) less its band (ini
 // AirSoftEdge / AirSoftTurns: at least that many of its full-speed turn diameters); `band` gets the band's width.
 airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
+// The box its edge holds it in now: its arrival box while it is arriving (Motion::arriving), else its soft box.
+inline airbound::Box JetHeldBox(const Jet& j) noexcept { return j.m.arriving ? j.m.arrive : JetSoftBox(j); }
 // m/s: the most a wing of kind `k` flies inside a play area of half size `half` (turns that fit it; jet_flight.cpp).
 float TightSpeed(const Kind& k,float half) noexcept;
 // m: its turn's radius at `speed` with its stores' `mass` (the g its thrust holds, kTurnWide).
@@ -729,11 +775,16 @@ const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest=0.0f) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
 // A ferry's passes along its line (Jet::ferry, the paratroop plane; ferry_line.h), `height` over it. Returns the speed to fly
-// it at (FerrySpeed: its slowest loiter, the stick jumps over the point); sets ferryGone past its last pass's end.
+// it at (FerrySpeed: its slowest loiter, the stick jumps over the point); past its last pass's end sets reap.
 float Ferry(Jet& j,const float* pos,float height,float* want) noexcept;
 // m/s a ferry of kind `k` flies at, and m: its turn's radius there (the room its line's ends keep: support_entry.h PassEnd).
 float FerrySpeed(const Kind& k) noexcept;
 float FerryTurn(const Kind& k) noexcept;
+// The bombing run's line (jet_bay.cpp BombRun): level at `height` toward the point `lead` m on along the line through `at`
+// (unit horizontal `dir`) from where it is, as Ferry follows its line; BombLead: that lead at `speed`, its turn's radius at
+// kBombG (at least ferry::kLeadLeast): the lead no shorter than the turn, the turn onto the line never overshoots it.
+void BombLine(const float* pos,const float* at,const float* dir,float lead,float height,float* want) noexcept;
+float BombLead(float speed) noexcept;
 // `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
 // `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
@@ -786,9 +837,13 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
           ULONGLONG ms) noexcept;
 
 // --- jet_sortie.cpp ---
-// A sortie's start (ActivateSupportAircraft): its pass at `mark`, its line from where it is (`pos`) and the way it flies.
+// A sortie's start (ActivateSupportAircraft): its pass at `mark`, its line the lane of its `place` in its flight
+// (flight_spread.h LaneLine) along the way it flies.
 void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms,
-                 const sortie::RunSpec& run={}) noexcept;
+                 const sortie::RunSpec& run={},const spread::Place& place={}) noexcept;
+// Its way out after its pass (Away): its lane's break (flight_spread.h BreakAway).
+// Inline: the flight code (jet_flight.cpp) calls it, and it is all the lane's own geometry (no sortie state machine).
+inline void SortieAway(const Jet& j,float* away) noexcept { spread::BreakAway(j.sortie.line,j.sortie.place,away); }
 // Its guidance this frame (Guide, before its kind's): true when it set `want` / `speed` (and the fire gates); false: its
 // kind's own (the gunship's circle) or done.
 bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,

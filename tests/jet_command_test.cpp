@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/booster.h"
 
 // Flight code is linked as-is. Only Patrol/Level are exercised; other game services fail closed.
 namespace crew {
@@ -123,16 +126,22 @@ int main() {
               j.anchor[0]==player.pos[0],"let go: it works round the player it escorts");
         ApplyMapCommand(j,Command{Order::guard,{elsewhere[0],elsewhere[1],elsewhere[2]}},1000);
         check(SupportEntryOf(j,call)==SupportEntry::superseded,"the player's own guard elsewhere is never taken back");
-        ApplyMapCommand(j,guard,1000);j.cmdMoving=false;j.mode=Mode::withdraw;
+        ApplyMapCommand(j,guard,1000);j.cmdMoving=false;j.phase=jetphase::Phase::withdraw;
         check(SupportEntryOf(j,call)==SupportEntry::gone,"withdrawing: nothing to let go");
-        j.mode=Mode::patrol;j.reap=true;
+        j.phase=jetphase::Phase::fly;j.reap=true;
         check(SupportEntryOf(j,call)==SupportEntry::gone,"being deleted: nothing to let go");
         j.reap=false;j.sortie.pass=SortiePass::gunRun;
         check(SupportEntryOf(j,call)==SupportEntry::sortie,"a sortie flies its own one pass: not arrived, not superseded");
     }
-    for(const Mode mode:{Mode::takeoff,Mode::withdraw,Mode::recover,Mode::bomb}) {
+    for(const Mode mode:{Mode::takeoff,Mode::bomb}) {
         Jet j{};j.mode=mode;ApplyMapCommand(j,guard,1000);
-        check(j.mode==mode,"orders preserve dedicated lifecycle and bombing modes");
+        check(j.mode==mode,"orders preserve takeoff and bombing modes");
+    }
+    for(const jetphase::Phase phase:{jetphase::Phase::withdraw,jetphase::Phase::recover}) {
+        Jet j{};j.phase=phase;j.mode=Mode::chase;j.modeAt=5;ApplyMapCommand(j,guard,1000);
+        check(j.phase==phase && j.mode==Mode::chase && j.modeAt==5,"orders leave a jet on its way out (withdraw, recover) as it is");
+        ApplyMapFocus(j,ObjRef{},1000);
+        check(j.phase==phase && j.mode==Mode::chase && j.modeAt==5,"...and a focus order too");
     }
     Jet carrierDrone{};carrierDrone.drone.mother=&carrierDrone;carrierDrone.drone.carried=true;
     float farPos[3]={-10000.0f,0.0f,-10000.0f};

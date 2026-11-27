@@ -6,13 +6,16 @@
 // the world 0x17E720, hknp motion type 0x11B14A0 0 static / 1 keyframed / 2 dynamic, hknpBody flags +0x54 and its
 // height) and every proxy constraint (its two proxies, added to the world 0x11C1220).
 // Read only: the natives called are the game's own queries, each signature checked first; every read is under SEH.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
 #include "edf41bike.h"
 #include "edf41classes.h"
 #include "memory.h"
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 
 namespace crew {
 namespace {

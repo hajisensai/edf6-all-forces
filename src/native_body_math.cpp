@@ -1,5 +1,7 @@
 #include "native_body_math.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include <algorithm>
 #include "perf_probe.h"
 #include "team_native_logic.h"
 #include "edf/memory.h"

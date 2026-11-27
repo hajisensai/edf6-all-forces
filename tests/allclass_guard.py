@@ -13,10 +13,15 @@
 """
 from __future__ import annotations
 
+import functools
 import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+import gen_config  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 failures: list[str] = []
 
@@ -25,24 +30,14 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    return '\n'.join(line.split('//', 1)[0] for line in text.splitlines())
+code_only = srcscan.code
+body = functools.partial(srcscan.body, regex=True, braces=False)
 
 
 def raw(root: str, rel: str) -> str:
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(root, rel), encoding='utf-8') as f:
-        return f.read()
-
-
-def body(text: str, signature: str) -> str:
-    m = re.search(signature + r'[^;{]*\{', text)
-    if not m:
-        return ''
-    depth, i = 1, m.end()
-    while depth and i < len(text):
-        depth += {'{': 1, '}': -1}.get(text[i], 0)
-        i += 1
-    return text[m.end():i - 1]
+        return gen_config.expand(f.read())
 
 
 def main() -> int:
@@ -131,14 +126,17 @@ def main() -> int:
 
     # Installed at load, the option wired.
     plugin = code_only(raw(root, 'src/plugin.cpp'))
-    if 'InstallAllClassesRide();' not in plugin:
-        fail('plugin.cpp: InstallAllClassesRide is not called at load')
+    installs = raw(root, 'src/module_table.h')
+    installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+    installs = installs[:installs.index('\n};')]
+    if installs.count('Id::kAllClassesRide,&Install<&InstallAllClassesRide>}') != 1:
+        fail('module_table.h kInstalls: InstallAllClassesRide is not installed at load (once)')
     if 'n.allClassesRide=ReadBool(L"AllClassesRide",n.allClassesRide);' not in plugin:
         fail('plugin.cpp: AllClassesRide is not read')
     if 'allClassesRide=%d' not in plugin:
         fail('plugin.cpp: AllClassesRide is not logged')
-    if not re.search(r'bool allClassesRide=true;', raw(root, 'src/crew.h')):
-        fail('crew.h: allClassesRide must default on')
+    if not re.search(r'bool allClassesRide=true;', raw(root, 'src/config.h')):
+        fail('config.h: allClassesRide must default on')
     ini = raw(root, 'EDF6VehicleCrew.ini')
     m = re.search(r'((?:^;.*\n)+)AllClassesRide=1\s*$', ini, re.M)
     if not m:

@@ -10,18 +10,23 @@
 // alone (the lean and the nacelles follow it; the vertical eases in over `respond` already).
 //
 // The lift: the stock heli's (V506: docs/aircraft-re.md, heli_movement [0][1] = 34, the lift of a full rotor in m/s^2,
-// less gravity 9.8: 24.2 m/s^2 over a hover), for a craft heavier than the heli its mass^(-1/3) share of it (the
+// less gravity 9.8: 24.2 m/s^2 over a hover), for a craft heavier than kFullLiftMass its mass^(-1/3) share of it (the
 // square-cube law: lift goes with the rotor area, size^2; mass with size^3; so the excess acceleration with
 // 1/size = mass^(-1/3)), never more than the heli's; times ini PlayerRotorLift (1 the default, 0 the NPCs' one budget).
 // Never less than the kind's thrust either (Accel): a light craft (the blast drones: 30 m/s^2) climbed on all of it.
-// kHeliMass: the V506 is a UH-60 class utility helicopter, ~10 t at its takeoff weight (an assumption: the game has no
-// mass for it).
+// kFullLiftMass: the mass the share is 1 at, the craft weighed as the jets are (pylib/vcobjects.py JET_MASSES). It was
+// the V506's ~10 t (a UH-60 class helicopter's takeoff weight, an assumption: the game has no mass for it) when the
+// carrier weighed 120 t, its lift then 10.6 m/s^2, the lift that made the carrier fly (the user above; tools/
+// hover_lift_check.cpp: climbing 1 s into braking). The jets re-weighed as their real prototypes (2026-11-26, the
+// carrier a C-5M's 327.2 t: x2.727) it is re-weighed with them, so every rotor craft keeps the lift it had (the carrier
+// and the Helicarrier 10.6, the drones the heli's): 10 t x 327.2 / 120 = 27.3 t. Weighing the V506 on the jets'
+// measure instead (a UH-60's ~6 t empty + fuel) would leave the carrier 6.4 m/s^2 and sinking.
 #pragma once
 #include <cmath>
 
 namespace crew {
 namespace hover {
-constexpr float kHeliLift=34.0f-9.8f,kHeliMass=10000.0f;
+constexpr float kHeliLift=34.0f-9.8f,kFullLiftMass=10000.0f*327200.0f/120000.0f;
 
 struct Budget { float thrust,lift,jerk; };   // m/s^2, m/s^2 (0: one budget for all three axes), m/s^3 (0: none)
 
@@ -30,7 +35,7 @@ inline float Len3(const float* a) noexcept { return std::sqrt(a[0]*a[0]+a[1]*a[1
 // The player's lift for a craft of `mass` kg (see the top), times `scale` (ini PlayerRotorLift).
 inline float PlayerLift(float mass,float scale) noexcept {
     if(!(mass>0.0f) || !(scale>0.0f))return 0.0f;
-    const float share=std::cbrt(kHeliMass/mass);
+    const float share=std::cbrt(kFullLiftMass/mass);
     return kHeliLift*(share<1.0f ? share : 1.0f)*scale;
 }
 

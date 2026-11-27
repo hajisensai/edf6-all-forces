@@ -1,7 +1,6 @@
 // The route guide hook on a private EDF.dll mapping: every constructor call site redirected, and a guide made
 // through each patched site corrected (the constructor itself stood in for: it needs the running game). Never starts
 // the game.
-#include "../src/crew.h"
 #include "../src/memory.h"
 namespace crew {
 int redirectCount=0,failAt=0;

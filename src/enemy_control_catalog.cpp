@@ -7,7 +7,8 @@
 #include "enemy_control_walking_guns.h"
 #include "enemy_control_command_actions.h"
 #include "enemy_control_types.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "mapcmd.h"
 #include "memory.h"
 #include <cstring>
 #include <cwchar>

@@ -313,12 +313,12 @@ class GameAssets(unittest.TestCase):
             if key is False:
                 self.assertEqual(m['ragdoll'][0].lower(), 'app:/object/ragdoll_v506_heli.shkt')
                 continue
-            self.assertEqual(m['ragdoll'][0].lower(), 'app:/object/'+ac.FILES[key].lower())
+            self.assertEqual(m['ragdoll'][0].lower(), 'app:/object/'+ac.file_of(key).lower())
             if key in jet_models.ANIMATIONS:
                 cas = jet_models.ANIMATIONS[key]
                 self.assertEqual(m['animation_model'][1].lower(), 'app:/object/'+cas.lower())
                 self.assertIn('OBJECT/'+cas, out)
-            self.assertIn('OBJECT/'+ac.FILES[key], out)
+            self.assertIn('OBJECT/'+ac.file_of(key), out)
             # Geometry/frame must not depend on whether a human or the AI owns it.
             values = [[vc._value(v) for v in row] for row in m['heli_rigid_body'][:2]]
             if key in keys:
