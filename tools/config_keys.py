@@ -2547,6 +2547,7 @@ K('TestDriveCycle', 'testDriveCycle', BOOL, False,
       '; 6 s idle, again. 0: off.')),
 K('DebugSpawn', 'debugSpawn', BOOL, False,
   doc=('// The debug spawn tool (debug_spawn.cpp): OFF by default. Off: nothing preloaded, no key read, nothing drawn.',),
+  note=('off unless the ini says 1 (an old ini without it: off)',),
   ini=(
       '',
       '; ---- 调试召唤（测试用，默认关闭）----',

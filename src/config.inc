@@ -537,7 +537,7 @@
     bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet
     bool testDriveCycle=false;      // tests (tests/autopilot): the player driver's throttle a fixed cycle (drivegear.cpp TestDriveInput)
     // The debug spawn tool (debug_spawn.cpp): OFF by default. Off: nothing preloaded, no key read, nothing drawn.
-    bool debugSpawn=false;
+    bool debugSpawn=false;          // off unless the ini says 1 (an old ini without it: off)
     int debugSpawnKey=0x77;         // ...its menu opened / shut (F8; Windows virtual-key codes, 0: none)
     int debugSpawnPrevKey=0x74;     // ...the row before (F5)
     int debugSpawnNextKey=0x75;     // ...the row after (F6)
