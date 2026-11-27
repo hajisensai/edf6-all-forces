@@ -4659,13 +4659,6 @@
     "tests/test_level_list.py"
    ]
   },
-  "live_set": {
-   "labels": [
-    "plugin-core",
-    "plugin-native"
-   ],
-   "scripts": []
-  },
   "loadout_generate": {
    "labels": [
     "autoturret-tools",
@@ -6694,23 +6687,6 @@
    ],
    "scripts": []
   },
-  "render_pose": {
-   "labels": [
-    "edf41",
-    "native-codec",
-    "plugin-air",
-    "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
-    "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
-    "plugin-support",
-    "test-data"
-   ],
-   "scripts": []
-  },
   "render_record": {
    "labels": [
     "plugin-core",
@@ -7481,7 +7457,7 @@
   },
   "srcscan": {
    "labels": [
-    "plugin-core",
+    "plugin-native",
     "pylib-model",
     "test-data"
    ],
@@ -7520,6 +7496,24 @@
     "plugin-native"
    ],
    "scripts": []
+  },
+  "step_objects": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "step_objects_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/step_objects_guard.py"
+   ]
   },
   "stock_store_loadouts": {
    "labels": [
