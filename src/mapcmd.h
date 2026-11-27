@@ -279,9 +279,6 @@ struct MapCommandReadout {
     Ping ping[kPings]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
-// A card button's word (hudtext.inc) and why one is greyed (map_buttons.h Why: its hover text, the refusal's note).
-const wchar_t* CardWordText(mapbtn::Id b) noexcept;
-const wchar_t* CardWhyText(mapbtn::Why why) noexcept;
 // hud.cpp: the 「摆放」 panel's click targets as drawn (`codes`: map_buttons.h-style codes, kPlace* below), for the clicks.
 constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePageDown=0x2002;   // a row's code: its kEntries index
 constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;

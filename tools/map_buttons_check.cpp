@@ -23,11 +23,11 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
-    static_assert(kCount==26,"a width for every button");
+    static_assert(kCount==24,"a width for every button");
     const float widths[][kCount]={
-        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,110,120,120,110,100,90,80,80,150,190,120,100},     // English-ish
-        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,80,80,80,80,70,70,70,70,120,170,100,80},           // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150,40},           // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,120,120,110,100,90,80,150,190,120,100},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,80,80,80,70,70,70,120,170,100,80},           // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150,40},           // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];
@@ -69,47 +69,89 @@ void Layouts() {
     Rect r[kCount];
     Check(Flow(w,kCount,1920.0f,100.0f,30.0f,6.0f,16.0f,r)==2,"a short screen: as many rows as fit",Flow(w,kCount,1920.0f,100.0f,30.0f,6.0f,16.0f,r));
 }
-// The card's buttons: their orders, which arm a click, which are shown for a selection.
+// The card's buttons (the user, 2026-11-27: 「感觉很多没用的指令。删一点或者整合一下」; 「各种按钮只在能操作的时候点亮。
+// 车上都是满人怎么上车」): their orders, which arm a click, which are shown for a selection and why one is greyed.
+std::uint32_t Bits(std::initializer_list<mapcmd::Order> orders) {
+    std::uint32_t b=0;
+    for(const mapcmd::Order o:orders)b|=1u<<static_cast<unsigned>(o);
+    return b;
+}
+int ShownCount(const CardSelection& c) {
+    int n=0;
+    for(int i=0;i<kCount;++i)n+=Shown(static_cast<Id>(i),c);
+    return n;
+}
 void Card() {
     using mapcmd::Order;
     Check(OrderOf(Id::move)==Order::move && OrderOf(Id::attackMove)==Order::attackMove && OrderOf(Id::release)==Order::none &&
-          OrderOf(Id::recruit)==Order::recruit && OrderOf(Id::sweep)==Order::none,"each order button's order");
-    Check(Arms(Id::move) && Arms(Id::attackMove) && Arms(Id::guard) && !Arms(Id::follow) && !Arms(Id::release) && !Arms(Id::sweep),
+          OrderOf(Id::sweep)==Order::none && OrderOf(Id::holdFire)==Order::holdFire && OrderOf(Id::decoy)==Order::decoy &&
+          OrderOf(Id::pace)==Order::none,"each order button's order");
+    Check(Arms(Id::move) && Arms(Id::attackMove) && Arms(Id::reverseMove) && !Arms(Id::follow) && !Arms(Id::release) &&
+          !Arms(Id::sweep) && !Arms(Id::holdFire) && !Arms(Id::altitude) && !Arms(Id::sprint) && !Arms(Id::decoy) && !Arms(Id::hold),
           "the point orders' buttons arm a click on the map, the others act at once");
-    const std::uint32_t vehicle=(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::guard))|
-                                (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove))|
-                                (1u<<static_cast<unsigned>(Order::hold));
-    int shown=0,squadOnly=0;
-    for(int i=0;i<kCount;++i) {
-        const Id b=static_cast<Id>(i);
-        shown+=Shown(b,vehicle,false);
-        squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation);
-    }
-    Check(shown==9 && !squadOnly && Shown(Id::guard,vehicle,false) && Shown(Id::smoke,vehicle,false) && !Available(Id::smoke,vehicle) &&
-          !Shown(Id::pace,vehicle,false),
-          "a vehicle selected: move, attack-move, guard, hold, stop, smoke / decoy (greyed), the sweep and its switch; no squad order or tool",shown);
-    // HOLD (H, 2026-10-19): an order button that acts at once (each unit's own spot, no click on the map).
-    Check(OrderOf(Id::hold)==Order::hold && !Arms(Id::hold) && OnCard(Id::hold),"HOLD: its button, acting at once");
-    // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): ENGAGE AT WILL and FOCUS FIRE
-    // have no button whatever the selection takes (the right button gives a focus); ALL OUT has one. GUARD is back on
-    // the card with Broken Arrow's controls (2026-11-27), arming a click as the point orders do.
-    const std::uint32_t every=0xFFFFFFFFu;
-    Check(Shown(Id::guard,every,true) && Arms(Id::guard) && !Shown(Id::engage,every,true) && !Shown(Id::focus,every,true),
-          "a GUARD button; no ENGAGE / FOCUS button");
-    // Broken Arrow's orders: the moves arm a click, the switches act at once; the paced march a squad tool.
-    Check(Arms(Id::fastMove) && Arms(Id::reverseMove) && Arms(Id::unloadAt) && !Arms(Id::holdFire) && !Arms(Id::altitude) &&
-          !Arms(Id::sprint) && !Arms(Id::smoke) && !Arms(Id::decoy) && OrderOf(Id::holdFire)==Order::holdFire &&
-          OrderOf(Id::decoy)==Order::decoy && OrderOf(Id::pace)==Order::none,"Broken Arrow's buttons: the moves arm a click, the rest at once");
-    Check(Shown(Id::pace,0u,true) && !Shown(Id::pace,0u,false) && Available(Id::pace,0u),"the paced march's switch: a squad tool");
-    Check(Shown(Id::dismountAll,1u<<static_cast<unsigned>(Order::dismountAll),false) && OrderOf(Id::dismountAll)==Order::dismountAll &&
-          !Arms(Id::dismountAll) && OrderOf(Id::withdraw)==Order::withdraw,"ALL OUT: its button, acting at once");
+    Check(OpensMenu(Id::dismount) && OpensMenu(Id::formation) && !Arms(Id::dismount) && !OpensMenu(Id::board),
+          "DISMOUNT and FORMATION open their menus");
+    // The trimmed card: off it GUARD (attack-move, G), UNLOAD AT / ALL OUT (DISMOUNT's menu), RECRUIT (FOLLOW), DISMISS
+    // (WITHDRAW), the two switches (FORMATION's menu), ENGAGE / FOCUS; FAST MOVE and SMOKE gone from the enum.
     int card=0;
     for(int i=0;i<kCount;++i)card+=OnCard(static_cast<Id>(i));
-    Check(card==kCardCount && card==kCount-2,"every button but the two cut is on the card once",card);
-    int idle=0;
-    for(int i=0;i<kCount;++i)idle+=Shown(static_cast<Id>(i),0u,false);
-    Check(idle==2 && Shown(Id::sweep,0u,false) && Shown(Id::health,0u,false),"nothing selected: the sweep and its switch alone",idle);
-    Check(Shown(Id::formation,0u,true) && !Shown(Id::formation,0u,false),"squads selected: their formation tool");
+    Check(card==kCardCount && card==15,"the card's buttons, each once",card);
+    for(const Id b:{Id::guard,Id::unloadAt,Id::dismountAll,Id::recruit,Id::dismiss,Id::health,Id::pace,Id::engage,Id::focus})
+        Check(!OnCard(b) && !Shown(b,CardSelection{1,1,1,0,0,0,0,0,4,0xFFFFFFFFu}),"a merged command has no button",static_cast<int>(b));
+    Check(MenuDismountOrder(kMenuDismountSquads)==Order::dismount && MenuDismountOrder(kMenuUnloadAt)==Order::unloadAt &&
+          MenuDismountOrder(DismountEntry(mapcmd::kDismountKeepDriver))==Order::dismountAll && MenuDismount(kMenuUnloadAt) &&
+          MenuDismountParam(kMenuDismountSquads)>=0x1000u,"DISMOUNT's menu: the squads', ALL OUT's choices, UNLOAD AT");
+    Check(MenuSwitch(kMenuPace) && MenuSwitch(kMenuHealth) && !MenuSwitch(MenuEntry(false,3)) && !MenuSwitch(MenuEntry(true,0)),
+          "FORMATION's menu: the two switches' rows apart from the shapes");
+    // Nothing selected: SWEEP alone (it sends the recruited squads).
+    const CardSelection none{};
+    Check(ShownCount(none)==1 && Shown(Id::sweep,none) && Available(Id::sweep,none),"nothing selected: the sweep alone",ShownCount(none));
+    // The usual selection, squads on foot: one row of 12 at the most.
+    const std::uint32_t foot=Bits({Order::none,Order::guard,Order::follow,Order::engage,Order::focus,Order::board,Order::move,
+                                   Order::attackMove,Order::hold,Order::formation,Order::holdFire,Order::sprint,Order::dismiss});
+    CardSelection squads{2,2,2,0,0,0,0,0,4,foot};
+    Check(ShownCount(squads)==kCardMostUsual && kCardMostUsual<=12,"squads on foot: one row of 12",ShownCount(squads));
+    Check(Available(Id::board,squads) && Available(Id::withdraw,squads) && Available(Id::follow,squads) && Available(Id::sprint,squads) &&
+          !Shown(Id::reverseMove,squads) && !Shown(Id::altitude,squads) && !Shown(Id::decoy,squads),
+          "squads on foot: BOARD (seats free), WITHDRAW (their dismissal), FOLLOW, SPRINT; no tank's, aircraft's or jet's");
+    Check(StateOf(Id::dismount,squads)==Why::noneRiding,"squads on foot: DISMOUNT greyed (none riding)");
+    // BOARD by the seats free (「车上都是满人怎么上车」): none free in the selected vehicles / in the one BOARD would pick.
+    CardSelection full=squads;full.boardRoom=0;
+    Check(StateOf(Id::board,full)==Why::noRoom,"BOARD: no free seat anywhere: greyed, no room");
+    full.vehicles=1;full.units=3;
+    Check(StateOf(Id::board,full)==Why::noRoomSelected,"BOARD: the selected vehicle full: greyed, that vehicle full");
+    full.boardRoom=1;
+    Check(StateOf(Id::board,full)==Why::none,"BOARD: one seat free: lit");
+    CardSelection riding{2,2,0,2,0,0,0,0,0,Bits({Order::none,Order::dismount,Order::move,Order::hold})};
+    Check(StateOf(Id::board,riding)==Why::allRiding && StateOf(Id::dismount,riding)==Why::none &&
+          StateOf(Id::formation,riding)==Why::allRiding,"squads all riding: BOARD and FORMATION greyed, DISMOUNT lit");
+    // A scripted squad (the mission's) takes nothing: every button greyed with that reason.
+    CardSelection scripted{1,1,1,0,1,0,0,0,4,0u};
+    Check(StateOf(Id::move,scripted)==Why::scripted && StateOf(Id::board,scripted)==Why::scripted &&
+          StateOf(Id::withdraw,scripted)==Why::scripted && OrderState(Order::guard,scripted)==Why::scripted,
+          "a scripted squad: greyed, the mission's");
+    // A tank: its moves, REVERSE, HOLD FIRE, STOP; DISMOUNT for its riders; no squad's.
+    CardSelection tank{1,0,0,0,0,1,0,0,0,Bits({Order::none,Order::guard,Order::move,Order::attackMove,Order::hold,
+                                               Order::reverseMove,Order::holdFire,Order::dismountAll,Order::unloadAt})};
+    Check(Shown(Id::reverseMove,tank) && Available(Id::dismount,tank) && !Shown(Id::board,tank) && !Shown(Id::formation,tank) &&
+          !Shown(Id::sweep,tank) && !Shown(Id::withdraw,tank) && !Shown(Id::sprint,tank),
+          "a tank: REVERSE and DISMOUNT; no squad's, no SWEEP");
+    Check(StateOf(Id::follow,tank)==Why::cannot,"a tank: FOLLOW greyed");
+    // A jet: ALTITUDE, SPRINT (the afterburner), DECOY greyed with none left, WITHDRAW.
+    CardSelection jet{1,0,0,0,0,0,1,1,0,Bits({Order::none,Order::move,Order::altitude,Order::sprint,Order::withdraw})};
+    Check(Available(Id::altitude,jet) && Available(Id::sprint,jet) && StateOf(Id::decoy,jet)==Why::noDecoys && Available(Id::withdraw,jet),
+          "a jet: ALTITUDE, SPRINT, WITHDRAW lit; DECOY greyed (none left)");
+    // Everything at once: the card whole, never more.
+    const CardSelection all{6,2,1,1,0,2,2,1,4,0xFFFFFFFFu};
+    Check(ShownCount(all)==kCardCount,"everything selected: the whole card",ShownCount(all));
+    // The keys answer always (their order's button's state, or the selection's takes): G guards, U / Shift+N unload.
+    Check(OrderState(Order::guard,squads)==Why::none && OrderState(Order::guard,jet)==Why::cannot &&
+          OrderState(Order::unloadAt,tank)==Why::none && OrderState(Order::dismountAll,squads)==Why::noneRiding &&
+          OrderState(Order::board,full)==Why::none && OrderState(Order::board,riding)==Why::allRiding,
+          "the keys: G, U, Shift+N, BOARD by the state");
+    for(int o=0;o<=static_cast<int>(mapcmd::kLastOrder);++o)
+        Check(OrderState(static_cast<Order>(o),none)!=Why::hidden && OrderState(static_cast<Order>(o),squads)!=Why::hidden,
+              "a key's state is never hidden",o);
 }
 
 // The support bar: the catalog's names grouped by what is before their "·" (support_dispatch.cpp SupportCallName order),

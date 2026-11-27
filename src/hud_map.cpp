@@ -7,6 +7,7 @@
 #include "strikes.h"
 #include "damagestats.h"
 #include "mapcmd.h"
+#include "map_card_text.h"
 #include "qmark.h"
 
 namespace crew {

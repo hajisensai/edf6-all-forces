@@ -931,6 +931,24 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow))|
                                (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove));
     }
+    {   // The card's summary of the selection (mapcmd.cpp CardOf; map_buttons.h StateOf): the selected marks counted, the
+        // orders taken but the retired; no rider in the selection (DISMOUNT greyed), and the selected crawlers full in the
+        // first scene (BOARD greyed: 「车上都是满人怎么上车」), a seat free in the roster's.
+        mapbtn::CardSelection& k=sceneCmd.card;
+        k=mapbtn::CardSelection{};
+        for(int i=0;i<sceneCmd.count;++i) {
+            const CmdMark& u=sceneCmd.unit[i];
+            if(!u.selected)continue;
+            ++k.units;
+            if(u.air){++k.aircraft;k.jets+=u.owner==kCmdOwnerJet;}
+            else if(std::strstr(u.name," x")==nullptr)++k.vehicles;
+        }
+        k.squads=k.onFoot=sceneCmd.selectedSquads;
+        for(int o=0;o<=static_cast<int>(mapcmd::kLastOrder);++o)
+            if(((sceneCmd.allowedOrders>>o)&1u) && !mapcmd::Retired(static_cast<Order>(o)))k.takes|=1u<<o;
+        for(const Order o:{Order::dismount,Order::dismountAll,Order::unloadAt})k.takes&=~(1u<<static_cast<unsigned>(o));
+        k.boardRoom=squadCount==9 ? 4 : 0;
+    }
     // The rows as npcai.cpp SquadRows gives them: sorted by rank (stable), a script's last; the tally of them all.
     for(int i=1;i<sceneCmd.squads;++i)for(int j=i;j>0 && sceneCmd.squad[j].rank<sceneCmd.squad[j-1].rank;--j) {
         std::swap(sceneCmd.squad[j],sceneCmd.squad[j-1]);std::swap(sceneCmd.squadSelected[j],sceneCmd.squadSelected[j-1]);
@@ -976,8 +994,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     } else {
         int wanted=0;
         for(int i=0;i<mapbtn::kCount;++i)
-            wanted+=mapbtn::Shown(static_cast<mapbtn::Id>(i),sceneCmd.selected>0 ? sceneCmd.allowedOrders : 0u,
-                                   sceneCmd.selectedSquads>0);
+            wanted+=mapbtn::Shown(static_cast<mapbtn::Id>(i),sceneCmd.allowed ? sceneCmd.card : mapbtn::CardSelection{});
         if(sceneButtons!=wanted){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,wanted);}
         // The support bar: a row (and its chips) for every kind of support, every entry reachable by a click.
         bool reach[kMapSupports]{};
@@ -1056,9 +1073,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             // Its word, and its key's badge in its corner when it has a key (hud_map.cpp MapButtons, Broken Arrow's).
             const mapbtn::Id id=static_cast<mapbtn::Id>(sceneButtonId[i]);
             const bool keyed=id==mapbtn::Id::attackMove || id==mapbtn::Id::release || id==mapbtn::Id::withdraw ||
-                id==mapbtn::Id::fastMove || id==mapbtn::Id::reverseMove || id==mapbtn::Id::unloadAt || id==mapbtn::Id::holdFire ||
-                id==mapbtn::Id::altitude || id==mapbtn::Id::sprint || id==mapbtn::Id::smoke || id==mapbtn::Id::decoy ||
-                id==mapbtn::Id::dismountAll;
+                id==mapbtn::Id::reverseMove || id==mapbtn::Id::dismount || id==mapbtn::Id::holdFire ||
+                id==mapbtn::Id::altitude || id==mapbtn::Id::sprint || id==mapbtn::Id::decoy;
             if(own!=(keyed ? 2 : 1)){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
         }
     }
@@ -1164,7 +1180,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         for(int i=0;i<sceneButtons;++i)formationShown=formationShown || sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation);
         const int wanted=sceneCmd.formationMenu && formationShown ?
             (sceneCmd.formationGuard ? static_cast<int>(std::size(npc::formation::kGuard)) : 0)+
-            (sceneCmd.formationMarch ? static_cast<int>(std::size(npc::formation::kMarch)) : 0) : 0;
+            (sceneCmd.formationMarch ? static_cast<int>(std::size(npc::formation::kMarch)) : 0)+2 : 0;   // +2: the switches' rows
         if(sceneMenuCount!=wanted){++textFailed;std::printf("FAIL formation menu rows: %d of %d\n",sceneMenuCount,wanted);}
         for(int i=0;i<sceneMenuCount;++i) {
             const float* m=sceneMenu[i];
