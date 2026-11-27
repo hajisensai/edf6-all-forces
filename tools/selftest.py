@@ -3908,6 +3908,8 @@ def heli_sight_after_aim_lines() -> None:
             return True
         if key == 'Edf41MaterialCompatibility':
             return key.lower() in src('tools/installer.py').lower() and 'material_compat=' in src('tools/installer.py')
+        if f'L"{key}"' in src('src/map_keys.h'):   # the map's order keys (map_keys.h kIniW), read in one loop
+            return 'ReadInt(mapkeys::kIniW[i],' in plugin
         for prefix, known in suffixes.items():
             if key.startswith(prefix) and key[len(prefix):] in known:
                 return any(f'L"{prefix}%ls"' in m for m in modules.values())
