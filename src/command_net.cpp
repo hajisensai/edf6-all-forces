@@ -6,6 +6,10 @@
 #include "memory.h"
 #include <cstring>
 #include <cwchar>
+#include "config.h"
+#include "heli.h"
+#include "netprobe.h"
+#include "mapcmd.h"
 namespace crew {
 namespace {
 command_net::Session commands;

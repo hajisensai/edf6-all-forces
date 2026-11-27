@@ -2,7 +2,7 @@
 // of native state/counters and accepted wire events; this layer never coalesces
 // shots, guesses a family from a team, or sends function addresses.
 #include "enemy_control_gun_factory.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cstring>
 namespace crew::enemy_native {

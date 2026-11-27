@@ -7,7 +7,7 @@
 #include "room_sync.h"
 #include "room_sync_logic.h"
 #include "coop_attr.h"
-#include "crew.h"
+#include "plugin_log.h"
 #include "loadout_store.h"
 #include "member_config.h"
 #include "support_config.h"

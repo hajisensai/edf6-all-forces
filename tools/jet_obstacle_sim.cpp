@@ -50,6 +50,15 @@
 #include <initializer_list>
 #include <string>
 #include <vector>
+#include "../src/plugin_log.h"
+#include "../src/booster.h"
+#include "../src/dreadnought.h"
+#include "../src/sazabi.h"
+#include "../src/seats.h"
+#include "../src/subcarrier.h"
+#include "../src/world.h"
+#include "../src/mapbounds.h"
+#include "../src/damagestats.h"
 
 namespace crew {
 unsigned char* image=nullptr;

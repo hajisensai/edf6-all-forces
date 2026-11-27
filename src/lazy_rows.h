@@ -9,7 +9,7 @@
 // If the allocation fails the table stays empty for good: the caller's feature refuses to bind
 // (one log line), never a half-initialised table.
 #pragma once
-#include "crew.h"
+#include "plugin_log.h"
 #include <atomic>
 #include <cstddef>
 #include <new>

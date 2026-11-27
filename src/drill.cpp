@@ -19,7 +19,22 @@
 // sheds DrillKillCool of it (the user, 2026-10-06: "改成击杀减热量"): an enemy it bit that is dead within
 // kKillWindowMs counts as its kill (the charge's own kill is not reported to the plugin: the bite is the evidence).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "objref.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "booster.h"
+#include "drill.h"
+#include "heli.h"
+#include "map.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "py_consts.inc"
 #include "body506.h"
 #include "exhaust_pose.h"

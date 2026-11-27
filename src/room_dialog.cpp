@@ -16,7 +16,6 @@
 //     mission starting: MissionSync / the preload, whatever thread): the dialog's frame runs while it is on screen.
 #include "room_dialog.h"
 #include "code_signatures.h"
-#include "crew.h"
 #include "edf/patch.h"
 #include "edf/wstr.h"
 #include "game_dialog.h"

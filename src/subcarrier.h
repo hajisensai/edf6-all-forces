@@ -2,7 +2,10 @@
 // carriers the plugin drives, so no one else reads a carrier's matrix or keeps a list of carriers of its own.
 // Game thread only.
 #pragma once
-#include "crew.h"
+#include "objref.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 
 namespace crew {
 // The hull (the SGO's rigid box, testrange/gen.py 'edf6tr_sub_carrier_mission' rigid: centre (0, 178.08, -7.58),
@@ -40,4 +43,26 @@ bool SubmitSubmarineDrone(const ObjRef& parent,const float* from,const float* no
 // The follower gauge's redirect (the carriers' gauges and panels, and hud.cpp's vehicle HUD drawn from it): only the
 // draw's own code is checked, nothing of the carrier's profile. At load, once.
 bool InstallGauge() noexcept;
+}  // namespace crew
+
+namespace crew {
+void ResetSubs() noexcept;        // subcarrier.cpp
+bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
+
+// subcarrier.cpp: the submarine carrier (潜水母艦, docs/subcarrier-re.md), a 506 body from EDF6VC_SUB_CARRIER.SGO
+// (tools/make_sub.py) driven by the plugin: it sits surfaced, follows the player at a ship's pace, turns its bow
+// on the nearest enemy, fires its turret guns and homing missiles, reloads aboard; its HP shows as a follower gauge.
+bool IsSub(const void* vehicle) noexcept;         // a 506 body with the carrier's mark
+void SubFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook (crew.cpp SubStep), carriers only
+bool InstallSub() noexcept;                       // after InstallJets (it chains onto the 506 physics slot)
+void PreloadSub() noexcept;                       // from the mission's player preload
+// A carrier made at run time on the ground at `pos` (metres; it is raised to sit on the highest ground under
+// its hull), its bow along `heading` (horizontal part used), friend, NPC pilot: the vehicle, or nullptr (its
+// files not installed or not preloaded this mission, three already out, the game failed to build it).
+unsigned char* SubLaunch(const float* pos,const float* heading) noexcept;
+// The live carrier nearest to `from`: a point on its flat bow deck (the hull box top, 193 m over its origin)
+// nearest to `from`, into `deck`; false with no carrier out.
+bool SubDeck(const float* from,float* deck) noexcept;
+// Horizontal metres from `p` to the nearest live carrier's hull footprint (0 over it), -1 with none.
+float SubHullGap(const float* p) noexcept;
 }  // namespace crew

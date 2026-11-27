@@ -4,7 +4,8 @@
 // stick (seat +0x2C0 steer, +0x2C4 throttle: npcpost.cpp kSeatSteer / kSeatThrottle) is cleared every frame just before
 // the stock input reads it (crew.cpp InputHook, after every plugin step that writes a stick), whoever sits there: a
 // player, an NPC, the stock AI. Online the driver's machine runs that input: every machine clears it alike.
-#include "crew.h"
+#include "edf_layout.h"
+#include "emplacement.h"
 #include "body506.h"
 #include "layout.h"
 #include "memory.h"

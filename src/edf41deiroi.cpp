@@ -6,7 +6,9 @@
 // The call is redirected: with a world the stock function runs; without one the same ray is cast through EDF6's map ray (edf41c::
 // GroundHit, 0x11A7EE0) and the result block is filled as 0xA954F0 fills it for the caller: +0x10 the hit fraction along the ray,
 // +0x50 non-null on a hit (0x32221E only tests it; a hit switches the walker to its landing state 0x321490).
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "edf41classes.h"
 #include "memory.h"
 

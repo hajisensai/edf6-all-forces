@@ -7,7 +7,12 @@
 #include "enemy_control_pvp_transport.h"
 #include "command_identity.h"
 #include "support_soldier.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
+#include "scopereticle.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

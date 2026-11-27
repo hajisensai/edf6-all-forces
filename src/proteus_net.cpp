@@ -3,7 +3,10 @@
 // magic PRNT). docs/proteus-online.md.
 #include "proteus_net.h"
 #include "object_net_transport.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace {

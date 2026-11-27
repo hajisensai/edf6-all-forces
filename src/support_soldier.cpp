@@ -8,6 +8,10 @@
 #include "npc_tier.h"
 #include <cmath>
 #include <iterator>
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace support_native {
@@ -147,7 +151,7 @@ void* __fastcall LoadWeaponHook(void* human,const MsvcWide* path,const void* sta
 // A soldier this module made with a player weapon: the attack coefficient a player has (1, the weapon's own damage, as
 // the requester's), not the difficulty's (docs/feature-npc-weapon-tier.md). Every other soldier: the stock one.
 // Only this mission's live entry for this very object: a dead armed soldier's entry stays until FreeEntry reaches it
-// or the mission resets, and a new object at its address (another control block, crew.h ObjRef) is not it.
+// or the mission resets, and a new object at its address (another control block, objref.h ObjRef) is not it.
 float __fastcall CoefHook(void* gameData,float scale,const void* soldier) noexcept {
     bool mine=false;
     if(soldier) {

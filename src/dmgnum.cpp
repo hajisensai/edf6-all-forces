@@ -6,7 +6,11 @@
 // screen, is handed with the local player as its attacker to the stock player path 0x54AAC0, the way the stock hands
 // a vehicle's hit to its rider (0x62F4F0). Everything stays in the stock's own notice and HUD: the number's place,
 // size, merging and fading are the game's.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "payload.h"
 #include "damagestats.h"
 #include "dmgnum.h"
 #include "memory.h"

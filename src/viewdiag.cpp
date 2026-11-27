@@ -18,7 +18,10 @@
 // wrapper only checks the 16 floats and calls on): such a placement is logged (VIEWDIAG umbra) with the call path and,
 // when the stack holds it, the object it belongs to, so a player's log names the source. Nothing about the call changes.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "hud.h"
+#include "view.h"
 #include "heli.h"
 #include "memory.h"
 #include "playarea.h"

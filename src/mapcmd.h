@@ -3,9 +3,9 @@
 // hands it the map's view (MapCommandView) and draws its readout.
 // The orders themselves are the AI modules' state (heli.cpp, jet.cpp, ground.cpp): each takes a command at the one
 // place it picks what it works round (its anchor / post / leader), reusing its own flight, targeting and fight.
-// Included by crew.h.
 #pragma once
 #include "pvp_match.h"
+#include "objref.h"
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"

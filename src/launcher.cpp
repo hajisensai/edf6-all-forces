@@ -18,7 +18,17 @@
 // view the point is the one the player's native pitch names (AxisLoftWant), the camera only observing the landing.
 // katyusha.cpp poses only the Katyusha's rack: a lofted gun on another class (the V603's TOS-1 and the X-Morph missile
 // launcher) is laid onto the same arc by its aim axes, turretcam.cpp (Wants, HighLoft).
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "highcam.h"
+#include "hud.h"
+#include "launchers.h"
+#include "turretcam_api.h"
+#include "payload.h"
 #include "layout.h"
 #include "memory.h"
 #include "rounds.h"
@@ -209,7 +219,7 @@ void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherR
 }  // namespace
 
 // The first ground along the arc from `pos` at `vel` (m/frame), `drop` m/frame^2 added a frame, for at most `frames`
-// frames: `hit` and the frames it took. Shared with playerjet.cpp's bomb impact (crew.h).
+// frames: `hit` and the frames it took. Shared with playerjet.cpp's bomb impact (launchers.h).
 bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept {
     rounds::Arc arc{};
     for(int c=0;c<3;++c){arc.vel[c]=vel[c];arc.drop[c]=drop[c];}

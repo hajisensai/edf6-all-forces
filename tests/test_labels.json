@@ -3,7 +3,15 @@
  "domains": {
   "test-scripts": "the tests themselves: a change selects the tests that run or import the file",
   "test-data": "data files the tests read",
-  "plugin-native": "the game plugins' C++ and what the C++ tests compile",
+  "plugin-enemy": "src/: the player's control of enemies, PvP",
+  "plugin-ports": "src/: the EDF4.1 / EDF5 ports' classes, outfits, maps and campaign",
+  "plugin-support": "src/: support calls, map commands, NPC squads, transports and drops",
+  "plugin-air": "src/: aircraft: helicopters, jets, the player's jets, carriers and the craft's own weapons",
+  "plugin-hud": "src/: the HUD, sights, scopes, first-person views, in-game menus and the world map",
+  "plugin-net": "src/: online play: rooms, the plugin's channels, sync",
+  "plugin-sound": "src/: sound",
+  "plugin-core": "src/: the rest of the plugin: boot, config, the game's layout and objects, vehicles, seats",
+  "plugin-native": "the plugins' shared C++ (common/, third_party/), EDF6AutoTurret's, the build files and the C++ tests",
   "native-codec": "native/: the installer's C++ codecs (edf6cmpl) pylib loads by ctypes",
   "autoturret-tools": "EDF6AutoTurret's Python install tools",
   "installer": "the install chain: installer, release, weapon tables, ownership ledger, test hub client",
@@ -21,18 +29,21 @@
  "ctest": {
   "aim_line_want_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "air_chase_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "airbound_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
@@ -45,7 +56,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-air",
     "pylib-model",
     "testhub",
     "testrange",
@@ -75,19 +86,29 @@
   },
   "aircraft_payload_click": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
    ],
    "scripts": []
   },
   "airdrop_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "airframe_constructor": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -101,19 +122,26 @@
   },
   "airstrike": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "aiworld_capacity": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "aiworld_capacity_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -123,7 +151,9 @@
   },
   "allclass": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -134,7 +164,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -150,7 +180,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -167,7 +197,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -180,7 +218,7 @@
   },
   "allclass_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "test-data"
    ],
    "scripts": [
@@ -189,25 +227,37 @@
   },
   "andryusha_check": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "armor_hud_check": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "armory_logic": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "armory_native": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -218,6 +268,7 @@
   },
   "armory_skin": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -233,7 +284,9 @@
   },
   "aura_logic": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
@@ -245,7 +298,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -265,7 +326,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -278,7 +347,11 @@
   },
   "autoturret_binding": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -296,25 +369,33 @@
   },
   "barga_aim_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "barrage_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "barrage_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "barrel_recoil": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -330,7 +411,7 @@
   },
   "begaruta_family_profile": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -340,7 +421,10 @@
   },
   "boarding_hit": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -352,7 +436,12 @@
   },
   "bullet_pass_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -390,13 +479,19 @@
   },
   "camera_frame_native": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "camera_payload_lifecycle": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
@@ -409,7 +504,8 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testrange",
@@ -422,31 +518,51 @@
   },
   "carrier_drone_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "carrier_drone_transaction": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "carrier_laser_team": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "carrier_support_dispatch": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "chase_cam": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -801,6 +917,7 @@
   },
   "cockpit_canvas_check": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -849,7 +966,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-hud",
     "pylib-model",
     "test-data",
     "testrange",
@@ -913,38 +1030,62 @@
   },
   "code_owner": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "command_identity": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "command_native_dispatch": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "command_protocol": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "commander_logic": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "commander_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -961,6 +1102,7 @@
    "labels": [
     "installer",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -971,7 +1113,11 @@
   },
   "coop_attr": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports"
    ],
    "scripts": []
   },
@@ -981,7 +1127,14 @@
     "edf41",
     "edf5",
     "installer",
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -992,44 +1145,65 @@
   },
   "crash_dump": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "crawl_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "create_jet_native": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "crew_first_use": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
   "damage_stats_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "debug_spawn": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "debug_spawn_files": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "test-data"
    ],
@@ -1043,7 +1217,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1057,7 +1239,7 @@
   },
   "debug_spawn_launch_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -1067,7 +1249,12 @@
   },
   "debug_spawn_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -1079,7 +1266,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1093,7 +1280,7 @@
   },
   "debug_spawn_vehicle_level_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -1103,12 +1290,15 @@
   },
   "decal_depth_native": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "dmgnum_check": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -1119,7 +1309,14 @@
     "edf41",
     "edf5",
     "installer",
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -1130,6 +1327,7 @@
   },
   "dreadnought_deck": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
@@ -1154,13 +1352,16 @@
   },
   "dreadnought_net": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "dreadnought_slot_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -1170,20 +1371,35 @@
   },
   "drill_heat": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "drill_hud_binding": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "drill_launch": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -1206,18 +1422,25 @@
   },
   "drill_net": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "drill_sync": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "drive_gear": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -1225,7 +1448,7 @@
   "drive_gear_native": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -1239,7 +1462,7 @@
     "edf41",
     "edf5",
     "installer",
-    "plugin-native",
+    "plugin-ports",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -1284,7 +1507,8 @@
   },
   "edf41_fortress_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
@@ -1308,7 +1532,8 @@
   },
   "edf41_hitlayer": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
@@ -1410,7 +1635,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1440,7 +1673,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1463,14 +1704,18 @@
   },
   "edf41_sound_bank": {
    "labels": [
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "edf41_sound_channels": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
@@ -1482,7 +1727,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-ports",
     "pylib-model",
     "test-data",
     "testrange",
@@ -1598,13 +1843,14 @@
   },
   "edf41bike": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf41bike_native": {
    "labels": [
-    "plugin-native",
+    "plugin-ports",
     "pylib-model",
     "test-data"
    ],
@@ -1614,44 +1860,64 @@
   },
   "edf41bike_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "edf41dragon_control": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "edf41dragon_wake": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf41fortress_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "edf41hector_control": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "edf41mech_boost": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf41mech_boost_native": {
    "labels": [
-    "plugin-native",
+    "plugin-ports",
     "test-data"
    ],
    "scripts": [
@@ -1662,39 +1928,59 @@
    "labels": [
     "edf41",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "edf41mother_control": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "edf41mother_pose": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf41net": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf41robo_ai": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf41robo_body": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
@@ -1710,13 +1996,19 @@
   },
   "edf5_campaign_chained": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "edf5_campaign_foreign_site": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -1728,7 +2020,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1748,7 +2048,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1768,7 +2076,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1788,7 +2104,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -1802,48 +2126,66 @@
   },
   "edf5_campaign_native": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "edf5_campaign_partial_install": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "edf5_online_foreign_build": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf5_online_native": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf5_online_netid": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf5_online_rollback": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "edf5_online_room": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "emc_check": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -1856,7 +2198,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data",
     "testrange",
@@ -1868,13 +2210,18 @@
   },
   "enemy_control_action_native": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_action_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -1883,19 +2230,24 @@
   },
   "enemy_control_action_protocol": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_boss_gun_net": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_boss_gun_net_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -1904,19 +2256,32 @@
   },
   "enemy_control_boss_gun_projectile": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_capacity": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_catalog": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -1928,7 +2293,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data",
     "testrange",
@@ -1941,6 +2306,8 @@
   },
   "enemy_control_command_actions": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
@@ -1948,7 +2315,7 @@
   "enemy_control_command_actions_native_audit": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -1966,7 +2333,7 @@
   },
   "enemy_control_crosshair_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-hud",
     "test-data"
    ],
    "scripts": [
@@ -1975,19 +2342,24 @@
   },
   "enemy_control_deiroi": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "enemy_control_deiroi_entity_aim": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_deiroi_entity_aim_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -1998,7 +2370,7 @@
   "enemy_control_deiroi_native_audit": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -2008,19 +2380,25 @@
   },
   "enemy_control_deiroi_net": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_deiroi_net_codec": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_deiroi_net_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2029,39 +2407,65 @@
   },
   "enemy_control_export_boss": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_export_deiroi_144": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
     "test-data"
    ],
    "scripts": []
   },
   "enemy_control_export_deiroi_30": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
     "test-data"
    ],
    "scripts": []
   },
   "enemy_control_export_deiroi_60": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
     "test-data"
    ],
    "scripts": []
   },
   "enemy_control_export_merman": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_export_monster": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
     "test-data"
    ],
@@ -2069,20 +2473,27 @@
   },
   "enemy_control_export_walking": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "enemy_control_gun_factory": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_gun_factory_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2091,6 +2502,9 @@
   },
   "enemy_control_humanoid": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
@@ -2098,21 +2512,33 @@
   "enemy_control_legacy_robo": {
    "labels": [
     "edf41",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "enemy_control_merman_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_merman_net_native_audit": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -2122,12 +2548,16 @@
   },
   "enemy_control_monster_definition": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_monster_net": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
     "test-data"
    ],
@@ -2135,6 +2565,7 @@
   },
   "enemy_control_monster_net_codec": {
    "labels": [
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
@@ -2146,7 +2577,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -2157,7 +2588,7 @@
   },
   "enemy_control_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2166,19 +2597,23 @@
   },
   "enemy_control_native_fixture": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_native_look": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_native_look_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2187,13 +2622,15 @@
   },
   "enemy_control_native_look_extra": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_native_look_extra_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2202,13 +2639,15 @@
   },
   "enemy_control_native_move": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_native_move_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2217,7 +2656,7 @@
   },
   "enemy_control_native_net_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2226,19 +2665,26 @@
   },
   "enemy_control_native_net_fixture": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_native_pose": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_native_pose_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -2248,13 +2694,20 @@
   },
   "enemy_control_net_input": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_net_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -2270,31 +2723,40 @@
   },
   "enemy_control_pose_codec": {
    "labels": [
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_pose_interp": {
    "labels": [
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_pose_protocol": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_projectile_native": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_projectile_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2303,79 +2765,126 @@
   },
   "enemy_control_protocol": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_provider_trace_rtt250_bg0": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_provider_trace_rtt250_bg32": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_provider_trace_rtt250_bg64": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_provider_trace_rtt600_bg0": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_provider_trace_rtt600_bg32": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_provider_trace_rtt600_bg64": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_pvp_berserker": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_pvp_berserker_core": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_pvp_boss": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_pvp_boss_core": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_pvp_native": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_pvp_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -2384,7 +2893,12 @@
   },
   "enemy_control_pvp_transport": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -2392,20 +2906,32 @@
    "labels": [
     "edf41",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "enemy_control_pvp_tree": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_radar_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2414,19 +2940,28 @@
   },
   "enemy_control_radar_native": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_source_native": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2435,12 +2970,18 @@
   },
   "enemy_control_target": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_target_native_audit": {
    "labels": [
+    "plugin-enemy",
     "plugin-native",
     "test-data"
    ],
@@ -2450,14 +2991,17 @@
   },
   "enemy_control_timeship": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_timeship_native_audit": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -2467,14 +3011,17 @@
   },
   "enemy_control_timeship_pods": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "enemy_control_timeship_pods_audit": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -2484,13 +3031,19 @@
   },
   "enemy_control_timeship_pods_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_timeship_pods_net_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2499,7 +3052,10 @@
   },
   "enemy_control_timeship_script": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
@@ -2511,13 +3067,15 @@
   },
   "enemy_control_unit_guide": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_unit_guide_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -2526,13 +3084,19 @@
   },
   "enemy_control_walking": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "enemy_control_walking_guns": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
@@ -2544,7 +3108,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data",
     "testrange",
@@ -2563,7 +3127,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data",
     "testrange",
@@ -2576,7 +3140,12 @@
   },
   "enemy_control_walking_net": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
@@ -2589,7 +3158,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data",
     "testrange",
@@ -2603,14 +3172,20 @@
   },
   "enemy_control_walking_parts": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "enemy_control_walking_parts_native_audit": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -2620,6 +3195,8 @@
   },
   "enemy_control_weapon_aim": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
@@ -2631,7 +3208,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-enemy",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -2642,7 +3219,14 @@
   },
   "enemy_hud_layout": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -2654,60 +3238,75 @@
   },
   "enemy_ui_logic": {
    "labels": [
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "exhaust_nozzles_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "exhaust_pose_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "ferry_line": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "fieldshare": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "firecontrol_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "fixed_weapon_sight": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "formation_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "fp_aim_check": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "fp_flash_check": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -2715,6 +3314,8 @@
   "fp_render_native": {
    "labels": [
     "native-codec",
+    "plugin-air",
+    "plugin-hud",
     "plugin-native",
     "pylib-model",
     "test-data"
@@ -2726,32 +3327,41 @@
   "fp_ride_lifecycle": {
    "labels": [
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "fp_skin": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "fp_view_check": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "frame_pacing_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "frame_pacing_install_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -2761,7 +3371,7 @@
   },
   "frame_pacing_sigs": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -2771,6 +3381,7 @@
   },
   "frame_rate_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -2781,7 +3392,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -2792,7 +3411,11 @@
   },
   "frame_rate_objects": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -2804,7 +3427,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -2818,7 +3449,7 @@
   },
   "frame_rate_sigs": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -2828,6 +3459,9 @@
   },
   "frame_rate_view": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -2840,7 +3474,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -2854,7 +3496,7 @@
   },
   "fsbudget_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "test-data"
    ],
    "scripts": [
@@ -2863,12 +3505,14 @@
   },
   "fuze": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "game_dialog": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "test-data"
    ],
@@ -2876,7 +3520,15 @@
   },
   "game_launch": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -2909,7 +3561,15 @@
     "installer",
     "misc",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -2943,7 +3603,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-hud",
     "pylib-model",
     "test-data",
     "testrange",
@@ -2956,6 +3616,8 @@
   },
   "gpufx_glow": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
     "test-data"
    ],
@@ -2963,6 +3625,7 @@
   },
   "gpufx_gpu": {
    "labels": [
+    "plugin-hud",
     "plugin-native",
     "test-data"
    ],
@@ -2970,6 +3633,7 @@
   },
   "gpufx_sim": {
    "labels": [
+    "plugin-hud",
     "plugin-native",
     "test-data"
    ],
@@ -2977,31 +3641,37 @@
   },
   "grape_turret_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "gravity_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "gravity_net": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "greyboss_parts": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native"
    ],
    "scripts": []
   },
   "greyboss_parts_native": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -3010,18 +3680,22 @@
   },
   "ground_contact_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "ground_navigation": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "ground_navigation_runtime": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -3051,25 +3725,36 @@
   },
   "gunner_recoil": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "gunship_muzzle_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "gunsight_check": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "hail_glide_0": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -3079,7 +3764,12 @@
   },
   "hail_glide_1": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -3089,7 +3779,12 @@
   },
   "hail_glide_2": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -3099,7 +3794,12 @@
   },
   "hail_glide_3": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -3109,7 +3809,12 @@
   },
   "hail_glide_shard_test": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -3120,6 +3825,7 @@
   },
   "hangar_recover": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
@@ -3132,13 +3838,15 @@
   },
   "havok_mt": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "havok_mt_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
+    "plugin-enemy",
     "pylib-model",
     "test-data"
    ],
@@ -3148,7 +3856,7 @@
   },
   "havok_mt_sim": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -3158,13 +3866,14 @@
   },
   "havok_props": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "havok_props_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -3178,7 +3887,7 @@
     "edf41",
     "edf5",
     "installer",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -3195,43 +3904,64 @@
   },
   "hector_ai_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "heli_aim_check": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "heli_command_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "heli_fire_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "heli_phase": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "heli_physical_sight": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "heli_player_input_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -3273,18 +4003,27 @@
   },
   "highcam_input": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "hit_accept_native": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "hit_predict_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -3327,6 +4066,7 @@
   },
   "hover_lift_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
@@ -3334,7 +4074,8 @@
   "hq_palette": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -3345,25 +4086,37 @@
   },
   "hud_cue_check": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "hud_layout": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "hudtext_check": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "hudtext_fit": {
    "labels": [
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -3372,13 +4125,15 @@
   },
   "ifc_model": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "ifc_model_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -3388,7 +4143,7 @@
   },
   "ifc_model_native": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
     "pylib-model",
     "test-data"
    ],
@@ -3398,13 +4153,20 @@
   },
   "infantry_scope_pip": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "ini_text": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
@@ -3414,7 +4176,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -3431,7 +4201,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -3453,73 +4231,131 @@
   },
   "jet_attack_runs": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jet_command_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jet_edge_suite": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jet_escort_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "jet_extend_flip": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jet_ground_settle": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jet_lever_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "jet_phase": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "jet_player_rotor_suite": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jet_strike_room": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jet_withdraw_suite": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "jetsound_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -3566,12 +4402,15 @@
   },
   "katyusha_rack_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "keybind": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
     "test-data"
    ],
@@ -3579,7 +4418,9 @@
   },
   "keyconfig_native": {
    "labels": [
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -3590,13 +4431,15 @@
   },
   "killcount": {
    "labels": [
-    "plugin-native"
+    "plugin-hud",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "killcount_native": {
    "labels": [
-    "plugin-native",
+    "plugin-hud",
     "test-data"
    ],
    "scripts": [
@@ -3605,12 +4448,17 @@
   },
   "launcher_owner": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "lazy_rows": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -3636,6 +4484,7 @@
   },
   "live_set": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -3648,7 +4497,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -3662,25 +4519,33 @@
   },
   "loadout_preset": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "loadout_writer": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "lock_cue": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "lock_registry_native": {
    "labels": [
+    "plugin-air",
     "plugin-native",
     "test-data"
    ],
@@ -3690,7 +4555,10 @@
   },
   "lockon": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -3702,6 +4570,7 @@
   },
   "log_once": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -3714,62 +4583,85 @@
   },
   "map_buttons_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "map_cam_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "map_cmd_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "map_command_identity_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "map_command_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "map_hud_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "map_marks_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "map_pvp_input": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "march_pace": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "mech_parts": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -3787,12 +4679,17 @@
   },
   "member_config": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "memo_epoch": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -3812,7 +4709,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-hud",
     "pylib-model",
     "test-data",
     "testrange",
@@ -3831,7 +4728,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -3845,7 +4750,8 @@
   },
   "missile_dud_native": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
     "test-data"
    ],
    "scripts": [
@@ -3854,13 +4760,17 @@
   },
   "mission_crew": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "mission_crew_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "test-data"
    ],
    "scripts": [
@@ -3869,13 +4779,15 @@
   },
   "mission_crew_radar": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "mission_crew_radar_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -3884,19 +4796,25 @@
   },
   "mission_crew_support": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "mission_crew_team_dll": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "mission_crew_team_fixture": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -3909,13 +4827,18 @@
   },
   "mission_pack_save_native": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "mission_participant_gate_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -3931,7 +4854,11 @@
   },
   "mission_participants_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -3951,19 +4878,25 @@
   },
   "mission_watch": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "mod_file": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "mod_room_isolation": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports"
    ],
    "scripts": []
   },
@@ -4025,7 +4958,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -4053,13 +4994,22 @@
   },
   "module_registry": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "module_registry_guard": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -4114,7 +5064,7 @@
   },
   "net_ground_probe_native": {
    "labels": [
-    "plugin-native",
+    "plugin-net",
     "test-data"
    ],
    "scripts": [
@@ -4123,19 +5073,25 @@
   },
   "net_object_ref": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "net_session_lifecycle_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "net_session_native": {
    "labels": [
-    "plugin-native",
+    "plugin-net",
     "test-data"
    ],
    "scripts": [
@@ -4144,19 +5100,27 @@
   },
   "nix_twist_check": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "npc_action_look": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "npc_action_look_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -4166,19 +5130,26 @@
   },
   "npc_ai_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "npc_arms": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "npc_backpack_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4187,7 +5158,11 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -4199,7 +5174,7 @@
   },
   "npc_backpack_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -4210,7 +5185,10 @@
   },
   "npc_backpack_native_check": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4224,7 +5202,7 @@
   },
   "npc_car_aim_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -4234,7 +5212,7 @@
   },
   "npc_climb_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -4243,13 +5221,19 @@
   },
   "npc_core_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "npc_cover_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -4258,7 +5242,13 @@
   },
   "npc_driver_payload": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4272,13 +5262,17 @@
   },
   "npc_grid_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "npc_gunner_aim": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4292,13 +5286,19 @@
   },
   "npc_gunners_online": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "npc_mech_aim_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -4307,13 +5307,15 @@
   },
   "npc_mobility_check": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "npc_mobility_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -4322,7 +5324,12 @@
   },
   "npc_post_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4336,7 +5343,10 @@
   },
   "npc_tier": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
@@ -4351,25 +5361,35 @@
   },
   "object_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
    ],
    "scripts": []
   },
   "objref": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "online_authority": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "online_authority_seat": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4379,7 +5399,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -4395,7 +5423,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -4412,7 +5448,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -4443,7 +5487,9 @@
   },
   "outfit41": {
    "labels": [
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
     "test-data"
    ],
    "scripts": []
@@ -4471,7 +5517,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testrange",
@@ -4489,7 +5543,9 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
+    "plugin-net",
+    "plugin-ports",
     "pylib-model",
     "test-data",
     "testrange",
@@ -4511,12 +5567,14 @@
   },
   "own_round_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "pack_switch": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -4524,7 +5582,7 @@
   "pack_switch_native": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -4534,43 +5592,74 @@
   },
   "pause_clock_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "payload_aim_api": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
    ],
    "scripts": []
   },
   "payload_click": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
    ],
    "scripts": []
   },
   "payload_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
    ],
    "scripts": []
   },
   "payload_sight": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
    ],
    "scripts": []
   },
   "payload_snapshot": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
    ],
    "scripts": []
   },
   "perf_probe_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "test-data"
    ],
    "scripts": [
@@ -4585,7 +5674,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -4600,24 +5697,36 @@
   },
   "pickup_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "pjet_kinds": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pjet_turn_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "play_area_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -4635,7 +5744,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -4654,20 +5771,27 @@
   },
   "player_slots": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "player_vehicle": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "player_vehicle_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -4682,7 +5806,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -4693,7 +5825,13 @@
   },
   "playerjet_payload_click": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4703,7 +5841,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc",
@@ -4715,7 +5861,15 @@
   },
   "plugin_image_size_guard": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -4724,62 +5878,95 @@
   },
   "plugin_net": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "plugin_pair_load_crew-first": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "plugin_pair_load_turret-first": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "pn": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "ported_missions_unlock_native": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "preload_set": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "preview_camera": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "primer_ballistics": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "primer_lifecycle": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "profile_native": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "test-data"
    ],
@@ -4787,7 +5974,15 @@
   },
   "profile_native_plugin_refusal": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
@@ -4799,7 +5994,8 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -4811,13 +6007,19 @@
   },
   "proteus_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "proteus_frame_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4840,13 +6042,17 @@
   },
   "proteus_net": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "proteus_net_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "pylib-model",
     "test-data"
    ],
@@ -4856,7 +6062,12 @@
   },
   "proteus_net_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -4909,31 +6120,51 @@
   },
   "proteus_weapon": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "proteus_weapon_native": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_controlled": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_controlled_npc": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_controlled_npc_native_audit": {
    "labels": [
-    "plugin-native",
+    "plugin-enemy",
     "test-data"
    ],
    "scripts": [
@@ -4942,33 +6173,57 @@
   },
   "pvp_controlled_ported_spawn": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "pvp_controlled_spawn_native": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "pvp_hud_layout": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_inherit_support": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_match": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
@@ -4982,19 +6237,37 @@
   },
   "pvp_native_fixture": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_native_inherit": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_native_live_emitters": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5008,31 +6281,48 @@
   },
   "pvp_protocol": {
    "labels": [
-    "plugin-native"
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "pvp_support_fixture": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "pvp_units": {
    "labels": [
+    "plugin-core",
+    "plugin-enemy",
     "plugin-native",
+    "plugin-net",
     "test-data"
    ],
    "scripts": []
   },
   "qmark": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
   "range_place": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "test-data"
    ],
@@ -5059,19 +6349,29 @@
   },
   "real_driver_native_dll": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "real_driver_native_fixture": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "real_npc_crew": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5088,7 +6388,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -5099,20 +6407,33 @@
   },
   "redirect_thunk": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "render_record": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "rescue_logic": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5122,7 +6443,14 @@
     "edf41",
     "edf5",
     "installer",
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "worldmap"
@@ -5133,44 +6461,64 @@
   },
   "reticle_check": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "ride_along_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "rocket_guide_prediction_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "rocket_impact_readout_test": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "room_coop_capability": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "room_dialog": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "room_dialog_native": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-core",
+    "plugin-net",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -5186,7 +6534,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-net",
     "pylib-model",
     "test-data",
     "testrange",
@@ -5199,19 +6547,30 @@
   },
   "room_menu": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "room_native_entry_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
   "room_native_menu_contract": {
    "labels": [
-    "plugin-native",
+    "plugin-net",
     "pylib-model",
     "test-data"
    ],
@@ -5221,7 +6580,12 @@
   },
   "room_preview": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
@@ -5234,7 +6598,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-net",
     "pylib-model",
     "test-data",
     "testrange",
@@ -5247,26 +6611,42 @@
   },
   "room_pvp": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "room_sync": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "room_ui": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "room_ui_sigs": {
    "labels": [
-    "plugin-native",
+    "plugin-net",
     "pylib-model",
     "test-data"
    ],
@@ -5277,7 +6657,11 @@
   "room_ui_wiring": {
    "labels": [
     "installer",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -5288,42 +6672,53 @@
   },
   "rotor_clear_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "rounds_check": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "route_guide": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "route_guide_foreign_site": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "route_guide_native": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "route_guide_partial_install": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "rubble_pass_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -5336,7 +6731,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testrange",
@@ -5349,43 +6752,53 @@
   },
   "save_mode_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "sazabi_ask": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "sazabi_assist_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "sazabi_flight_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "sazabi_funnel_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "sazabi_net": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "sazabi_net_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -5395,37 +6808,55 @@
   },
   "sazabi_net_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "sazabi_pose_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "sazabi_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "scope_crosshair": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "scope_lens": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "scope_lens_native": {
    "labels": [
-    "plugin-native",
+    "plugin-hud",
     "test-data"
    ],
    "scripts": [
@@ -5434,6 +6865,7 @@
   },
   "scope_pip_check": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -5441,6 +6873,7 @@
   "scope_pip_gpu": {
    "labels": [
     "native-codec",
+    "plugin-hud",
     "plugin-native",
     "test-data"
    ],
@@ -5448,6 +6881,7 @@
   },
   "scope_spread": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -5458,7 +6892,12 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -5469,7 +6908,8 @@
   },
   "scope_spread_native": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-hud",
     "test-data"
    ],
    "scripts": [
@@ -5478,36 +6918,43 @@
   },
   "scopeview_check": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "seat_aim_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "seat_events_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "seat_net": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "seat_switch_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "seat_turret": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -5550,7 +6997,12 @@
   },
   "sidecar_board_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5574,13 +7026,21 @@
   },
   "sightzoom": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "sightzoom_native": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5608,7 +7068,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -5622,25 +7090,30 @@
   },
   "smoke_trail_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "sortie_check": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "sound_engine_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-sound"
    ],
    "scripts": []
   },
   "sound_event_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-sound"
    ],
    "scripts": []
   },
@@ -5650,7 +7123,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc",
@@ -5662,19 +7143,25 @@
   },
   "sound_place_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-sound"
    ],
    "scripts": []
   },
   "split_fuse": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "spot_ray": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5688,7 +7175,7 @@
   },
   "srcscan": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data"
    ],
@@ -5698,25 +7185,32 @@
   },
   "stab_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "stab_interpolation_test": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "stab_native_readback": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "step_fresh": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -5729,7 +7223,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
     "pylib-model",
     "test-data",
     "testrange",
@@ -5748,6 +7242,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
     "pylib-model",
     "test-data",
@@ -5769,38 +7264,58 @@
   },
   "store_burden": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "store_recoil": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "sub_support_dispatch": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "sub_support_net": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "submarine_support": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_config": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5812,7 +7327,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testrange",
@@ -5825,26 +7342,39 @@
   },
   "support_dispatch": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "support_drone_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_entry": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_exit_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
     "pylib-model",
     "test-data"
    ],
@@ -5854,25 +7384,38 @@
   },
   "support_firepower": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_infantry_route": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_level": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_loadout": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
@@ -5885,7 +7428,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testrange",
@@ -5898,31 +7444,52 @@
   },
   "support_net_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_pages": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_points": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_policy": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_protocol": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -5934,7 +7501,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testrange",
@@ -5946,14 +7513,24 @@
   },
   "support_soldier": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "support_soldier_create_native": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
@@ -5961,7 +7538,7 @@
   "support_soldier_native": {
    "labels": [
     "native-codec",
-    "plugin-native",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -5971,39 +7548,61 @@
   },
   "support_source": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_spawn": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "support_variants": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "support_vehicle_route": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "test-data"
    ],
    "scripts": []
   },
   "support_warning": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "supportunit_allies_native": {
    "labels": [
-    "plugin-native",
+    "plugin-support",
     "test-data"
    ],
    "scripts": [
@@ -6012,19 +7611,21 @@
   },
   "surround_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-sound"
    ],
    "scripts": []
   },
   "sync_load_logic": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "sync_load_probe_native": {
    "labels": [
-    "plugin-native",
+    "plugin-net",
     "test-data"
    ],
    "scripts": [
@@ -6033,13 +7634,14 @@
   },
   "team_native": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "team_native_sigs": {
    "labels": [
-    "plugin-native",
+    "plugin-net",
     "pylib-model",
     "test-data"
    ],
@@ -6075,7 +7677,15 @@
     "installer",
     "misc",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -6106,7 +7716,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc",
@@ -6125,7 +7743,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -6165,6 +7791,7 @@
   },
   "text_fit": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
@@ -6186,12 +7813,15 @@
   },
   "thermal_gpu": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "thermal_models": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
     "test-data"
    ],
@@ -6199,7 +7829,8 @@
   },
   "thermal_models_native": {
    "labels": [
-    "plugin-native",
+    "plugin-hud",
+    "plugin-ports",
     "test-data"
    ],
    "scripts": [
@@ -6208,7 +7839,7 @@
   },
   "thermal_native": {
    "labels": [
-    "plugin-native",
+    "plugin-hud",
     "test-data"
    ],
    "scripts": [
@@ -6217,7 +7848,13 @@
   },
   "thermal_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -6273,7 +7910,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -6344,25 +7989,36 @@
   },
   "transport_check": {
    "labels": [
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "transport_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "turret_cam_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "turret_cam_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -6374,12 +8030,18 @@
   },
   "tvguide": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
    ],
    "scripts": []
   },
   "twin_cadence": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -6394,25 +8056,33 @@
   },
   "ultimate_check": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "ultimate_net": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
    ],
    "scripts": []
   },
   "unlock_ported_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "unmanned_launch_guard": {
    "labels": [
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-support",
     "pylib-model",
     "test-data"
    ],
@@ -6428,7 +8098,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -6468,7 +8146,11 @@
   },
   "vehicle_look": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -6491,19 +8173,25 @@
   },
   "vehicle_ram_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "vehicle_sensor": {
    "labels": [
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "vehicle_sensor_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -6525,6 +8213,7 @@
   },
   "vehicle_weapons": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "test-data"
    ],
@@ -6551,6 +8240,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
     "pylib-model",
     "test-data",
@@ -6578,42 +8268,65 @@
   },
   "vehsound_gun": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
   "vehsound_trace_record": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
   "vehsound_trace_replay": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
   "view_clip_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "view_depth_lifecycle": {
    "labels": [
-    "plugin-native"
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "vsound_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
   "vulcan_rotor": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -6637,18 +8350,27 @@
   },
   "vulcan_rotor_runtime": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
   "warn_check": {
    "labels": [
-    "plugin-native"
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
    ],
    "scripts": []
   },
   "wasted_fire_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -6662,7 +8384,8 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-core",
+    "plugin-net",
     "pylib-model",
     "test-data",
     "testrange",
@@ -6675,6 +8398,7 @@
   },
   "weapon_list_logic": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "test-data"
    ],
@@ -6699,19 +8423,23 @@
   },
   "weapon_page_logic": {
    "labels": [
+    "plugin-core",
+    "plugin-hud",
     "plugin-native"
    ],
    "scripts": []
   },
   "weapon_records": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "weapon_records_native": {
    "labels": [
-    "plugin-native",
+    "plugin-core",
+    "plugin-net",
     "pylib-model",
     "test-data",
     "tools-misc"
@@ -6732,24 +8460,28 @@
   },
   "wing_engine_check": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "wing_turn": {
    "labels": [
+    "plugin-air",
     "plugin-native"
    ],
    "scripts": []
   },
   "world_text_check": {
    "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
   "worldmap": {
    "labels": [
+    "plugin-hud",
     "plugin-native",
     "test-data"
    ],
@@ -6763,7 +8495,7 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-hud",
     "pylib-model",
     "test-data",
     "testhub",
@@ -6783,7 +8515,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -6797,7 +8537,7 @@
   },
   "worldmap_sigs": {
    "labels": [
-    "plugin-native",
+    "plugin-hud",
     "pylib-model",
     "test-data"
    ],
@@ -6813,7 +8553,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -6832,7 +8580,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "tools-misc",
@@ -7038,7 +8794,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -7055,7 +8819,9 @@
   "aim_lines_hide_real_crews": {
    "labels": [
     "installer",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -7072,7 +8838,11 @@
   "air_chase_wired": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -7095,7 +8865,9 @@
   "air_support_arrival_is_the_flight_controls": {
    "labels": [
     "installer",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -7117,7 +8889,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -7145,7 +8925,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7167,7 +8949,10 @@
   "arrival_smoke_is_drawn_where_it_is_laid": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -7210,7 +8995,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -7237,7 +9030,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7405,7 +9200,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -7441,7 +9244,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7487,7 +9292,9 @@
   "boarding_an_empty_aircraft_makes_its_entry": {
    "labels": [
     "installer",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -7532,7 +9339,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7554,7 +9364,10 @@
   "boarding_only_after_collision": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -7577,7 +9390,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7606,7 +9421,15 @@
     "installer",
     "misc",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -7671,7 +9494,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -7695,7 +9520,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7835,7 +9662,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7857,7 +9686,9 @@
    "labels": [
     "cockpit",
     "installer",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -7877,7 +9708,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -7975,7 +9814,10 @@
     "docs-guard",
     "installer",
     "native-codec",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -8002,7 +9844,10 @@
     "docs-guard",
     "installer",
     "native-codec",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -8032,7 +9877,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8059,7 +9907,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8085,7 +9936,9 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -8110,6 +9963,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8154,7 +10008,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8181,7 +10037,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -8359,7 +10223,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8387,7 +10253,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8477,7 +10351,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8504,7 +10380,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8533,6 +10412,8 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -8556,7 +10437,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8586,7 +10475,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8615,7 +10506,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -8667,6 +10561,8 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -8691,7 +10587,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8739,7 +10637,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8766,7 +10666,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8882,7 +10784,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8957,6 +10862,8 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8977,7 +10884,10 @@
    "labels": [
     "edf41",
     "installer",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -9031,7 +10941,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9169,7 +11081,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9214,6 +11134,8 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9240,7 +11162,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9266,7 +11191,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9293,7 +11220,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9320,6 +11250,8 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9347,7 +11279,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9378,7 +11313,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9405,7 +11348,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9436,7 +11387,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9458,7 +11411,15 @@
   "edf41_net_contract": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -9478,6 +11439,7 @@
    "labels": [
     "installer",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -9499,7 +11461,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9528,7 +11492,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9555,7 +11521,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9580,7 +11548,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9627,7 +11603,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9652,7 +11630,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9694,6 +11674,8 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9719,7 +11701,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9749,7 +11734,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9887,7 +11874,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -10002,7 +11991,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -10073,7 +12064,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -10101,7 +12094,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -10562,6 +12557,8 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -10618,6 +12615,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -10667,7 +12665,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -10714,7 +12714,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -10798,7 +12800,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -10830,7 +12834,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -10906,7 +12912,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11036,7 +13050,10 @@
   "embedded_seat_aim_wired": {
    "labels": [
     "installer",
+    "plugin-air",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -11059,7 +13076,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11124,7 +13149,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -11152,7 +13179,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -11237,7 +13266,10 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -11261,7 +13293,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -11286,7 +13320,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11396,7 +13438,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11423,7 +13473,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11466,7 +13524,15 @@
    "labels": [
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -11491,7 +13557,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -11552,7 +13620,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -11605,7 +13675,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -11639,7 +13717,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11668,7 +13748,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11697,7 +13780,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11725,7 +13811,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -11754,6 +13848,7 @@
     "edf5",
     "installer",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -11774,7 +13869,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -11801,7 +13904,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11828,7 +13939,9 @@
   "heli_store_flies_its_own_arc": {
    "labels": [
     "installer",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -11852,7 +13965,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11880,7 +14001,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -11932,7 +14055,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -11953,7 +14084,15 @@
   "hud_switch_cues_wired": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -11979,7 +14118,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc",
@@ -12014,7 +14161,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12041,7 +14190,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12064,7 +14221,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12091,7 +14256,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12117,7 +14290,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12143,7 +14324,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12195,7 +14384,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -12373,7 +14570,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12402,7 +14607,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12422,6 +14635,7 @@
     "autoturret-tools",
     "installer",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -12445,7 +14659,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12555,6 +14777,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -12599,7 +14822,9 @@
    "labels": [
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -12622,7 +14847,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -12774,6 +15001,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12904,7 +15132,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -12932,7 +15168,15 @@
     "docs-guard",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -12982,7 +15226,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc",
@@ -13015,7 +15267,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13101,7 +15361,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13128,7 +15390,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13153,7 +15423,10 @@
     "docs-guard",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -13192,7 +15465,13 @@
   "npc_ai_asks_less": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -13212,7 +15491,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -13244,7 +15531,10 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -13266,7 +15556,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -13293,6 +15591,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13440,7 +15739,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13483,7 +15790,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13530,7 +15845,15 @@
   "play_area_wired": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -13560,7 +15883,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -13583,7 +15908,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -13661,7 +15994,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13782,7 +16123,12 @@
     "docs-guard",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -13825,7 +16171,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13936,7 +16290,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -13964,7 +16320,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -14030,6 +16388,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc",
@@ -14069,7 +16428,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -14095,7 +16462,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -14141,6 +16516,7 @@
    "labels": [
     "installer",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc"
@@ -14164,7 +16540,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -14225,7 +16609,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -14254,7 +16640,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -14366,7 +16755,10 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -14409,7 +16801,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -14586,7 +16986,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -14638,7 +17046,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -14691,7 +17107,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -14763,7 +17187,10 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -14788,7 +17215,11 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -14817,7 +17248,10 @@
   "sound_at_takes_a_still_sound": {
    "labels": [
     "installer",
+    "plugin-air",
     "plugin-native",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -14841,7 +17275,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15076,7 +17512,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15124,7 +17562,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15148,7 +17588,10 @@
    "labels": [
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -15173,7 +17616,15 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -15201,7 +17652,11 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -15226,7 +17681,15 @@
    "labels": [
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -15275,6 +17738,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15301,7 +17765,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15358,7 +17830,15 @@
     "docs-guard",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -15414,7 +17894,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -15435,7 +17918,10 @@
   "support_arrives_from_off_the_map": {
    "labels": [
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -15465,7 +17951,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -15493,7 +17982,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -15520,7 +18012,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -15546,7 +18041,14 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -15573,7 +18075,9 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -15658,7 +18162,15 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "tools-misc",
     "worldmap"
@@ -15712,7 +18224,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15738,7 +18253,10 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-core",
     "plugin-native",
+    "plugin-ports",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -15764,7 +18282,9 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -15795,7 +18315,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15831,7 +18359,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -15883,7 +18419,11 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -15909,7 +18449,9 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -15939,7 +18481,11 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
+    "plugin-air",
+    "plugin-core",
     "plugin-native",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "tools-misc"
@@ -15966,7 +18512,9 @@
   "view_distance_keeps_far_pass_start": {
    "labels": [
     "installer",
+    "plugin-core",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "tools-misc"
    ],
@@ -15991,6 +18539,7 @@
     "installer",
     "native-codec",
     "plugin-native",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",
@@ -16043,7 +18592,14 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-native",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -16069,7 +18625,15 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
     "pylib-model",
     "testhub",
     "testrange",

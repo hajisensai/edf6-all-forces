@@ -38,7 +38,7 @@
 // with the modules its own install fitted (nothing of it is sent: it is the install's, not the ship's state).
 using dreadnought::kBays;
 using dreadnought::kHangars;
-static_assert(dreadnought::kKinds==kDnFighterKinds,"dreadnought_deck.h's kinds are crew.h's");
+static_assert(dreadnought::kKinds==kDnFighterKinds,"dreadnought_deck.h's kinds are jet.h's");
 constexpr float kSlideSec=2.5f;              // s a fighter slides between its bay and its mouth
 constexpr float kLaunchSec=2.0f,kLaunchSpeed=90.0f;   // a fighter thrown off its mouth: s, m/s over the ship's
 constexpr float kLaunchClimb=12.0f;          // ...m/s up at the end of it

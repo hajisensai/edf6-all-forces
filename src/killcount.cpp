@@ -23,7 +23,9 @@
 // construction (the call at 0x893BF3 redirected), on the thread that runs it. Every byte the patch relies on is checked
 // first; until the call is redirected the table holds the stock rows and the bounds are 90: the stock page.
 // EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "patches.h"
 #include "edf41_kill_counters.h"
 #include "killcount_logic.h"
 #include "memory.h"

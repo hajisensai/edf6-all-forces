@@ -9,7 +9,17 @@ DWORD Process(HWND,LPDWORD pid) noexcept{*pid=GetCurrentProcessId();return 1;}
 #define GetWindowThreadProcessId bindingkeys::Process
 #include "../autoturret/src/designate.cpp"
 #undef GetWindowThreadProcessId
-#include "../src/crew.h"
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/scene.h"
+#include "../src/heli.h"
+#include "../src/highcam.h"
+#include "../src/hud.h"
+#include "../src/map.h"
+#include "../src/sightzoom_api.h"
+#include "../src/turretcam_api.h"
+#include "../src/payload.h"
 #include <cstdio>
 namespace autoturret {
 unsigned char* image=nullptr;Config cfg{};

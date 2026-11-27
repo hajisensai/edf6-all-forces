@@ -1,6 +1,6 @@
 """EDF6VehicleCrew.ini's keys: the one table the plugin's Config and the shipped ini are made from (2026-11-27,
 docs/reviews/design-review-1126.md P5 / P6). tools/gen_config.py writes from it:
-  src/config.inc         the Config fields (crew.h), the reads (plugin.cpp LoadConfig) and the range checks
+  src/config.inc         the Config fields (config.h), the reads (plugin.cpp LoadConfig) and the range checks
                          (plugin.cpp Validate), and the retired keys' warnings (plugin.cpp IgnoreRetired)
   EDF6VehicleCrew.ini    the shipped ini: HEADER, each shipped key's comment lines and its default, TAIL
 CI and tools/check.py run gen_config.py --check; tools/selftest.py parses the generated ini back against KEYS.

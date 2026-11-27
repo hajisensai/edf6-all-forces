@@ -9,7 +9,7 @@
 // The call may fault on a class that throws on its data (an SGO the plugin got wrong): the callers keep their __try (an
 // SEH frame here would hide which feature it was).
 #pragma once
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cstring>
 

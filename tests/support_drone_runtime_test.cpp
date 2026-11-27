@@ -3,6 +3,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/plugin_body.h"
+#include "../src/strikes.h"
+#include "../src/mapbounds.h"
+#include "../src/proteus.h"
 
 namespace fixture {
 using namespace crew;

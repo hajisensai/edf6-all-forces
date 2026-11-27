@@ -1137,7 +1137,7 @@ add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 add_test(NAME enemy_control_crosshair_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_crosshair_guard.py")
 # Every channel names a player by its mission slot, never its NetId (tests/player_identity_guard.py).
 add_test(NAME player_identity_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_identity_guard.py")
-# The shipped ini parsed back equals tools/config_keys.py (defaults, crew.h Config initialisers via src/config.inc).
+# The shipped ini parsed back equals tools/config_keys.py (defaults, config.h Config initialisers via src/config.inc).
 add_test(NAME config_roundtrip COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/config_roundtrip_test.py")
 add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
 # The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.

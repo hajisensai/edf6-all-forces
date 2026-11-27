@@ -3,7 +3,9 @@
 // clamps the body there whatever velocity the plugin sets, so the jets flew like fast helicopters. A jet's
 // body gets a copy of its preset with the speed cap raised, added to the world's motion-properties library
 // (never the shared entry edited in place: every heli and truck uses it).
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "jet.h"
 #include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include <cstring>

@@ -17,7 +17,8 @@
 // the boss has; a name it lacks gives null, which every caller already handles. A list this cannot walk
 // (not readable, its links or size disagreeing) is left to the native call, unchanged.
 #include "greyboss_parts.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include <cwchar>
 

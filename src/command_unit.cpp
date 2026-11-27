@@ -1,4 +1,7 @@
-#include "crew.h"
+#include "edf_layout.h"
+#include "jet.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

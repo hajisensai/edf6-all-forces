@@ -11,7 +11,12 @@
 // layers) and the SGO an object was made from (no field for it is known). An object counted is its lock point's
 // distance, not its body's (a mothership's hull is far bigger than the point).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "heli.h"
+#include "jet.h"
+#include "seats.h"
+#include "vhud.h"
 #include "edf/host.h"
 #include "jet_internal.h"
 #include "memory.h"

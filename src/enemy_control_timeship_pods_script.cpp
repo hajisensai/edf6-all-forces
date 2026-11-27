@@ -5,7 +5,7 @@
 #include "enemy_control_timeship_pods_net.h"
 #include "enemy_control_action_native.h"
 #include "enemy_control.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cstring>
 

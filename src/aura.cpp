@@ -16,7 +16,14 @@
 // Online the host decides which auras stand and sends them (AFAU, state stream auraVehicles, every second and at a
 // change); every machine applies them. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "aura.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "layout.h"
 #include "memory.h"
 #include "body506.h"

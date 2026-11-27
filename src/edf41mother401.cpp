@@ -30,7 +30,13 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "edf41.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "team_native_logic.h"
 #include "edf41_hitlayer.h"
 #include "edf41classes.h"

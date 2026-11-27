@@ -6,7 +6,15 @@
 // it the jets', the carrier's and the laser's preloads) does not hang on the loadout's own checks: the
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
 #include "crash_dump.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "carrierlaser.h"
+#include "debug_spawn_api.h"
+#include "jet.h"
+#include "playerjet.h"
+#include "subcarrier.h"
+#include "world.h"
 #include "aura.h"
 #include "gravity.h"
 #include "gravity_net.h"

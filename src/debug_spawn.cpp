@@ -5,7 +5,20 @@
 //
 // Nothing of it runs while it is off: PreloadDebugSpawn returns before touching the preload manager, DebugSpawnFrame
 // before reading a key, DebugSpawnReadout has nothing to show. It patches nothing at all, on or off.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "debug_spawn_api.h"
+#include "heli.h"
+#include "hud.h"
+#include "jet.h"
+#include "map.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "transport.h"
 #include "debug_spawn.h"
 #include "vehicle_weapons.h"
 #include "debug_spawn_net.h"

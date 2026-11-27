@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include "../src/edf_layout.h"
 
 namespace controlled_fixture {
 using namespace crew::controlled_pvp;

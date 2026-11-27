@@ -22,7 +22,20 @@
 // nobody's (an enemy's vehicle takes the round as the stock game has it).
 // Static RE and what is still to be seen in game: docs/boarding-re.md.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "boarding.h"
+#include "heli.h"
+#include "jet.h"
+#include "playerjet.h"
+#include "seats.h"
+#include "subcarrier.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "layout.h"
 #include "memory.h"
 #include <atomic>

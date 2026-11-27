@@ -18,7 +18,13 @@
 //    (ShieldVehicle: the physics body's velocity). Slower vehicles, and everyone on foot, cross freely.
 // The layer's sphere: the world box of its body's shape (body_box.cpp BodyWorldBox, as the heli's check measures it).
 // Centre and the half of its x extent. The shields are gathered once a frame from the lock-on registry (the EDF side's enemies).
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "patches.h"
+#include "shield.h"
 #include "heli.h"
 #include "memory.h"
 #include "online_authority.h"

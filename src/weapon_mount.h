@@ -1,6 +1,8 @@
 // Native weapon-to-seat articulation: actual holder/model bone ancestry, never a vehicle-name guess.
 #pragma once
-#include "crew.h"
+#include "edf_layout.h"
+#include "layout.h"
+#include "memory.h"
 #include "edf/weapon.h"
 #include <cmath>
 #include <cstring>

@@ -20,7 +20,12 @@
 //    (wasted_fire.h: 4 hits in a row that hurt nothing hold that shooter's fire 6 s) covers them.
 // The windows (hit_predict.h): the invincible flag for all; a ship's damage window (+0xD85) and its hatch timer (+0xD84
 // open, +0xD90 frames left: UfoCarrier_CloseInterval counting down, 0x4F8507); an anchor while a living ship shields it.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "damagestats.h"
+#include "npcai.h"
 #include "hit_predict.h"
 #include "memo_epoch.h"
 #include "memory.h"

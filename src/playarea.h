@@ -4,7 +4,7 @@
 // Why it is needed (docs/map-edge-re.md, docs/player-jet-re.md §3): the stock keeps every heli-type body inside the map's
 // own move_limit box (MoveAreaManager, clamped by slot 55 0x6543A0 -> 0x5A9E50), but the plugin turns that clamp off for
 // the aircraft it flies (veh+0xE00 = -1e6: the jets were pinned at the box's edge, ~1 km out on the test range) and kept
-// them in with walls of its own at crew.h PlayEdge: the physics world's square (+-2400 stock, ini BigWorld less 750),
+// them in with walls of its own at world.h PlayEdge: the physics world's square (+-2400 stock, ini BigWorld less 750),
 // which has nothing to do with where the map's ground ends (+-1500..2000 on a stock map; the user's own logs: BigWorld
 // 6000 on a stock map, ground only within ~1750 m, walls at 5250). Past the ground's edge a map ray finds nothing
 // (kNoGround), so the flight has no floor, no ground warning and no crash there: the jet flew on over the void, and once
@@ -21,7 +21,7 @@
 
 namespace crew {
 // The walls in x (index 0) and z (index 1): a flyer keeps within lo..hi. `ground`: measured off the map's ground
-// (false: the physics-world square of crew.h PlayEdge, until the measure is in or where it found no ground).
+// (false: the physics-world square of world.h PlayEdge, until the measure is in or where it found no ground).
 // `floor`: the lowest ground the measure found (hasFloor): within the walls a void under the aircraft (the big map's
 // seams between its blocks) is floored there (area::FloorClear), so nothing sinks into it either.
 struct PlayArea {

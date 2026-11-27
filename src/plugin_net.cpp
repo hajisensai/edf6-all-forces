@@ -4,7 +4,8 @@
 #include <cstdlib>
 #include "plugin_net.h"
 #include "net_counters.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 
 namespace crew::plugin_net {
 namespace {

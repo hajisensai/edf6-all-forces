@@ -7,7 +7,12 @@
 // to nobody: no enemy turns on it, M). Remembered by its address and weak-this control block (ObjRef): a new object at the
 // same address is not taken for it. Game thread only.
 #pragma once
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "seats.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 #include "scene_object.h"
 #include <cstring>

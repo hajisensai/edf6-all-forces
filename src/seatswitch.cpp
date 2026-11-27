@@ -27,7 +27,22 @@
 // 情况", not only switch) the whole ride in a vehicle with more than one seat, SeatSwitch off or online too: reading the
 // seats moves nothing. The keys that move them (or the online lock) ride along only for kPromptMs after boarding and
 // after a move, while the key is held, and kRefusedMs after a refusal; SeatList off, the line is shown only then.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "dreadnought.h"
+#include "heli.h"
+#include "map.h"
+#include "netprobe.h"
+#include "seats.h"
+#include "payload.h"
+#include "proteus.h"
+#include "support_call.h"
+#include "transport.h"
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"

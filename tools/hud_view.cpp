@@ -45,6 +45,20 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/scene.h"
+#include "../src/debug_spawn_api.h"
+#include "../src/ground.h"
+#include "../src/highcam.h"
+#include "../src/sightzoom_api.h"
+#include "../src/strikes.h"
+#include "../src/subcarrier.h"
+#include "../src/damagestats.h"
+#include "../src/mapcmd.h"
+#include "../src/qmark.h"
+#include "../src/infantryscope.h"
 
 namespace crew {
 bool VehicleLookHint(bool*) noexcept { return false; }

@@ -3,7 +3,7 @@
 // Deiroi/GiantDangoLarge/TimeShip have empty forwarded writers; SquidSmall lacks a full heading path, and UFO515
 // awaits a completed heading proof. These five remain false; the separate controlled fallback owns no native claim.
 #include "enemy_control_native_net.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cstring>
 

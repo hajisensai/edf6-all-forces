@@ -7,6 +7,10 @@
 #include "support_net.h"
 #include "online_authority.h"
 #include "support_soldier.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "playerjet.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace jet {

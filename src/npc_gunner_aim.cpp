@@ -1,5 +1,8 @@
 #include "npc_gunner_aim.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 #include "memory.h"
 
 namespace crew {

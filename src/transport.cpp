@@ -16,7 +16,13 @@
 //    a Wing Diver's own jets (TransportJumperIntent), a Fencer's free fall onto his feet.
 // No soldier or vehicle is made or teleported here: the soldiers board and get off by the stock ride (npcai.cpp), the
 // vehicles are driven / flown by their NPC drivers through the plugin's own controllers.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "jet.h"
+#include "playerjet.h"
 #include "transport.h"
 #include "transport_logic.h"
 #include "npcai.h"

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cwchar>
 #include <limits>
+#include <initializer_list>
 
 namespace crew {
 bool EnemyControlNativePvpSpawnProof(const wchar_t*,controlled_pvp::SpawnProof*) noexcept;

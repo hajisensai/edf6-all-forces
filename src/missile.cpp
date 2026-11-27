@@ -20,7 +20,14 @@
 //    launcher's bodies, Launcher): unarmed, the proximity fuse holds and a hit is a dud: single-target damage, no burst,
 //    no blast sound, no fireball (fuze.h HitFlags / HitFireball).
 // Docs: docs/missile-re.md. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "jet.h"
+#include "missile.h"
+#include "patches.h"
+#include "seats.h"
 #include "fuze.h"
 #include "heli.h"
 #include "memory.h"

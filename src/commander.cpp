@@ -20,6 +20,10 @@
 #include "team_walk.h"
 #include <cmath>
 #include <cstring>
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
+#include "mapcmd.h"
 
 namespace crew {
 namespace {

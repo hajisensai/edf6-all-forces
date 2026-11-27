@@ -36,7 +36,9 @@
 #include "frame_pacing_logic.h"
 #include "frame_rate_logic.h"
 #include "frame_pacing.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include "edf/patch.h"
 #include <algorithm>

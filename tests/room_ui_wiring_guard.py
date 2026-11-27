@@ -19,7 +19,7 @@ import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, c
 
 # with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
 plugin = gen_config.read_expanded('src/plugin.cpp')
-crew = gen_config.read_expanded('src/crew.h')
+crew = gen_config.read_expanded('src/config.h')
 ini = open(os.path.join(ROOT, 'EDF6VehicleCrew.ini'), encoding='utf-8-sig').read()
 checks = 0
 

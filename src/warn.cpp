@@ -17,6 +17,11 @@
 #include "jetaudio.h"
 #include <cmath>
 #include <cstring>
+#include "config.h"
+#include "heli.h"
+#include "sound.h"
+#include "vhud.h"
+#include "playarea.h"
 
 namespace crew {
 namespace {

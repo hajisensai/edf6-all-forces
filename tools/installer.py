@@ -102,7 +102,7 @@ NEW_DEFAULTS_1017: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1017 = '; edf6vc-defaults-2026-10-17：安装器已把仍是旧出厂值 15 的 Edf41MotherParts 改成 31' \
                      '（4.1 母舰的板甲也建出来；想改就改，之后安装不会再改）'
-# The high view (the user, 2026-10-23: "俯瞰视角太小了"): its eye from 45 m over / 35 m behind to 90 / 55 (src/crew.h
+# The high view (the user, 2026-10-23: "俯瞰视角太小了"): its eye from 45 m over / 35 m behind to 90 / 55 (src/config.h
 # highCamHeight / highCamBack); merge_ini keeps an old ini's 45 / 35, so it never saw the farther view.
 NEW_DEFAULTS_1024: dict[str, dict[str, tuple[str, str]]] = {
     SECTION: {'HighCamHeight': ('45', '90'), 'HighCamBack': ('35', '55')},
@@ -110,7 +110,7 @@ NEW_DEFAULTS_1024: dict[str, dict[str, tuple[str, str]]] = {
 DEFAULTS_MARK_1024 = '; edf6vc-defaults-2026-10-24：安装器已把仍是旧出厂值的高视角 HighCamHeight 45 / HighCamBack 35 ' \
                      '改成 90 / 55（想改就改，之后安装不会再改）'
 # Fire key 4 on a pad (2026-11-08, docs/feedback-2026-11-08-grape-keys.md): the Grape's coax moved off the Car's throttle
-# (LT) onto fire key 4, whose pad button shipped 0 (none); RB now (src/crew.h vehicleFire4Button). merge_ini keeps an old
+# (LT) onto fire key 4, whose pad button shipped 0 (none); RB now (src/config.h vehicleFire4Button). merge_ini keeps an old
 # ini's 0, which would leave the Grape's coax with no pad button at all.
 NEW_DEFAULTS_1108: dict[str, dict[str, tuple[str, str]]] = {
     SECTION: {'VehicleFire4Button': ('0', '512')},

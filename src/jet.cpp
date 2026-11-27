@@ -38,6 +38,13 @@
 #include "pvp.h"
 #include "support_drone.h"
 #include <intrin.h>
+#include "plugin_log.h"
+#include "plugin_body.h"
+#include "booster.h"
+#include "playerjet.h"
+#include "missile.h"
+#include "view.h"
+#include <initializer_list>
 
 namespace crew {
 namespace jet {
@@ -53,7 +60,7 @@ constexpr float kFerryAlt=150.0f;   // m over its point a ferry (the paratroop p
 // mission's move area shrunk by veh+kAreaInset (0x5A9E50) and teleports it back, every frame, so a jet at
 // the edge stopped dead and slid flank first. A jet's inset is set to kNoInset (the box grown 1e6 m: no
 // clamp; the stock bombers are never clamped either). Out there the Havok broadphase ends at 3000 m a
-// side: walls at the play edge (crew.h PlayEdge, with its buffer) keep the jets in, and one past kWorldGoneIn of it is deleted.
+// side: walls at the play edge (world.h PlayEdge, with its buffer) keep the jets in, and one past kWorldGoneIn of it is deleted.
 constexpr std::size_t kAreaInset=0xE00;
 // kWorldGoneIn: m inside the world's edge (WorldHalf): 2950 stock. It was 300: a jet chasing past the walls
 // (then 600 m in) at 200 m/s turns on a radius of some 500 m, and one in its turn was deleted 300 m past the wall

@@ -13,7 +13,12 @@
 //    checked against the round's class and owner. No tag (melee, a ram, a derived round, a script's blast, an enemy's
 //    attack): the attacker itself names the source (an enemy's kind is its weapon).
 // 0x54A586 itself is left alone: subcarrier.cpp checks that its call still reaches 0x547C30 (DamageCallReaches).
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "seats.h"
+#include "playarea.h"
 #include "damagestats.h"
 #include "dmgnum.h"
 #include "edf/host.h"

@@ -1,5 +1,6 @@
 #include "mission_crew_team.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 
 namespace crew {

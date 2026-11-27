@@ -11,7 +11,7 @@
 //  - SazabiMeleeKey / Button: the beam tomahawk drawn and swung (its strike a drill charge at each enemy in reach and
 //    one ahead for the buildings); pressed again mid-swing, another follows;
 //  - SazabiGuardKey / Button held: the shield up, the damage taken from ahead SazabiGuardShare of itself.
-// Beams are the plugin's rounds (crew.h EmcRound sz*: DemoIndirectFire objects of the Sazabi's team, jet_bay.cpp).
+// Beams are the plugin's rounds (bay_rounds.h EmcRound sz*: DemoIndirectFire objects of the Sazabi's team, jet_bay.cpp).
 // Funnels fly in the world (sazabi_funnels.h, after the games' and the film's) and are drawn there by their bones
 // (sazabi_pose.h Funnels).
 // The thrusters' flames and the funnels' are Booster flames (booster.cpp FlareFlames). Every effect has its sound

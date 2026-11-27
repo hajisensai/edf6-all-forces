@@ -1,6 +1,7 @@
 // The in-game loadout menu's saving: loadout_store.h.
 #include "loadout_store.h"
-#include "crew.h"
+#include "config.h"
+#include "plugin_log.h"
 #include "support_call.h"
 #include "save_mode.h"
 #include <cwchar>

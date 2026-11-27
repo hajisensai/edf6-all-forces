@@ -5,6 +5,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/netprobe.h"
 
 namespace crew {
 unsigned char* image=nullptr;

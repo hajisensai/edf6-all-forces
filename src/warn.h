@@ -2,7 +2,8 @@
 // decided once a frame in one place for the eyes (hud.cpp: the annunciator, the ground cue, the RWR scope) and the ears
 // (jetaudio.cpp: the callouts, the stall horn, the launch warble). Game thread, except WarnLatest (any thread).
 #pragma once
-#include "crew.h"
+#include "step_fresh.h"
+#include "playerjet.h"
 
 namespace crew {
 // The warnings, in the annunciator's order (most urgent first). Warnings (red) are the ones that kill now: PULL UP, STALL,

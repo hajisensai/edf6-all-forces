@@ -1,6 +1,7 @@
 #include "enemy_control_humanoid.h"
 #include "enemy_control_types.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "bay_rounds.h"
 #include "memory.h"
 #include <cstring>
 #include <iterator>

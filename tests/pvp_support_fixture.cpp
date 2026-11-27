@@ -1,6 +1,7 @@
 // Production ownership bridge with fake native identities and Coop's exported
 // slot-to-PUID resolver. No game, network, native object memory or DLL is used.
 #include <Windows.h>
+#include "../src/netprobe.h"
 namespace {
 HMODULE FixtureGetModuleHandleW(LPCWSTR name) noexcept;
 FARPROC FixtureGetProcAddress(HMODULE module,LPCSTR name) noexcept;

@@ -309,7 +309,7 @@ struct PreloadRecord {
     bool OnlineTook(int i,int cls) const noexcept { return ValidIndex(i) && ValidClass(cls) && online[i].load()==cls; }
 };
 
-// The plugin's live switch (Enabled=0, crew.h): no item in the popup, the choice left as stored, every model the stock
+// The plugin's live switch (Enabled=0, config.h): no item in the popup, the choice left as stored, every model the stock
 // one, and the room told the stock flags, as every other module passes through while it is off.
 constexpr Wire Effective(bool enabled,const Wire& w) noexcept { return enabled ? w : Wire{}; }
 

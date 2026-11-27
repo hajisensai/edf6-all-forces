@@ -1,5 +1,5 @@
 """Read-only audit: the seat inputs the stock vehicle classes read, against the keys the plugin gives their add-on
-weapons (src/payload.cpp FreeSecondary / SwitchButton, src/crew.h VehicleFire4Button, pylib/vcobjects.py STOCK_MOUNTS).
+weapons (src/payload.cpp FreeSecondary / SwitchButton, src/config.h VehicleFire4Button, pylib/vcobjects.py STOCK_MOUNTS).
 
 The player, 2026-11-08 (docs/feedback-2026-11-08-grape-keys.md): on the Grape 「LT and LB are assigned to forward and
 reverse movement ... you cannot move forward unless you keep firing the coaxial machine gun, and you cannot move backward
@@ -102,7 +102,7 @@ assert DRIVE[0] == 0x32 and all(ROWS[r * 7] != 0x32 for r in range(1, 7))
 assert DRIVE[3] == 0x4D, "the drive page's 「DriveHorn」 (default right button) is bit 0x20: the Car's empty slot 83"
 assert DRIVE[5] == 0x36, "the drive page's 「TanksAttack2」 (default middle button) is bit 0x40: the Car's horn"
 HORN_DEFAULT_VK = 0x04   # 0x36's stock default, the middle button (0xD52F0; tests/keyconfig_native_audit.py)
-import config_keys  # noqa: E402  (the ini's keys and defaults: crew.h Config takes them through src/config.inc)
+import config_keys  # noqa: E402  (the ini's keys and defaults: config.h Config takes them through src/config.inc)
 free_look = int(config_keys.BY_NAME['FreeLookKey'].default, 0)
 assert free_look != HORN_DEFAULT_VK, "free look on the key that sounds the Grape's horn (2026-11-10)"
 

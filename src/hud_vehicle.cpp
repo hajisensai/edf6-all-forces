@@ -2,6 +2,8 @@
 // vehicles' readouts and the carriers' panel, the payload and seat cues, the loadout strip, the drill, the Sazabi, the
 // Dreadnought, the Balam's marks, the turret's aim, and the stock vehicles' HUD and ammo (vhud.cpp gathers it).
 #include "hud_internal.h"
+#include "config.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace hudi {
@@ -584,7 +586,7 @@ void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float
     Bar(drawer,ctx,bx+rpmW+between,by,heatW,barH,heat,heat,HeatColour(heat,c.overheated),s);
 }
 
-// --- The player's Sazabi (crew.h SazabiCue, published by sazabi.cpp; README 沙扎比): its own HUD (the user, 2026-10-07:
+// --- The player's Sazabi (sazabi.h SazabiCue, published by sazabi.cpp; README 沙扎比): its own HUD (the user, 2026-10-07:
 // "我们自制的hud … 需要做的都要做"), drawn while the player drives it (the stock vehicle weapon gauge given way:
 // HudPublish's SetStockGaugeCover). Positions in design px (1080 lines; times the HUD's scale `s`) from the screen's
 // centre C:

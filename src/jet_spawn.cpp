@@ -19,6 +19,11 @@
 #include "real_driver_native.h"
 #include <cstdio>
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "plugin_body.h"
+#include "strikes.h"
+#include "mapbounds.h"
 
 namespace crew {
 bool NpcDriver(const unsigned char* vehicle) noexcept;

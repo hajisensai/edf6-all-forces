@@ -7,7 +7,7 @@ namespace crew::support {
 enum class Refusal { none, noArea, noSky, noEntry, unsupported, online, cooldown, unavailable };
 // Air arrival and departure line. `beyond` is diagnostic only; visibility never restricts entry.
 struct Route { float from[3]{},heading[3]{},to[3]{}; bool beyond=false; };
-// What an arrival may use, from the game (crew.h): `half` the physical square |x|,|z| <= half a body may be made and fly in
+// What an arrival may use, from the game (world.h): `half` the physical square |x|,|z| <= half a body may be made and fly in
 // (the Havok world and the jets' deletion: ArrivalHalf); `draw` the m out to which the observer's near camera draws
 // (NearDrawDistance: the mission's FarClipZ raised by ini ViewDistance).
 struct Reach { float half,draw; };

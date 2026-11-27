@@ -32,7 +32,19 @@
 // requested through command_net; accepted transport is displayed separately from the correlated authority result.
 // Remote vehicle commands are not fabricated by writing a local copy. Every order goes one way (Dispatch: this machine's
 // units through MapCommandAuthority, the others' in one request), the formation (its card button and menu) too.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "debug_spawn_api.h"
+#include "heli.h"
+#include "jet.h"
+#include "netprobe.h"
+#include "payload.h"
+#include "damagestats.h"
+#include "mapcmd.h"
 #include "formation.h"
 #include "map_buttons.h"
 #include "hudtext.h"

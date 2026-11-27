@@ -20,7 +20,19 @@
 //  - Walking with the shield up, the allies' priority zone (SearchHook, EDF6AutoTurret's PriorityZoneV1).
 //  - Online (proteus_net.inc): the driver's machine publishes stance / shield / field; the registered owner the shield's HP.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "map.h"
+#include "netprobe.h"
+#include "vhud.h"
+#include "proteus.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "layout.h"
 #include "memory.h"
 #include "vecmath.h"
@@ -36,6 +48,8 @@
 #include <cmath>
 #include <cstring>
 #include <cwchar>
+#include "bay_rounds.h"
+#include "hud.h"
 
 namespace crew {
 namespace {

@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <cwchar>
 #include <vector>
+#include "../src/plugin_body.h"
+#include "../src/hud.h"
+#include "../src/netprobe.h"
 
 namespace crew {
 bool VehicleLookActive(const void*) noexcept { return false; }

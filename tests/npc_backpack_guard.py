@@ -36,7 +36,7 @@ before = srcscan.before
 
 
 def read(root: str, rel: str) -> str:
-    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(root, rel), encoding='utf-8') as f:
         return gen_config.expand(f.read())
 

@@ -1,6 +1,5 @@
 // Actual production sound hooks, private native endpoints, no game/files/audio.
 // Native cache references are {cacheNode*, cacheGlobal*}; Bank is inline at +48.
-#include "../src/crew.h"
 #include "../src/memory.h"
 #include <cstdio>
 #include <cstdlib>

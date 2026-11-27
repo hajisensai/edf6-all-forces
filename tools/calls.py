@@ -47,8 +47,8 @@ class Call:
                          # 'ultimate' (a satellite call whose fire becomes the plugin's show: src/ultimate.cpp)
     log: str = ''        # its name in the plugin's log
     fuel_sec: int = 0    # the plugin's fuel limit for what it brings (0: none)
-    role: str = ''       # brings 'jets': the JetRole (src/crew.h)
-    body: str = ''       # brings 'helis': the HeliBody (src/crew.h)
+    role: str = ''       # brings 'jets': the JetRole (src/jet.h)
+    body: str = ''       # brings 'helis': the HeliBody (src/jet.h)
     # A vehicle request (template eWeapon394): the OBJECT SGO it brings (tools/make_jets.py, no extension) and
     # the pylib/vcobjects.py JETS entry it is made like; `mark` is then that jet's mark (its speed gain k).
     vehicle: str = ''
@@ -63,7 +63,7 @@ class Call:
     # 2026-10-14: 「地底也能召唤飞机……应该只能召唤地底的钻地战车这种」): every other request is written 0, whatever its
     # template had (the Freed bike's, the sidecar's template, is 1).
     underground: bool = False
-    # brings 'throw': the drone its bomb releases (src/crew.h ThrownDrone); `mark` is then throw_mark(code).
+    # brings 'throw': the drone its bomb releases (src/jet.h ThrownDrone); `mark` is then throw_mark(code).
     drone: str = ''
 
     # ...or (brings 'gun') a hand weapon made from this stock weapon row (its SGO, row and texts): the boarding gun,
@@ -131,7 +131,7 @@ def mark_bits(call: 'Call') -> int:
     return struct.unpack('<I', struct.pack('<f', call.mark))[0]
 
 
-# The sorties' passes: src/crew.h SortiePass after its `none` (1 + the index here; tools/gen_calls.py writes the enum,
+# The sorties' passes: src/jet.h SortiePass after its `none` (1 + the index here; tools/gen_calls.py writes the enum,
 # src/sortie_pass.inc).
 SORTIE_PASSES = ('gunRun', 'missilePass', 'carpet', 'popUp', 'missileRain', 'gunshipLap', 'heliStrafe', 'heliHunter',
                  'heliCircle')

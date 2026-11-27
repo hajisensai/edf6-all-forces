@@ -2,7 +2,12 @@
 // EDF5 ran Havok hkp: vehicles were hkpVehicleInstance bodies and the terrain was welded, and a character
 // pushed by a dynamic body was limited to maxForce. EDF6 moved to hknp with game-side wheels; the vehicle
 // chassis lost the motion welding and the character's vertical contacts lost the force limit on the way.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "patches.h"
+#include "sidecar.h"
 #include "memory.h"
 #include "rubble_pass.h"
 

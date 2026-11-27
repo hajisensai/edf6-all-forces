@@ -5,7 +5,11 @@
 #include <cstring>
 #include <limits>
 #include "../src/enemy_control_walking_parts.h"
-#include "../src/crew.h"
+#include "../src/objref.h"
+#include "../src/plugin_log.h"
+#include "../src/npcai.h"
+#include "../src/support_call.h"
+#include "../src/transport.h"
 #include "../src/memory.h"
 namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}
 #include "../src/enemy_control_walking_parts.cpp"

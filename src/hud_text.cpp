@@ -2,6 +2,9 @@
 // the colours, the quad primitives (Emit, Rect, Bar, Seg, Tri, Arc), the damage trails, the Line / Text sequence of
 // the game's own text renderer (Font, Measure, Draw, DrawWorld, DrawAll), the key and button names, the world labels.
 #include "hud_internal.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace hudi {

@@ -1,6 +1,8 @@
 // This mission's preload set: preload_set.h.
 #include "preload_set.h"
-#include "crew.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "jet.h"
 #include "debug_spawn.h"
 #include "jet_internal.h"
 #include "room_pvp.h"

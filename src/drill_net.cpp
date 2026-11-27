@@ -2,7 +2,10 @@
 // The drill's flight over the object message layer (object_net.cpp; its block: drill_net.h State, magic DRIL).
 #include "drill_net.h"
 #include "object_net_transport.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace {

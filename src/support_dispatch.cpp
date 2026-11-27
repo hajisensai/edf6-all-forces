@@ -1,6 +1,15 @@
 // Support requests select and verify an entry before any object exists. The host sends the resulting
 // matrices to peers. Real soldiers board stationary hulls, then the existing vehicle controllers enter.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "jet.h"
+#include "netprobe.h"
+#include "strikes.h"
+#include "view.h"
+#include "mapcmd.h"
+#include "scopereticle.h"
 #include "lazy_rows.h"
 #include "support_call.h"
 #include "support_aircraft.h"
@@ -1024,7 +1033,7 @@ constexpr ULONGLONG kRetireSettleFrames=30;
 // deleted. Deleting a seated one left its seat owned by a freed object: the hull then counted as occupied
 // (DeleteSupportVehicle refused it, the deployment let it go undriven) and the rider stood in its seat pose, updated by
 // nothing (2026-10-10 "我摇的人...成棍木了 / 卡车也跟着虚化了"). True: it is not in a seat now.
-constexpr std::size_t kSoldierVehicle=0x1548;   // Human: the vehicle it is in (crew.h, by kHumanVehicleCtrl)
+constexpr std::size_t kSoldierVehicle=0x1548;   // Human: the vehicle it is in (edf_layout.h, by kHumanVehicleCtrl)
 bool Unseat(const ObjRef& soldier) noexcept {
     __try {
         if(!Alive(soldier))return true;

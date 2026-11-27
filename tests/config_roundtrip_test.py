@@ -1,5 +1,5 @@
 """出厂 ini 往返（tools/config_keys.py → tools/gen_config.py → EDF6VehicleCrew.ini）：把生成的 ini 按插件的读法
-（[VehicleCrew] 段、key=value、; 开头是注释）解析回来，每个出厂键的值都等于表里的默认值，也等于 crew.h Config
+（[VehicleCrew] 段、key=value、; 开头是注释）解析回来，每个出厂键的值都等于表里的默认值，也等于 config.h Config
 成员（src/config.inc EDF6_CONFIG_FIELDS）的初值；不出厂的键、已退役的键不出现在 ini 里；提交的 config.inc 与 ini
 都是生成器现在会写的内容。纯文本，不需要游戏文件。"""
 from __future__ import annotations

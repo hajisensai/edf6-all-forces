@@ -11,6 +11,8 @@
 #include "../tools/hud_view.cpp"
 #undef wmain
 #include <cstdlib>
+#include "../src/edf_layout.h"
+#include "../src/mapcmd.h"
 namespace {
 int taskChecks=0,openPanels=0;
 void TaskCheck(bool ok,const char* why) { ++taskChecks;if(!ok){std::printf("FAIL PVP HUD: %s\n",why);std::exit(1);} }

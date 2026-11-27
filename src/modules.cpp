@@ -4,6 +4,7 @@
 #include "hudtext.h"
 #include <cstring>
 #include <cwchar>
+#include "edf_layout.h"
 
 namespace crew::modules {
 namespace {

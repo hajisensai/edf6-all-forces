@@ -1,6 +1,12 @@
 // A mark/hover owns only a weak control-block reference, never the game object. Validate every use.
 #pragma once
-#include "crew.h"
+#include "memory.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 
 namespace crew::npcmark {
 constexpr std::size_t kFlags=0x18;

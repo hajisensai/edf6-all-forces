@@ -43,6 +43,23 @@
 #include "hangar_recover.h"
 #include <cmath>
 #include <cstring>
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "dreadnought.h"
+#include "jet.h"
+#include "netprobe.h"
+#include "sidecar.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
+#include "march_pace.h"
+#include "bay_rounds.h"
+#include "boarding.h"
+#include "hud.h"
 
 namespace crew {
 namespace {
@@ -437,7 +454,7 @@ bool IsDreadnought(const void* vehicle) noexcept { return BodyOf(vehicle)==Plugi
 bool DreadnoughtBridgeClaims(const unsigned char* human,int vk) noexcept {
     if(!vk || !installed || !Cfg().dreadnought || (vk!=Cfg().dreadnoughtStrafeLeftKey && vk!=Cfg().dreadnoughtStrafeRightKey))return false;
     __try {
-        const auto v=At<unsigned char*>(human,0x1548);   // the vehicle it rides (crew.h kHumanVehicleCtrl - 8)
+        const auto v=At<unsigned char*>(human,0x1548);   // the vehicle it rides (edf_layout.h kHumanVehicleCtrl - 8)
         if(!v || !IsDreadnought(v) || SeatCount(v)==0)return false;
         const unsigned char* seat0=SeatAt(v,0);
         return At<const unsigned char*>(seat0,kSeatRider)==human && !Pad(seat0);

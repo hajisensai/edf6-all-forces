@@ -20,7 +20,18 @@
 //    command onto a world point already holds the torso's world yaw; TurretCamSteers).
 // PlayerNixTorso publishes the frame's legs and torso (nix.h) for the vehicle camera and the HUD's twist indicator.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "hud.h"
+#include "turretcam_api.h"
+#include "nix.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 #include "nix_twist.h"
 #include "seat_aim.h"

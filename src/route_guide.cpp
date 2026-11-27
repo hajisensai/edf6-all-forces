@@ -6,7 +6,10 @@
 // 0x1B4528, and the EDF5 scripts' BVM native 1200 0x21F681. Each call is redirected to a wrapper that runs the
 // constructor and then sets the guide's fields (routeguide::Corrected); the frame's update reads them every frame.
 // Docs: docs/route-guide-re.md. All addresses are RVAs into EDF.dll 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "patches.h"
 #include "memory.h"
 #include "route_guide.h"
 #include <cstring>

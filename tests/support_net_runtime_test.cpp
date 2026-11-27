@@ -1,7 +1,7 @@
 #define _CRT_RAND_S
 // Real production bridge with an in-process implementation of the public C ABI.
 // No game process, game installation, socket, or DLL entry point is used.
-#include "../src/crew.h"
+#include "../src/edf_layout.h"
 #include "../src/coop_extension_api.h"
 #include "../src/support_protocol.h"
 #include <deque>

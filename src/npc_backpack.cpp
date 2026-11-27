@@ -15,7 +15,10 @@
 // sends (NetworkObject +0x120 slot 14) when this soldier is the registered copy every other machine follows.
 // The code read for all of it is held to its bytes (npc_backpack_signatures.inc, tools/npc_backpack_sigs.py; checked
 // against EDF.dll by tests/npc_backpack_native_audit.py): one byte different and no NPC uses a backpack weapon.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "netprobe.h"
+#include "npcai.h"
 #include "layout.h"
 #include "memory.h"
 #include "npc_pack_table.h"

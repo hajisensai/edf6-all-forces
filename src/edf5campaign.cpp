@@ -20,7 +20,11 @@
 // join (0x8EC659) for one of our ids is told which pack this machine lacks.
 // Another plugin may have redirected a site first (EDF6Coop logs the lobby join's 0x8EC659 and loads before us, by
 // name): its call is chained, ours asking it instead of 0xD92B0. A site redirected inside EDF.dll is another build.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "campaign.h"
+#include "vecmath.h"
 #include "memory.h"
 #include "edf/host.h"
 #include "debug_spawn.h"

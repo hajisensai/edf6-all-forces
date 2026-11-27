@@ -1,6 +1,7 @@
 // Production game-thread optical collector; synthetic native seat and hostile lock registry.
 #include "../src/sight_contacts.cpp"
 #include <cstdio>
+#include "../src/jet.h"
 namespace crew {
 unsigned char* image=nullptr;
 Config sensorConfig{};

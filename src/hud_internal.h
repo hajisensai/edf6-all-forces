@@ -1,8 +1,23 @@
 // The vehicle HUD's internal header (hud.cpp and its parts hud_text.cpp, hud_vehicle.cpp, hud_air.cpp, hud_map.cpp,
 // hud_scope.cpp; tools/hud_view.cpp includes them all): what more than one of them uses. Not for any other file: the
-// HUD's API is crew.h's (HudDraw, HudSee, HudPublish, ...). Everything here is in crew::hudi, which every part uses.
+// HUD's API is hud.h's (HudDraw, HudSee, HudPublish, ...). Everything here is in crew::hudi, which every part uses.
 #pragma once
-#include "crew.h"
+#include "sightzoom.h"
+#include "dreadnought.h"
+#include "drill.h"
+#include "emc.h"
+#include "heli.h"
+#include "helisight.h"
+#include "hud.h"
+#include "jet.h"
+#include "launchers.h"
+#include "sazabi.h"
+#include "turretcam_api.h"
+#include "nix.h"
+#include "vhud.h"
+#include "payload.h"
+#include "proteus.h"
+#include "npcai.h"
 #include "barga_aim.h"
 #include "cockpit_canvas.h"
 #include "firstperson.h"

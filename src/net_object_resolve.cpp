@@ -5,6 +5,7 @@
 #include "team_walk.h"
 #include "support_soldier.h"
 #include <cstring>
+#include "scene.h"
 
 // The one native all-team walk every resolver of object references makes (net_object_resolve.h). Static RE
 // (docs/mission-participants-native.md): 5E0C80 visits every team's GameObjects with no HP or dead-state filter, a player

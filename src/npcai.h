@@ -1,5 +1,6 @@
-// npcai.cpp: the plugin's own AI for the friendly NPC soldiers (docs/npc-ai-design.md §3, §4). Included by crew.h.
+// npcai.cpp: the plugin's own AI for the friendly NPC soldiers (docs/npc-ai-design.md §3, §4).
 #pragma once
+#include <Windows.h>
 #include <cstdint>
 #include "mapcmd_logic.h"
 

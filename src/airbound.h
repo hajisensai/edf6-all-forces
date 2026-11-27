@@ -3,7 +3,7 @@
 // jet works round) call it with their own edges; tools/airbound_check.cpp and tools/jet_obstacle_sim.cpp --edge-suite
 // test it offline.
 //
-// The hard edge is the square every flyer must stay inside (crew.h PlayEdge for the jets; for the helis the game's own
+// The hard edge is the square every flyer must stay inside (world.h PlayEdge for the jets; for the helis the game's own
 // move area as well, which clamps them). The soft edge is that square shrunk by a band (Band): at least the ini's width,
 // at least AirSoftTurns full-speed turn diameters of the kind, but never so wide that the soft box is narrower than
 // kRoomTurns of its turn's radius each side (a stock map's 2400 m does not hold a 245 m/s fighter's 2450 m turn plus a

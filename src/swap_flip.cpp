@@ -24,7 +24,8 @@
 // change) has a new object; the old one's handle is not closed (the game thread may be waiting on it), one handle a
 // mode change.
 #include "swap_flip.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include "edf/patch.h"
 #include <atomic>

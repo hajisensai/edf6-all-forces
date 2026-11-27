@@ -5,7 +5,14 @@
 #include "edf41classes.h"
 #include "gpufx/gpufx.h"
 
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 #include "scene_object.h"
 

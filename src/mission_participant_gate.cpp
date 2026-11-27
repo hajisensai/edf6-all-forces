@@ -1,5 +1,11 @@
 #include "mission_participant_gate.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "campaign.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 
 namespace crew {

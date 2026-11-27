@@ -32,7 +32,28 @@
 // Per heli the module keeps a Heli, keyed by its ObjRef (a new object at an old address is a new heli),
 // dropped at a new mission (ResetHelis, with the player's track and the rescue) and reused only once its heli
 // has not been flown for kStaleMs: a full table takes on no new heli rather than drop a live one.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "dreadnought.h"
+#include "heli.h"
+#include "jet.h"
+#include "map.h"
+#include "missile.h"
+#include "netprobe.h"
+#include "sazabi.h"
+#include "seats.h"
+#include "subcarrier.h"
+#include "vhud.h"
+#include "mapbounds.h"
+#include "payload.h"
+#include "damagestats.h"
+#include "mapcmd.h"
+#include "scopereticle.h"
 #include "map_floor.h"
 #include "body506.h"
 #include "heliaim.h"
@@ -2380,7 +2401,7 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
 // The soft edge (airbound.h; the user 2026-10-06: a small edge before the edge, past it they come back). A heli is
 // held inside the move area (shrunk by its inset, veh+kAreaInset) by the stock input, which teleports it back: one
 // chasing out there sat on that edge (or, on the big map, 650 m out past the ground's edge, BigWorld's widened area).
-// Its edge: that box and the play edge (crew.h PlayEdge) overlapped; its soft edge that less the band (ini HeliSoftEdge,
+// Its edge: that box and the play edge (world.h PlayEdge) overlapped; its soft edge that less the band (ini HeliSoftEdge,
 // at least what it takes to stop from full speed, kHeliSoftReact s of it at full speed included). Its post and its hold
 // are put inside it (a guard post or a map command's point out there: its guard circle stays inside), and its wanted
 // velocity out across it is cut to what still stops on it (LimitOut); past it, in at kHeliBackShare of its top speed.

@@ -13,7 +13,7 @@ namespace crew {
 namespace sortie {
 constexpr float kPi=3.14159265358979f;
 
-// The passes (crew.h SortiePass's order after its `none`; tools/calls.py SORTIE_PASSES).
+// The passes (jet.h SortiePass's order after its `none`; tools/calls.py SORTIE_PASSES).
 // Jets
 constexpr float kMaxOffset=80.0f;         // m: a formation's aircraft at most this far across their line from the mark
 constexpr float kPassBeyond=900.0f;       // m past the mark along its line a level pass ends (it withdraws)

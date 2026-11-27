@@ -22,6 +22,15 @@
 // load make every one stale, as the count stands still in the menus; nothing is drawn while the game is paused (GamePaused).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "hud_internal.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "debug_spawn_api.h"
+#include "ground.h"
+#include "highcam.h"
+#include "sightzoom_api.h"
+#include "subcarrier.h"
 
 namespace crew {
 namespace hudi {

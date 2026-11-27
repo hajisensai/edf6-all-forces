@@ -1,7 +1,14 @@
 // Enemy bodies retain their real native object, skills, physics and network owner.
 // AI decisions, input and target selection are leased. The original
 // Soldier remains the authenticated source and resumes immediately on release.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "team_native_logic.h"
 #include "enemy_control.h"
 #include "net_object_resolve.h"

@@ -7,7 +7,7 @@
 //    session says) and on every path releases the reference it was handed (returns 0 no user, 1, 2).
 //  - 0x3D3C0 frees a std::wstring's heap buffer (capacity 8 and up) through the game's own allocator and leaves it empty.
 // So this is the name tag's exact call, made with this plugin's own std::wstring-shaped buffer and reference.
-#include "crew.h"
+#include "edf_layout.h"
 #include "player_name.h"
 #include "memory.h"
 #include <cstdint>

@@ -3,7 +3,6 @@
 // the enemy nearest the aim, else a point on the ground, the map's selection sent there); this file casts the aim's ray
 // (qmark_ray.h), keeps the point mark, shares this machine's marks with the teammates and shows theirs (qmark_protocol.h,
 // over support_net.cpp's transport), publishes every mark for the HUD and plays the cues (jetaudio.cpp clips).
-// Included by crew.h.
 #pragma once
 #include <cstddef>
 #include <cstdint>

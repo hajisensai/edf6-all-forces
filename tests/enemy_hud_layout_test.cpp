@@ -4,6 +4,8 @@
 #include "../tools/hud_view.cpp"
 #undef wmain
 #include <cstdlib>
+#include "../src/edf_layout.h"
+#include "../src/mapcmd.h"
 namespace {
 int checks=0;
 void Check(bool yes,const char* why) {++checks;if(!yes){std::printf("FAIL enemy HUD: %s\n",why);std::exit(1);}}

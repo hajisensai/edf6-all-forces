@@ -17,7 +17,10 @@
 // insect in the air, a corpse, a container, debris are each machine's own physics; docs/gravity-re.md §11): online, a move
 // every machine must see goes through gravity_net.h (the gravity gun's do), which has each machine's copy moved the same way.
 #pragma once
-#include "crew.h"
+#include "objref.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "gravity_logic.h"
 #include <cstdint>
 

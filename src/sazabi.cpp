@@ -42,6 +42,17 @@
 #include "vehicle_look.h"
 #include <cmath>
 #include <cstring>
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "boarding.h"
+#include "plugin_body.h"
+#include "netprobe.h"
+#include "sazabi.h"
+#include "booster.h"
 
 namespace crew {
 namespace {
@@ -465,7 +476,7 @@ bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noex
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-// The HUD's view of the player's Sazabi (crew.h SazabiCue): published each frame it is driven (PublishCue).
+// The HUD's view of the player's Sazabi (sazabi.h SazabiCue): published each frame it is driven (PublishCue).
 bool PlayerSazabiCue(SazabiCue* out) noexcept {
     if(!out || !stepfresh::Fresh(cueStep))return false;
     *out=cue;

@@ -13,6 +13,12 @@
 #include "layout.h"
 #include <cmath>
 #include <cstring>
+#include "edf_layout.h"
+#include "config.h"
+#include "scene.h"
+#include "heli.h"
+#include "netprobe.h"
+#include "seats.h"
 
 namespace crew {
 namespace {

@@ -13,6 +13,9 @@
 // World-service sentinels below never return, so optimized, unexercised flight paths are unreachable.
 #pragma warning(disable:4702)
 #include "../src/jet_spawn.cpp"
+#include "../src/plugin_body.h"
+#include "../src/strikes.h"
+#include "../src/proteus.h"
 #pragma warning(pop)
 
 // Whole-translation-unit linkage requires these world services. None belongs to CreateJet's

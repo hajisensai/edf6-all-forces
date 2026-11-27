@@ -118,7 +118,7 @@ def main() -> int:
         fail('dreadnought_hangar.inc CallPlayerHome: a player\'s fighter not called home to the bay it came out of')
     if not re.search(r'DreadnoughtHangarBoard\s*\(', body(read(root, 'src/crew.cpp'), r'FindSeatHook\s*\(')):
         fail('crew.cpp FindSeatHook: the board press never reaches the Dreadnought\'s hangars (DreadnoughtHangarBoard)')
-    everything = '\n'.join(read(root, rel) for rel in ('src/dreadnought.cpp', 'src/dreadnought_hangar.inc', 'src/crew.h',
+    everything = '\n'.join(read(root, rel) for rel in ('src/dreadnought.cpp', 'src/dreadnought_hangar.inc', 'src/dreadnought.h',
                                                        'src/playerjet_board.inc', 'src/playerjet.cpp'))
     for gone in ('dn_ready', 'kDeckRunSec', 'nextKind', 'DreadnoughtParked', 'DeckSpot'):
         if gone in everything:

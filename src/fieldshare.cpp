@@ -21,7 +21,9 @@
 //    first (0x1104E0, the game's own deactivation): its chunks outlive it for the other instances and must not be drawn
 //    with an owner that is gone; the kept references go when the FMB's last instance does.
 // ini TerrainShare=0 turns it off. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "world.h"
 #include "memory.h"
 #include <cstdint>
 #include <cstring>

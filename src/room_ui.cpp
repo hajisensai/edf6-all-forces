@@ -27,7 +27,11 @@
 #include "room_pvp.h"
 #include "outfit41.h"
 #include "host_settings.h"
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "campaign.h"
 #include "hud.h"
 #include "loadout_store.h"
 #include "map.h"
@@ -886,7 +890,7 @@ bool Chain(Screen& s,void* hook,void* goneHook) noexcept {
 
 bool InstallRoomUi() noexcept {
     constexpr const char* kUntouched="both screens stay as they are";
-    // RoomLoadout=0 at load: nothing is installed, nothing checked (crew.h: both screens untouched; the room pre-sync never
+    // RoomLoadout=0 at load: nothing is installed, nothing checked (config.h: both screens untouched; the room pre-sync never
     // runs). Turning it on takes a restart. Enabled (the plugin's live switch) and RoomLoadout turned 0 later: the frames
     // pass straight through (Off).
     // HqAutoMissionSelect=0 too: the same. RoomLoadout=0 with it on: only the HQ chained, for that alone (HqAutoHook).

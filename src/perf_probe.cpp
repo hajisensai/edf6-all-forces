@@ -8,7 +8,10 @@
 #include <cstring>
 #include <iterator>
 
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
 #include "memory.h"
 #include "net_counters.h"
 

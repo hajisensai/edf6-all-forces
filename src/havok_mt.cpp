@@ -4,7 +4,9 @@
 // 回调的串行性由 Havok 的世界级任务（单实例）保证，见 docs/havok-mt-re.md §1、§3、§11。
 #include "havok_mt.h"
 #include "havok_mt_logic.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include <atomic>
 #include <cstring>

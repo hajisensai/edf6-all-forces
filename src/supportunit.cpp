@@ -8,7 +8,9 @@
 // ini SupportUnitOnAllies, live (the code cave reads the plugin's byte for every unit thrown). Each machine runs the
 // hit filter for its own copy of the round: in a room every player should set the same. All addresses are RVAs into
 // EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "patches.h"
 #include "memory.h"
 #include <atomic>
 #include <cstdint>

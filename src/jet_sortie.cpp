@@ -16,6 +16,7 @@
 // Every pass that finds nothing to strike gives up after kSearchMs, or once past the mark on its line.
 #include "jet_internal.h"
 #include "sortie_plan.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace jet {

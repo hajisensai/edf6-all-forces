@@ -1,6 +1,5 @@
 // Compare the read-only rocket predictor against the production missile.cpp Guide, followed by the separately
 // tested native MissileBullet01 motor/core step. No game process. Covers inherited velocity, ignition and burnout.
-#include "../src/crew.h"
 #include "../src/rounds.h"
 #define rounds trackedRounds
 #include "../src/missile.cpp"

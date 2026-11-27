@@ -6,7 +6,7 @@ the tests run in up to 8 worker processes, -j 1 in this one in order):
     where it is (call_weapons.plan_rows / tail_start);
   - the copies kept by hand elsewhere agree with tools/calls.py and pylib/vcobjects.py (the player jets' marks
     in src/playerjet.cpp, the jets' marks and files in src/jet* and tools/make_jets.py,
-    the enum names in src/crew.h, the counts in README.md);
+    the enum names in src/jet.h, the counts in README.md);
   - the weapon table transaction (call_weapons.commit / recover) writes all or nothing, and rolls back a run
     that died half way;
   - the ownership ledger (pylib/ledger.py) deletes a file only when nobody needs it, and never one someone
@@ -75,7 +75,7 @@ def test(fn: Callable[[], None]) -> Callable[[], None]:
 
 
 def src(rel: str) -> str:
-    """A source's text; crew.h's and plugin.cpp's with the config.inc sections they include written out (the ini's keys,
+    """A source's text; config.h's and plugin.cpp's with the config.inc sections they include written out (the ini's keys,
     tools/config_keys.py via tools/gen_config.py), as the compiler sees them."""
     with open(os.path.join(ROOT, *rel.split('/')), encoding='utf-8') as f:
         text = f.read()
@@ -192,7 +192,7 @@ def in_team_field(rel: str, text: str, at: int) -> bool:
 def team_changes_go_through_set_team() -> None:
     """No plugin writes an object's team (+0x314, kTeam) itself: the game's team manager finds the object's set by
     it, and a raw write leaves the object in its old team's set after it is freed (the crash at the next
-    mission's start, crew.h SetObjectTeam). Every change goes through SetObjectTeam (the game's SetTeam)."""
+    mission's start, seats.h SetObjectTeam). Every change goes through SetObjectTeam (the game's SetTeam)."""
     raw = re.compile(r'Put\s*<[^>]*>\s*\([^;]*\bkTeam\s*[,)]')
     found = []
     for top in ('src', 'autoturret', 'common'):
@@ -834,9 +834,9 @@ def release_module_identity() -> None:
 
 @test
 def play_edge_margin_is_the_big_maps() -> None:
-    """src/crew.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
+    """src/world.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
     import make_bigmap
-    m = re.search(r'kBigWorldMargin=([\d.]+)f', src('src/crew.h'))
+    m = re.search(r'kBigWorldMargin=([\d.]+)f', src('src/world.h'))
     assert m and float(m.group(1)) == make_bigmap.WORLD_MARGIN, (m and m.group(1), make_bigmap.WORLD_MARGIN)
 
 
@@ -890,7 +890,7 @@ def calls_table_consistent() -> None:
     marks = [c.mark for c in calls.CALLS if not c.ground and not c.heli]
     assert len(set(marks)) == len(marks), 'duplicate marks'
     assert all(c.mark == 0 for c in calls.CALLS if c.ground or c.heli), 'a ground vehicle / helicopter request with a mark'
-    crew_h = src('src/crew.h')
+    crew_h = src('src/jet.h')
     roles = set(re.search(r'enum class JetRole \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     bodies = set(re.search(r'enum class HeliBody \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     drones = set(re.search(r'enum class ThrownDrone \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
@@ -1010,16 +1010,16 @@ def boarding_debug_gun_parameters_and_text() -> None:
 def boarding_gun_range_unlimited() -> None:
     """The boarding rifle shoots as far as anything can be (the user, 2026-10-11: "登车狙击枪的射击距离应该是无限远"):
     its reach (AmmoSpeed x AmmoAlive, its only range limit) is past the unlimited view distance at the largest
-    BigWorld (src/crew.h UnlimitedViewDistance) and the stock far pass, with half again to spare (a fire modifier
+    BigWorld (src/view.h UnlimitedViewDistance) and the stock far pass, with half again to spare (a fire modifier
     may scale a round's life, docs/boarding-re.md §2); its life stays a direct-fire round's (src/highcam.cpp, src/sightzoom.cpp: 600 frames is indirect fire) and
     flat (no drop). Only the boarding guns get it: GUN_LIFE is read by gun_sgo / gun_stats alone."""
     import ast
-    plugin, crew_h = src('src/plugin.cpp'), src('src/crew.h')
+    plugin, crew_h = src('src/plugin.cpp'), src('src/view.h')
     most = re.search(r'Fix\("BigWorld",n\.bigWorld,([\d.]+)f,([\d.]+)f\)', plugin)
     assert most, 'BigWorld clamp not found in src/plugin.cpp'
     diag = re.search(r'UnlimitedViewDistance\(\) noexcept \{ const float d=([\d.]+)f\*WorldHalf\(\)', crew_h)
     far = re.search(r'kStockDistantFar=([\d.]+)f', crew_h)
-    assert diag and far, 'src/crew.h UnlimitedViewDistance changed'
+    assert diag and far, 'src/view.h UnlimitedViewDistance changed'
     farthest = max(float(diag.group(1)) * float(most.group(2)), float(far.group(1)))
     speed, life = cw.GUN_CURVES['AmmoSpeed'], cw.GUN_SCALARS['AmmoAlive']
     assert life == cw.GUN_LIFE and life == int(life), life
@@ -1460,7 +1460,7 @@ def supports_on_map_rows_are_placeholders() -> None:
 
 @test
 def sound_at_takes_a_still_sound() -> None:
-    """SoundAt's contract (src/crew.h, src/sound_place.h): `vel` may be nullptr, a still sound; the arithmetic that reads
+    """SoundAt's contract (src/sound.h, src/sound_place.h): `vel` may be nullptr, a still sound; the arithmetic that reads
     it is sound_place.h's, which checks it (2026-10-20 smoke test: the ultimate's recordings passed none, jetsound.cpp's
     Place read through it and the show's step faulted on every cue). jetsound.cpp reads no velocity outside it; the
     offline check runs in CI."""
@@ -1468,7 +1468,7 @@ def sound_at_takes_a_still_sound() -> None:
     assert srcscan.has(place, 'if(!v)return 0.0f;') and srcscan.has(place, 'Closing(vel,u)') and srcscan.has(place, 'Closing(camVel,u)')
     assert srcscan.has(jet, '*out=soundplace::Place(listener,listenerVel,pos,vel);')
     assert not re.search(r'Dot\(\s*(vel|listenerVel)\s*,', jet), 'jetsound.cpp reads a velocity outside sound_place.h'
-    assert '`vel` may be nullptr' in src('src/crew.h')
+    assert '`vel` may be nullptr' in src('src/sound.h')
     cmake = src('CMakeLists.txt')
     assert 'add_executable(sound_place_check EXCLUDE_FROM_ALL tools/sound_place_check.cpp)' in cmake
     assert re.search(r'set\(EDF6_OFFLINE_CHECKS[^)]*\bsound_place_check\b', cmake)
@@ -1998,7 +1998,7 @@ def emc_copies_agree() -> None:
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
     assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst, barrageMissile,\s+andryushaBlast, andryushaFire \};',
-                     src('src/crew.h')), 'src/crew.h EmcRound'
+                     src('src/bay_rounds.h')), 'src/bay_rounds.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in sz_files] == list(vc.SAZABI_ROUND_FILES) and all(s == f.lower() for s, f in sz_files), sz_files
@@ -2027,7 +2027,7 @@ def emc_copies_agree() -> None:
     assert runs_when_disabled('EmcFrame') and runs_when_disabled('EmcTick'), 'EmcFrame / EmcTick run with the plugin off'
     assert 'Cfg().enabled && Cfg().emcBeam' in emc, 'emc.cpp Ready: off with the plugin'
     # The HUD's EMC line is the EMC's own vehicle's (its position), as the Proteus readout is.
-    assert 'float pos[3]; };' in src('src/crew.h').split('struct EmcCue', 1)[1].split('\n', 1)[0]
+    assert 'float pos[3]; };' in src('src/emc.h').split('struct EmcCue', 1)[1].split('\n', 1)[0]
     assert 'std::memcpy(c.pos,v+kPosition,12);' in emc and 'x.emc && vec::Dist(x.emc->pos,r.pos)<2.0f' in hud_src()
     assert resets('ResetEmc') and installs('InstallEmc')
     inst = src('tools/installer.py')
@@ -2107,7 +2107,7 @@ def barrage_copies_agree() -> None:
     bay = src('src/jet_bay.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_barrage_[a-z]+\.sgo)",L"(EDF6VC_BARRAGE_[A-Z]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.BARRAGE_FILES) and all(s == f.lower() for s, f in files), files
-    assert not srcscan.has(src('src/crew.h'), 'EmcRound::barrage,') and 'barrage, barrageBurst,' in src('src/crew.h')
+    assert not srcscan.has(src('src/bay_rounds.h'), 'EmcRound::barrage,') and 'barrage, barrageBurst,' in src('src/bay_rounds.h')
     assert [n.split('/', 1)[1] for n in make_barrage.names()] == list(vc.BARRAGE_FILES)
     # Called from the map's bar (2026-10-26), told to the peers by its own channel, its area warned of.
     assert srcscan.has(src('src/airstrike.cpp'), 'BarrageStart(k.barrage,caller,target,heading,k.damage)')
@@ -2135,10 +2135,10 @@ def barrage_copies_agree() -> None:
 @test
 def sortie_copies_agree() -> None:
     """The sorties (src/jet_sortie.cpp, src/heli.cpp HeliSortie, src/sortie_plan.h; docs/plan-2026-10-25-strikes.md §1.2): the
-    passes in one order in calls.py and crew.h (kCalls carries 1 + the index), each sortie call a flown one with its catalog key
+    passes in one order in calls.py and jet.h (kCalls carries 1 + the index), each sortie call a flown one with its catalog key
     and label (tools/support_config.py), the plugin wired through (the spec, the activation of jets and helis, the guidance, the
     bombs, the second waves' queue, tick and reset), the offline check built."""
-    crew_h = src('src/crew.h')
+    crew_h = src('src/jet.h')
     # The enum is tools/gen_calls.py's (src/sortie_pass.inc; gen --check keeps it current).
     assert '#include "sortie_pass.inc"' in crew_h
     plan = src('src/sortie_plan.h')
@@ -2361,7 +2361,7 @@ def andryusha_marks_agree() -> None:
     bay = src('src/jet_bay.cpp')
     files = re.findall(r'L"(EDF6VC_ANDRYUSHA_\w+\.SGO)"', bay)
     assert files == list(vc.ANDRYUSHA_BOMBLET_FILES), files
-    enum = re.search(r'enum class EmcRound \{(.*?)\};', src('src/crew.h'), re.S).group(1)
+    enum = re.search(r'enum class EmcRound \{(.*?)\};', src('src/bay_rounds.h'), re.S).group(1)
     assert re.sub(r'\s', '', enum).endswith('barrage,barrageBurst,barrageMissile,andryushaBlast,andryushaFire'), enum
     # The fuse switch writes the weapon's template AmmoHitSizeAdjust: the template's AmmoSpeed / AmmoAlive offsets
     # (common/edf/weapon.h) at the same distance from it as in the IFC's InitParam (docs/carrier-laser-re.md §3).
@@ -4183,13 +4183,13 @@ def proteus_wired() -> None:
     # Unused parked vehicles wait for their first player driver unless the explicit test-only opt-in is enabled.
     assert 'if(!st.playerAt && !Cfg().npcCrewTest)return;' in crew, \
         'unused parked vehicles require a player driver or the explicit NpcCrewTest opt-in'
-    assert 'bool npcCrewTest=false;' in src('src/crew.h'), 'NpcCrewTest must stay off by default'
+    assert 'bool npcCrewTest=false;' in src('src/config.h'), 'NpcCrewTest must stay off by default'
     assert 'n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);' in plugin, 'the test opt-in must load from config'
     assert re.search(r'^NpcCrewTest=0\s*$', src('EDF6VehicleCrew.ini'), re.MULTILINE), \
         'the shipped configuration must not auto-crew unused vehicles'
     # The stock weapons only: no custom rounds, no damage-call redirect, the stock damage path untouched.
     for gone in ('ProteusGunRound', 'ProteusSalvoRound', 'ProteusRoundsReady', 'ProteusDamageThunk', 'kProteusHoldCountdown'):
-        for rel in ('src/crew.h', 'src/jet_bay.cpp', 'src/proteus.cpp', 'src/proteus.h', 'src/subcarrier.cpp', 'src/vehsound.cpp'):
+        for rel in ('src/bay_rounds.h', 'src/emc.h', 'src/jet_bay.cpp', 'src/proteus.cpp', 'src/proteus.h', 'src/subcarrier.cpp', 'src/vehsound.cpp'):
             assert gone not in src(rel), f'{gone} in {rel}'
     assert 'return to==image+kDamageTarget;' in src('src/subcarrier.cpp')
     assert '0x54A586' not in code and 'RedirectCall' not in code
@@ -4442,7 +4442,7 @@ def gunship_gunner_seat() -> None:
     """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second
     seat with the pilot's locators and the stock door gunner's pose, class mask and key row, and nothing else changes; a
     gunship that has it already, a stock gunner seat not as expected, or a weapon put on the gunner seat are refused. The
-    C++ side's seat number (src/crew.h kGunnerSeat) is the generator's, the crew's ini keys are read and documented."""
+    C++ side's seat number (src/playerjet.h kGunnerSeat) is the generator's, the crew's ini keys are read and documented."""
     import sgo
     pilot = ['door1', 'seat1', ['loc1', 0.0, 0.0], '506_HELI_DRIVER', 9, 10.0, make_jets.PILOT_KEYS]
     setup = [[1.0, 1.0], [make_jets.GUNSHIP_MARK, 0.0003], [999900.0, 1.666],
@@ -4487,8 +4487,8 @@ def gunship_gunner_seat() -> None:
         pass
     else:
         raise AssertionError('check_gunner_seat took a gunship with one seat')
-    m = re.search(r'constexpr unsigned kGunnerSeat=(\d+);', src('src/crew.h'))
-    assert m and int(m.group(1)) == make_jets.GUNNER_SEAT, 'src/crew.h kGunnerSeat'
+    m = re.search(r'constexpr unsigned kGunnerSeat=(\d+);', src('src/playerjet.h'))
+    assert m and int(m.group(1)) == make_jets.GUNNER_SEAT, 'src/playerjet.h kGunnerSeat'
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('GunshipBoardGunner', 'GunshipGunnerKey'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
@@ -6234,7 +6234,7 @@ def stock_payload_and_seats_wired() -> None:
         assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
     assert re.search(r'^StockVehicleStores=1', ini, re.M) and mss.wanted(ini), 'StockVehicleStores ships on'
     assert not mss.wanted('[VehicleCrew]\nStockVehicleStores=0\n'), 'the player can turn it off'
-    assert 'bool stockStores=true;' in src('src/crew.h'), 'the plugin defaults it on as the ini does'
+    assert 'bool stockStores=true;' in src('src/config.h'), 'the plugin defaults it on as the ini does'
     assert mss.wanted('[VehicleCrew]\nStockVehicleStores=1 ; on\n') and not mss.wanted('[Other]\nStockVehicleStores=1\n')
     # the older key (the helicopters alone) still turns it on, in the plugin and the installer alike
     assert 'L"StockHeliStores"' in plugin and mss.wanted('[VehicleCrew]\nStockVehicleStores=0\nStockHeliStores=1\n')
@@ -6321,7 +6321,7 @@ def new_defaults_on_once() -> None:
     it will be (player_ini_text), so the stores are built on the first install; the uninstall that keeps the call
     weapons still takes the stores back, EDF6AutoTurret's flak requests rewritten first."""
     import installer
-    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
     for key, (old, new) in installer.NEW_DEFAULTS[installer.SECTION].items():
         assert re.search(rf'^{key}={new}\b', ini, re.M), f'{key} ships {new}'
     for field in ('DWORD heliLandMs=5000;', 'bool rescueAutoBoard=true;', 'bool stockStores=true;', 'bool seatSwitchOnline=true;'):
@@ -6494,7 +6494,7 @@ def edf41_mother_parts_default_migrates() -> None:
     player's value, so an ini still at the old 15 is moved to 31 once by the installer's second defaults step (its own mark:
     an ini that took the 10-07 step takes it too), a value the player chose is kept, and a later install changes nothing."""
     import installer
-    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
     assert re.search(r'^Edf41MotherParts=31$', ini, re.M) and srcscan.has(crew, 'int edf41MotherParts=31;')
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
@@ -6528,7 +6528,7 @@ def max_frame_latency_default_back_to_0() -> None:
     launches at 1 ran slow): the shipped ini and the plugin's default agree, an old ini still at 1 is moved to 0 once by the
     11-24 defaults step, a value the player chose is kept, and a later install changes nothing."""
     import installer
-    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
     assert re.search(r'^MaxFrameLatency=0$', ini, re.M) and srcscan.has(crew, 'int maxFrameLatency=0;')
     assert installer.NEW_DEFAULTS_1124[installer.SECTION] == {'MaxFrameLatency': ('1', '0')}
     marks = '\n'.join(m for m, _ in installer.DEFAULTS_STEPS if m != installer.DEFAULTS_MARK_1124)
@@ -6550,7 +6550,7 @@ def frame_rate_cap_default_off() -> None:
     default agree, and no defaults step moves it (1, the display's refresh rate, waits for the maintainer's checklist
     and the other objects' interpolation; a later PR changes the default)."""
     import installer
-    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
     assert re.search(r'^FrameRateCap=0$', ini, re.M) and srcscan.has(crew, 'int frameRateCap=0;')
     assert all('FrameRateCap' not in flips.get(installer.SECTION, {}) for _, flips in installer.DEFAULTS_STEPS)
 
@@ -6561,7 +6561,7 @@ def high_cam_default_migrates() -> None:
     installer's 10-24 defaults step (merge_ini alone keeps them: the player would never see the farther view); a value the
     player chose is kept, and a later install changes nothing."""
     import installer
-    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
     assert re.search(r'^HighCamHeight=90$', ini, re.M) and re.search(r'^HighCamBack=55$', ini, re.M)
     assert srcscan.has(crew, 'float highCamHeight=90.0f;') and srcscan.has(crew, 'float highCamBack=55.0f;')
     assert installer.NEW_DEFAULTS_1024[installer.SECTION] == {'HighCamHeight': ('45', '90'), 'HighCamBack': ('35', '55')}
@@ -6590,7 +6590,7 @@ def fire4_pad_default_migrates() -> None:
     (2026-11-08, docs/feedback-2026-11-08-grape-keys.md): the shipped ini and the plugin's default agree, an old ini still
     at 0 is moved once by the installer's 11-08 step, a button the player chose is kept, a later install changes nothing."""
     import installer
-    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
     import config_keys
     fire4 = config_keys.BY_NAME['VehicleFire4Button']   # the plugin's default is the table's (tools/gen_config.py)
     assert re.search(r'^VehicleFire4Button=512$', ini, re.M) and fire4.default == '512' and \
@@ -6617,7 +6617,7 @@ def free_look_key_default_migrates() -> None:
     the shipped ini, the plugin's defaults and the key config's slots agree; an old ini still on the old defaults is moved
     once by the 11-10 step, a key the player chose is kept, a later install changes nothing."""
     import installer
-    ini, crew, kb = src('EDF6VehicleCrew.ini'), src('src/crew.h'), src('common/edf/keybind.h')
+    ini, crew, kb = src('EDF6VehicleCrew.ini'), src('src/config.h'), src('common/edf/keybind.h')
     assert re.search(r'^FreeLookKey=0x43$', ini, re.M) and re.search(r'^HighCamKey=0x4C$', ini, re.M)
     assert srcscan.has(crew, 'int freeLookKey=0x43;') and srcscan.has(crew, 'int highCamKey=0x4C;')
     assert srcscan.has(kb, '{0x58,12,0,Owner::crew,L"FreeLookKey",0x43}') and srcscan.has(kb, '{0x59,12,1,Owner::crew,L"HighCamKey",0x4C}')
@@ -6644,7 +6644,7 @@ def infantry_scope_pip_default_migrates() -> None:
     its range agree; an old ini still at 1 is moved once by the installer's 11-10 step, a 0 the player chose is kept, a
     later install changes nothing."""
     import installer
-    ini, crew, plugin = src('EDF6VehicleCrew.ini'), src('src/crew.h'), src('src/plugin.cpp')
+    ini, crew, plugin = src('EDF6VehicleCrew.ini'), src('src/config.h'), src('src/plugin.cpp')
     pip = src('src/scope_pip.h')
     assert re.search(r'^InfantryScope=2$', ini, re.M) and srcscan.has(crew, 'int infantryScope=2;')
     assert srcscan.has(pip, 'constexpr int kModeLowest=0,kModeHighest=2,kModeDefault=2;')
@@ -6833,7 +6833,7 @@ def map_commands_wired() -> None:
 @test
 def play_area_wired() -> None:
     """The player-flown aircraft keep inside the map's ground (src/playarea.h, docs/player-jet-re.md §3): the walls are the
-    measured play area's, not the physics square's (crew.h PlayEdge, km out over the void on a stock map); the rotor craft
+    measured play area's, not the physics square's (world.h PlayEdge, km out over the void on a stock map); the rotor craft
     are kept in too; it is measured every mission; a void within the walls is floored; the cockpit shows AREA; the offline
     check runs in CTest."""
     pj, board = src('src/playerjet.cpp'), src('src/playerjet_board.inc')
@@ -7236,7 +7236,7 @@ def split_missile_wired() -> None:
     assert srcscan.has(sm, 'if(!moved)return nextSplit(round,frames);')
     assert srcscan.has(sm, 'targetVtbl[kAddHitSlot]=reinterpret_cast<void*>(&TargetAddHit);')
     assert installs('InstallSplitMissiles')
-    assert srcscan.has(src('src/crew.h'), 'bool splitMissileSurface=true;')
+    assert srcscan.has(src('src/config.h'), 'bool splitMissileSurface=true;')
     assert 'SplitMissileSurface=1' in src('EDF6VehicleCrew.ini')
     assert 'src/splitmissile.cpp' in src('CMakeLists.txt')
     assert 'add_test(NAME split_fuse COMMAND split_fuse_test)' in src('CMakeLists.txt')
@@ -7278,7 +7278,7 @@ def stock_guidance_wired() -> None:
     ms_src = src('src/missile.cpp')
     assert ms_src.index('nextUpdate(b,a2,a3,a4);') < ms_src.index('TvAfter(static_cast<unsigned char*>(b));'), 'TV view after the step'
     assert srcscan.has(m, 'in.back=Down(VK_RBUTTON);'), 'the right button hands the TV back'
-    crew, vini, readme = src('src/crew.h'), src('EDF6VehicleCrew.ini'), src('README.md')
+    crew, vini, readme = src('src/config.h'), src('EDF6VehicleCrew.ini'), src('README.md')
     for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
                        ('tempestTv', 'TempestTv')):
         assert f'bool {field}=true;' in crew and re.search(rf'^{key}=1', vini, re.M) and key in readme, key
@@ -7778,7 +7778,7 @@ def support_arrives_from_off_the_map() -> None:
     assert 'std::fabs(at[0])>reach.half || std::fabs(at[2])>reach.half' in plan, 'each formation slot inside the physical square'
     assert 'at[0]<area.lo[0]' not in plan, 'no slot is held to the map any more'
     assert 'SupportPassTurn(spec)' in plan
-    crewh = src('src/crew.h')
+    crewh = src('src/world.h') + src('src/view.h') + src('src/config.h')
     assert srcscan.has(crewh, 'inline float ArrivalHalf() noexcept { const float h=HavokHalf(),w=WorldHalf();return (h<w ? h : w)-kArrivalRoom; }')
     assert srcscan.has(crewh, 'const float v=ViewDistanceWanted();return v>kStockFarClip ? v : kStockFarClip;')
     # 2026-10-10 "改成无限": ViewDistance -1 (the default) reaches past the world's diagonal and the stock far pass end.
@@ -8872,7 +8872,7 @@ def ported_content_unlock_keys() -> None:
         mine = f'[VehicleCrew]\r\nEnabled=1\r\n{key}=1\r\n'
         text, added, _ = installer.merge_ini(mine, shipped)
         assert key not in added and f'\r\n{key}=1\r\n' in text and f'{key}=0' not in text, 'the player\'s 1 is kept'
-    crew = src('src/crew.h')
+    crew = src('src/config.h')
     plugin = src('src/plugin.cpp')
     assert srcscan.has(crew, 'bool portedMissionsUnlocked=false;') and srcscan.has(crew, 'bool portedWeaponsUnlocked=false;')
     assert srcscan.has(plugin, 'n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);')
@@ -10819,7 +10819,7 @@ def edf41_mother_plugin_contract() -> None:
     assert any(o['object'] == 'OBJECT/' + m.MOTHER301_ROOT and o['class'] == m.MOTHER301_ALIAS.cls
                for o in eo.registry()['objects'])
     assert 'if(!Cfg().edf41Mother)' in cpp.split('bool InstallEdf41Mother()', 1)[1].split('BuildClone', 1)[0]
-    crew, ini = src('src/crew.h'), src('EDF6VehicleCrew.ini')
+    crew, ini = src('src/config.h'), src('EDF6VehicleCrew.ini')
     assert srcscan.has(crew, 'bool edf41Mother=true;') and srcscan.has(plugin, 'ReadBool(L"Edf41Mother"')
     assert re.search(r'^Edf41Mother=1$', ini, re.M) and re.search(r'^Edf41MotherParts=31$', ini, re.M)
     assert not hasattr(eo, 'DEV_ENV') and not hasattr(m, 'MOTHER_DEV_OUT')
@@ -11007,7 +11007,7 @@ def edf41_robo_plugin_contract() -> None:
     that class cleared and its durability sized by level (slot 6), the transform refuses damage, ObjectAction 0 / 1 / 2
     follow 4.1, and every EDF.dll function the shared module calls for it is fingerprinted."""
     import make_edf41_objects as m
-    cpp, plugin, cmake, crew = src('src/edf41robo.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt'), src('src/crew.h')
+    cpp, plugin, cmake, crew = src('src/edf41robo.cpp'), src('src/plugin.cpp'), src('CMakeLists.txt'), src('src/edf41.h') + src('src/config.h')
     shared, ini = src('src/edf41classes.cpp'), src('EDF6VehicleCrew.ini')
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)' in cmake and installs('InstallEdf41Robo')
     assert srcscan.has(crew, 'bool InstallEdf41Robo() noexcept;') and srcscan.has(crew, 'bool edf41Robo=true;') and srcscan.has(plugin, 'ReadBool(L"Edf41Robo"')
@@ -11059,7 +11059,7 @@ def edf41_net_contract() -> None:
     the decisions to the host (UfoRobo: no AI, no gun timer; 401: no attack start; 301: no cannon charge). The 401 runs on
     every machine (its ObjectAction reached EventAnimationObject's OnMessage on a guest, which throws without `action`)."""
     net, head = src('src/edf41net.cpp'), src('src/edf41net.h')
-    cmake, plugin, crew, ini = src('CMakeLists.txt'), src('src/plugin.cpp'), src('src/crew.h'), src('EDF6VehicleCrew.ini')
+    cmake, plugin, crew, ini = src('CMakeLists.txt'), src('src/plugin.cpp'), src('src/config.h'), src('EDF6VehicleCrew.ini')
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41net.cpp)' in cmake and 'add_test(NAME edf41net COMMAND edf41net_test)' in cmake
     assert srcscan.has(crew, 'bool edf41Net=true;') and srcscan.has(crew, 'bool edf41NetMirror=false;')
     assert srcscan.has(plugin, 'ReadBool(L"Edf41Net"') and srcscan.has(plugin, 'ReadBool(L"Edf41NetMirror"')
@@ -11252,8 +11252,9 @@ def edf41_mother401_plugin_contract() -> None:
     every EDF.dll function the shared module calls for it has a fingerprint."""
     import edf41_objects as eo
     import sgo
-    cpp, plugin, cmake, crew, ini = (src(r) for r in ('src/edf41mother401.cpp', 'src/plugin.cpp', 'CMakeLists.txt', 'src/crew.h',
+    cpp, plugin, cmake, crew, ini = (src(r) for r in ('src/edf41mother401.cpp', 'src/plugin.cpp', 'CMakeLists.txt', 'src/edf41.h',
                                                        'EDF6VehicleCrew.ini'))
+    crew += src('src/config.h')
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)' in cmake
     assert installs('InstallEdf41Mother401') and 'bool InstallEdf41Mother401() noexcept;' in crew
     assert 0 <= registry_index('kInstalls', 'InstallEdf41Mother') < registry_index('kInstalls', 'InstallEdf41Mother401')

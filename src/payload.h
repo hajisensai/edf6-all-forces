@@ -1,7 +1,6 @@
 // payload.cpp: the weapons of the seat the local player sits in on a stock vehicle, as a readout for the vehicle HUD,
 // and the stock helicopters' switchable stores (docs/stock-payload-re.md).
 // seatswitch.cpp: the player moving to another seat of the vehicle they are in (docs/stock-payload-re.md §5).
-// Included by crew.h; game thread unless said.
 #pragma once
 #include "stores.h"
 #include <cstdint>

@@ -7,7 +7,11 @@
 // LoadoutPreload; this file hooks only the player creation.
 // Refill=1 also fills every weapon of the new player at once (the developer command weapon_reload's
 // per-soldier call), which makes an Air Raider's vehicles callable without earning points first.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "core.h"
 #include "memory.h"
 #include "weapon_records.h"
 #include <cwchar>

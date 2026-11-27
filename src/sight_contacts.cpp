@@ -1,6 +1,13 @@
 // Game-thread optical contact collector. The HUD publishes this value with its snapshot;
 // native object reads, team relationships and terrain/building rays never run on the draw thread.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "heli.h"
+#include "hud.h"
+#include "map.h"
+#include "vhud.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight_contacts.h"

@@ -5,6 +5,7 @@
 #include "memory.h"
 #include "lazy_rows.h"
 #include <cstring>
+#include "edf_layout.h"
 
 namespace crew::controlled_pvp {
 namespace {

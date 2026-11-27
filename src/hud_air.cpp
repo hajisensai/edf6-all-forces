@@ -2,6 +2,8 @@
 // panel and stores, the gunship gunner's frame, the fighter HUD (pitch ladder, heading tape, boxes, sights, the RWR,
 // the warnings), the reticles' rendering, and the helicopter's HUD and panel.
 #include "hud_internal.h"
+#include "config.h"
+#include "playarea.h"
 
 namespace crew {
 namespace hudi {
