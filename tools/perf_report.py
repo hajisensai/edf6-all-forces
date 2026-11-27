@@ -413,6 +413,135 @@ def read_frame_split(log: str, window: tuple[float, float]) -> dict[str, float]:
     return out
 
 
+HAVOK_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF HAVOK (?:(before|after) )?'
+                        r'build (\d+) calls ([\d.]+) ms total max ([\d.]+) ms, '
+                        r'finish (\d+) calls ([\d.]+) ms total max ([\d.]+) ms')
+
+
+def read_havok(log: str, window: tuple[float, float]) -> dict[str, tuple[int, float, float]]:
+    """Direct task graph timings: per phase (calls, mean ms, max ms), including the caller's waits."""
+    rows = _rows(log, HAVOK_TIME, window)
+    out = {}
+    for phase in (None, 'before', 'after'):
+        samples = [m for m in rows if m[4] == phase]
+        for graph, i in (('build', 5), ('finish', 8)):
+            calls = sum(int(m[i]) for m in samples)
+            if calls:
+                name = f'{phase} objects {graph}' if phase else graph
+                out[name] = (calls, sum(float(m[i + 1]) for m in samples) / calls,
+                             max(float(m[i + 2]) for m in samples))
+    return out
+
+
+COLLIDE_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE construct (\d+) calls ([\d.]+) ms, '
+                          r'dispatch (\d+) calls ([\d.]+) ms, mode0 (\d+), sleep (\d+) calls ([\d.]+) ms')
+
+
+NPC_PARALLEL = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF NPCMT (on|off), (\d+) threads: ([\d.]+) soldiers decided '
+                          r'a step, (\d+) faults; a step: gather ([\d.]+) ms, decide ([\d.]+) ms, stock think ([\d.]+) ms, '
+                          r'apply ([\d.]+) ms \(asks made at apply ([\d.]+) ms\); kept answers (\d+), asked at apply (\d+), '
+                          r'no intent (\d+), stale (\d+), mismatches (\d+)')
+NPC_PARALLEL_TIMES = ('gather', 'decide', 'stock think', 'apply', 'asks at apply')
+NPC_PARALLEL_COUNTS = ('faults', 'kept', 'asked at apply', 'no intent', 'stale', 'mismatches')
+
+
+def read_npc_parallel(log: str, window: tuple[float, float]) -> dict:
+    """The soldiers' Think split (src/npcai.cpp NpcParallelReport, PerfProbe=1 and Debug=1): each part's ms a step
+    (the rows' mean: each row one PerfTick period), the soldiers decided a step, the counters summed; the switch and
+    the threads as the last row has them."""
+    rows = _rows(log, NPC_PARALLEL, window)
+    if not rows:
+        return {}
+    n = len(rows)
+    out: dict = {'rows': n, 'mode': rows[-1][4], 'threads': int(rows[-1][5]),
+                 'decided': sum(float(m[6]) for m in rows) / n}
+    out.update({key: sum(float(m[i]) for m in rows) / n for i, key in enumerate(NPC_PARALLEL_TIMES, 8)})
+    out.update({key: sum(int(m[i]) for m in rows) for i, key in zip((7, 13, 14, 15, 16, 17), NPC_PARALLEL_COUNTS)})
+    return out
+
+
+def read_collide(log: str, window: tuple[float, float]) -> dict:
+    """Totals from the first Havok build; mode-0 sleep is included in dispatch."""
+    rows = _rows(log, COLLIDE_TIME, window)
+    if not rows:
+        return {}
+    out = {name: (sum(int(m[i]) for m in rows), sum(float(m[i + 1]) for m in rows))
+           for name, i in (('construct', 4), ('dispatch', 6), ('sleep', 9))}
+    out['mode0'] = sum(int(m[8]) for m in rows)
+    return out
+
+
+COLLIDE_GRAPH = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE GRAPH (\d+) nodes (\d+)/(\d+) '
+                           r'dropped (\d+) tail (-?\d+) wait ([\d.]+) ms')
+COLLIDE_NODE = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE NODE (\d+) index (\d+) (\w+) '
+                          r'calls (\d+) workers (\d+) work ([\d.]+) ms withwait ([\d.]+) ms '
+                          r'first ([\d.]+) ms last ([\d.]+) ms predecessor (-?\d+)')
+
+
+def read_collide_tasks(log: str, window: tuple[float, float]) -> dict:
+    """Sampled task graphs, by complete observed tail chains and aggregate timed callback spans."""
+    graphs = {int(m[4]): m for m in _rows(log, COLLIDE_GRAPH, window)}
+    if not graphs:
+        return {}
+    nodes = {graph: {} for graph in graphs}
+    for m in _rows(log, COLLIDE_NODE, None):
+        graph = int(m[4])
+        if graph in nodes:
+            nodes[graph][int(m[5])] = m
+
+    totals = {}
+    chains = collections.Counter()
+    complete = 0
+    for graph, row in graphs.items():
+        found = nodes[graph]
+        for m in found.values():
+            kind = totals.setdefault(m[6], [0, 0, 0.0, 0.0])
+            kind[0] += int(m[7])
+            kind[1] += int(m[8])
+            kind[2] += float(m[9])
+            kind[3] += float(m[10])
+        if int(row[5]) != int(row[6]) or int(row[7]) or len(found) != int(row[5]):
+            continue
+        complete += 1
+        cursor = int(row[8])
+        chain, seen = [], set()
+        while cursor in found and cursor not in seen:
+            seen.add(cursor)
+            chain.append(found[cursor][6])
+            cursor = int(found[cursor][13])
+        if chain:
+            chains[tuple(reversed(chain))] += 1
+    return {'graphs': len(graphs), 'complete': complete, 'chains': chains, 'tasks': totals,
+            'wait_ms': sum(float(m[9]) for m in graphs.values())}
+
+
+CONTACT_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE CONTACT (\d+) dispatches (\d+) '
+                          r'work ([\d.]+) ms signal ([\d.]+) ms dropped (\d+)')
+CONTACT_COMMAND = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE COMMAND (\d+) kind (\d+) calls (\d+)')
+CONTACT_LISTENER = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE LISTENER (\d+) event (\d+) '
+                              r'callback (0x[0-9A-Fa-f]+) calls (\d+) work ([\d.]+) ms')
+
+
+def read_post_collide(log: str, window: tuple[float, float]) -> dict:
+    rows = {int(m[4]): m for m in _rows(log, CONTACT_TIME, window)}
+    if not rows:
+        return {}
+    commands = collections.Counter()
+    listeners = {}
+    for m in _rows(log, CONTACT_COMMAND, None):
+        if int(m[4]) in rows:
+            commands[int(m[5])] += int(m[6])
+    for m in _rows(log, CONTACT_LISTENER, None):
+        if int(m[4]) in rows:
+            item = listeners.setdefault((int(m[5]), int(m[6], 16)), [0, 0.])
+            item[0] += int(m[7])
+            item[1] += float(m[8])
+    return {'graphs': len(rows), 'dispatches': sum(int(m[5]) for m in rows.values()),
+            'dispatch_ms': sum(float(m[6]) for m in rows.values()),
+            'signal_ms': sum(float(m[7]) for m in rows.values()),
+            'dropped': sum(int(m[8]) for m in rows.values()), 'commands': commands, 'listeners': listeners}
+
+
 def read_render(log: str, window: tuple[float, float]) -> dict[str, float]:
     """The PERF RENDER rows in `window`: means weighted by presents, worsts the max. {} without them."""
     rows = _rows(log, RENDER, window)
@@ -911,6 +1040,59 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
                 f'there): {split["without steps"]:.2f} ms: the floor of a frame that steps nothing, n = 0 (cpu-11), '
                 f'at most {1000 / split["without steps"]:.0f} frames a second on this thread alone.'
                 if split['without steps'] else '']
+    havok = read_havok(log, cw)
+    if havok:
+        out += ['', '## Havok task graphs (direct timing, including waits)', '']
+        out += [f'- {phase}: {count} calls, {mean:.2f} ms/call (worst {worst:.2f})'
+                for phase, (count, mean, worst) in havok.items()]
+    mt = read_npc_parallel(log, cw)
+    if mt:
+        out += ['', f"## Soldiers' Think (NpcParallelThink {mt['mode']}, {mt['threads']} threads)", '',
+                '| part | ms a step |', '|---|---|']
+        out += [f'| {k} | {mt[k]:.3f} |' for k in NPC_PARALLEL_TIMES]
+        out += ['', f"{mt['decided']:.1f} soldiers decided a step; kept answers {mt['kept']:,}, asked at apply "
+                f"{mt['asked at apply']:,} (stale {mt['stale']:,}, no intent {mt['no intent']:,}); "
+                f"faults {mt['faults']}, mismatches {mt['mismatches']}."]
+    collide = read_collide(log, cw)
+    if collide:
+        n, construct_ms = collide['construct']
+        dispatches, dispatch_ms = collide['dispatch']
+        sleeps, sleep_ms = collide['sleep']
+        if n:
+            out += ['', '## Havok first build (collision graph)', '',
+                    f'- Construction and pre-collision callbacks: {construct_ms / n:.3f} ms/build ({n} calls)',
+                    f'- Queue dispatch and execution: {dispatch_ms / n:.3f} ms/build ({dispatches} dispatches)',
+                    f'- Main-thread mode-0 event wait within dispatch: {sleep_ms / n:.3f} ms/build '
+                    f"({sleeps} waits, {collide['mode0']}/{dispatches} dispatches used mode 0)"]
+    tasks = read_collide_tasks(log, cw)
+    if tasks:
+        out += ['', '## Sampled Havok collision tasks (PerfProbe=2)', '',
+                f"{tasks['complete']}/{tasks['graphs']} graphs timed every concrete node. "
+                f"Main thread event wait across sampled graphs: {tasks['wait_ms']:.2f} ms.", '',
+                '| Task | Calls | Worker calls | Callback time (ms) | Worker callbacks overlapping main wait (ms) |',
+                '|---|---:|---:|---:|---:|']
+        for name, (calls, workers, work, overlap) in sorted(tasks['tasks'].items(), key=lambda item: -item[1][3]):
+            out.append(f'| {name} | {calls} | {workers} | {work:.2f} | {overlap:.2f} |')
+        if tasks['chains']:
+            out += ['', 'Last-finishing observed dependency chains:', '']
+            out += [f"- {' → '.join(chain)}: {count} graphs" for chain, count in tasks['chains'].most_common(4)]
+    post_collide = read_post_collide(log, cw)
+    if post_collide:
+        out += ['', '## Sampled PostCollide event dispatch (PerfProbe=2)', '',
+                f"{post_collide['graphs']} graphs: {post_collide['dispatches']} dispatches, "
+                f"{post_collide['dispatch_ms']:.2f} ms in command dispatch, "
+                f"{post_collide['signal_ms']:.2f} ms in the PostCollide signal, "
+                f"{post_collide['dropped']} listener calls omitted by the bucket limit."]
+        if post_collide['commands']:
+            out += ['', 'Command kinds: ' + ', '.join(f'{kind} × {count}'
+                    for kind, count in post_collide['commands'].most_common()), '']
+        if post_collide['listeners']:
+            out += ['', '| Event type | Listener RVA | Calls | Inclusive callback time (ms) |',
+                    '|---|---|---:|---:|']
+            for (kind, callback), (calls, elapsed) in sorted(post_collide['listeners'].items(),
+                                                             key=lambda item: -item[1][1]):
+                name = f'0x{callback:x}' if callback else 'Outside EDF.dll'
+                out.append(f'| {kind} | {name} | {calls} | {elapsed:.2f} |')
     render = read_render(log, cw)
     if render:
         sub = ' / '.join(f'{v:.0f}' for v in render['submits'])

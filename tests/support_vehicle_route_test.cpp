@@ -39,7 +39,7 @@ int main() {
     Put<float>(v,kMatrix,1);Put<float>(v,kMatrix+40,1);Put<unsigned>(v,0x1AD0,1);
     Put<const void*>(seats[0],kSeatRider,driver.obj);Put<const void*>(seats[0],kSeatRiderCtrl,driver.ctrl);
     check(NpcDriver(v),"fixture is a real human rider, not a dummy/player");
-    check(deployments.Allocate("fixture deployments"),"the fixture deployment rows exist (the spawn path allocates them first)");
+    check(deployments.Append("fixture deployments")!=nullptr,"the fixture deployment rows exist (the spawn path allocates them first)");
     auto& d=deployments[0];d.used=true;d.assigned=true;d.id=1;d.born=fixtureMs;
     d.plan.catalogId=static_cast<unsigned>(GroundStart()+1);d.plan.count=2;d.plan.target[2]=24;
     d.plan.units[0].resourceId=kVehicle;d.plan.units[1].resourceId=kSoldier;d.plan.units[1].role=1;

@@ -47,7 +47,7 @@ struct Stream {
     Pending queue[kQueued]{};Receipt receipts[kReceipts]{};
     Meta stage{};Record parts[kParts]{};unsigned staged=0;bool finalStaged=false;std::uint64_t finalSerial=0,finalHash=0;
 };
-LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
+IncrementalRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
 using ShootFn=void(__fastcall*)(void*,int);using VoidFn=void(__fastcall*)(void*);
 ShootFn originalShoot=nullptr;unsigned char entryPatch[32]{};void* trampoline=nullptr;
 struct Scope {Stream* stream=nullptr;Meta meta{};unsigned queueBase=0,cursor=0,current=kParts;bool replay=false,failed=false;Scope* previous=nullptr;};
@@ -95,12 +95,10 @@ Stream* FindRoot(const void* root) noexcept {for(auto& s:streams)if(s.held && s.
 Stream* Bind(const NativeLease& l,bool authority) noexcept {
     if(!installed || image!=admittedImage || !Family(l) || !Current({l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))}))return nullptr;
     if(auto* s=Find(l))return !s->retired && s->authority==authority ? s : nullptr;
-    if(!streams.Allocate("walking parts streams"))return nullptr;
-    for(auto& s:streams)if(!s.held && !s.retired && !s.uncertain) {
-        if(!Pin({l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))}))return nullptr;
-        s.root={l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))};s.profile=l.profile;s.held=true;s.authority=authority;return &s;
-    }
-    return nullptr;
+    auto* s=streams.FindOrAppend("walking parts streams",[](const Stream& row){return !row.held && !row.retired && !row.uncertain;});
+    const Ref root{l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))};
+    if(!s || !Pin(root))return nullptr;
+    s->root=root;s->profile=l.profile;s->held=true;s->authority=authority;return s;
 }
 bool Finite(const float* v,unsigned count) noexcept {for(unsigned i=0;i<count;++i)if(!std::isfinite(v[i]))return false;return true;}
 bool Matrix(const float* m) noexcept {

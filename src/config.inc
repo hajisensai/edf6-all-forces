@@ -4,7 +4,7 @@
 #undef EDF6_CONFIG_FIELDS
     bool enabled=true;
     bool debug=true;
-    bool perfProbe=false;           // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
+    int perfProbe=0;                // with debug: 1 frame and graph probes, 2 also samples collision tasks
     int preloadMode=0;              // a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)
     bool syncLoadProbe=true;        // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
     bool autoCrew=true;             // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
@@ -80,7 +80,8 @@
     bool vehicleWelding=true;       // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true;      // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;     // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
-    int frameRateCap=0;             // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz (shipped), 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
+    int objectUpdateMT=1;           // slot5's bones-to-collision-proxy sync (0x6ED800) computed on worker threads, committed in registration order (object_update_mt.cpp); read at start only (docs/object-update-mt-re.md)
+    int frameRateCap=170;           // ini FrameRateCap (frame_rate_logic.h FixCap): 170 shipped (the maintainer, 2026-11-27), 0 the game's 59.94 Hz, 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool frameRateFlip=false;       // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
     int maxFrameLatency=0;          // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
     bool splitMissileSurface=true;  // split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
@@ -435,6 +436,7 @@
     float npcLaneLength=150.0f;     // ...m along it (shorter where it meets the map)
     float npcFlankDeg=45.0f;        // ...their combat spot this many degrees off the player's own line to the target
     bool npcWeaponSwitch=true;      // ...they switch weapons for the target's range and kind
+    int npcParallelThink=1;         // ...the soldiers' combat queries (target pick, line of sight, friends in the shot) worked out on worker threads, applied on the game thread (npcai.cpp, docs/npc-ai-design.md)
     bool npcBackpack=true;          // ...a support soldier made with a backpack weapon uses it (npc_backpack.h, docs/npc-backpack-re.md)
     float npcEngageShare=0.85f;     // ...they fight at this share of their longest weapon's true reach (the stock: half, at least 25 m)
     bool npcEvade=true;             // ...crowded, they back off, side-step and roll
@@ -594,7 +596,7 @@
 #undef EDF6_CONFIG_LOAD
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
-    n.perfProbe=ReadBool(L"PerfProbe",n.perfProbe);
+    n.perfProbe=ReadInt(L"PerfProbe",static_cast<DWORD>(n.perfProbe));
     n.preloadMode=ReadInt(L"PreloadMode",static_cast<DWORD>(n.preloadMode));
     n.syncLoadProbe=ReadBool(L"SyncLoadProbe",n.syncLoadProbe);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
@@ -664,6 +666,7 @@
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
+    n.objectUpdateMT=ReadInt(L"ObjectUpdateMT",static_cast<DWORD>(n.objectUpdateMT));
     n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
     n.maxFrameLatency=ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency));
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
@@ -966,6 +969,7 @@
     n.npcLaneLength=ReadFloat(L"NpcLaneLength",n.npcLaneLength);
     n.npcFlankDeg=ReadFloat(L"NpcFlankDeg",n.npcFlankDeg);
     n.npcWeaponSwitch=ReadBool(L"NpcWeaponSwitch",n.npcWeaponSwitch);
+    n.npcParallelThink=ReadInt(L"NpcParallelThink",static_cast<DWORD>(n.npcParallelThink));
     n.npcBackpack=ReadBool(L"NpcBackpack",n.npcBackpack);
     n.npcEngageShare=ReadFloat(L"NpcEngageShare",n.npcEngageShare);
     n.npcEvade=ReadBool(L"NpcEvade",n.npcEvade);
@@ -1099,6 +1103,7 @@
     n.auraParkSpeed=ReadFloat(L"AuraParkSpeed",n.auraParkSpeed);
 #elif defined(EDF6_CONFIG_VALIDATE)
 #undef EDF6_CONFIG_VALIDATE
+    n.perfProbe=static_cast<int>(FixInt("PerfProbe",n.perfProbe,0,2));
     n.preloadMode=static_cast<int>(FixInt("PreloadMode",n.preloadMode,0,2));
     n.crewDelayMs=FixInt("CrewDelayMs",static_cast<int>(n.crewDelayMs),0,600000);
     Fix("CrewRange",n.crewRange,0.0f,10000.0f);
@@ -1136,6 +1141,7 @@
     Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax);
     Fix("CarrierLaserDamage",n.carrierLaserDamage,0.0f,1.0e6f);
     Fix("CarrierLaserBreak",n.carrierLaserBreak,0.0f,1.0f);
+    n.objectUpdateMT=static_cast<int>(FixInt("ObjectUpdateMT",n.objectUpdateMT,0,1));
     n.maxFrameLatency=static_cast<int>(FixInt("MaxFrameLatency",n.maxFrameLatency,0,3));
     Reset("StockMissileNav",n.stockMissileNav,2.0f,6.0f,3.0f);
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
@@ -1331,6 +1337,7 @@
     Fix("NpcLaneWidth",n.npcLaneWidth,0.5f,20.0f);
     Fix("NpcLaneLength",n.npcLaneLength,10.0f,1000.0f);
     Fix("NpcFlankDeg",n.npcFlankDeg,10.0f,80.0f);
+    n.npcParallelThink=static_cast<int>(FixInt("NpcParallelThink",n.npcParallelThink,0,1));
     Fix("NpcEngageShare",n.npcEngageShare,0.2f,1.0f);
     Fix("NpcDangerRange",n.npcDangerRange,2.0f,100.0f);
     Fix("NpcCrowd",n.npcCrowd,0.2f,20.0f);

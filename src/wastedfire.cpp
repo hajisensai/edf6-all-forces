@@ -29,13 +29,13 @@
 #include "hit_predict.h"
 #include "memo_epoch.h"
 #include "memory.h"
-#include "live_set.h"
+#include "edf/step_objects.h"
 #include "wasted_fire.h"
 #include "edf/hash_index.h"
 #include "edf/host.h"
-#include <vector>
-
 #include <atomic>
+#include <new>
+#include <vector>
 
 namespace crew {
 namespace {
@@ -97,7 +97,7 @@ Kind KindOfSlot(const unsigned char* const* vt) noexcept {
 }
 Kind KindOf(const unsigned char* o) noexcept {
     const auto vt=At<const unsigned char* const*>(o,0);
-    return Readable(vt,(kSlotAccept+1)*8) ? KindOfSlot(vt) : Kind::none;
+    return edf::InImage(image,vt,(kSlotAccept+1)*8) || Readable(vt,(kSlotAccept+1)*8) ? KindOfSlot(vt) : Kind::none;
 }
 // The same for an object the game's own walk handed over (live): its vtable taken as the image's when it points into
 // it, no Readable ask (WatchTarget runs on every enemy each frame).
@@ -118,14 +118,17 @@ std::size_t ReachOf(Kind k) noexcept {
 // Whether `o`'s slot 12 is the stock const false (what the anchor and fortress part overrides call).
 bool Slot12False(const unsigned char* o) noexcept {
     const auto vt=At<const unsigned char* const*>(o,0);
-    return Readable(vt,(kSlotFalse12+1)*8) && vt[kSlotFalse12]==image+kConstFalse;
+    return (edf::InImage(image,vt,(kSlotFalse12+1)*8) || Readable(vt,(kSlotFalse12+1)*8)) && vt[kSlotFalse12]==image+kConstFalse;
 }
 // The ship an anchor hangs from, alive (its weak reference's uses), else nullptr.
 const unsigned char* AnchorShip(const unsigned char* o) noexcept {
     const auto ctrl=At<const unsigned char*>(o,kAnchorShipCtrl);
-    if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)<=0)return nullptr;
+    if(!ctrl)return nullptr;
     const auto ship=At<const unsigned char*>(o,kAnchorShip);
-    return Readable(ship,kObjFlags+4) ? ship : nullptr;
+    const bool trusted=ship && stepobj::ControlOf(ship)==ctrl;   // this frame's ship, by this very reference
+    if(!trusted && !Readable(ctrl,0x10))return nullptr;
+    if(At<std::int32_t>(ctrl,8)<=0)return nullptr;
+    return trusted || Readable(ship,kObjFlags+4) ? ship : nullptr;
 }
 
 // --- The target's window now: open or not, and the time it stays open (ms, <0 not readable) ---
@@ -242,19 +245,94 @@ SRWLOCK lock=SRWLOCK_INIT;
 // no, without the lock and the 256-pair scan (the AI asks a shooter and lock point at a time; nearly always no hold runs).
 // Apart from the book because it is reset by assignment (an atomic cannot be).
 std::atomic<std::uint64_t> latestHoldMirror{0};
+std::atomic<std::uint64_t> peekVersion{1};   // WastedFireVersion
 
-// The target's lock points (its own registry entries), at most `max`; its root when it has none.
-struct Points { const void* target; float p[4][3]; int n; };
-void SeePoint(void* ctx,const void* object,const float* aim) {
-    auto& s=*static_cast<Points*>(ctx);
-    if(object==s.target && s.n<4){std::memcpy(s.p[s.n],aim,12);++s.n;}
+// Snapshot the first four valid points in registry order, with no native pointers to the point storage retained.
+struct Points {
+    float p[4][3]{};
+    int n=0;
+    void Add(const float* aim) noexcept {
+        if(n<4)std::memcpy(p[n++],aim,sizeof(p[0]));
+    }
+};
+
+Points ScanPoints(const void* target) noexcept {
+    struct Request { const void* target; Points points; } request{target,{}};
+    VisitLockPoints([](void* ctx,const void* object,const float* aim) {
+        auto& request=*static_cast<Request*>(ctx);
+        if(object==request.target)request.points.Add(aim);
+    },&request);
+    return request.points;
 }
+
+// The first request of a scene step indexes the whole registry once; every later target of the step reads its row.
+// Each target keeps its sample until the native scene step changes.
+class TargetPointCache {
+public:
+    Points Read(const void* target) noexcept {
+        const SceneStep step=SceneStepNow();
+        if(!step.scene) {
+            if(step_.scene)Clear();
+            return ScanPoints(target);
+        }
+        if(step_.scene!=step.scene || step_.count!=step.count || step_.mission!=step.mission) {
+            Clear();
+            step_=step;
+        }
+        const bool builtNow=state_==State::empty;
+        if(builtNow)Build();
+        if(state_==State::indexed) {
+            const int i=rows_.Find(target);
+            if(i>=0)return points_[static_cast<std::size_t>(i)];
+            if(builtNow)return {};
+        }
+        // An absent object may register a lock point later in the same step.
+        return ScanPoints(target);
+    }
+
+    void Clear() noexcept {
+        step_={};
+        state_=State::empty;
+        rows_.Clear();
+        points_.clear();
+    }
+
+private:
+    enum class State { empty,indexed,failed };
+    void Add(const void* object,const float* aim) {
+        const int i=rows_.Find(object);
+        if(i>=0) {
+            points_[static_cast<std::size_t>(i)].Add(aim);
+            return;
+        }
+        const auto next=static_cast<int>(points_.size());
+        points_.emplace_back().Add(aim);
+        rows_.Set(object,next);
+    }
+    void Build() noexcept {
+        state_=State::failed;
+        struct BuildState { TargetPointCache& owner; bool complete; } build{*this,true};
+        if(VisitLockPoints([](void* ctx,const void* object,const float* aim) {
+            auto& build=*static_cast<BuildState*>(ctx);
+            if(!build.complete)return;
+            try { build.owner.Add(object,aim); }
+            catch(const std::bad_alloc&) { build.complete=false; }
+        },&build) && build.complete)state_=State::indexed;
+    }
+
+    SceneStep step_{};
+    State state_=State::empty;
+    edf::PtrIndex rows_;
+    std::vector<Points> points_;
+};
+
+TargetPointCache targetPoints;
 
 // Observed this frame (`frame`: the memo epoch) unless it was already: its velocity over the time since it was last
 // seen, its position, its window (hitpredict::Observe). The one writer of a Watched. Null when unreadable.
 const Watched* See(const void* target,Kind k,std::uint64_t frame) {
     auto o=static_cast<const unsigned char*>(target);
-    if(!Readable(o,ReachOf(k)))return nullptr;
+    if(!stepobj::Reads(o,ReachOf(k)))return nullptr;   // a Trusted object of kind k is that long (its class)
     Watched& w=Watch(target);
     if(w.frame==frame)return &w;
     w.frame=frame;
@@ -274,12 +352,11 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
     std::memcpy(p.from,from,12);p.speed=speed;p.gravity=gravity;
     auto o=static_cast<unsigned char*>(const_cast<void*>(target));
     const Kind k=KindOf(o);
-    if(!Readable(o,ReachOf(k)))return p;
+    if(!stepobj::Reads(o,ReachOf(k)))return p;
     const std::uint64_t ms=GameMs();
     const float* root=reinterpret_cast<const float*>(o+kPosition);
     const WindowNow now=WindowOf(o,k);
-    Points pts{target,{},0};
-    VisitLockPoints(&SeePoint,&pts);
+    Points pts=o[edf::kDead] ? Points{} : targetPoints.Read(target);
     if(!pts.n){std::memcpy(pts.p[0],root,12);pts.n=1;}
     // The first lock point whose predicted hit the game takes: its aim point; none: the first one's, not accepted.
     bool accepted=false;float flightMs=0.0f;
@@ -371,10 +448,12 @@ memoepoch::Clock memoClock;
 struct TargetMemo { const void* target; ULONGLONG frame; bool readable; Kind kind; hitpredict::Verdict verdict; };
 TargetMemo targetMemo[4096];   // direct-mapped: 300 targets in 1024 slots shared a slot a quarter of the time
 struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shooterMemo{};
+// The prime's epoch and clock (WastedFirePrime): what a peek reads the memo under.
+ULONGLONG primedEpoch=0,primedMs=0;
 const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
     TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
     if(m.target==target && m.frame==frame)return m;
-    m={target,frame,liveset::Has(target) || Readable(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
+    m={target,frame,stepobj::Reads(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
     if(!m.readable)return m;
     const auto o=static_cast<const unsigned char*>(target);
     m.kind=AcceptOk() ? KindOf(o) : Kind::none;
@@ -388,7 +467,7 @@ hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float
     if(!shooter || !target)return hitpredict::Verdict::fire;
     const ULONGLONG frame=memoClock.Epoch(GameFrame(),WallMs());
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
-        shooterMemo={shooter,frame,liveset::Has(shooter) || Readable(shooter,kPosition+12)};
+        shooterMemo={shooter,frame,stepobj::Reads(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;
     const TargetMemo& t=TargetThisFrame(target,frame);
     if(!t.readable)return hitpredict::Verdict::fire;
@@ -420,6 +499,7 @@ void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
     AcquireSRWLockExclusive(&lock);
     const bool held=wastedfire::Hit(book,shooter,target,hurt,ms);
     latestHoldMirror.store(book.latestHold,std::memory_order_relaxed);
+    peekVersion.fetch_add(1,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     // One line a hold (a few a minute at most per pair): the evidence in a player's log that the AI held its fire.
     if(held)Log("WASTEDFIRE %p: %d hits on %p hurt nothing: its fire at it held %.0f s",shooter,wastedfire::kWastedHits,target,
@@ -446,14 +526,46 @@ void ResetWastedFire() noexcept {
     AcquireSRWLockExclusive(&lock);
     book=wastedfire::Book{};
     latestHoldMirror.store(0,std::memory_order_relaxed);
+    peekVersion.fetch_add(1,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     watched.Clear();
     plans.Clear();
+    targetPoints.Clear();
     for(auto& m:targetMemo)m=TargetMemo{};
     shooterMemo=ShooterMemo{};
     memoClock.Reset();   // epochs only grow: no cleared memo's key comes back
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
     feedbackFrame=feedbackMs=0;
+    primedEpoch=0;primedMs=0;
 }
+
+namespace {
+void PrimeOne(const void* target,ULONGLONG epoch) noexcept {
+    __try { TargetThisFrame(target,epoch); } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+}  // namespace
+void WastedFirePrime(const void* const* targets,int count) noexcept {
+    primedEpoch=memoClock.Epoch(GameFrame(),WallMs());
+    primedMs=FeedbackMs();
+    for(int i=0;i<count;++i)if(targets[i])PrimeOne(targets[i],primedEpoch);
+    peekVersion.fetch_add(1,std::memory_order_relaxed);
+}
+int WastedFirePeek(const void* shooter,const void* target) noexcept {
+    if(!target)return 0;
+    if(!shooter)return 0;   // VerdictOf's fire, and Feedback has no shooter's hits to hold
+    const TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
+    if(m.target!=target || m.frame!=primedEpoch || !primedEpoch)return -1;
+    if(m.readable) {
+        if(m.kind!=Kind::none && m.kind!=Kind::yes)return -1;   // its plan: the game thread's (PlanFor)
+        if(m.verdict==hitpredict::Verdict::skip)return 1;
+    }
+    // Feedback at the frame's clock (FeedbackMs, read by the prime).
+    if(primedMs>=latestHoldMirror.load(std::memory_order_relaxed))return 0;
+    AcquireSRWLockShared(&lock);
+    const bool wasted=wastedfire::Wasted(book,shooter,target,primedMs);
+    ReleaseSRWLockShared(&lock);
+    return wasted ? 1 : 0;
+}
+std::uint64_t WastedFireVersion() noexcept { return peekVersion.load(std::memory_order_relaxed); }
 }  // namespace crew

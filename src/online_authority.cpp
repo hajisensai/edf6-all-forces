@@ -9,6 +9,7 @@
 #include "gunnerrecoil.h"
 #include "memory.h"
 #include "real_driver_native.h"
+#include "edf/step_objects.h"
 
 namespace crew {
 namespace {
@@ -34,7 +35,10 @@ bool Known() noexcept {
     return ok;
 }
 
-bool Host() noexcept { return Known() && reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr); }
+bool ReadHost() noexcept { return Known() && reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr); }
+// Once a frame (stepobj's period, edf/step_objects.h): who hosts does not change within one.
+stepobj::PerPeriod<bool> host;
+bool Host() noexcept { return stepobj::Once(host,&ReadHost); }
 
 // No live registered driver: the host's NPC and the clients' empty copies must choose the SAME authority. The
 // stock last-driver fallback is intentionally not used for plugin work (it would retain a second client authority).
@@ -42,7 +46,7 @@ bool HostSeat0(const unsigned char* v) noexcept {
     const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),0);
     if(!seat || SeatRider(seat)==Rider::none)return true;
     const auto rider=At<const unsigned char*>(seat,kSeatRider);
-    return !Readable(rider,kNetWord+2) || online::LocalCopy(At<std::uint16_t>(rider,kNetWord));
+    return !stepobj::Reads(rider,kNetWord+2) || online::LocalCopy(At<std::uint16_t>(rider,kNetWord));
 }
 
 // The unregistered copies' owners (NoteLocalCopy), by object and its weak-this block (a new object at an old address is
@@ -54,7 +58,7 @@ int copyNext=0;
 online::CopyOwner spawnScope=online::kCopyHost;
 
 bool Live(const CopyRecord& r) noexcept {
-    return r.obj && Readable(r.obj,kSelfCtrl+8) && At<const void*>(r.obj,kSelfCtrl)==r.ctrl;
+    return r.obj && stepobj::Reads(r.obj,kSelfCtrl+8) && At<const void*>(r.obj,kSelfCtrl)==r.ctrl;
 }
 
 // The recorded owner of `object` (a pointer compared first: `object` may be no object at all, as a jet's flight source).
@@ -71,12 +75,12 @@ bool Read(const void* object,online::Facts* f) noexcept {
     f->known=Known();
     f->host=Host();
     const auto o=static_cast<const unsigned char*>(object);
-    if(!Readable(o,kNetWord+2))return false;
+    if(!stepobj::Reads(o,kNetWord+2))return false;   // this frame's scene object: no Readable ask
     __try {
         f->net=At<std::uint16_t>(o,kNetWord);
         if(online::LocalCopy(f->net)){f->copyOwner=RecordedOwner(o);return true;}
         if(!f->known)return true;
-        f->vehicle=Readable(o,kSeatCount+8) && SeatCount(o)>0 && KnownVehicle(o);
+        f->vehicle=stepobj::Reads(o,kSeatCount+8) && SeatCount(o)>0 && KnownVehicle(o);
         if(f->vehicle) {
             f->hostSeat0=HostSeat0(o);
             f->stock=f->hostSeat0 ? 0 : reinterpret_cast<OperatorFn>(image+kOperator)(const_cast<unsigned char*>(o),true,true);

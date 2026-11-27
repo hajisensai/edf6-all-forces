@@ -46,7 +46,8 @@
 #include "command_net.h"
 #include "layout.h"
 #include "memory.h"
-#include "live_set.h"
+#include "edf/step_objects.h"
+#include "edf/host.h"
 #include "formation.h"
 #include "ground_navigation.h"
 #include "pickup.h"
@@ -68,6 +69,8 @@
 #include "loadout_store.h"
 #include "vhud.h"
 #include "edf/hash_index.h"
+#include "crash_dump.h"
+#include "worker_pool.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -286,7 +289,6 @@ void SeeEnemy(void* ctx,const void* object,const float* aim) {
     w.enemyIndex.Set(object,w.enemies);
     Enemy& e=w.enemy[w.enemies++];
     e.object=object;std::memcpy(e.aim,at,12);e.points=1;
-    liveset::Add(object);
 }
 
 struct FriendWalk { void** vtable; World* w; };
@@ -309,7 +311,6 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
         npc::Friend& fr=w.fr[w.friends];
         fr.pos[0]=p[0];fr.pos[1]=p[1]+(r==kVehicleRadius ? 1.5f : 1.0f);fr.pos[2]=p[2];fr.radius=r;
         w.frObject[w.friends++]=o;
-        liveset::Add(o);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 void __fastcall FriendDtor(void*,unsigned) noexcept {}
@@ -323,7 +324,6 @@ void __fastcall NobodyVisit(void* self,void* object) noexcept {
         if(!o || o[kDead] || !KnownVehicle(o) || !NpcDrivable(o))return;
         Room(w.nobody,w.nobodys);
         w.nobody[w.nobodys++]=o;
-        liveset::Add(o);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 void* kNobodyVtable[]={reinterpret_cast<void*>(&FriendDtor),reinterpret_cast<void*>(&NobodyVisit)};
@@ -634,7 +634,7 @@ const unsigned char* RootLeader(const unsigned char* h) noexcept {
     const unsigned char* root=nullptr;
     const unsigned char* at=At<const unsigned char*>(h,kLeader);
     for(int i=0;at && i<kMaxRoot;++i) {
-        if(!Readable(at,kLeader+8))break;
+        if(!stepobj::Reads(at,kLeader+8))break;
         root=at;at=At<const unsigned char*>(at,kLeader);
     }
     return root;
@@ -762,6 +762,100 @@ Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept {
     return a;
 }
 
+// --- The parallel Decide (NpcParallelThink; docs/npc-ai-design.md「并行决策与串行提交」) ---
+// The soldiers' Think runs one by one inside the stock AI pass (ai_update, the list +0x488's slot 7), between the stock
+// nextThink calls: it cannot move off the game thread as a whole (the stock Think, every write to a soldier's block,
+// the weapon pick through d82+i, the routes' shared budget, the squads, the native calls are all the game thread's).
+// What costs its time are its read-only asks of the frame: the target pick over the enemy grid, the line-of-sight map
+// ray, the friends-in-the-shot capsules, the friends round the target (stress:100 2026-11-24: ShotOk 12-13 ms of a
+// 17.8 ms step). So at the frame's first Think (the world just gathered; nothing writes the scene until the pass ends:
+// Havok steps after it, the objects move after it, the wastedfire book changes only in the damage hook), every soldier
+// Drive saw lately has those asks made for it on the pool (Decide: worker_pool.h, the game thread working too) from what
+// it asked with last time (Guess: its anchor, its pick's scope and reach, its arms) and where it stands now. Each answer
+// is kept with its question's exact inputs (Intent). Then each soldier's Think runs as before, in the pass's order, and
+// every ask its Drive makes (Apply) takes the kept answer only when the inputs are the same bit for bit; any other ask is
+// made then, on the game thread (a miss: a new soldier, its arms or anchor changed, the stock Think turned it to another
+// target, a target whose fire the game decides with a plan of its own, a fault in its Decide). Each answer is a pure
+// function of its inputs and of a world that does not change in the pass, so a kept answer is the one the ask would get
+// now: the frame comes out the same as with every ask made on the game thread (NpcParallelThink=0), for any pool size.
+namespace mt {
+struct PickQ { float eye[3],anchor[3],scope,reach; int held,row; };
+struct ClearQ { float from[3],to[3],blast; bool clear; };
+struct RayQ { float a[3],b[3],hit[3],dist; };
+struct CloseQ { float at[3],r; bool yes; };
+struct HoldQ { const void* target; bool hold; };
+constexpr int kTargets=2,kClears=4,kRays=2,kCloses=2,kHolds=2;
+struct Intent {
+    const unsigned char* h;
+    ObjRef ref;
+    ULONGLONG frame;
+    std::uint64_t version;      // WastedFireVersion at the Decide: the pick and the holds stand only under it
+    bool done;                  // its Decide ran to its end (a fault: false, every ask made at Apply)
+    bool wantPick;              // the pick guessed (Drive picked last time, its anchor read by the fork)
+    bool pickOk;                // the pick known (no candidate needed the game thread's verdict)
+    PickQ pick;
+    int clears,rays,closes,holds;
+    ClearQ clear[kClears];
+    RayQ ray[kRays];
+    CloseQ close[kCloses];
+    HoldQ hold[kHolds];
+};
+// What Drive last asked with (Remember): the Decide's guess at this frame's questions.
+struct Guess {
+    ObjRef ref;                 // the soldier it is of (its slot may go to another)
+    bool set,pick;              // pick: Drive picked (some weapon has an engage range)
+    const float* anchor;        // where Drive read its anchor (a position an object, a squad, the world or the soldier holds)
+    float scope,reach;
+    Arms arms;
+    ULONGLONG intentFrame;      // the fork its intent is of, and its index there
+    int intentAt;
+};
+std::vector<Guess> guesses;     // by the soldier's slot in soldiers[]
+std::vector<Intent> intents;    // by the fork's index
+std::vector<int> forkSlots;     // the fork's index -> the soldier's slot
+std::vector<const void*> primeTargets;
+const Intent* applying=nullptr; // the soldier whose Drive runs now: its intent (game thread)
+ULONGLONG forkFrame=~0ull;
+struct Stats {
+    unsigned frames,decided,faults,applied,noIntent,hits,misses,stale,mismatches;
+    LONGLONG gather,decide,stock,think,sync;   // QPC ticks (PerfProbe>=1)
+};
+Stats stats{};
+unsigned shadowTick=0;
+ULONGLONG mismatchLogAt=0,faultLogAt=0;
+bool Same3(const float* a,const float* b) noexcept { return std::memcmp(a,b,12)==0; }
+bool Same1(float a,float b) noexcept { return std::memcmp(&a,&b,4)==0; }
+// The intent for `self`'s ask now, or null.
+const Intent* For(const void* self) noexcept {
+    const Intent* i=applying;
+    return i && i->h==self ? i : nullptr;
+}
+bool Fresh(const Intent& i) noexcept {
+    if(i.version==WastedFireVersion())return true;
+    ++stats.stale;
+    return false;
+}
+// Debug=1: one kept answer in 32 asked again on the game thread and compared (NPCMT MISMATCH: the kept one was not the
+// answer now; the game thread's is used).
+bool Shadow() noexcept { return Cfg().debug && (++shadowTick&31)==0; }
+void Mismatch(const char* what,const void* self) noexcept {
+    ++stats.mismatches;
+    const ULONGLONG ms=GetTickCount64();
+    if(mismatchLogAt && ms-mismatchLogAt<2000)return;
+    mismatchLogAt=ms;
+    Log("NPCMT MISMATCH %s: soldier %p's kept answer differs from the game thread's (%u so far)",what,self,stats.mismatches);
+}
+LONGLONG Ticks() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
+// An ask made at Apply (a miss when the soldier had an intent), timed under PerfProbe.
+struct Sync {
+    LONGLONG at;
+    explicit Sync(bool counted) noexcept : at(Cfg().perfProbe ? Ticks() : 0) { if(counted)++stats.misses; }
+    ~Sync() { if(at)stats.sync+=Ticks()-at; }
+    Sync(const Sync&)=delete;
+    Sync& operator=(const Sync&)=delete;
+};
+}  // namespace mt
+
 // --- The target ---
 // The row of the object `r` holds in this frame's enemies (the same object: ObjRef::Is), -1 when it is not among them.
 // One row an object (SeeEnemy), so it is the row the scans over enemy[] for r.Is(object) found.
@@ -777,17 +871,38 @@ struct Pick { const Enemy* e; float dist; };
 // looked up once by the index (one row an object): isCurrent is then an int compare for each enemy visited. (ObjRef::Is
 // compares the pointer first and reads memory only for the row that is the held object, so the scan's isCurrent read
 // once a frame too: what the row saves is the compares, not reads.)
+// The pick's row (-1 none) over the frame's enemies, `usable(k)` the fire-is-not-wasted ask of row k.
+template<class Usable>
+int PickRow(int held,const float* eye,const float* anchor,float scope,float reach,Usable usable) noexcept {
+    return npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
+                                 [held](int k) noexcept { return k==held; },usable,eye,anchor,scope,reach);
+}
+int PickRowNow(const void* self,int held,const float* eye,const float* anchor,float scope,float reach) noexcept {
+    return PickRow(held,eye,anchor,scope,reach,[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); });
+}
 Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* anchor,float scope,float reach) noexcept {
     const int held=EnemyRow(s.target);
-    const int i=npc::grid::PickTarget(world.enemyGrid,world.enemies,[](int k) noexcept { return world.enemy[k].aim; },
-                                      [held](int k) noexcept { return k==held; },
-                                      [self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); },eye,anchor,scope,reach);
+    int i=-1;
+    const mt::Intent* in=mt::For(self);
+    if(in && in->pickOk && in->pick.held==held && mt::Same3(in->pick.eye,eye) && mt::Same3(in->pick.anchor,anchor) &&
+       mt::Same1(in->pick.scope,scope) && mt::Same1(in->pick.reach,reach) && mt::Fresh(*in)) {
+        ++mt::stats.hits;
+        i=in->pick.row;
+        if(mt::Shadow()) {
+            const int now=PickRowNow(self,held,eye,anchor,scope,reach);
+            if(now!=i){mt::Mismatch("target pick",self);i=now;}
+        }
+    } else {
+        const mt::Sync sync(in!=nullptr);
+        i=PickRowNow(self,held,eye,anchor,scope,reach);
+    }
     return i<0 ? Pick{nullptr,0.0f} : Pick{&world.enemy[i],npc::Dist(eye,world.enemy[i].aim)};
 }
 const Enemy* StockTarget(const unsigned char* h) noexcept {
     const auto o=At<const void*>(h,kStockTarget);
     const auto ctrl=At<const unsigned char*>(h,kStockTargetCtrl);
-    if(!o || !ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return nullptr;
+    // The target's control block the one this frame's System holds it by (stepobj): readable without asking.
+    if(!o || !ctrl || (stepobj::ControlOf(o)!=ctrl && !Readable(ctrl,0x10)) || At<std::int32_t>(ctrl,8)==0)return nullptr;
     const int i=world.enemyIndex.Find(o);   // its row (one an object), as the scan for the first row of it found
     return i>=0 ? &world.enemy[static_cast<std::size_t>(i)] : nullptr;
 }
@@ -795,40 +910,115 @@ npc::TargetKind KindOf(const Enemy& e,const float* pos) noexcept {
     if(e.aim[1]-pos[1]>kAirAbove)return npc::TargetKind::air;
     return e.points>=kLargePoints ? npc::TargetKind::large : npc::TargetKind::light;
 }
-// The friends (the player among them) but `self` a shot from `from` to `to` (a round of `blast`) can touch, for
-// ShotClear, into `out` (each caller's own buffer, kept from frame to frame): those in the cells along its line and round
-// where it lands (npc_grid.h ShotCandidates), in the list's order. ShotClear over them is ShotClear over every friend but
-// `self`: the others are farther off its line and its blast than any friend's radius. The same for a thrown round's arc
-// and landing (npc_backpack.h ArcClear: its ground track is the line's, its landing `blast` its Radius), so no caller
-// copies every friend any more.
-int FriendsOnShot(const void* self,const float* from,const float* to,float blast,std::vector<npc::Friend>& out) noexcept {
-    static std::vector<int> rows;
-    npc::grid::ShotCandidates(world.friendGrid,from,to,world.frRadius+kSpread,blast>0.0f ? blast*1.25f+world.frRadius : 0.0f,rows);
-    if(out.size()<rows.size())out.resize(rows.size());
-    int n=0;
-    for(const int i:rows)if(world.frObject[static_cast<std::size_t>(i)]!=self)out[static_cast<std::size_t>(n++)]=world.fr[static_cast<std::size_t>(i)];
-    return n;
+// Veto a shot at the first blocker in the relevant cells.
+bool ShotClearNow(const void* self,const float* from,const float* to,float blast) noexcept {
+    return npc::grid::ShotClear(world.friendGrid,npc::Shot(from,to,kSpread,blast),world.frRadius,
+        [](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; },
+        [self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; });
 }
-// ShotClear over every friend but `self` for a shot from `from` to `to` (a round of `blast`), asked of the same cells as
-// FriendsOnShot and done at the first friend in the way: a yes or no needs neither their order nor each once, so nothing
-// is gathered or sorted (gathering and sorting the candidates cost 30 ms a frame with 2132 soldiers in one crowd).
-bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
-    bool clear=true;
-    const auto test=[&](int i) noexcept {
-        const std::size_t k=static_cast<std::size_t>(i);
-        if(clear && world.frObject[k]!=self && !npc::ShotClear(from,to,kSpread,blast,&world.fr[k],1))clear=false;
-    };
-    world.friendGrid.Capsule(from,to,world.frRadius+kSpread,test);
-    if(clear && blast>0.0f)world.friendGrid.Around(to,blast*1.25f+world.frRadius,test);
-    return clear;
+template<class Blocked>
+bool PackArcClearOf(const void* self,const npcpack::Weapon& pack,const float* from,const float* to,
+                    float pitch,Blocked blocked) noexcept {
+    const auto at=[](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; };
+    const auto isSelf=[self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; };
+    return npcpack::ArcClear(pack,from,to,pitch,kSpread,
+        [&](const npc::Shot* chords,int count) noexcept {
+            return npc::grid::ArcChordsClear(world.friendGrid,chords,count,world.frRadius,at,isSelf);
+        },[&](const float* landing,float radius) noexcept {
+            return npc::grid::BlastClear(world.friendGrid,npc::Shot(landing,landing,0.0f,radius),world.frRadius,at,isSelf);
+        },blocked);
 }
-// A friend but `self` within `r` of `at`: looked for in the cells round it (the same answer as over every friend).
-bool FriendNear(const void* self,const float* at,float r) noexcept {
-    bool found=false;
-    world.friendGrid.Around(at,r,[&](int i) noexcept {
-        if(!found && world.frObject[static_cast<std::size_t>(i)]!=self && npc::Dist(world.fr[static_cast<std::size_t>(i)].pos,at)<r)found=true;
+bool FriendNearNow(const void* self,const float* at,float r) noexcept {
+    return world.friendGrid.AnyAround(at,r,[&](int i) noexcept {
+        const auto k=static_cast<std::size_t>(i);
+        return world.frObject[k]!=self && npc::Dist(world.fr[k].pos,at)<r;
     });
-    return found;
+}
+
+// The asks as Drive makes them: the soldier's kept answer (its intent: the same inputs bit for bit), else made now.
+bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(in)for(int k=0;k<in->clears;++k) {
+        const mt::ClearQ& c=in->clear[k];
+        if(!mt::Same3(c.from,from) || !mt::Same3(c.to,to) || !mt::Same1(c.blast,blast))continue;
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=ShotClearNow(self,from,to,blast);
+            if(now!=c.clear){mt::Mismatch("shot clear",self);return now;}
+        }
+        return c.clear;
+    }
+    const mt::Sync sync(in!=nullptr);
+    return ShotClearNow(self,from,to,blast);
+}
+bool FriendNear(const void* self,const float* at,float r) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(in)for(int k=0;k<in->closes;++k) {
+        const mt::CloseQ& c=in->close[k];
+        if(!mt::Same3(c.at,at) || !mt::Same1(c.r,r))continue;
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=FriendNearNow(self,at,r);
+            if(now!=c.yes){mt::Mismatch("friend near",self);return now;}
+        }
+        return c.yes;
+    }
+    const mt::Sync sync(in!=nullptr);
+    return FriendNearNow(self,at,r);
+}
+// The map ray a->b (heli.h MapRay: metres to the hit, -1 none; `hit` written on a hit only).
+float MapRayQ(const void* self,const float* a,const float* b,float* hit) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(in)for(int k=0;k<in->rays;++k) {
+        const mt::RayQ& r=in->ray[k];
+        if(!mt::Same3(r.a,a) || !mt::Same3(r.b,b))continue;
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            float now[3];
+            const float d=MapRay(a,b,now);
+            if(!mt::Same1(d,r.dist) || (d>=0.0f && !mt::Same3(now,r.hit))) {
+                mt::Mismatch("map ray",self);
+                if(d>=0.0f)std::memcpy(hit,now,12);
+                return d;
+            }
+        }
+        if(r.dist>=0.0f)std::memcpy(hit,r.hit,12);
+        return r.dist;
+    }
+    const mt::Sync sync(in!=nullptr);
+    return MapRay(a,b,hit);
+}
+// WastedFire / HoldFire of an ordinary target (its verdict the invincible flag and the shooter's wasted hits: the same
+// answer to both, `aim` untouched), kept while the wastedfire book stands as it was at the Decide.
+const mt::HoldQ* KeptHold(const void* self,const void* target) noexcept {
+    const mt::Intent* in=mt::For(self);
+    if(!in || !target)return nullptr;
+    for(int k=0;k<in->holds;++k)if(in->hold[k].target==target)return mt::Fresh(*in) ? &in->hold[k] : nullptr;
+    return nullptr;
+}
+bool WastedFireQ(const void* self,const void* target) noexcept {
+    if(const mt::HoldQ* q=KeptHold(self,target)) {
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=WastedFire(self,target);
+            if(now!=q->hold){mt::Mismatch("wasted fire",self);return now;}
+        }
+        return q->hold;
+    }
+    const mt::Sync sync(mt::For(self)!=nullptr);
+    return WastedFire(self,target);
+}
+bool HoldFireQ(const void* self,const void* target,const float* from,float speed,float gravity,float* aim=nullptr) noexcept {
+    if(const mt::HoldQ* q=KeptHold(self,target)) {
+        ++mt::stats.hits;
+        if(mt::Shadow()) {
+            const bool now=HoldFire(self,target,from,speed,gravity,aim);
+            if(now!=q->hold){mt::Mismatch("hold fire",self);return now;}
+        }
+        return q->hold;
+    }
+    const mt::Sync sync(mt::For(self)!=nullptr);
+    return HoldFire(self,target,from,speed,gravity,aim);
 }
 
 // --- The block's writes ---
@@ -958,7 +1148,7 @@ bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const
     if(npc::AimError(At<float>(h,kViewPitch),At<float>(h,kViewYaw),dir)>(cone>kFireConeMin ? cone : kFireConeMin))return false;
     if(GameFrame()-s.losFrame>=kLosFrames || s.losObject!=t.object) {
         float hit[3];
-        const float wall=MapRay(eye,t.aim,hit);
+        const float wall=MapRayQ(h,eye,t.aim,hit);
         s.los=wall<0.0f || wall>dist-2.0f;s.losFrame=GameFrame();s.losObject=t.object;
     }
     if(!s.los)return false;
@@ -995,7 +1185,7 @@ void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a,int fir
         if(!h[kTrigger+k])continue;
         const int w=a.held[k];
         const bool known=w>=0 && w<a.n;
-        if(t && HoldFire(h,t->object,eye,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f))h[kTrigger+k]=0;
+        if(t && HoldFireQ(h,t->object,eye,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f))h[kTrigger+k]=0;
         if(!ShotSafe(h,t,eye,known ? a.arm[w].blast : LargestBlast(a),known ? a.arm[w].reach : LongestReach(a)))h[kTrigger+k]=0;
     }
 }
@@ -1046,7 +1236,7 @@ void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,const
 constexpr int kMaxThreats=64;
 int ThreatsNear(const float* pos,float reach,npc::Threat* out) noexcept {
     static std::vector<int> rows;
-    npc::grid::FirstAround(world.enemyGrid,pos,reach,kMaxThreats,
+    world.enemyGrid.FirstAround(pos,reach,kMaxThreats,
                            [pos,reach](int i) noexcept { return npc::Horiz(pos,world.enemy[static_cast<std::size_t>(i)].aim)<reach; },rows);
     int n=0;
     for(const int i:rows) {
@@ -1175,7 +1365,7 @@ unsigned char* TopNpc(unsigned char* h) noexcept {
     unsigned char* top=h;
     for(int i=0;i<kMaxRoot;++i) {
         const auto up=At<unsigned char*>(top,kLeader);
-        if(!up || !Readable(up,kLeader+8) || IsAnyPlayer(up) || up[kDead] || !IsSoldierClass(up))break;
+        if(!up || !stepobj::Reads(up,kLeader+8) || IsAnyPlayer(up) || up[kDead] || !IsSoldierClass(up))break;
         top=up;
     }
     return top;
@@ -1303,7 +1493,7 @@ const unsigned char kRemoteRideSig[]={0x48,0x8D,0x8E,0xE0,0xFE,0xFF,0xFF,0xE8}; 
 bool remoteRideHooked=false;
 // The vehicle takes `human`'s seat as held from the start: no boarding sound for it (seat_events.h Quiet).
 void QuietRide(unsigned char* v,const unsigned char* human) noexcept {
-    if(!seatEventsOk || !v || !human || !Readable(v,kSeatCount+8) || !Readable(v+seatevt::kShift,12))return;
+    if(!seatEventsOk || !v || !human || !stepobj::Reads(v,kSeatCount+8) || !Readable(v+seatevt::kShift,12))return;
     for(unsigned k=0;k<SeatCount(v);++k)if(At<const void*>(SeatAt(v,k),kSeatRider)==human) {
         auto& mask=*reinterpret_cast<std::uint16_t*>(v+seatevt::kMask);
         mask=seatevt::Quiet(mask,At<std::uint32_t>(v,seatevt::kShift),k);
@@ -1318,7 +1508,7 @@ bool MissionCrewAboard(const unsigned char* v,const unsigned char* human) noexce
 void __fastcall RemoteRide(void* human,SharedRef* vehicle,int seat) noexcept {
     reinterpret_cast<RideFn>(image+kRideVehicle)(human,vehicle,seat);
     auto* h=static_cast<unsigned char*>(human);
-    auto* v=Readable(h,kHumanRiding+8) ? At<unsigned char*>(h,kHumanRiding) : nullptr;
+    auto* v=stepobj::Reads(h,kHumanRiding+8) ? At<unsigned char*>(h,kHumanRiding) : nullptr;
     if(v && MissionCrewAboard(v,h))QuietRide(v,h);
 }
 
@@ -1422,7 +1612,7 @@ SeatInputOwner NpcSeatInputOwner(unsigned char* seat) noexcept {
     if(!IsOnlineAuthority(h))return SeatInputOwner::remote;
     if(At<const void*>(h,kHumanSeat)!=seat)return SeatInputOwner::seatMismatch;
     auto* v=At<unsigned char*>(h,kHumanRiding);
-    if(!Readable(v,kSeatCount+8) || v[kDead] || SeatCount(v)==0 || !IsOnlineAuthority(v))return SeatInputOwner::vehicle;
+    if(!stepobj::Reads(v,kSeatCount+8) || v[kDead] || SeatCount(v)==0 || !IsOnlineAuthority(v))return SeatInputOwner::vehicle;
     return SeatAt(v,0)==seat ? SeatInputOwner::npc : SeatInputOwner::notSeat0;
 }
 bool OwnsNpcSeatInput(unsigned char* seat) noexcept { return NpcSeatInputOwner(seat)==SeatInputOwner::npc; }
@@ -1436,10 +1626,10 @@ bool SeatTakes(const unsigned char* v,unsigned i,const unsigned char* h) noexcep
 // Walks to its seat's riding point and boards there; false once the order is over (done, gone, timed out).
 bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     auto v=static_cast<unsigned char*>(const_cast<void*>(s.boardV.obj));
-    if(!v || !Readable(v,kSeatCount+8) || !s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<0 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
+    if(!v || !stepobj::Reads(v,kSeatCount+8) || !s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<0 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
        !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) || !SeatTakes(v,static_cast<unsigned>(s.boardSeat),h)) {
         float at[3]{},reach=0.0f;
-        const bool seen=v && s.boardV.Is(v) && Readable(v,kSeatCount+8) && s.boardSeat>=0 &&
+        const bool seen=v && s.boardV.Is(v) && stepobj::Reads(v,kSeatCount+8) && s.boardSeat>=0 &&
             SeatPoint(v,static_cast<unsigned>(s.boardSeat),at,&reach);
         Log("NPCAI soldier %p: board order dropped (%s) seat %d point (%.1f,%.1f,%.1f) reach %.1f soldier (%.1f,%.1f,%.1f) %.1f m off",
             h,ms-s.boardAt>kBoardMs ? "too long" : "the seat or the vehicle is gone",s.boardSeat,at[0],at[1],at[2],reach,
@@ -1571,10 +1761,11 @@ bool AttackMoveSee(Squad& q,bool target,bool fired,ULONGLONG ms) noexcept {
 
 // --- Its backpack weapon (docs/npc-backpack-re.md; npc_backpack.h) ---
 // The enemies within `radius` of target `t`'s lock point, `t` among them.
-int GroupAt(const Enemy& t,float radius) noexcept {
-    int n=0;
-    world.enemyGrid.Around(t.aim,radius,[&n,&t,radius](int i) noexcept { if(npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=radius)++n; });
-    return n>0 ? n : 1;
+bool PackGroupExists(const Enemy& t,float radius) noexcept {
+    int found=0;
+    return world.enemyGrid.AnyAround(t.aim,radius,[&](int i) noexcept {
+        return npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=radius && ++found>=npcpack::kGroupLeast;
+    });
 }
 ULONGLONG packLoggedAt=0;
 // After the main weapon's look and trigger: a throw or a swing at `t` when its backpack weapon is for it (npc_backpack.h
@@ -1601,7 +1792,6 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
         return;
     }
     if(!t)return;
-    static std::vector<npc::Friend> fr;
     const float dist=npc::Dist(eye,t->aim);
     for(int i=0;i<n;++i) {
         const PackWeapon& row=*slots[i].row;
@@ -1614,22 +1804,18 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
                              std::isfinite(factor) && factor>0.0f ? factor*npcpack::kGravity : 0.0f,row.lift,
                              At<std::int32_t>(w,kWeaponAmmo)>0};
         if(!npcpack::Rested(row.use,s.packUsed,ms-s.packAt))continue;
-        const npcpack::Target target{dist,npc::Horiz(eye,t->aim),t->aim[1]-eye[1],GroupAt(*t,npcpack::GroupRadius(pack)),
-                                     t->points>=kLargePoints};
+        const npcpack::Target target{dist,npc::Horiz(eye,t->aim),t->aim[1]-eye[1],t->points>=kLargePoints};
         float pitch=0.0f,dir[3],hit[3];
-        if(!npcpack::Fits(pack,target,&pitch))continue;
-        // The friends its round can touch: along the line over the ground (a throw's arc keeps to it: npc_backpack.h
-        // ArcClear's points are eye + (aim - eye) * t/flight on x and z) and round where it lands (its Radius).
-        const int friends=FriendsOnShot(h,eye,t->aim,row.use==PackUse::thrown ? npcpack::Radius(pack) : 0.0f,fr);
+        if(!npcpack::Fits(pack,target,&pitch,[&]() noexcept { return PackGroupExists(*t,npcpack::GroupRadius(pack)); }))continue;
         if(row.use==PackUse::thrown) {
             npcpack::ThrowLook(eye,t->aim,pitch,row.lift,dir);
-            if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr.data(),friends,[](const float* from,const float* to) noexcept {
+            if(!PackArcClearOf(h,pack,eye,t->aim,pitch,[](const float* from,const float* to) noexcept {
                 float collision[3];return MapRay(from,to,collision)>=0.0f;
             }))continue;
         } else {
             dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
-            const float wall=MapRay(eye,t->aim,hit);
-            if(!npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends) || (wall>=0.0f && wall<dist-2.0f))continue;
+            const float wall=MapRayQ(h,eye,t->aim,hit);
+            if(!ShotClearOf(h,eye,t->aim,0.0f) || (wall>=0.0f && wall<dist-2.0f))continue;
         }
         if(!(mask&kMaskLook))return;
         Look(h,dir);
@@ -2000,6 +2186,150 @@ void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos
     else if(c.agility==Agility::roll)SprintRoll(s,h,pos,p,ms,sprinting);
 }
 
+// --- The parallel Decide: its guess, the fork, the soldier's intent at its Think (mt above) ---
+namespace mt {
+// What Drive asked with this frame (game thread): the next fork asks the same from where the soldier stands then.
+void Remember(const Soldier& s,const unsigned char* h,const float* anchor,float scope,float reach,bool pick,const Arms& a) noexcept {
+    const int i=soldierIndex.Find(h);
+    if(i<0)return;
+    if(guesses.size()<soldiers.size())guesses.resize(soldiers.size());
+    Guess& g=guesses[static_cast<std::size_t>(i)];
+    if(g.ref.obj!=s.ref.obj || g.ref.ctrl!=s.ref.ctrl){g=Guess{};g.intentFrame=~0ull;g.intentAt=-1;}
+    g.ref=s.ref;g.set=true;g.pick=pick && anchor;g.anchor=anchor;g.scope=scope;g.reach=reach;g.arms=a;
+}
+bool CopyAnchor(const float* from,float* to) noexcept {
+    __try {
+        if(!edf::Readable(from,12))return false;
+        std::memcpy(to,from,12);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void AddClear(Intent& in,const float* from,const float* to,float blast) noexcept {
+    for(int k=0;k<in.clears;++k)
+        if(Same3(in.clear[k].from,from) && Same3(in.clear[k].to,to) && Same1(in.clear[k].blast,blast))return;
+    if(in.clears>=kClears)return;
+    ClearQ& c=in.clear[in.clears];
+    std::memcpy(c.from,from,12);std::memcpy(c.to,to,12);c.blast=blast;
+    c.clear=ShotClearNow(in.h,from,to,blast);
+    ++in.clears;
+}
+struct ForkCtx { ULONGLONG frame; };
+// One soldier's Decide (a pool thread or the game thread, inside Run): Drive's read-only asks of this frame made from
+// what it asked last time and where it stands, each kept with its inputs. Reads the frame's world (written by Gather
+// alone, before the fork), the soldier's entry and guess (written by its Think alone: none runs during Run), the
+// soldier's and the targets' memory (the pass moves nothing: physics steps after it), the wastedfire memo (primed
+// before the fork, WastedFirePeek: no write) and the map (MapRay: a query of the Havok world, not stepping in the pass).
+// Writes its own intent only. No clock, config, log, random number or native object's virtual call.
+void Decide(void* ctx,int index) noexcept {
+    const ULONGLONG frame=static_cast<const ForkCtx*>(ctx)->frame;
+    Intent& in=intents[static_cast<std::size_t>(index)];
+    const std::size_t slot=static_cast<std::size_t>(forkSlots[static_cast<std::size_t>(index)]);
+    const Soldier& s=soldiers[slot];
+    const Guess& g=guesses[slot];
+    const float* pos=Pos(in.h);
+    const float eye[3]={pos[0],pos[1]+kEye,pos[2]};
+    const int held=EnemyRow(s.target);
+    int rows[kTargets],n=0;
+    if(in.wantPick) {   // its anchor copied by the fork (in.pick.anchor)
+        std::memcpy(in.pick.eye,eye,12);in.pick.scope=g.scope;in.pick.reach=g.reach;in.pick.held=held;
+        bool known=true;
+        const void* const self=in.h;
+        in.pick.row=PickRow(held,eye,in.pick.anchor,g.scope,g.reach,[self,&known](int k) noexcept {
+            const int w=WastedFirePeek(self,world.enemy[static_cast<std::size_t>(k)].object);
+            if(w<0)known=false;   // its verdict a plan's (PlanFor): the game thread's, so the pick is too
+            return w==0;
+        });
+        in.pickOk=known;
+        if(known && in.pick.row>=0)rows[n++]=in.pick.row;
+    }
+    if(held>=0 && (n==0 || rows[0]!=held))rows[n++]=held;
+    const Arms& a=g.arms;
+    const int w0=a.held[0],w1=a.held[1];
+    for(int r=0;r<n;++r) {
+        const Enemy& t=world.enemy[static_cast<std::size_t>(rows[r])];
+        if(in.holds<kHolds) {
+            const int w=WastedFirePeek(in.h,t.object);
+            if(w>=0){in.hold[in.holds].target=t.object;in.hold[in.holds].hold=w>0;++in.holds;}
+        }
+        if(in.closes<kCloses) {   // ChooseArm's friends round the target
+            CloseQ& c=in.close[in.closes];
+            std::memcpy(c.at,t.aim,12);c.r=kFriendNearTarget;c.yes=FriendNearNow(in.h,t.aim,kFriendNearTarget);
+            ++in.closes;
+        }
+        // ShotOk with the held weapon (ChooseArm fires only it): its map ray when the kept one is due, its line clear.
+        const float dist=npc::Dist(eye,t.aim);
+        if(w0>=0 && w0<a.n && a.arm[w0].ready && dist<=a.arm[w0].reach && dist>=npc::MinRange(a.arm[w0])) {
+            if((frame-s.losFrame>=kLosFrames || s.losObject!=t.object) && in.rays<kRays) {
+                RayQ& q=in.ray[in.rays];
+                std::memcpy(q.a,eye,12);std::memcpy(q.b,t.aim,12);
+                q.dist=MapRay(eye,t.aim,q.hit);
+                ++in.rays;
+            }
+            AddClear(in,eye,t.aim,a.arm[w0].blast);
+        }
+        AddClear(in,eye,t.aim,w1>=0 && w1<a.n ? a.arm[w1].blast : LargestBlast(a));   // Veto from hand 1
+    }
+    in.done=true;   // last: a fault before it leaves every ask to the game thread
+}
+// The frame's fork (the first soldier's Think after the world is gathered, game thread): every soldier Drive saw
+// lately (kStaleMs) and still the same object gets its Decide; the rest ask at their Think.
+void Fork(ULONGLONG frame,ULONGLONG ms) noexcept {
+    forkFrame=frame;applying=nullptr;
+    intents.clear();forkSlots.clear();
+    if(!Cfg().npcParallelThink)return;
+    const LONGLONG t0=Cfg().perfProbe ? Ticks() : 0;
+    const std::size_t n=guesses.size()<soldiers.size() ? guesses.size() : soldiers.size();
+    for(std::size_t i=0;i<n;++i) {
+        Guess& g=guesses[i];
+        const Soldier& s=soldiers[i];
+        if(!g.set || g.ref.obj!=s.ref.obj || g.ref.ctrl!=s.ref.ctrl || ms-s.seen>kStaleMs)continue;
+        const auto h=static_cast<const unsigned char*>(s.ref.obj);
+        if(!stepobj::Reads(h,kPosition+12) || !s.ref.Is(h))continue;
+        float anchor[3]{};
+        const bool pick=g.pick && CopyAnchor(g.anchor,anchor);
+        g.intentFrame=frame;g.intentAt=static_cast<int>(forkSlots.size());
+        forkSlots.push_back(static_cast<int>(i));
+        intents.emplace_back();
+        Intent& in=intents.back();
+        in.h=h;in.ref=s.ref;in.frame=frame;
+        if(pick)std::memcpy(in.pick.anchor,anchor,12);
+        in.wantPick=pick;   // an anchor not readable now: the pick made at its Think
+    }
+    if(intents.empty()){if(t0)stats.decide+=Ticks()-t0;return;}
+    primeTargets.clear();
+    for(int i=0;i<world.enemies;++i)primeTargets.push_back(world.enemy[static_cast<std::size_t>(i)].object);
+    WastedFirePrime(primeTargets.data(),static_cast<int>(primeTargets.size()));
+    const std::uint64_t version=WastedFireVersion();
+    for(auto& in:intents)in.version=version;
+    ForkCtx ctx{frame};
+    workers::Fault fault;
+    workers::Run(&Decide,&ctx,static_cast<int>(intents.size()),&fault);
+    ++stats.frames;stats.decided+=static_cast<unsigned>(intents.size());
+    if(fault.count) {
+        stats.faults+=static_cast<unsigned>(fault.count);
+        if(!faultLogAt || ms-faultLogAt>=10000) {
+            faultLogAt=ms;
+            Log("NPCMT fault %08lX at %p in soldier %p's Decide (%d this frame%s): its asks made on the game thread",
+                fault.code,fault.address,fault.index>=0 ? intents[static_cast<std::size_t>(fault.index)].h : nullptr,
+                fault.count,fault.dumped ? ", minidump written" : "");
+        }
+    }
+    if(t0)stats.decide+=Ticks()-t0;
+}
+// The soldier's intent for its Drive now (game thread, its Think), or none.
+void Begin(const unsigned char* h) noexcept {
+    applying=nullptr;
+    if(intents.empty())return;
+    const int i=soldierIndex.Find(h);
+    const Guess* g=i>=0 && static_cast<std::size_t>(i)<guesses.size() ? &guesses[static_cast<std::size_t>(i)] : nullptr;
+    if(!g || g->intentFrame!=forkFrame || forkFrame!=GameFrame() || g->intentAt<0 ||
+       static_cast<std::size_t>(g->intentAt)>=intents.size()){++stats.noIntent;return;}
+    const Intent& in=intents[static_cast<std::size_t>(g->intentAt)];
+    if(!in.done || in.h!=h || in.frame!=forkFrame || !in.ref.Is(h)){++stats.noIntent;return;}
+    applying=&in;++stats.applied;
+}
+}  // namespace mt
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -2017,6 +2347,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
     Pick t=engage>0.0f ? PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
+    mt::Remember(s,h,anchor,o.leash+engage,LongestReach(a),engage>0.0f,a);   // the next frame's Decide asks the same
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
     const Enemy* commandTarget=nullptr;
     if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
@@ -2024,7 +2355,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     }
     // A mark its fire is wasted on waits (the shut ship's hatch opens, it moves under it): the others fought meanwhile.
     const Enemy* const marked=commandTarget ? commandTarget : NearestMark(eye);
-    if(const Enemy* m=marked && !WastedFire(h,marked->object) ? marked : nullptr) {
+    if(const Enemy* m=marked && !WastedFireQ(h,marked->object) ? marked : nullptr) {
         float reach=0.0f;
         for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
         const bool focus=commandTarget!=nullptr;
@@ -2043,7 +2374,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         // would take none (its window shut or due to open: aimed at all the same, ready).
         Enemy at=*t.e;
         const bool armed=p.arm>=0 && p.arm<a.n;
-        const bool hold=HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
+        const bool hold=HoldFireQ(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
         const float dir[3]={at.aim[0]-eye[0],at.aim[1]-eye[1],at.aim[2]-eye[2]};
         if(mask&kMaskLook)Look(h,dir);
         p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
@@ -2139,8 +2470,13 @@ void Think(unsigned char* h,int cls) noexcept {
     }
     const ULONGLONG ms=GameMs();
     SeeFrame(h);   // first: the step's frame moved before h is listed in it (listed under the last step, the next Add drops it)
-    liveset::Add(h);   // the game is calling its Think: WastedFire's asks of it as the shooter (VerdictOf)
-    if(world.frame!=GameFrame())Gather(team);   // 0 and 2 have the same enemies (TeamManager's table, docs/swarm-team-re.md)
+    if(world.frame!=GameFrame()) {   // 0 and 2 have the same enemies (TeamManager's table, docs/swarm-team-re.md)
+        const LONGLONG g0=Cfg().perfProbe ? mt::Ticks() : 0;
+        Gather(team);
+        if(g0)mt::stats.gather+=mt::Ticks()-g0;
+    }
+    // The frame's parallel Decide, once, over the world just gathered (by this Think, PreThink or a vehicle's AI).
+    if(mt::forkFrame!=GameFrame())mt::Fork(GameFrame(),ms);
     const unsigned char* root=RootLeader(h);
     const npc::Control control=ControlOf(h,root);
     // Counted in its squad whether it walks or rides (a squad in a vehicle is listed and takes dismount, §7).
@@ -2178,7 +2514,9 @@ void Think(unsigned char* h,int cls) noexcept {
     const float hpNow=At<float>(h,kHumanHp);
     if(q && mapcmd::Hurt(s->hpSeen,hpNow)){UnitStruck(q->top.obj);q->hurtAt=ms;}   // ...and a move pushes on (MoveJudged)
     s->hpSeen=hpNow;
+    if(!npc::Scripted(control))mt::Begin(h);
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
+    mt::applying=nullptr;
     if(!npc::Scripted(control))   // a script's unit keeps its stock moves
         Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil);
     if(Cfg().verbose && ms-s->loggedAt>kLogMs) {   // every soldier every 2 s: the bulk of a Debug=1 log, so Debug=2
@@ -2236,7 +2574,7 @@ int Followers(const unsigned char* leader,unsigned char** out,int most) noexcept
         node=At<const unsigned char*>(node,kListNodeNext),++guard) {
         if(!Readable(node,0x18))break;
         const auto o=At<unsigned char*>(node,kListNodeObject);
-        if(o && Readable(o,kDead+1) && !o[kDead] && IsSoldierClass(o) && !IsAnyPlayer(o))out[n++]=o;
+        if(o && stepobj::Reads(o,kDead+1) && !o[kDead] && IsSoldierClass(o) && !IsAnyPlayer(o))out[n++]=o;
     }
     return n;
 }
@@ -2295,7 +2633,7 @@ void Succeed(unsigned char* dead) noexcept {
     if(pick<0)return;
     unsigned char* const lead=m[pick];
     auto up=At<unsigned char*>(dead,kLeader);
-    if(up && (!Readable(up,kDead+1) || up[kDead]))up=nullptr;
+    if(up && (!stepobj::Reads(up,kDead+1) || up[kDead]))up=nullptr;
     // Too few left: join another squad instead (the nearest with room).
     // Every squad of the frame's friends a candidate (not the first 32 of the walk: in a big battle the nearest is further on).
     static std::vector<unsigned char*> others;static std::unique_ptr<float[][3]> at;static std::vector<int> sizes;
@@ -2334,7 +2672,7 @@ void PreThink(unsigned char* h) noexcept {
     const auto team=At<std::int32_t>(h,kTeam);
     if(team!=0 && team!=kTeamFriend)return;
     const auto leader=At<unsigned char*>(h,kLeader);
-    if(!leader || !Readable(leader,kObjectFlags+4) || !leader[kDead] || IsAnyPlayer(leader))return;
+    if(!leader || !stepobj::Reads(leader,kObjectFlags+4) || !leader[kDead] || IsAnyPlayer(leader))return;
     if(At<std::uint32_t>(leader,kObjectFlags)&kAutoResurrect)return;   // it comes back: the stock keeps following it
     if(!OnlineHostOnly())return;                                       // the host decides squads (§2.2; online_authority.h)
     if(world.frame!=GameFrame())Gather(At<std::int32_t>(h,kTeam));
@@ -2364,7 +2702,7 @@ std::uint8_t HideWalkUp(unsigned char* h) noexcept {
 // A squad the stock would let a player walk up to and join: no leader, +0x540 set. A script's squad so (a mission
 // waiting for the player to take it) is recruited from the map instead while the walk-up is off.
 bool NativeJoinable(const unsigned char* top) noexcept {
-    return WalkUpOff() && top && Readable(top,kLeader+8) && !At<const void*>(top,kLeader) && top[kAutoFollow];
+    return WalkUpOff() && top && stepobj::Reads(top,kLeader+8) && !At<const void*>(top,kLeader) && top[kAutoFollow];
 }
 // A script's squad the map takes FOLLOW / RECRUIT for alone (mapcmd.h CommandUnit::joinOnly): not locked on the map.
 bool JoinOnly(npc::Control control,const void* top) noexcept {
@@ -2409,7 +2747,7 @@ alignas(16) const unsigned char kNoCover[kAutoFollow+0x10]{};
 // of the few the stock would mark (its own gate first: +0x540 set, no +0x548 leader), so the walk of every soldier
 // pays no Readable (the 2026-11-08 stress lesson, HideWalkUp above).
 bool AboardMissionVehicle(const unsigned char* h) noexcept {
-    if(!h[kAutoFollow] || At<const void*>(h,kLeader) || !Readable(h,kHumanRiding+8))return false;
+    if(!h[kAutoFollow] || At<const void*>(h,kLeader) || !stepobj::Reads(h,kHumanRiding+8))return false;
     const auto* v=At<const unsigned char*>(h,kHumanRiding);
     return v && MissionCrewAboard(v,h);
 }
@@ -2427,7 +2765,7 @@ const unsigned char* __fastcall CoverRoot(const unsigned char* h) noexcept {
         const unsigned char* top=h;
         for(int i=0;i<kMaxRoot*4;++i) {
             const auto up=At<const unsigned char*>(top,kLeader);
-            if(!up || !Readable(up,kLeader+8) || (belowPlayer && IsAnyPlayer(up)))return top;
+            if(!up || !stepobj::Reads(up,kLeader+8) || (belowPlayer && IsAnyPlayer(up)))return top;
             top=up;
         }
         return top;
@@ -2523,7 +2861,8 @@ bool bargaKindOk=false;
 struct SixRun { ObjRef ref; bool built=false; };
 std::vector<SixRun> sixRuns;
 bool ObjectGone(const ObjRef& r) noexcept {
-    return !r.ctrl || !Readable(r.ctrl,edf::kCtrlUses+4) || At<std::int32_t>(r.ctrl,edf::kCtrlUses)<=0;
+    return !r.ctrl || (stepobj::ControlOf(r.obj)!=r.ctrl && !Readable(r.ctrl,edf::kCtrlUses+4)) ||
+           At<std::int32_t>(r.ctrl,edf::kCtrlUses)<=0;
 }
 const SixRun* SixRunOf(const unsigned char* v) noexcept {
     const void* const ctrl=At<const void*>(v,kSelfCtrl);
@@ -2558,9 +2897,9 @@ AiPass AiPassOf(const void* fn) noexcept {
 
 // A Barga driven by a real NPC soldier this machine runs, its state machine built.
 bool NpcDrivenBarga(const unsigned char* v) noexcept {
-    if(!Readable(v,kBargaAction+8) || (v[kListFlags]&kInAiList) || !At<const void*>(v,kBargaAction) || SeatCount(v)==0)return false;
+    if(!stepobj::Reads(v,kBargaAction+8) || (v[kListFlags]&kInAiList) || !At<const void*>(v,kBargaAction) || SeatCount(v)==0)return false;
     const auto vt=At<void* const*>(v,0);
-    return Readable(vt,(kSlotAiPass+1)*8) && vt[kSlotAiPass]==image+kBargaAiPass &&
+    return (edf::InImage(image,vt,(kSlotAiPass+1)*8) || Readable(vt,(kSlotAiPass+1)*8)) && vt[kSlotAiPass]==image+kBargaAiPass &&
         OwnsNpcSeatInput(SeatAt(const_cast<unsigned char*>(v),0));
 }
 int __fastcall BargaControlKind(const void* v,std::uint64_t seat) noexcept {
@@ -2584,7 +2923,7 @@ bool RunBargaSix(unsigned char* v,void* const* vt) noexcept {
 bool BargaReady(unsigned char* v,void* const* vt) noexcept {
     if(const SixRun* r=SixRunOf(v))return r->built;   // before the action: a failed slot 6 may have left one
     if(At<const void*>(v,kBargaAction))return true;   // its stock slot 6 ran (it was on the AI list)
-    if(!CanRecordSixRun(v) || !Readable(vt,(kSlotSix+1)*8) || vt[kSlotSix]!=image+kBargaSix)return false;
+    if(!CanRecordSixRun(v) || !(edf::InImage(image,vt,(kSlotSix+1)*8) || Readable(vt,(kSlotSix+1)*8)) || vt[kSlotSix]!=image+kBargaSix)return false;
     const bool built=RunBargaSix(v,vt);
     RecordSixRun(v,built);
     Log("NPCAI Barga v=%p: its AI %s for the NPC driver",v,built ? "built (slot 6)" : "could not be built: left driving only");
@@ -2651,7 +2990,7 @@ bool RunCarSix(unsigned char* v,void* const* vt,bool& returned) noexcept {
 }
 
 bool CarAimReady(unsigned char* v,void* const* vt) noexcept {
-    if(!Readable(vt,(kSlotSix+1)*8) || vt[kSlotSix]==image+kCarSix)return true;   // CarBase's own: nothing of its own
+    if(!(edf::InImage(image,vt,(kSlotSix+1)*8) || Readable(vt,(kSlotSix+1)*8)) || vt[kSlotSix]==image+kCarSix)return true;   // CarBase's own: nothing of its own
     if(const SixRun* r=SixRunOf(v))return r->built;   // before the action: a slot 6 that threw left one
     if(At<const void*>(v,kCarAction))return true;     // its stock slot 6 ran (it was on the AI list)
     if(!CanRecordSixRun(v))return false;
@@ -2761,8 +3100,8 @@ void LogVehicleAi(NpcVehicleAi& r,unsigned char* v,const char* why) noexcept {
     }
     char rounds[160]{};SeatRounds(v,rounds,sizeof(rounds));
     const auto* target=At<const unsigned char*>(v,kVehicleTarget);
-    const bool seen=Readable(target,kActiveFlag+1);
-    const float targetAt=seen && Readable(target,kPosition+12) ? npc::Dist(Pos(v),Pos(target)) : -1.0f;
+    const bool seen=stepobj::Reads(target,kActiveFlag+1);
+    const float targetAt=seen && stepobj::Reads(target,kPosition+12) ? npc::Dist(Pos(v),Pos(target)) : -1.0f;
     const auto* driver=static_cast<const unsigned char*>(r.driver.obj);
     Log("NPCAI vehicle v=%p (%s) driver %p: %s%s%s; %.0f s: pass %u, action %u%s%s; active=%d sight=%.0f e04/e08/e09=%d/%d/%d "
         "list=%#x target %p at %.0f m (active %d); gunners [%s]; rounds seat:n [%s]",
@@ -2828,13 +3167,13 @@ bool ActivateDrivenVehicle(unsigned char* v,NpcVehicleAi* r) noexcept {
 
 // The step a Think of seat 0's rider ends at for `v`. Each return is one cause the diagnosis names.
 DriveStep DriveVehicleAiStep(unsigned char* v,unsigned char* seat,const float* dt,SeatInputOwner& owner) noexcept {
-    if(!Readable(v,kSeatCount+8) || v[kDead])return DriveStep::vehicleGone;
+    if(!stepobj::Reads(v,kSeatCount+8) || v[kDead])return DriveStep::vehicleGone;
     if(v[kListFlags]&kInAiList)return DriveStep::onAiList;
     owner=NpcSeatInputOwner(seat);
     if(owner!=SeatInputOwner::npc)return DriveStep::seatInput;
     if(seat!=SeatAt(v,0) || !NpcDriver(v))return DriveStep::noDriver; // passengers must not run seat-0 AI or take over a human driver
     const auto vt=At<void* const*>(v,0);
-    if(!Readable(vt,(kSlotAiPass+1)*8))return DriveStep::noPass;
+    if(!(edf::InImage(image,vt,(kSlotAiPass+1)*8) || Readable(vt,(kSlotAiPass+1)*8)))return DriveStep::noPass;
     const AiPass kind=AiPassOf(vt[kSlotAiPass]);
     if(kind==AiPass::none)return DriveStep::noPass;
     if(!PrepareNpcVehicleAi(v))return DriveStep::notPrepared;
@@ -2851,7 +3190,7 @@ DriveStep DriveVehicleAiStep(unsigned char* v,unsigned char* seat,const float* d
     const bool car=kind==AiPass::car;
     const std::size_t action=car ? kCarAction : kMechAction,inAction=car ? kCarInAction : kMechInAction;
     const std::size_t slot=car ? kSlotCarAi : kSlotMechAi;
-    if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return done;
+    if(At<const void*>(v,action) || !(edf::InImage(image,vt,(slot+1)*8) || Readable(vt,(slot+1)*8)))return done;
     const void* fn=vt[slot];
     if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return done;
     if(!PrepareNpcVehicleAi(v))return done; // the native pass may replace the target; refresh before firing
@@ -2868,7 +3207,7 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     auto* v=At<unsigned char*>(h,kHumanRiding);
     if(!seat || !v)return;   // on foot
     // Only seat 0's rider is the vehicle's driver: a gunner's Think ends here unrecorded (its seat: NpcGunnersInput).
-    if(!Readable(v,kSeatCount+8) || SeatCount(v)==0 || seat!=SeatAt(v,0))return;
+    if(!stepobj::Reads(v,kSeatCount+8) || SeatCount(v)==0 || seat!=SeatAt(v,0))return;
     SeatInputOwner owner=SeatInputOwner::npc;
     const DriveStep step=DriveVehicleAiStep(v,seat,dt,owner);
     SeeDriveStep(v,h,step,owner);
@@ -2927,13 +3266,20 @@ template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
     }
     std::uint8_t walkUp=0;   // +0x540 hidden from the stock walk-up for this Think (HideWalkUp)
     __try { walkUp=HideWalkUp(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {walkUp=0;}
+    mt::applying=nullptr;
+    const bool timed=Cfg().perfProbe!=0;
+    const LONGLONG s0=timed ? mt::Ticks() : 0;
     nextThink[I](human,dt);
+    if(timed)mt::stats.stock+=mt::Ticks()-s0;
     if(walkUp) {
         auto* h=static_cast<unsigned char*>(human);
         if(!h[kAutoFollow])h[kAutoFollow]=walkUp;   // put back, unless the Think itself set it meanwhile
     }
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return;
+    const LONGLONG t0=timed ? mt::Ticks() : 0;
     __try { Think(static_cast<unsigned char*>(human),I); } __except(Fault(GetExceptionInformation())) {}
+    mt::applying=nullptr;   // a fault in its Drive: the next soldier's asks are not this one's
+    if(timed)mt::stats.think+=mt::Ticks()-t0;
     // A jumper's own descent (transport.cpp: a Wing Diver's jets), over whatever the AI wrote this frame.
     __try { TransportJumperIntent(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {}
     __try { DriveVehicleAi(static_cast<unsigned char*>(human),dt); } __except(Fault(GetExceptionInformation())) {}
@@ -2955,11 +3301,11 @@ bool IsSoldierClassLive(const void* human) noexcept {
     for(const auto& c:kSoldiers)if(vt==image+c.vtable)return true;
     return false;
 }
-bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }
+bool IsSoldierClass(const void* human) noexcept { return stepobj::Reads(human,8) && IsSoldierClassLive(human); }
 namespace {
 // Its class's index in kSoldiers (0 Ranger, 1 Wing Diver, 2 Fencer, 3 Air Raider: mapcmd_logic.h kDismountRanger ...), -1 none.
 int SoldierClassIndex(const void* human) noexcept {
-    if(!Readable(human,8))return -1;
+    if(!stepobj::Reads(human,8))return -1;
     const auto vt=At<const unsigned char*>(human,0);
     for(int i=0;i<kClasses;++i)if(vt==image+kSoldiers[i].vtable)return i;
     return -1;
@@ -2992,6 +3338,7 @@ bool InstallNpcAi() noexcept {
     InstallBargaControlKind();
     InstallBoxes();
     InstallMobility();
+    workers::SetDumpWriter(MiniDumpWriter(),kDumpType);   // a Decide's fault: its minidump (worker_pool.h)
     int hooked=0;
     for(int i=0;i<kClasses;++i) {
         auto slot=reinterpret_cast<void**>(image+kSoldiers[i].vtable)+kSlotThink;
@@ -3007,6 +3354,26 @@ bool InstallNpcAi() noexcept {
     InstallVehicleTargetSearch();   // every CarBase AI driver, the stock's dummies too: not tied to the soldiers' Think
     ConfigureNpcCommandNetwork(ok ? &NpcMapCommandForRequester : nullptr);
     return ok;
+}
+
+void ResetNpcParallel() noexcept {
+    mt::guesses.clear();mt::intents.clear();mt::forkSlots.clear();mt::primeTargets.clear();
+    mt::applying=nullptr;mt::forkFrame=~0ull;
+    mt::stats=mt::Stats{};mt::shadowTick=0;mt::mismatchLogAt=mt::faultLogAt=0;
+}
+void NpcParallelReport(unsigned steps) noexcept {
+    const mt::Stats st=mt::stats;
+    mt::stats=mt::Stats{};
+    if(!steps || !Cfg().perfProbe)return;
+    LARGE_INTEGER hz;QueryPerformanceFrequency(&hz);
+    const double f=static_cast<double>(steps),ms=1000.0/static_cast<double>(hz.QuadPart)/f;
+    const LONGLONG apply=st.think-st.gather-st.decide;
+    Log("PERF NPCMT %s, %d threads: %.1f soldiers decided a step, %u faults; a step: gather %.3f ms, decide %.3f ms, "
+        "stock think %.3f ms, apply %.3f ms (asks made at apply %.3f ms); kept answers %u, asked at apply %u, "
+        "no intent %u, stale %u, mismatches %u",Cfg().npcParallelThink ? "on" : "off",workers::Threads(),
+        static_cast<double>(st.decided)/f,st.faults,static_cast<double>(st.gather)*ms,static_cast<double>(st.decide)*ms,
+        static_cast<double>(st.stock)*ms,static_cast<double>(apply>0 ? apply : 0)*ms,static_cast<double>(st.sync)*ms,
+        st.hits,st.misses,st.noIntent,st.stale,st.mismatches);
 }
 
 namespace {
@@ -3050,7 +3417,7 @@ const char* kClassWords[kClasses]={"RANGER","WING DIVER","FENCER","AIR RAIDER"};
 bool Live(const Squad& q,ULONGLONG ms) noexcept {
     __try {
         const auto* top=static_cast<const unsigned char*>(q.top.obj);
-        return q.top && q.seen && ms-q.seen<=kSquadSeenMs && Readable(top,kHumanVehicleCtrl+8) &&
+        return q.top && q.seen && ms-q.seen<=kSquadSeenMs && stepobj::Reads(top,kHumanVehicleCtrl+8) &&
             q.top.Is(top) && !top[kDead] && !(top[kObjectFlags]&4) && IsSoldierClass(top) && !IsAnyPlayer(top);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -3066,9 +3433,9 @@ struct CommandSquadVisitor { const void* const* vtable; };
 void __fastcall CommandSquadIgnore(void*) noexcept {}
 void __fastcall CommandSquadVisit(CommandSquadVisitor*,unsigned char* human) noexcept {
     __try {
-        if(!IsSoldierClass(human) || !Readable(human,kHumanVehicleCtrl+8) || IsAnyPlayer(human) || human[kDead] || (human[kObjectFlags]&4))return;
+        if(!IsSoldierClass(human) || !stepobj::Reads(human,kHumanVehicleCtrl+8) || IsAnyPlayer(human) || human[kDead] || (human[kObjectFlags]&4))return;
         auto* top=TopNpc(human);
-        if(!top || !Readable(top,kHumanVehicleCtrl+8) || top[kDead] || IsOnlineAuthority(top))return;
+        if(!top || !stepobj::Reads(top,kHumanVehicleCtrl+8) || top[kDead] || IsOnlineAuthority(top))return;
         const auto identity=ObjRef::Of(top);
         unsigned char nativeId[32];if(!identity.ctrl || !ReadNativeObjectId(top,nativeId))return;
         const float hp=At<float>(human,kHumanHp),hpMax=At<float>(human,kHumanHpMax);
@@ -3564,7 +3931,7 @@ bool FriendlyVehicle(const unsigned char* v,const unsigned char* member) noexcep
 // NpcBoardable): one the plugin knows (crew.cpp KnownVehicle), alive, not a fighter (jet.cpp IsJet: its pilot's alone),
 // with a seat some soldier's class fits. Not whether a seat is free now, nor whether this machine seats NPCs in it.
 bool Boardable(const unsigned char* v) noexcept {
-    if(!v || !Readable(v,kSeatCount+8) || v[kDead] || !KnownVehicle(v) || IsJet(v))return false;
+    if(!v || !stepobj::Reads(v,kSeatCount+8) || v[kDead] || !KnownVehicle(v) || IsJet(v))return false;
     auto* const seats=const_cast<unsigned char*>(v);
     for(unsigned seat=0;seat<SeatCount(seats) && seat<edf::kMaxSeats;++seat)
         if((At<std::uint32_t>(SeatAt(seats,seat),kSeatClass)&At<std::uint32_t>(SeatAt(seats,seat),kSeatEnable))!=0)return true;
@@ -3616,7 +3983,7 @@ unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULO
     }
     if(requester && !HumanOnFoot(requester)) {
         auto* v=At<unsigned char*>(requester,kHumanRiding);
-        if(v && Readable(v,kSeatCount+8) && !v[kDead]) {
+        if(v && stepobj::Reads(v,kSeatCount+8) && !v[kDead]) {
             if(sawVehicle)*sawVehicle=true;
             if(BoardDistance(v,members,count,ms)>=0)return v;
         }
@@ -3639,7 +4006,7 @@ unsigned char* BoardTarget(unsigned char* top,const unsigned char* requester,ULO
 bool Reserved(const unsigned char* v,unsigned seat,ULONGLONG ms,const void* except) noexcept {
     for(const auto& s:soldiers)
         if(s.ref.obj!=except && s.boardV.Is(v) && s.boardSeat==static_cast<int>(seat) && ms-s.boardAt<=kBoardMs &&
-           Readable(s.ref.obj,kDead+1) && s.ref.Is(s.ref.obj) && !At<unsigned char>(s.ref.obj,kDead))return true;
+           stepobj::Reads(s.ref.obj,kDead+1) && s.ref.Is(s.ref.obj) && !At<unsigned char>(s.ref.obj,kDead))return true;
     return false;
 }
 
@@ -3676,7 +4043,7 @@ bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
 // way to stay its own (Reserved); a member already walking to a seat of `v` keeps it and is counted. Assignment never
 // creates a rider.
 int BoardInto(unsigned char* v,unsigned char* top,ULONGLONG ms,const int* roles,int roleCount) noexcept {
-    if(!v || !Readable(v,kSeatCount+8) || v[kDead] || !OnlineMaySeatNpc(v))return 0;
+    if(!v || !stepobj::Reads(v,kSeatCount+8) || v[kDead] || !OnlineMaySeatNpc(v))return 0;
     unsigned char* m[kMaxSquad];
     const int n=Members(top,m,kMaxSquad);
     static_assert(kMaxSquad<=ridealong::kMembersMost && edf::kMaxSeats<=static_cast<unsigned>(ridealong::kSeatsMost),"the offer holds a squad and a vehicle");
@@ -3769,7 +4136,7 @@ bool DismountSquad(unsigned char* top,int* affected=nullptr,bool all=true,std::u
 
 int NpcBoardCrew(unsigned char* v,unsigned char* const* humans,int count) noexcept {
     if(!ok || !rideOk || !Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || !v ||
-       !Readable(v,kDead+1) || v[kDead] || !humans || count<=0 || !OnlineMaySeatNpc(v))return 0;
+       !stepobj::Reads(v,kDead+1) || v[kDead] || !humans || count<=0 || !OnlineMaySeatNpc(v))return 0;
     int assigned=0;
     const ULONGLONG ms=GameMs();
     for(int i=0;i<count;++i) {
@@ -3787,7 +4154,7 @@ int NpcBoardCrew(unsigned char* v,unsigned char* const* humans,int count) noexce
 // machine for its own copies before they are registered, so no native ride event crosses the network before peers
 // know the objects. The first soldier takes the driver's seat. Returns how many are seated.
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* humans,int count) noexcept {
-    if(!ok || !rideOk || !Cfg().enabled || !v || !Readable(v,kSeatCount+8) || v[kDead] || !humans || count<=0 ||
+    if(!ok || !rideOk || !Cfg().enabled || !v || !stepobj::Reads(v,kSeatCount+8) || v[kDead] || !humans || count<=0 ||
        !OnlineMaySeatNpc(v))return 0;
     auto* ctrl=At<unsigned char*>(v,kSelfCtrl);
     if(!ctrl || At<std::int32_t>(ctrl,8)<=0)return 0;
@@ -3818,7 +4185,7 @@ int NpcSeatCrewNow(unsigned char* v,unsigned char* const* humans,int count) noex
 // asynchronous: they walk to the native entry point and RideVehicle consumes its shared_ptr there.
 bool NpcRequestCrew(unsigned char* v,bool /*spawned*/) noexcept {
     if(!ok || !rideOk || !Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || !v ||
-       !Readable(v,kDead+1) || v[kDead] || !OnlineMaySeatNpc(v))return false;
+       !stepobj::Reads(v,kDead+1) || v[kDead] || !OnlineMaySeatNpc(v))return false;
     const ULONGLONG ms=GameMs();
     bool pending=false;
     for(const auto& s:soldiers)pending=pending || (s.boardV.Is(v) && ms-s.boardAt<=kBoardMs);
@@ -3888,7 +4255,7 @@ bool NpcRestoreMissionSeat(unsigned char* v,unsigned char* h) noexcept {
 }
 
 bool NpcReleaseVehicleCrew(unsigned char* v) noexcept {
-    if(!v || !Readable(v,kSeatCount+8) || !OnlineMaySeatNpc(v))return false;
+    if(!v || !stepobj::Reads(v,kSeatCount+8) || !OnlineMaySeatNpc(v))return false;
     bool released=false;
     for(unsigned i=0;i<SeatCount(v);++i)
         if(NpcCanYieldSeat(SeatAt(v,i)))released=NpcMoveSeat(v,i,-1) || released;
@@ -3936,7 +4303,7 @@ int NpcSquadMembers(const void* top,ObjRef* out,int most) noexcept {
     if(!top || !out || most<=0)return 0;
     __try {
         auto* t=static_cast<unsigned char*>(const_cast<void*>(top));
-        if(!Readable(t,kDead+1) || t[kDead] || !IsSoldierClass(t))return 0;
+        if(!stepobj::Reads(t,kDead+1) || t[kDead] || !IsSoldierClass(t))return 0;
         unsigned char* m[kMaxSquad];
         const int n=Members(t,m,kMaxSquad);
         int k=0;
@@ -3950,7 +4317,7 @@ bool NpcSquadTopOf(const ObjRef& member,ObjRef* top) noexcept {
     if(!member.obj || !top)return false;
     __try {
         auto* h=static_cast<unsigned char*>(const_cast<void*>(member.obj));
-        if(!Readable(h,kLeader+8) || !Readable(h,kSelfCtrl+8) || !member.Is(h) || h[kDead] || !IsSoldierClass(h))return false;
+        if(!stepobj::Reads(h,kLeader+8) || !stepobj::Reads(h,kSelfCtrl+8) || !member.Is(h) || h[kDead] || !IsSoldierClass(h))return false;
         unsigned char* const t=TopNpc(h);
         if(!t || t[kDead])return false;
         *top=ObjRef::Of(t);
@@ -4073,7 +4440,7 @@ void GuardOrder(Squad& q,const Command& c,const unsigned char* requester=nullptr
 }
 Squad* SupportRouteOwner(unsigned char* top) noexcept {
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi || !followOk || !top ||
-       !Readable(top,kHumanVehicleCtrl+8) || !IsSoldierClass(top) || IsAnyPlayer(top) || top[kDead] ||
+       !stepobj::Reads(top,kHumanVehicleCtrl+8) || !IsSoldierClass(top) || IsAnyPlayer(top) || top[kDead] ||
        !IsOnlineAuthority(top) || !HumanOnFoot(top) || TopNpc(top)!=top || SupportSoldierHeld(top))return nullptr;
     Squad* const q=FindSquad(top);
     if(!q || GameMs()-q->seen>kOrderSeenMs || !q->top.Is(top) || q->routeCancelled ||
@@ -4105,7 +4472,7 @@ bool NpcFinishSquadRoute(unsigned char* leader,const float* destination) noexcep
 namespace {
 unsigned char* TransportTop(const void* top) noexcept {
     auto* t=static_cast<unsigned char*>(const_cast<void*>(top));
-    return t && Readable(t,kHumanVehicleCtrl+8) && !t[kDead] && IsSoldierClass(t) && !IsAnyPlayer(t) ? t : nullptr;
+    return t && stepobj::Reads(t,kHumanVehicleCtrl+8) && !t[kDead] && IsSoldierClass(t) && !IsAnyPlayer(t) ? t : nullptr;
 }
 }  // namespace
 bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept {
@@ -4131,7 +4498,7 @@ bool NpcSquadSeats(const void* top,const void* vehicle,SquadSeats* out) noexcept
 int NpcSquadBoardVehicle(const void* top,unsigned char* vehicle) noexcept {
     __try {
         auto* const t=TransportTop(top);
-        if(!t || !ok || !rideOk || !Cfg().npcBoarding || !vehicle || !Readable(vehicle,kSeatCount+8) || vehicle[kDead] ||
+        if(!t || !ok || !rideOk || !Cfg().npcBoarding || !vehicle || !stepobj::Reads(vehicle,kSeatCount+8) || vehicle[kDead] ||
            !OnlineMaySeatNpc(vehicle))return 0;
         return BoardInto(vehicle,t,GameMs(),ridealong::kBoardRoles,3);
     } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
@@ -4151,11 +4518,11 @@ void NpcRideAlongTick() noexcept {
             if(!IsOnlineAuthority(top) || TopNpc(top)!=top)continue;
             const unsigned char* const root=RootLeader(top);
             const bool eligible=on && q.control==npc::Control::recruited && q.cmd.order==Order::none && !q.dismissed &&
-                                root && IsAnyPlayer(root) && Readable(root,kHumanRiding+8) && !root[kDead] && !TransportOf(top);
+                                root && IsAnyPlayer(root) && stepobj::Reads(root,kHumanRiding+8) && !root[kDead] && !TransportOf(top);
             unsigned char* now=nullptr;
             if(eligible && !HumanOnFoot(root)) {
                 auto* const v=At<unsigned char*>(root,kHumanRiding);
-                if(v && Readable(v,kSeatCount+8) && !v[kDead])now=v;
+                if(v && stepobj::Reads(v,kSeatCount+8) && !v[kDead])now=v;
             }
             const ridealong::Step step=ridealong::Advance(q.along,eligible,now,ms);
             if(step.left) {
@@ -4201,7 +4568,7 @@ const void* HintCandidate(const unsigned char* me,float* at) noexcept {
         for(int i=0;i<remoteSquadCount;++i) {
             const RemoteSquad& r=remoteSquads[static_cast<std::size_t>(i)];
             const auto* top=static_cast<const unsigned char*>(r.top.obj);
-            if(!top || !Readable(top,kHumanVehicleCtrl+8) || !r.top.Is(top) || top[kDead] || !HumanOnFoot(top))continue;
+            if(!top || !stepobj::Reads(top,kHumanVehicleCtrl+8) || !r.top.Is(top) || top[kDead] || !HumanOnFoot(top))continue;
             if(r.control==npc::Control::free || (r.control==npc::Control::recruited && RootLeader(top)==me))consider(top,r.pos);
         }
     }
@@ -4218,7 +4585,7 @@ void NpcCommandHintFrame(const unsigned char* human,bool mapOpen) noexcept {
         // Over the squad it began on while that one is still there (at the head: the stock recruit mark's place).
         if(hint.showing && hint.who) {
             const auto* who=static_cast<const unsigned char*>(hint.who);
-            if(Readable(who,kHumanVehicleCtrl+8) && !who[kDead] && IsSoldierClass(who)){std::memcpy(at,Pos(who),12);candidate=who;}
+            if(stepobj::Reads(who,kHumanVehicleCtrl+8) && !who[kDead] && IsSoldierClass(who)){std::memcpy(at,Pos(who),12);candidate=who;}
         }
         bool finished=false;
         if(ridealong::HintStep(hint,candidate,GameMs(),&finished) && candidate) {
@@ -4259,12 +4626,12 @@ bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding
 const void* NpcSquadTopOf(const void* human) noexcept {
     __try {
         auto* h=static_cast<unsigned char*>(const_cast<void*>(human));
-        if(!h || !Readable(h,kHumanVehicleCtrl+8) || h[kDead] || !IsSoldierClass(h) || IsAnyPlayer(h))return nullptr;
+        if(!h || !stepobj::Reads(h,kHumanVehicleCtrl+8) || h[kDead] || !IsSoldierClass(h) || IsAnyPlayer(h))return nullptr;
         return TopNpc(h);
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
 int NpcSoldierClass(const void* human) noexcept {
-    if(!human || !Readable(human,8))return -1;
+    if(!human || !stepobj::Reads(human,8))return -1;
     for(int c=0;c<kClasses;++c)if(At<const void*>(human,0)==image+kSoldiers[c].vtable)return c;
     return -1;
 }
@@ -4276,13 +4643,13 @@ NpcCommandResult CommandResult(NpcCommandReason reason,unsigned affected=0) noex
 }
 bool CommandActor(const ObjRef& ref,bool playerActor) noexcept {
     const auto* h=static_cast<const unsigned char*>(ref.obj);
-    return h && Readable(h,kHumanVehicleCtrl+8) && ref.Is(h) && !h[kDead] && !(h[kObjectFlags]&4) &&
+    return h && stepobj::Reads(h,kHumanVehicleCtrl+8) && ref.Is(h) && !h[kDead] && !(h[kObjectFlags]&4) &&
         IsSoldierClass(h) && (playerActor ? IsAnyPlayer(h) : !IsAnyPlayer(h));
 }
 struct CommandFocusCheck { ObjRef wanted;bool found=false;float at[3]{}; };
 void SeeCommandFocus(void* context,const void* object,const float* aim) noexcept {
     auto& check=*static_cast<CommandFocusCheck*>(context);
-    if(object==check.wanted.obj && Readable(object,kSelfCtrl+8) && check.wanted.Is(object)) {
+    if(object==check.wanted.obj && stepobj::Reads(object,kSelfCtrl+8) && check.wanted.Is(object)) {
         check.found=true;std::memcpy(check.at,aim,12);
     }
 }
@@ -4397,7 +4764,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         case Order::hold:   // RTS hold position: a guard of the spot its top stands on now (each squad its own)
             GuardOrder(*q,Command{Order::guard,{Pos(top)[0],Pos(top)[1],Pos(top)[2]}},caller);break;
         case Order::focus: {
-            if(!focus.obj || !Readable(focus.obj,kDead+1) || static_cast<const unsigned char*>(focus.obj)[kDead])return CommandResult(Reason::noTarget);
+            if(!focus.obj || !stepobj::Reads(focus.obj,kDead+1) || static_cast<const unsigned char*>(focus.obj)[kDead])return CommandResult(Reason::noTarget);
             CommandFocusCheck checked{focus};VisitEnemiesOf(caller ? callerTeam : team,&SeeCommandFocus,&checked);
             if(!checked.found)return CommandResult(Reason::noTarget);
             q->cmd=c;q->cmdLead=npc::LeadOf(control);std::memcpy(q->cmd.at,checked.at,12);npcmark::Assign(q->commandFocus,focus);break;
@@ -4504,7 +4871,7 @@ constexpr std::size_t kGunnerInputs[4]={0x2D0,0x2D4,0x2E4,0x2E0};
 void ResetGunnerInputs() noexcept { gunnerWrites.clear(); }
 // An entry whose vehicle is gone (or its address another object's) is dropped with nothing cleared.
 template<class Write> bool StaleWrite(const Write& w) noexcept {
-    return !Readable(w.vehicle.obj,kSelfCtrl+8) || !w.vehicle.Is(w.vehicle.obj);
+    return !stepobj::Reads(w.vehicle.obj,kSelfCtrl+8) || !w.vehicle.Is(w.vehicle.obj);
 }
 // Swap-with-back: the entries' order means nothing.
 template<class Write> void DropWrite(std::vector<Write>& writes,std::size_t i) noexcept {
@@ -4517,7 +4884,7 @@ void ReleaseGunnerInputs(unsigned char* v) noexcept {
         if(w.vehicle.obj!=v){++i;continue;}
         if(!StaleWrite(w)) {
             unsigned char* seat=w.seat<SeatCount(v) ? SeatAt(v,w.seat) : nullptr;
-            if(seat && !AnyPlayerIn(seat) && Readable(w.rider.obj,kSelfCtrl+8) && w.rider.Is(At<const void*>(seat,kSeatRider)))
+            if(seat && !AnyPlayerIn(seat) && stepobj::Reads(w.rider.obj,kSelfCtrl+8) && w.rider.Is(At<const void*>(seat,kSeatRider)))
                 for(int k=0;k<4;++k)if(At<float>(seat,kGunnerInputs[k])==w.values[k])Put<float>(seat,kGunnerInputs[k],0.0f);
         }
         DropWrite(gunnerWrites,i);
@@ -4538,7 +4905,7 @@ bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept {
         if(!InSession())return true;
         // A registered vehicle's Dummy exists on the host only. Never pick the driver machine instead:
         // native shots carry the NPC's firing event to every vehicle copy, including a remote driver's.
-        if(!Readable(vehicle,0x12A))return false;
+        if(!stepobj::Reads(vehicle,0x12A))return false;
         if(online::LocalCopy(At<std::uint16_t>(vehicle,0x128)))return IsOnlineAuthority(vehicle);
         return OnlineHostOnly();
     }
@@ -4619,7 +4986,7 @@ void CrewOwnWeapons(unsigned char* v,unsigned index,const void* target,float dis
 }
 }  // namespace
 bool GunnerAirTarget(const void* target) noexcept {
-    if(!Readable(target,kPosition+12))return false;
+    if(!stepobj::Reads(target,kPosition+12))return false;
     const auto p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(target)+kPosition);
     const float from[3]={p[0],p[1]+1.0f,p[2]},end[3]={p[0],p[1]-512.0f,p[2]};float hit[3];
     return MapFloorRay(from,end,hit)>=0.0f && p[1]-hit[1]>15.0f;
@@ -4658,7 +5025,7 @@ void ReleaseDriverPayload(unsigned char* v,bool replace) noexcept {
         if(!StaleWrite(w)) {
             if(!replace && RealPayloadDriver(v) && GameMs()-w.at<=200){++i;continue;}
             auto seat=SeatCount(v) ? SeatAt(v,0) : nullptr;
-            if(seat && !AnyPlayerIn(seat) && Readable(w.rider.obj,kSelfCtrl+8) && w.rider.Is(At<const void*>(seat,kSeatRider))) {
+            if(seat && !AnyPlayerIn(seat) && stepobj::Reads(w.rider.obj,kSelfCtrl+8) && w.rider.Is(At<const void*>(seat,kSeatRider))) {
                 constexpr std::size_t offsets[]={0x2E4,0x2E0};
                 for(int k=0;k<2;++k)if(At<float>(seat,offsets[k])==w.fire[k])Put<float>(seat,offsets[k],0.0f);
             }
@@ -4686,7 +5053,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
         if(target && HoldFire(v,target))target=nullptr;   // the stock AI's target no round would hurt now: none
         const auto seat=SeatAt(v,0);
         Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
-        if(target && !Readable(target,kPosition+12))target=nullptr;
+        if(target && !stepobj::Reads(target,kPosition+12))target=nullptr;
         const float distance=target ? npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))) : 0.0f;
         const bool airborne=target && GunnerAirTarget(target);
         unsigned char* const weapon=CrewMainGun(v,0,target,distance,airborne);   // with no target: the old redirect cleared
@@ -4736,7 +5103,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     if(!sig)sig=Matches(kSeatFire,kSeatFireSig,sizeof(kSeatFireSig)) ? 1 : -1;
     if(sig<0)return;
     const auto vt=At<void* const*>(v,0);
-    if(!Readable(vt,(kSlotSeatFire+1)*8) || vt[kSlotSeatFire]!=image+kSeatFire)return;
+    if(!(edf::InImage(image,vt,(kSlotSeatFire+1)*8) || Readable(vt,(kSlotSeatFire+1)*8)) || vt[kSlotSeatFire]!=image+kSeatFire)return;
     for(unsigned i=1;i<SeatCount(v);++i) {
         unsigned char* const seat=SeatAt(v,i);
         GunnerStep step=GunnerStep::notAi;   // each test below that passes moves it on (the diagnosis: SeeGunnerStep)

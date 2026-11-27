@@ -39,13 +39,64 @@ def call(at: int, target: int) -> None:
 checked = 0
 for site, target in (('kInputCall', 'kInput'), ('kFenceCall', 'kFence'), ('kPresentCall', 'kPresentCmd'),
                      ('kUpdateCall', 'kUpdate'), ('kDrawCall', 'kDraw'), ('kResolveCall', 'kResolve'),
-                     ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette')):
+                     ('kQueryCall', 'kQuery'), ('kPaletteCall', 'kPalette'),
+                     ('kHavokBeforeCall', 'kHavokStep'), ('kHavokAfterCall', 'kHavokStep'),
+                     ('kHavokBuildCall', 'kHavokBuild'), ('kHavokFinishCall', 'kHavokFinish'),
+                     ('kCollideConstructCall', 'kCollideConstruct'), ('kCollideSleepCall', 'kCollideSleep')):
     call(value(site), value(target))
     checked += 1
 for sites, target in (('kSubmitCalls', 'kSubmit'), ('kMeshCalls', 'kMesh')):
     for at in values(sites):
         call(at, value(target))
         checked += 1
+# Both dispatch calls use the same argument setup and secondary queue vtable slot.
+sig = bytes.fromhex('488b06488d5424204533c0488bceff90a8000000')
+for at in values('kCollideDispatchCalls'):
+    assert binary[at - 14:at + 6] == sig
+    checked += 1
+vt = value('kDefaultQueueInterface')
+assert struct.unpack_from('<Q', binary, vt + 0xA8)[0] - pe.OPTIONAL_HEADER.ImageBase == 0x9EB5D0
+# The mode check selects the runner containing the signed sleep call. The sleep thunk loads a handle, then tail-calls WaitForSingleObject.
+assert value('kDefaultQueueMode') == 0x36C
+assert binary[0xA15AFE:0xA15B05] == bytes.fromhex('458b806c030000')
+jump = value('kCollideSleep') + 8
+assert binary[jump:jump+3] == bytes.fromhex('48ff25')
+slot = jump + 7 + struct.unpack_from('<i', binary, jump+3)[0]
+pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
+assert any(entry.address - pe.OPTIONAL_HEADER.ImageBase == slot and entry.name == b'WaitForSingleObject'
+           for library in pe.DIRECTORY_ENTRY_IMPORT for entry in library.imports)
+# The mode-0 call uses the same +0x20 task interface that the graph passes to queue slot 4.
+at = value('kModeZeroExecute')
+assert binary[at-16:at+6] == bytes.fromhex('488d431048894588488d55a0488b4b58488b01ff5010')
+assert struct.unpack_from('<Q', binary, vt + 0x20)[0] - pe.OPTIONAL_HEADER.ImageBase == 0xA15830
+assert binary[0xA1583C:0xA15840] == bytes.fromhex('4c894258')
+assert binary[0x9EDC05:0x9EDC09] == bytes.fromhex('488b5310')
+assert binary[0x9EC4AB:0x9EC4AF] == bytes.fromhex('4c8d4320')
+assert binary[0x9EC6BB:0x9EC6BF] == bytes.fromhex('4c8934c8')
+for raw, name in re.findall(r'{(0x[0-9A-Fa-f]+),"([A-Za-z]+)"}', source):
+    vtable = int(raw, 16)
+    if not (0x18C0000 <= vtable < 0x18D0000):
+        continue
+    col = struct.unpack_from('<Q', binary, vtable - 8)[0] - pe.OPTIONAL_HEADER.ImageBase
+    assert struct.unpack_from('<I', binary, col + 4)[0] == 0x20
+    td = struct.unpack_from('<I', binary, col + 12)[0]
+    native_name = binary[td + 16:td + 128].partition(b'\0')[0]
+    assert native_name == f'.?AVhknp{name}Task@@'.encode(), native_name
+    assert struct.unpack_from('<Q', binary, vtable + 0x10)[0] == struct.unpack_from('<Q', binary, vtable - 0x20 + 0x30)[0]
+checked += 1
+# PostCollide is split at the stock calls. The listener bridge recreates both volatile arguments.
+for probe, callee in [('kContactDispatchCall','kContactDispatch'),('kPostCollideSignalCall','kPostCollideSignal'),
+                      ('kEventCommandCall','kEventCommand')]:
+    call(value(probe),value(callee))
+at = value('kEventListenerCall')
+assert binary[at:at+10] == bytes.fromhex('4c8bc5498bd741ff5118')
+assert binary[0xE75F98:0xE75F9B] == bytes.fromhex('4c8b09')   # r9 is the listener vtable
+assert binary[0xE76970:0xE76974] == bytes.fromhex('66394704') # event kind at event+4
+assert binary[0x12FE960:0x12FE964] == bytes.fromhex('0fb64203') # command kind at record+3
+for vt, member in ((0x17E7538, 0x6DBD30), (0x1AE33F8, 0x11B9CF0)):
+    assert struct.unpack_from('<Q', binary, vt+0x18)[0] - pe.OPTIONAL_HEADER.ImageBase == member
+    assert binary[member:member+11] == bytes.fromhex('488bc1488b491048ff6018')
+checked += 4
 # The Present command's rcx: lea rcx, [rip+disp] at 0x11A308E, the renderer.
 assert binary[0x11A308E:0x11A3091] == bytes.fromhex('488d0d')
 assert 0x11A3095 + struct.unpack_from('<i', binary, 0x11A3091)[0] == value('kRenderer')

@@ -102,7 +102,7 @@ friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5
 - `Gather` 的 `FriendVisit` 拿到的是游戏 TeamManager 队伍遍历（0x5E11D0，遍历自己的成员红黑树）交来的成员，上一行已直接读 `+0x2E8`：类判断用 `IsSoldierClassLive`（直接读 vtable）。乘骑提示 `PromptHook` 的 `object` 同样来自这个遍历、原版访问者刚对它做过 dynamic_cast：vtable 直接读，`ClassOfVtable` 判载具类，`IsJet`（要问 Readable 读 506 的标记）只对 506 vtable 问。
 - `ArmsOf`：原来一名士兵 4 次工作集调用（列表、武器批、WeaponSet、set 的 entry 各一次），改为 `edf::PrefetchReadableSpans` 两次（列表 + 两组 set；武器 + entry）。实测单次调用固定开销约 0.23 µs、每页约 0.2 µs。之后各处 Readable 的答案不变，只是都在缓存里找到。
 - `MoveTo`：路线预算把本帧排在「上一帧第一个被拒者」之前的调用者直接返回 pending（`GroundNavigate` 的轮转），而它两端的落地射线（`RouteStart`，1.6 ms/帧）此时根本不会被用到。先问 `GroundNavigateDeferred`（与调用共用同一个帧轮转函数、同样推进轮转状态），轮不到就直接 Stand，不再射线。
-
+- 地面 A* 按格坐标对已发现节点做固定容量哈希索引。每条可走边只检查同桶节点，同格多层仍按高度差严格小于 0.25 米、按插入顺序命中。搜下一段时重置索引，已铺好的路线继续走。桶链利用节点末尾已有的对齐空间，士兵和支援的每个搜索状态分别增加 1 KiB 和 2 KiB 桶头。节点优先级、开放边查询和每帧预算保持原有规则。
 
 ### 3.4 枪线（B1）
 
@@ -464,3 +464,85 @@ The 410's native aim-mode call at `0x6525E5` used mode 1, which overwrote receiv
 fields can be overwritten. Its signature/profile guard leaves the enhanced online door-gunner path off on failure.
 The native audit checks local/remote/Dummy/empty seat ownership, fire-start gating and both aim modes on a private
 EDF.dll mapping; no live game or installation is modified. Actual two-machine gameplay remains an E2E boundary.
+
+## 12. 并行决策与串行提交（NpcParallelThink，2026-11-27）
+
+开关 `NpcParallelThink`（int 0/1，默认 1）。0 = 所有询问都在游戏线程上、在 Drive 里当场做（对照用）。代码在 `src/npcai.cpp` 的 `mt` 命名空间（「The parallel Decide」两段），线程池在 `src/worker_pool.h/.cpp`。
+
+### 12.1 切分
+
+士兵 Think 在原版 AI pass（ai_update，列表 +0x488 的 slot 7）里一个接一个跑，夹在原版 nextThink 之间，所以整个 Think 不能挪出游戏线程：要写士兵块（摇杆、扳机、d82+i 换枪），GroundNavigate 的预算是全帧共享的，小队表、原生调用（上车、拾取、背包、Mobility）都只能在游戏线程做。stress:100（2026-11-24）的 17.8 ms/步里，ShotOk 占 12–13 ms，主要花在只读询问上。所以这次只把这些只读询问拿出去：
+
+- **Decide（池线程 + 游戏线程一起跑，`mt::Decide`）**：本帧第一次 Think、Gather 刚结束时 fork 一次（`mt::Fork`）。对每个最近被 Drive 过、对象没变的士兵，按它上次 Drive 用的输入（`mt::Guess`：锚点指针、scope、reach、Arms）和它现在站的位置，算出下面这些答案，每个答案连同它的输入原样存进 `mt::Intent`（按 fork 索引排）：
+  - 选目标（`PickRow`，用的是 WastedFirePeek）；
+  - 持有目标、新目标的 hold / wasted（WastedFirePeek）；
+  - ChooseArm 的「目标旁有友军」（FriendNearNow）；
+  - 主手 ShotOk 的视线射线（MapRay，只在缓存的射线到期时算）和挡枪胶囊（ShotClearNow）；
+  - Veto 副手的挡枪胶囊。
+- **Apply（游戏线程，原顺序）**：Think、Drive 照旧跑。Drive 里每次询问都走一个包装（`PickTarget`、`ShotClearOf`、`FriendNear`、`MapRayQ`、`WastedFireQ`、`HoldFireQ`）：输入和 Intent 里存的逐位相同（memcmp）就用存的答案，否则当场在游戏线程上问（记为一次 miss，也就是「同步重新 Decide」）。所有写入（扳机、看向、换枪、移动、导航预算、wastedfire 簿、上车、拾取）仍然只在 Apply 里，顺序和以前一样。
+
+**一定在游戏线程当场问的情况**（触发条件）：
+
+- 新士兵，或 Guess 还没设（第一次被 Drive）；
+- Arms、锚点、眼睛位置、scope、reach 变了，或原版 Think 把它的目标换了（`s.target` 的行变了）；
+- `WastedFireVersion` 变了：WastedFireHit 结算了命中、Reset 或 Prime，这时存的 pick 和 hold 都作废（记为 stale）；
+- 特殊目标：Peek 返回 −1，HoldFire 要走 PlanFor，或要给出弱点 aim；
+- 它自己的 Decide 出了故障（`done=false`）；
+- 超过 kStaleMs 没见到它，或对象换了（ref 的 ctrl 不同）；
+- fork 时它的锚点读不到；
+- Scripted 控制（不调用 Begin）；
+- 上车中（Think 在 Begin 之前就 return）。
+
+中途死亡、换阵营的士兵在 Think 一开头就 return，它的 Intent 不会被用到。
+
+### 12.2 不变量（Decide 不读可变全局）
+
+Decide 只读下面这些，fork 期间（`workers::Run` 返回之前）没有任何东西会写它们：
+
+- **`world`**：只有 Gather、IndexWorld、PlayerLane 写，Gather 每帧一次，在 fork 之前。
+- **`soldiers[slot]`、`guesses[slot]`**：只有该士兵自己的 Think / Drive 写，Run 期间不会有 Think 在跑。
+- **士兵和目标的内存**：AI pass 里没有东西移动它们，物理在 pass 之后才 step。
+- **wastedfire 备忘**：fork 前 `WastedFirePrime` 先算好本帧每个敌人的答案，Peek 只读不写。`FeedbackMs` 按 GameFrame 缓存。
+- **Havok 世界**：MapRay 只是查询，pass 里没有人 step 它。
+
+Decide 只写它自己那份 `intents[index]`。它不读时钟（GameMs / GameFrame / QPC）、不读 Cfg、不写日志、不用 rand / LCG（0x705570）、不调用原版对象的虚函数（MapRay 除外，见 12.4）。`tests/npc_parallel_guard.py` 沿调用图静态检查这些规则：它从 `mt::Decide` 出发，把 npcai.cpp 里调到的函数逐个跟进去，再把 npc_grid.h / npc_logic.h 整个文件、objref.h 的 `Is` 和 hash_index.h 的 `Find` 一起查，禁止出现 WastedFire / HoldFire / WastedFireHit / WatchTarget / WastedFirePrime / Cfg / Log / GameMs / GameFrame / GetTickCount64 / rand / Put / Look / ChooseArm / PlanFor / Readable、kPickWeapon / kTrigger、函数指针强转、vtable。另外还检查：Drive、ShotOk、Veto、ChooseArm、Backpack 不绕过包装直接问。
+
+池里每个线程都继承调用者的 MXCSR，一个任务只写自己索引的结果，所以无论池里有几个线程，每个答案都逐位相同。
+
+### 12.3 确定性对照（离线）
+
+`npc_core_check`（`tools/npc_core_check.cpp`）的设置：24 个士兵、6 个敌人、26 个友军，连跑 6 帧。每帧依次出现：
+
+- 开火和 hold；
+- 第 5 号士兵从第 2 帧起换手（Arms 变了）；
+- 走向 combat spot；
+- 第 3 帧 pass 进行到一半时 wastedfire 簿被写（版本 +1）；
+- 第 4 帧起 7 号士兵中途死亡、9 号换阵营；
+- 射线墙每隔一帧出现一次；
+- 目标每帧都在移动。
+
+分三种模式跑：NpcParallelThink=0、=1 且池 1 线程、=1 且池 9 线程（本机），外加 Debug=1 的影子模式。逐位比较：两种池大小的 Intent（46,080 字节）、每帧所有士兵块（0x2200 字节）、条目（目标、手、视线缓存）、Plan。结果全部相同。
+
+kept answers 275（两种池大小一样），当场问 22，stale 22，故障 0，影子模式 mismatch 0。故意把一个存的 pick 改错时，影子比较能抓到：`NPCMT MISMATCH`，并改用游戏线程的答案。
+
+Debug=1 时，每 32 个存的答案抽 1 个在游戏线程上重问一遍做比较，不一致就打 `NPCMT MISMATCH <what>`（最多 2 s 一行）。Decide 里出故障会打 `NPCMT fault`（最多 10 s 一行），进程里第一次故障会写 minidump `<exe>.<pid>.npcmt.dmp`。
+
+### 12.4 计时与剩余风险
+
+PerfProbe=1 且 Debug=1 时，每个 PerfTick 周期打一行 `PERF NPCMT on|off, N threads: …`，内容有：每步 gather、decide（fork 总时间）、stock think、apply（Think 的其余部分）、apply 里当场询问花的时间，以及 kept / 当场问 / 无 intent / stale / mismatch 的计数。`tools/perf_report.py read_npc_parallel` 读这一行，生成「Soldiers' Think」一节。
+
+**实机对照（2026-11-27，`perfrun.py stress:30 stress:100`，Debug=1 PerfProbe=1）**：`python tools/perfrun.py stress:30 --ini NpcParallelThink=0` 和 `--ini NpcParallelThink=1` 各跑一次，stress:100 同样各跑一次。基线是单线程 stress:30 约 11 ms/步、stress:100 约 17.8 ms/步（2026-11-24）。结果填进下表。
+
+| 场景 | NpcParallelThink | 每步 Think 合计 | decide | apply | kept / 当场问 |
+|---|---|---|---|---|---|
+| stress:30（2541 敌） | 0 | 3.65 ms | — | 2.17 ms | — |
+| stress:30（3332 敌） | 1 | 5.37 ms | 0.68 ms | 2.18 ms | 730,531 / 367,637 |
+| stress:100（3551 敌） | 0 | 13.85 ms | — | 7.30 ms | — |
+| stress:100（3707 敌） | 1 | 13.18 ms | 1.55 ms | 5.53 ms | 1,178,140 / 756,929 |
+
+每步 Think 合计 = gather + decide + stock think + apply（PERF NPCMT 的每步均值）。stress 场景每次刷出的敌人数不同，两档的敌人数已写在表里，同档前后不能逐毫秒对比。stress:100 的 apply 从 7.30 降到 5.53 ms，但 decide 多花 1.55 ms，合计只省约 0.7 ms/步（约 5%）。影子核对 0 次不一致，0 次 fault，没有崩溃。收益小的原因是命中率：约 39% 的询问在 apply 时输入已经变了（士兵或目标在 fork 之后移动），只能当场再问一次，decide 为这部分做的计算就白费了。要提高收益，需要让 fork 时的输入与 apply 时一致，比如在移动之后、或按本帧已定的位置 fork。
+
+**剩余风险**：
+
+- **MapRay 在池线程上调用 Havok**：调用链是 0x11A7EE0 → hknpWorld vtable slot 54 → 0xE4D160，读 TLS `gs:[0x58]`，由 0x97E1D0 按线程懒建上下文（docs/havok-mt-re.md §7.3、§8）。Havok 堆在这些线程上是否线程安全，目前只是推断，没有实证。实机要看的是 `NPCMT fault` 和崩溃。
+- **fork 的额外开销**：每个候选的锚点复制要多问一次 Readable；Prime 要把本帧所有敌人过一遍。

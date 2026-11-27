@@ -127,6 +127,78 @@ void RacingFirstUse() {
         delete rows;
     }
 }
+
+struct IncRow {
+    int held;
+    unsigned next=1;
+    unsigned char payload[64];
+    static inline int made=0;
+    static inline bool refuse=false;
+    static void* operator new(std::size_t size,const std::nothrow_t&) noexcept {
+        if(refuse)return nullptr;
+        ++made;
+        void* p=std::malloc(size);
+        if(p)std::memset(p,0xCD,size);
+        return p;
+    }
+    static void operator delete(void* p) noexcept {std::free(p);}
+    static void operator delete(void* p,const std::nothrow_t&) noexcept {operator delete(p);}
+};
+
+constexpr crew::IncrementalRows<IncRow,4> kIncConstantInit{};
+constexpr auto kFree=[](const IncRow& row){return row.held==0;};
+
+void GrowthAndReuse() {
+    crew::IncrementalRows<IncRow,2> incTable;
+    Check(kIncConstantInit.Size()==0 && !(incTable.begin()!=incTable.end()) && IncRow::made==0,"an unused table has no rows");
+    const auto before=incTable.begin();
+    auto* first=incTable.FindOrAppend("rows",kFree);
+    Check(first && incTable.Size()==1 && IncRow::made==1,"first use constructs one row");
+    Check(!(before!=incTable.end()),"a reader begun before allocation sees no rows");
+    Check(first->held==0 && first->next==1,"the new row is value-initialised");
+    for(unsigned char byte:first->payload)Check(byte==0,"new payload is zeroed");
+    auto at=incTable.begin();
+    first->held=42;
+    auto* second=incTable.FindOrAppend("rows",kFree);
+    Check(second && second!=first && incTable.Size()==2,"one additional occupied row grows the incTable");
+    Check(&*at==first && !(++at!=incTable.end()),"an older iterator stops at its original prefix");
+    second->held=7;
+    Check(!incTable.FindOrAppend("rows",kFree),"a full incTable refuses growth");
+    first->held=0;
+    Check(incTable.FindOrAppend("rows",kFree)==first && IncRow::made==2 && second->held==7,
+          "a released row is reused without moving or clearing other rows");
+    delete first;delete second;
+}
+
+void FailureKeepsExistingRows() {
+    crew::IncrementalRows<IncRow,8> incTable;
+    auto* first=incTable.Append("refused rows");
+    Check(first!=nullptr,"allocation succeeds before growth failure");
+    first->held=1;
+    const int memoryBefore=crew::memoryLines;
+    IncRow::refuse=true;
+    Check(!incTable.FindOrAppend("refused rows",kFree),"heap failure refuses just the new row");
+    IncRow::refuse=false;
+    Check(!incTable.Append("refused rows") && crew::memoryLines==memoryBefore+1,"growth failure logs once");
+    first->held=0;
+    Check(incTable.FindOrAppend("refused rows",kFree)==first && incTable.Size()==1,"existing rows can be reused after a failed grow");
+    delete first;
+}
+
+void ConcurrentPublish() {
+    crew::IncrementalRows<IncRow,16> incTable;
+    std::vector<IncRow*> seen(16,nullptr);
+    std::vector<std::thread> threads;
+    for(std::size_t i=0;i<seen.size();++i)threads.emplace_back([&,i]{seen[i]=incTable.Append("concurrent rows");});
+    for(auto& thread:threads)thread.join();
+    Check(incTable.Size()==seen.size(),"concurrent append publishes every row");
+    for(auto& row:incTable) {
+        int matches=0;
+        for(const IncRow* allocated:seen)if(allocated==&row)++matches;
+        Check(matches==1 && row.next==1,"each published slot has one fully initialised row");
+        delete &row;
+    }
+}
 }
 
 int main() {
@@ -135,6 +207,9 @@ int main() {
     FailureTurnsTheFeatureOff();
     LoopStraddlingFirstAllocate();
     RacingFirstUse();
+    GrowthAndReuse();
+    FailureKeepsExistingRows();
+    ConcurrentPublish();
     std::printf("lazy_rows_test: %d checks passed\n",checks);
     return 0;
 }

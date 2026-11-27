@@ -8,6 +8,10 @@
 
 #include "module.h"
 #include "plugin_log.h"
+#include "config.h"
+#include "native_body_math.h"
+#include "native_bone_update.h"
+#include "target_grid.h"
 #include "scene.h"
 #include "boarding.h"
 #include "plugin_body.h"
@@ -58,6 +62,7 @@
 #include "gravity.h"
 #include "gravity_net.h"
 #include "havok_mt.h"
+#include "object_update_mt.h"
 #include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
@@ -66,6 +71,7 @@
 #include "pvp.h"
 #include "havok_props.h"
 #include "aiworld_capacity.h"
+#include "step_objects_hook.h"
 #include "team_native.h"
 #include "room_pvp.h"
 #include "edf41bike.h"
@@ -127,10 +133,13 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kRenderFence,"render fence",kLoadOnly) \
     M(kFrameLatency,"frame latency",kLoadOnly) \
     M(kFrameRate,"frame rate",kLoadOnly) \
+    M(kNativePerformance,"native performance",kLoadOnly) \
+    M(kTargetGrid,"target grid",kLoadOnly) \
     M(kFsBudget,"fs budget",kLoadOnly) \
     M(kTeamCapacity,"team capacity",kLoadOnly) \
     M(kHavokProps,"havok props",kLoadOnly) \
     M(kAiWorldCapacity,"ai world capacity",kLoadOnly) \
+    M(kStepObjects,"step objects",kLoadOnly) \
     M(kModRoom,"mod room",kLoadOnly) \
     M(kSupportSoldiers,"support soldiers","its table is dropped by its own preload at each mission (support_soldier.cpp PreloadSupportSoldiers)") \
     M(kSupportFirepower,"support firepower",nullptr) \
@@ -173,6 +182,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kInfantryScope,"infantry scope",nullptr) \
     M(kPhysics,"physics",kLoadOnly) \
     M(kHavokMultithread,"havok multithread",kLoadOnly) \
+    M(kObjectUpdateMultithread,"object update multithread",kLoadOnly) \
     M(kGunnerRecoil,"gunner recoil",kLoadOnly) \
     M(kStoreRecoil,"store recoil",kLoadOnly) \
     M(kSidecar,"sidecar",nullptr) \
@@ -250,6 +260,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kRescue,"rescue","heli.cpp's sea rescue: the heli module's reset (ResetHelis) drops it with the player's track") \
     M(kGround,"ground",nullptr) \
     M(kNpcGunners,"npc gunners",nullptr) \
+    M(kNpcParallel,"npc parallel think",nullptr) \
     M(kQMarks,"qmarks",nullptr) \
     M(kAutoTurret,"auto turret",nullptr) \
     M(kNpcPost,"npc post",nullptr) \
@@ -326,10 +337,17 @@ constexpr InstallEntry kInstalls[]={
     // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
     // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     {IP::kBeforeAppInit,Id::kFrameRate,&Install<&InstallFrameRate>},
+    {IP::kBeforeAppInit,Id::kNativePerformance,[](const LoadContext&) noexcept {
+        if(!Cfg().enabled)return;
+        Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
+        Log("PHYSICS attachment and collision: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
+    }},
     {IP::kBeforeAppInit,Id::kFsBudget,&Install<&InstallFsLoaderBudget>},   // before the application's init starts CRI File System (fsbudget.cpp)
+    {IP::kBeforeAppInit,Id::kTargetGrid,&Install<&InstallTargetGrid>},   // the nearest-enemy pick on team grids (target_grid.cpp)
     {IP::kBeforeAppInit,Id::kTeamCapacity,&Install<&InstallTeamCapacity>}, // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     {IP::kBeforeAppInit,Id::kHavokProps,&Install<&InstallHavokProps>},     // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
     {IP::kBeforeAppInit,Id::kAiWorldCapacity,&Install<&InstallAiWorldCapacity>},   // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024
+    {IP::kBeforeAppInit,Id::kStepObjects,&Install<&InstallStepObjects>},   // before any scene: the System's object lists trusted a frame at a time (step_objects_hook.cpp, edf/step_objects.h)
     {IP::kPhysics,Id::kModRoom,[](const LoadContext&) noexcept {Log("ROOM isolation=%d",InstallModRoom());}},
     {IP::kPhysics,Id::kSupportSoldiers,[](const LoadContext&) noexcept {Log("SUPPORT soldiers=%d",InstallSupportSoldiers());}},
     {IP::kPhysics,Id::kSupportFirepower,[](const LoadContext&) noexcept {Log("SUPPORT firepower=%d",InstallSupportFirepower());}},   // support vehicles' and aircraft's damage by level
@@ -374,6 +392,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kInfantryScope,&Install<&InstallInfantryScope>},   // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     {IP::kFeatures,Id::kPhysics,&Install<&InstallPhysics>},        // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     {IP::kFeatures,Id::kHavokMultithread,&Install<&InstallHavokMultithread>},   // the physics step on the game's Havok worker threads (ini HavokMultithread; havok_mt.cpp)
+    {IP::kFeatures,Id::kObjectUpdateMultithread,&Install<&InstallObjectUpdateMultithread>},   // slot5 bones -> collision proxies on worker threads (ini ObjectUpdateMT; object_update_mt.cpp)
     {IP::kFeatures,Id::kGunnerRecoil,&Install<&InstallGunnerRecoil>},   // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     {IP::kFeatures,Id::kStoreRecoil,&Install<&InstallStoreRecoil>},     // the 403's store holders past its seats: the hull push, not a seat's jitter (storerecoil.cpp)
     {IP::kFeatures,Id::kSidecar,&Install<&InstallSidecar>},        // the sidecar motorcycle's gunner (sidecar.cpp)
@@ -465,6 +484,7 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kHeli,&Call<&ResetHelis>},
     {RP::kMissionState,Id::kGround,&Call<&ResetGround>},
     {RP::kMissionState,Id::kNpcGunners,&Call<&ResetNpcAi>},
+    {RP::kMissionState,Id::kNpcParallel,&Call<&ResetNpcParallel>},   // the soldiers' parallel Decide: guesses, intents, counts (npcai.cpp mt)
     {RP::kMissionState,Id::kQMarks,&Call<&ResetQMarks>},   // the Q marks, ours and the teammates' (qmark.cpp)
     {RP::kMissionState,Id::kAutoTurret,&Call<&AutoTurretMissionReset>},   // EDF6AutoTurret's auto-aim back to its ini's (off), its lock let go (turretaim.cpp)
     {RP::kMissionState,Id::kNpcPost,&Call<&ResetNpcPosts>},

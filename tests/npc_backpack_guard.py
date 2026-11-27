@@ -103,12 +103,16 @@ def main() -> int:
     if not before(backpack, 'if(NpcPackBusy(h) || frame<s.packHoldUntil) {', 'h[kTrigger]=0;h[kPickWeapon]=h[kPickWeapon+1]=h[kPickWeapon+2]=0;', 'return;'):
         fail('Backpack: the main trigger and the picks not off while a use goes on')
     checks += 1
-    if not before(backpack, 'if(!NpcPackCanUse(h,slots[i].slot))continue;', 'npcpack::Fits(pack,target,&pitch)', 'npcpack::ArcClear(', 'Look(h,dir);',
+    if not before(backpack, 'if(!NpcPackCanUse(h,slots[i].slot))continue;', 'npcpack::Fits(pack,target,&pitch,', 'PackArcClearOf(', 'Look(h,dir);',
                   'npcpack::AimOn(', 'NpcPackUse(h,slots[i].slot)'):
         fail('Backpack: the look before native readiness / its whole arc checked, or the use before its look')
     checks += 1
-    if 'npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends)' not in backpack:
+    if 'ShotClearOf(h,eye,t->aim,0.0f)' not in backpack:
         fail('Backpack: a direct weapon\'s line not tested for friends')
+    arc = body(npcai, 'bool PackArcClearOf(const void* self,')
+    checks += 1
+    if not before(arc, 'npcpack::ArcClear(', 'npc::grid::ArcChordsClear(', 'npc::grid::BlastClear(', '},blocked)'):
+        fail('Backpack: the arc needs chord and landing friend checks as well as terrain rays')
     arms = body(npcai, 'Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept')
     checks += 1
     if 'NpcPackIndex(h,i)' not in arms:

@@ -8,9 +8,6 @@
 #include <vector>
 #include "../src/config.h"
 
-// live_set.cpp: nothing handed over by the game here, so every ask goes to Readable as before.
-namespace liveset { bool Has(const void*) noexcept { return false; } }
-
 namespace crew {
 unsigned char* image=nullptr;
 Config config{};
@@ -29,7 +26,16 @@ bool IsSoldierClass(const void*) noexcept { return false; }
 // The lock points and the ray the plan uses, as each case sets them.
 struct Lock { const void* object; float at[3]; };
 std::vector<Lock> locks;
-bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { for(const auto& l:locks)visit(ctx,l.object,l.at);return true; }
+SceneStep fixtureStep{};
+SceneStep SceneStepNow() noexcept { return fixtureStep; }
+unsigned lockWalks=0;
+bool lockRegistryReadable=true;
+bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept {
+    ++lockWalks;
+    if(!lockRegistryReadable)return false;
+    for(const auto& l:locks)visit(ctx,l.object,l.at);
+    return true;
+}
 float rayHit[3]{};std::uint32_t rayBody=0;bool rayOn=false;
 float ObjectRay(const float* a,const float*,float* hit,std::uint32_t* body) noexcept {
     if(!rayOn)return -1.0f;
@@ -79,6 +85,63 @@ void MakeRagdoll(unsigned char* o,Part* parts,Body* bodies,int n,std::uint32_t f
 }
 
 alignas(16) unsigned char ship[0x2000],boat[0x2000],anchor[0x2000],gen[0x2000],timeShip[0x2000],part[0x2000],monster[0x2000],soldier[0x400],other[0x2000];
+
+void LockPointReuse() {
+    TargetPointCache cache;
+    fixtureStep={ship,1,1};
+    lockWalks=0;
+    locks={{ship,{0,90,0}},{gen,{0,10,0}},{ship,{0,80,0}},{gen,{0,20,0}},
+           {gen,{0,30,0}},{gen,{0,40,0}},{gen,{0,50,0}}};
+    const auto first=cache.Read(ship);
+    locks[0].at[1]=91;
+    Check(first.n==2 && cache.Read(ship).p[0][1]==90 && lockWalks==1,
+          "the first request indexes the registry once and later shooters share the sample");
+    const auto second=cache.Read(gen);
+    Check(second.n==4 && second.p[0][1]==10 && second.p[3][1]==40 && lockWalks==1,
+          "a second target reads the same index: registry order and the four-point cap, no new scan");
+    Check(!cache.Read(anchor).n && lockWalks==2,"an index miss checks the current registry");
+    locks.push_back({anchor,{0,5,0}});
+    Check(cache.Read(anchor).p[0][1]==5 && lockWalks==3,"a target registered mid-step is visible on a miss");
+    ++fixtureStep.count;
+    Check(cache.Read(ship).p[0][1]==91 && lockWalks==4,"a new step re-indexes the registry");
+    ++fixtureStep.mission;
+    lockRegistryReadable=false;
+    Check(cache.Read(ship).n==0 && lockWalks==6,"a new mission drops the old sample even when the registry is down");
+    lockRegistryReadable=true;
+    Check(cache.Read(ship).p[0][1]==91 && lockWalks==7,"an unavailable registry does not publish a missing sample");
+    fixtureStep={};
+    locks[0].at[1]=92;
+    Check(cache.Read(ship).p[0][1]==92 && lockWalks==8,"without a scene step read the live registry");
+    fixtureStep={ship,2,2};
+    Check(cache.Read(ship).p[0][1]==92 && lockWalks==9,"an unavailable step invalidates an earlier sample with the same stamp");
+    fixtureStep={};
+    locks.clear();
+}
+
+void BattleLockPoints() {
+    constexpr int nodes=2603,requests=64,targets=8;
+    unsigned char objects[nodes]{};
+    locks.reserve(nodes);
+    for(int i=0;i<nodes;++i)locks.push_back({&objects[i],{static_cast<float>(i),0,0}});
+    for(int count:{1,targets}) {
+        TargetPointCache cache;
+        fixtureStep={objects,static_cast<std::uint32_t>(count),1};
+        Points expected[requests];
+        lockWalks=0;
+        for(int i=0;i<requests;++i)expected[i]=ScanPoints(&objects[i%count]);
+        const unsigned before=lockWalks*nodes;
+        lockWalks=0;
+        bool equal=true;
+        for(int i=0;i<requests;++i) {
+            const Points got=cache.Read(&objects[i%count]);
+            equal=equal && got.n==expected[i].n && std::memcmp(got.p,expected[i].p,sizeof(got.p))==0;
+        }
+        Check(equal && lockWalks==1u,"a busy step matches every independent registry walk");
+        std::printf("lock-point nodes for %d requests, %d targets: %u -> %u\n",requests,count,before,lockWalks*nodes);
+    }
+    fixtureStep={};
+    locks.clear();
+}
 
 void Classes() {
     const float at[3]={0,0,0};
@@ -164,6 +227,21 @@ void Plans() {
     nowMs+=1000;ship[0xD84]=1;ship[0xD85]=1;Put<std::int32_t>(ship,0xD90,120);
     float aim[3]{};
     Check(!HoldFire(soldier,ship,eye,0.0f,0.0f,aim) && aim[1]==95.0f,"open, the core in line: fire at its lock point");
+    fixtureStep={ship,1,1};
+    const unsigned walks=lockWalks;
+    const Watched observed{};
+    const Plan core=Assess(soldier,ship,eye,0.0f,0.0f,observed);
+    rayBody=100;
+    const Plan hull=Assess(other,ship,eye,0.0f,0.0f,observed);
+    Check(core.aimSet && core.aim[1]==95.0f && !hull.aimSet && lockWalks==walks+1,
+          "independent shooter plans reuse lock points and still test their own ray hits");
+    ship[edf::kDead]=1;
+    rayBody=101;
+    const Plan dead=Assess(other,ship,eye,0.0f,0.0f,observed);
+    Check(dead.aim[1]==pos[1] && lockWalks==walks+1,
+          "a dead target drops previous lock points and follows the existing root-aim rule");
+    ship[edf::kDead]=0;
+    fixtureStep={};
     // The hull in line whichever lock point: held.
     nowMs+=200;
     struct Seq { static const void* __fastcall Body(std::uint32_t) { return ship; } };
@@ -299,6 +377,8 @@ void BattleTables() {
 int main(int argc,char** argv) {
     FeedbackClock();   // no EDF.dll needed
     BattleTables();
+    LockPointReuse();
+    BattleLockPoints();
     if(argc<2 || !argv[1][0] || GetFileAttributesA(argv[1])==INVALID_FILE_ATTRIBUTES) {
         std::puts("SKIP: pass the supported EDF.dll path (private mapping, no DllMain)");return failures ? 1 : 77;
     }

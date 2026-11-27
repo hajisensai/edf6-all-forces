@@ -27,6 +27,7 @@ namespace perfprobe {   // the measurement probes (src/perf_probe.cpp): no frame
 Frames TakeFrames() noexcept { return {}; }
 void Report(unsigned) noexcept {}
 }  // namespace perfprobe
+void NpcParallelReport(unsigned) noexcept {}   // npcai.cpp's PERF NPCMT line (not linked here)
 void ResetMissionCrew() noexcept {}
 bool InstallMissionCrewHooks(const unsigned*,std::size_t) noexcept { return true; }
 int yieldAsks=0;   // PromptHook got past its object gate to the seats (the prompt cases)

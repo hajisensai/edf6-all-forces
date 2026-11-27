@@ -6505,7 +6505,7 @@ def edf41_mother_parts_default_migrates() -> None:
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
                                                          installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108,
                                                          installer.DEFAULTS_MARK_1110, installer.DEFAULTS_MARK_1124,
-                                                         installer.DEFAULTS_MARK_1126]
+                                                         installer.DEFAULTS_MARK_1126, installer.DEFAULTS_MARK_1127]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -6550,14 +6550,22 @@ def max_frame_latency_default_back_to_0() -> None:
 
 
 @test
-def frame_rate_cap_default_off() -> None:
-    """FrameRateCap ships 0, the game's own 59.94 Hz (docs/unlimited-fps-re.md §5): the shipped ini and the plugin's
-    default agree, and no defaults step moves it (1, the display's refresh rate, waits for the maintainer's checklist
-    and the other objects' interpolation; a later PR changes the default)."""
+def frame_rate_cap_default_170() -> None:
+    """FrameRateCap ships 170 (the maintainer, 2026-11-27: 「默认开启170帧数上限」; docs/unlimited-fps-re.md §5): the
+    shipped ini and the plugin's default agree, and the 11-27 defaults step moves an old ini's 0 to 170 once (a value the
+    player chose stays, a later install changes nothing)."""
     import installer
     ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
-    assert re.search(r'^FrameRateCap=0$', ini, re.M) and srcscan.has(crew, 'int frameRateCap=0;')
-    assert all('FrameRateCap' not in flips.get(installer.SECTION, {}) for _, flips in installer.DEFAULTS_STEPS)
+    assert re.search(r'^FrameRateCap=170$', ini, re.M) and srcscan.has(crew, 'int frameRateCap=170;')
+    assert installer.NEW_DEFAULTS_1127[installer.SECTION] == {'FrameRateCap': ('0', '170')}
+    steps = [m for m, flips in installer.DEFAULTS_STEPS if 'FrameRateCap' in flips.get(installer.SECTION, {})]
+    assert steps == [installer.DEFAULTS_MARK_1127], steps
+    text, flipped = installer.apply_new_defaults('[VehicleCrew]\nEnabled=1\nFrameRateCap=0\n')
+    assert 'FrameRateCap' in flipped and 'FrameRateCap=170' in text and installer.DEFAULTS_MARK_1127 in text
+    text2, flipped2 = installer.apply_new_defaults(text.replace('FrameRateCap=170', 'FrameRateCap=0'))
+    assert 'FrameRateCap' not in flipped2 and 'FrameRateCap=0' in text2, 'the player turned it back to 0 after the step'
+    kept, _ = installer.apply_new_defaults('[VehicleCrew]\nFrameRateCap=144\n')
+    assert 'FrameRateCap=144' in kept
 
 @test
 def high_cam_default_migrates() -> None:
@@ -7595,7 +7603,7 @@ def npc_ai_asks_less() -> None:
     visit = body(code, 'void __fastcall FriendVisit(void* self,void* object) noexcept {')
     assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
     assert 'IsAnyPlayer(o)' not in visit and 'KnownVehicle(o)' not in visit and 'KnownVehicleVtable(vtable)' in visit,         "FriendVisit: a player is a soldier class; a vehicle's class off the vtable read"
-    assert srcscan.has(code, 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }')
+    assert srcscan.has(code, 'bool IsSoldierClass(const void* human) noexcept { return stepobj::Reads(human,8) && IsSoldierClassLive(human); }')
     # cpu-2: the asks moved to AskArms (once a soldier, again when SameArms sees its arms changed)
     arms = body(code, 'bool AskArms(ArmsSeen& seen,const unsigned char* const* list,std::uint64_t count,const unsigned char* sets,\n             std::uint64_t setCount) noexcept {')
     first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
@@ -7864,7 +7872,8 @@ def air_chase_wired() -> None:
     grid = src('src/npc_grid.h')
     pick = grid.split('int PickTarget(const Grid& g,', 1)[1].split('\n}\n', 1)[0]
     assert 'return npc::PickTarget(n,aimOf,isCurrent,usable,eye,anchor,scope,reach);' in pick and 'g.Odd()' in pick
-    assert 'TargetScore(Dist(eye,aim),reach,isCurrent(i))' in pick and 'if(Horiz(anchor,aim)>scope)return;' in pick
+    assert 'TargetScore(std::sqrt(squared),reach,current)' in pick and 'if(Horiz(anchor,aim)>scope)return;' in pick
+    assert 'squared>distanceLimit[current]' in pick and 'TargetDistanceLimitSquared(bestScore,reach,kKeepTarget)' in pick
     assert '(score==bestScore && i<best)' in pick, 'a tie: the lower index, as the scan'
     assert srcscan.has(npcai, 'w.enemyGrid.Build(w.enemies,') and srcscan.has(npcai, 'w.friendGrid.Build(w.friends,'), 'the grids built with the lists in Gather'
     assert 'EXCLUDE_FROM_ALL tools/npc_grid_check.cpp' in src('CMakeLists.txt') and \
@@ -7872,9 +7881,9 @@ def air_chase_wired() -> None:
     # Fire the game will not let hurt its target (docs/feedback-2026-10-12-ai-targeting.md): every AI asks WastedFire, the
     # damage hook feeds it whatever the statistics' switch, and the offline check runs in CTest.
     assert srcscan.has(npcai, '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }')
-    assert srcscan.has(npcai, 'HoldFire(h,t->object,eye,known ? a.speed[w]') and srcscan.has(npcai, 'bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }')
+    assert srcscan.has(npcai, 'HoldFireQ(h,t->object,eye,known ? a.speed[w]') and srcscan.has(npcai, 'bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }')
     assert srcscan.has(npcai, 'if(target && HoldFire(v,target))target=nullptr;') and srcscan.has(npcai, 'if(p.best && HoldFire(v,p.best))')
-    assert srcscan.has(npcai, 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]') and srcscan.has(npcai, 'p.fire=!hold && ShotOk(')
+    assert srcscan.has(npcai, 'HoldFireQ(h,t.e->object,eye,armed ? a.speed[p.arm]') and srcscan.has(npcai, 'p.fire=!hold && ShotOk(')
     # A cached plan is the same weapon's (its round's speed and gravity are in the plans' key) and the same muzzle's.
     wasted = src('src/wastedfire.cpp')
     assert 'speed==o.speed && gravity==o.gravity' in wasted and srcscan.has(wasted, 'const PlanKey key{shooter,target,speed,gravity};')

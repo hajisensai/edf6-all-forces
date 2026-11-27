@@ -4659,13 +4659,6 @@
     "tests/test_level_list.py"
    ]
   },
-  "live_set": {
-   "labels": [
-    "plugin-core",
-    "plugin-native"
-   ],
-   "scripts": []
-  },
   "loadout_generate": {
    "labels": [
     "autoturret-tools",
@@ -5220,6 +5213,20 @@
     "tests/test_native_bc7.py"
    ]
   },
+  "native_body_math": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "native_bone_update": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "native_cmpl": {
    "labels": [
     "native-codec",
@@ -5515,6 +5522,18 @@
     "tests/npc_mobility_native_audit.py"
    ]
   },
+  "npc_parallel_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_parallel_guard.py"
+   ]
+  },
   "npc_post_test": {
    "labels": [
     "plugin-air",
@@ -5560,6 +5579,23 @@
     "plugin-ports"
    ],
    "scripts": []
+  },
+  "object_update_mt": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "object_update_mt_sigs": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/object_update_mt_sig_audit.py"
+   ]
   },
   "objref": {
    "labels": [
@@ -7457,7 +7493,7 @@
   },
   "srcscan": {
    "labels": [
-    "plugin-core",
+    "plugin-native",
     "pylib-model",
     "test-data"
    ],
@@ -7496,6 +7532,24 @@
     "plugin-native"
    ],
    "scripts": []
+  },
+  "step_objects": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "step_objects_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/step_objects_guard.py"
+   ]
   },
   "stock_store_loadouts": {
    "labels": [
@@ -7919,6 +7973,14 @@
    "scripts": [
     "tests/sync_load_probe_native_audit.py"
    ]
+  },
+  "target_grid": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
   },
   "team_native": {
    "labels": [
@@ -8770,6 +8832,13 @@
   "wing_turn": {
    "labels": [
     "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "worker_pool": {
+   "labels": [
+    "plugin-core",
     "plugin-native"
    ],
    "scripts": []
@@ -13810,7 +13879,7 @@
     "sys"
    ]
   },
-  "frame_rate_cap_default_off": {
+  "frame_rate_cap_default_170": {
    "labels": [
     "autoturret-tools",
     "cockpit",
@@ -13838,7 +13907,7 @@
    ],
    "uses": [
     "ROOT",
-    "frame_rate_cap_default_off",
+    "frame_rate_cap_default_170",
     "os",
     "re",
     "src",

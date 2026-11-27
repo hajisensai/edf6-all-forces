@@ -57,7 +57,7 @@ LEGS (more than one positional argument): one launch, the scenarios one after th
   --key), its own warm-up and difficulty. --key, --ab and --cycle are refused with legs (key= on the leg instead).
   Out: <out>/<leg>/ each (run.json with the leg's windows, cpu.txt, stacks.txt, gpu.csv, its part of the plugin log,
   report.md as a single run's), <out>/summary.md a row a leg; the whole launch's logs in <out>.
-  --leg-timeout S   seconds from a leg's `next` until it must be in its mission (default 900: stress:100 leaves at a
+  --leg-timeout S   seconds from a leg's `next` until its mission and any enemy wave are ready (default 900: stress:100 leaves at a
                     few frames a second)
   --next-reboot     back in through the script's ReBoot (SystemReset) instead of HQMain
 
@@ -339,6 +339,51 @@ def run_log(log: str, mark: tuple[int, int]) -> bytes | None:
         return b'(perfrun: the log turned over more than once; its start is lost)\r\n' + f.read() + now
 
 
+WAVE_OBJECTS = re.compile(rb'(?m)^\[[^\]\r\n]+\] PERF OBJECTS enemies (-?\d+), player team ')
+
+
+def needs_population(plan, opts: dict) -> bool:
+    """Only scenarios which expect waves and have object telemetry can use the population milestone."""
+    debug = '1'
+    for setting in opts['ini']:
+        key, _, value = setting.partition('=')
+        if key.strip().lower() == 'debug':
+            debug = value.strip().lower()
+    return bool(plan and plan.waves.enabled and plan.waves.per_wave > 0 and debug not in ('0', 'false', 'off', 'no'))
+
+
+def wait_population(game: str, log: str, timeout: float, gate=None) -> str | None:
+    """The mission entry can precede actor creation by tens of seconds. Use only object counts appended after it."""
+    import drive
+    mark = log_mark(log)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if gate is not None and gate.state != drive.Gate.OPEN:
+            return 'the run ended before the enemy wave became active'
+        if not drive.game_pids():
+            return 'the game exited before the enemy wave became active'
+        try:
+            current = run_log(log, mark) or b''
+        except OSError:
+            current = b''   # the logger may be rotating the file
+        if any(int(row[1]) > 0 for row in WAVE_OBJECTS.finditer(current)):
+            return None
+        time.sleep(0.5)
+    return 'no live enemy wave before the readiness deadline (--leg-timeout)'
+
+
+def check_wave_window(plan, opts: dict, marks: dict, log: str) -> None:
+    """A successful spawn before warm-up is insufficient when the battle is empty during the measurement."""
+    window = marks.get('windows', {}).get('cpu')
+    if window and not marks.get('error') and needs_population(plan, opts):
+        import perf_report
+        objects = perf_report.read_objects(log, tuple(window))
+        if not objects:
+            marks['error'] = 'no object counts in the battle measurement window'
+        elif objects['enemies'][1] <= 0:
+            marks['error'] = 'no live enemies in the battle measurement window'
+
+
 def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, variant: str = '') -> int:
     """One launch of the game: the scenario, sampled, its run.json and logs in `out`; everything put back. Non-zero
     when nothing was sampled, the run failed, or the range's files could not be put back (the game still running)."""
@@ -356,6 +401,18 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
     clog = coop_log(game)
     clog_at = log_mark(clog)
     cycle = opts.get('cycle')
+    wait_for_wave = not cycle and needs_population(plan, opts)
+    gate = drive.Gate()
+
+    def during() -> None:
+        if wait_for_wave:
+            why = wait_population(game, log, opts['leg_timeout'], gate)
+            if why:
+                marks['error'] = why
+                return
+            marks['population_ready'] = time.time()
+        sample(out, warm, opts['cpu'], opts['stacks'], opts['interval'], marks, opts.get('presentmon'))
+
     loaded = loaded_plugins(game, dll)   # before the launch: the files the game is about to load
     kept = keep_symbols(dll, out)
     skipped = gen.write_scenario(game, plan) if plan else []
@@ -365,13 +422,14 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         stay = opts.get('cycle_stay', 20.0)
         # a load run: each entry its stay and a load (two minutes at most, a big map cold), then CYCLE done
         longest = int(cycle * (stay + 120) + 60) if cycle else int(warm + opts['cpu'] + opts['stacks'] + 90)
+        if wait_for_wave:
+            longest += math.ceil(opts['leg_timeout'])
         # Debug=1 is the shipped default (EDF6VehicleCrew.ini): the PERF rows, and what players run; PerfProbe=1 the
         # frame split, the render thread and the channels (src/perf_probe.h)
         rc = drive.run(game, 'range' if plan else scenario, opts['difficulty'], longest,
                        os.path.join(out, 'autopilot.log'), place=place, ini=('Debug=1', 'PerfProbe=1', *opts['ini']),
                        shots=os.path.join(out, 'shots') if opts['shots'] else None, keys=tuple(opts.get('keys', ())),
-                       during=None if cycle else lambda: sample(out, warm, opts['cpu'], opts['stacks'],
-                                                                opts['interval'], marks, opts.get('presentmon')),
+                       during=None if cycle else during, gate=gate,
                        quit_wait=600,   # stress:100 at 8 fps was still leaving the mission after drive's 90 s
                        cycle=(cycle, stay, False) if cycle else None)
     finally:
@@ -399,6 +457,8 @@ def one_run(game: str, scenario: str, out: str, dll: str | None, opts: dict, var
         with open(os.path.join(out, 'coop.log'), 'wb') as f:
             f.write(data)
     marks = dict(marks)   # a snapshot: the sampling thread may still run when the game ended first
+    if not cycle:
+        check_wave_window(plan, opts, marks, os.path.join(out, 'vehiclecrew.log'))
     run = dict(scenario=scenario, variant=variant, dll=kept or dll, built=dll, **loaded,
                warm=warm, edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped, cycle=cycle, **marks)
     with open(os.path.join(out, 'run.json'), 'w', encoding='utf-8') as f:
@@ -551,6 +611,7 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
     i = 0
     try:
         for i, leg in enumerate(legs):
+            began = time.monotonic()
             marks = legmarks[i]
             mission = leg_mission(leg['scenario'])
             seen = 0   # the first: every row of the launch (its `running` went with the mission)
@@ -573,6 +634,12 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
             keys = threading.Thread(target=hold_leg_keys, args=(game, leg['keys'], marks['entered'], marks, gate),
                                     daemon=True)
             keys.start()
+            if needs_population(plans[i], opts):
+                why = wait_population(game, plugin_log(game), opts['leg_timeout'] - (time.monotonic() - began), gate)
+                if why:
+                    marks['error'] = why
+                    return
+                marks['population_ready'] = time.time()
             _sample(dirs[i], warms[i], opts['cpu'], opts['stacks'], opts['interval'], marks, opts.get('presentmon'))
             keys.join()
             if marks.get('error') or 'windows' not in marks:
@@ -654,15 +721,16 @@ def multi_run(game: str, legs: list[dict], out: str, dll: str | None, opts: dict
             with open(os.path.join(d, name), 'wb') as f:
                 f.write(piece)
     for i, (leg, d, marks) in enumerate(zip(legs, dirs, legmarks)):
+        check_wave_window(plans[i], opts, marks, os.path.join(d, 'vehiclecrew.log'))
         run = dict(scenario=leg['scenario'], variant='', leg=i + 1, legs=len(legs), dll=kept or dll, built=dll,
                    **loaded, warm=warms[i], difficulty=difficulties[i], keys=leg['keys'],
                    edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped[i], cycle=None, **marks)
         with open(os.path.join(d, 'run.json'), 'w', encoding='utf-8') as f:
             json.dump(run, f, indent=1)
-    failed = [(names[i], m.get('error') or 'not reached') for i, m in enumerate(legmarks) if 'windows' not in m
-              or m.get('error')]
-    for name, why in failed:
-        print(f'leg {name} not sampled: {why}')
+    failed = [(names[i], m) for i, m in enumerate(legmarks) if 'windows' not in m or m.get('error')]
+    for name, marks in failed:
+        state = 'invalid sample' if 'windows' in marks else 'not sampled'
+        print(f'leg {name} {state}: {marks.get("error") or "not reached"}')
     return rc or (1 if failed else 0)
 
 

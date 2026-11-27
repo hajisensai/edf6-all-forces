@@ -9,6 +9,7 @@
 #include "scopereticle.h"
 #include "memory.h"
 #include "lazy_rows.h"
+#include "object_update_mt.h"
 #include <cmath>
 #include <cstring>
 
@@ -48,7 +49,7 @@ struct Transaction {
     bool used=false,changed=false,pending=false;PoseKind kind=PoseKind::deiroi;void* stageRag=nullptr;
     Write write[kMostWrites]{};Body body[kMostBodies]{};Owner retained[kMostParts+1]{};
 };
-LazyRows<Transaction,kTransactions> transactions;
+IncrementalRows<Transaction,kTransactions> transactions;
 struct Part {unsigned char* object=nullptr;void* control=nullptr;void* model=nullptr;void* rag=nullptr;void* collision=nullptr;};
 struct DeiroiData {unsigned char* points=nullptr;unsigned char* previous=nullptr;std::size_t count=0,oldCount=0,parts=0;Part part[kMostParts]{};};
 
@@ -87,8 +88,10 @@ Transaction* Existing(const NativeLease& l) noexcept {
     for(auto& t:transactions)if(t.used && t.object==l.object && t.control==l.control)return &t;return nullptr;
 }
 Transaction* Start(const NativeLease& l) noexcept {
-    if(!transactions.Allocate("native pose transactions"))return nullptr;
-    for(auto& t:transactions)if(!t.used){t.writes=t.bodies=0;t.owners=1;t.owner=0;t.stageRag=nullptr;t.retained[0]={l.object,l.control,false,true};t.used=true;t.changed=t.pending=false;t.object=l.object;t.control=l.control;return &t;}return nullptr;
+    auto* t=transactions.FindOrAppend("native pose transactions",[](const Transaction& row){return !row.used;});
+    if(!t)return nullptr;
+    t->writes=t->bodies=0;t->owners=1;t->owner=0;t->stageRag=nullptr;t->retained[0]={l.object,l.control,false,true};
+    t->used=true;t->changed=t->pending=false;t->object=l.object;t->control=l.control;return t;
 }
 bool Clear(Transaction& t) noexcept {
     for(unsigned i=0;i<t.owners;++i)if(t.retained[i].retained && !Readable(t.retained[i].control,16,true)){t.pending=true;return false;}
@@ -405,6 +408,7 @@ bool Rag(Transaction& t,unsigned char* rag) noexcept {
     t.stageRag=nullptr;return true;
 }
 bool FlushRag(Transaction& t,unsigned char* rag) noexcept {
+    FlushObjectUpdates();   // 直接读写代理前，先把 slot5 登记的全部提交（object_update_mt.cpp）
     const auto n=At<std::uint64_t>(rag,0x88);auto* records=At<unsigned char*>(rag,0x78);
     for(std::size_t i=0;i<n;++i) {
         auto* r=records+i*0xC0;const auto mode=At<unsigned>(r,0x9C);if(!r[0xA4] || (mode!=1 && mode!=2))continue;

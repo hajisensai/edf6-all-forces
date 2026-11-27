@@ -77,6 +77,7 @@
 #include "turretcam_api.h"
 #include "view.h"
 #include "vhud.h"
+#include "render_snapshot.h"
 #include "firstperson.h"
 #include "edf/weapon.h"
 #include "fp_view.h"
@@ -353,39 +354,15 @@ State states[kLocalViews]{};
 struct LocalSeen { unsigned char* human; ULONGLONG at; };
 LocalSeen localSeen[kLocalViews]{};
 constexpr ULONGLONG kLocalSeenMs=1000;
-// What the camera step and the camera submit leave for the draws (docs/fp-render-re.md §17.5), each published whole
-// under a sequence count (odd while it is written: SeqPublish) and read as a whole copy (SeqTake). The draws run on a
-// render thread, up to three update steps behind the game thread, so nothing on their path reads a State field.
-// The camera's submitted views (CaptureRenderCamera), the last kViewHistory of them: a draw is made with the view of the
-// update it renders, which may be a few submits older than the newest (§17.2: 0-3 steps), and matching only the newest
-// left a lagging draw of a turning camera unowned (L1 error past 0.1: the stock body and gun for that draw).
+// Draws may lag the camera step by several submits. Publish values for the render thread
+// to read independently of the camera's live State, and retain its eight most recent views.
 constexpr int kViewHistory=8;
-// ok: submitted in first person; sent: submitted (any view), by the local player `who` the camera followed then.
 struct ViewHistory { M4 view[kViewHistory]; bool ok[kViewHistory]; bool sent[kViewHistory]; const void* who[kViewHistory]; int next; };
-// The draws' copies, beside the states (a State is reset by assigning it whole: never under a reader's feet). last /
-// lastViews: the render thread's own (the last whole copy, while a writer keeps the count odd).
-struct Published { DrawSnap snap; volatile LONG seq; DrawSnap last; bool lastOk;
-                   ViewHistory views; volatile LONG viewSeq; ViewHistory lastViews; bool lastViewsOk; };
+struct Published {
+    RenderSnapshot<DrawSnap> snap;
+    RenderSnapshot<ViewHistory> views;
+};
 Published published[kLocalViews]{};
-template<class T,class Write> void SeqPublish(volatile LONG* seq,T* value,Write write) noexcept {
-    InterlockedIncrement(seq);   // odd: being written (a full barrier)
-    write(*value);
-    InterlockedIncrement(seq);   // even: whole
-}
-// A copy torn by a writer meanwhile is taken again; while a writer keeps it busy the last whole copy stands. False: none.
-// taken (optional): the even count the copy was whole under; left as it was when the copy is the last whole one instead.
-template<class T> bool SeqTake(volatile LONG* seq,const T* value,T* out,T* last,bool* lastOk,LONG* taken=nullptr) noexcept {
-    for(int tries=0;tries<64;++tries) {
-        const LONG before=InterlockedCompareExchange(seq,0,0);
-        if(before&1){YieldProcessor();continue;}
-        std::memcpy(out,value,sizeof(*out));
-        MemoryBarrier();
-        if(InterlockedCompareExchange(seq,0,0)==before){*last=*out;*lastOk=true;if(taken)*taken=before;return true;}
-    }
-    if(!*lastOk)return false;
-    *out=*last;
-    return true;
-}
 thread_local const DrawSnap* drawSnap=nullptr;   // the draw in progress's copy (render thread)
 const DrawSnap& Snap() noexcept { static const DrawSnap none{};return drawSnap ? *drawSnap : none; }
 struct SnapScope {
@@ -406,24 +383,18 @@ int SnapHand(const DrawSnap& d,const void* model) noexcept {
 }
 void Publish() noexcept;
 void ResetToggleGestures() noexcept;
-// Each thread's whole copy of each published snapshot, kept while the count stays at the even value it was whole under:
-// the snapshot is written only under SeqPublish and its count only grows, so an unchanged even count is unchanged
-// content, and the many draws of one camera step (every model of the frame asks) share one copy instead of each
-// copying it twice. users: the draws on this thread still reading it (DrawSnapScope), never rewritten under them.
-struct SnapCache { LONG seq; bool valid; int users; DrawSnap snap; };
+// Keep one committed copy per reader and revision. Nested draws can hold the
+// outer draw's copy even after a new camera step publishes.
+struct SnapCache { std::uint64_t revision; int users; DrawSnap snap; };
 thread_local SnapCache snapCache[kLocalViews]{};
-// The published snapshot of `index` as SeqTake would copy it: the thread's cached copy, or `scratch` when a draw on
-// this thread still reads the cached one (a nested draw). Null: none yet.
 const DrawSnap* SnapshotOf(int index,DrawSnap* scratch) noexcept {
     Published& p=published[index];
     SnapCache& c=snapCache[index];
-    const LONG now=InterlockedCompareExchange(&p.seq,0,0);
-    if(c.valid && !(now&1) && c.seq==now)return &c.snap;
+    if(c.revision && c.revision==p.snap.Revision())return &c.snap;
     DrawSnap* const out=c.users ? scratch : &c.snap;
-    if(out==&c.snap)c.valid=false;
-    LONG taken=-1;   // odd: no count the copy was whole under (the last whole copy, a busy writer's): taken again next time
-    if(!SeqTake(&p.seq,&p.snap,out,&p.last,&p.lastOk,&taken))return nullptr;
-    if(out==&c.snap && !(taken&1)){c.seq=taken;c.valid=true;}
+    std::uint64_t revision=0;
+    if(!p.snap.TryRead(*out,revision))return c.revision ? &c.snap : nullptr;
+    if(out==&c.snap)c.revision=revision;
     return out;
 }
 bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
@@ -433,8 +404,13 @@ bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
     return true;
 }
 bool TakeViews(int index,ViewHistory* out) noexcept {
-    Published& p=published[index];
-    return SeqTake(&p.viewSeq,&p.views,out,&p.lastViews,&p.lastViewsOk);
+    struct ViewCache { ViewHistory views; std::uint64_t revision; };
+    thread_local ViewCache cache[kLocalViews]{};
+    auto& view=cache[index];
+    published[index].views.TryRead(view.views,view.revision);
+    if(!view.revision)return false;
+    *out=view.views;
+    return true;
 }
 // Each thread its own selection: the camera step (game thread) and the draws (render thread) select states at once.
 thread_local State* selected=&states[0];
@@ -483,7 +459,7 @@ State* AcquireCamera(void* camera) noexcept {
 // A state's submitted views retired (game thread): it left first person, or the mission's cameras are gone.
 void ClearViews(int index) noexcept {
     Published& p=published[index];
-    SeqPublish(&p.viewSeq,&p.views,[](ViewHistory& v){v=ViewHistory{};});
+    p.views.Publish([](ViewHistory& v){v=ViewHistory{};});
 }
 // Mission reset is published from preload; only the game/render thread drops its camera objects and GPU cache.
 std::atomic<unsigned> session{0};
@@ -530,7 +506,7 @@ void CaptureRenderCamera(void* camera,const float* world) noexcept {
     const bool ok=sent && state->on && !state->overridden;
     const void* const who=CameraPlayer(static_cast<const unsigned char*>(camera));
     Published& p=published[state-states];
-    SeqPublish(&p.viewSeq,&p.views,[&](ViewHistory& v){
+    p.views.Publish([&](ViewHistory& v){
         const int at=v.next>=0 && v.next<kViewHistory ? v.next : 0;
         v.view[at]=native;v.ok[at]=ok;v.sent[at]=sent && who;v.who[at]=who;v.next=(at+1)%kViewHistory;
     });
@@ -586,14 +562,17 @@ State* ViewState(const void* view) noexcept {
     M4 native;std::memcpy(native.m,static_cast<const unsigned char*>(view)+0x20,64);
     // The draws' own cache (render thread): the owner holds while no camera submitted, or retired, a view since.
     thread_local M4 cached{};
-    thread_local LONG cachedSeq[kLocalViews]{};
+    thread_local std::uint64_t cachedRevision[kLocalViews]{};
     thread_local bool cachedOk=false;
     thread_local State* owner=nullptr;
-    LONG seq[kLocalViews];bool settled=true;
-    for(int k=0;k<kLocalViews;++k){seq[k]=InterlockedCompareExchange(&published[k].viewSeq,0,0);settled=settled && !(seq[k]&1);}
-    if(cachedOk && settled && std::memcmp(cachedSeq,seq,sizeof(seq))==0 && std::memcmp(cached.m,native.m,64)==0)return owner;
+    std::uint64_t revision[kLocalViews];
+    bool settled=true;
+    for(int k=0;k<kLocalViews;++k){revision[k]=published[k].views.Revision();settled=settled && !(revision[k]&1);}
+    if(cachedOk && settled && std::memcmp(cachedRevision,revision,sizeof(revision))==0 && std::memcmp(cached.m,native.m,64)==0)return owner;
     bool live=false;
-    owner=MatchView(native,&live);cached=native;std::memcpy(cachedSeq,seq,sizeof(seq));cachedOk=settled;
+    owner=MatchView(native,&live);
+    for(int k=0;settled && k<kLocalViews;++k)settled=revision[k]==published[k].views.Revision();
+    cached=native;std::memcpy(cachedRevision,revision,sizeof(revision));cachedOk=settled;
     if(Cfg().debug && At<int>(view,4)==0) {
         thread_local ULONGLONG logged=0;thread_local unsigned matched=0,unmatched=0;
         if(owner)++matched;else if(live)++unmatched;
@@ -1882,7 +1861,7 @@ void __fastcall PassEndHook(void* system,int pass) {
 void Publish() noexcept {
     Published& p=published[selected-states];
     const State& c=Current();
-    SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){
+    p.snap.Publish([&](DrawSnap& d){
         d.on=c.on && !c.overridden;d.riding=c.riding;d.body=c.body;d.bodyCtrl=c.bodyCtrl;d.rideCtrl=c.rideCtrl;
         d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
         std::memcpy(d.weapons,c.weapons,sizeof(d.weapons));std::memcpy(d.weaponCtrls,c.weaponCtrls,sizeof(d.weaponCtrls));d.weaponCount=c.weaponCount;
@@ -2618,13 +2597,8 @@ void* nextLaserRay=nullptr;     // slot 2 as it was (ChainVtableSlot writes it b
 LaserCastFn nextLaserCast=nullptr;
 thread_local const unsigned char* castLaser=nullptr;   // the attachment whose slot 2 runs on this thread
 
-// The published views (the update may run off the camera step's thread): this thread's own last whole copies.
-bool TakeRayView(int index,DrawSnap* out) noexcept {
-    thread_local DrawSnap last[kLocalViews]{};
-    thread_local bool lastOk[kLocalViews]{};
-    Published& p=published[index];
-    return SeqTake(&p.seq,&p.snap,out,&last[index],&lastOk[index]);
-}
+// Laser updates may run off the camera step's thread and use the same committed handoff as draws.
+bool TakeRayView(int index,DrawSnap* out) noexcept {return TakeSnapshotOf(index,out);}
 
 // The viewmodel's muzzle of `weapon` in the world, from the shot's own muzzle (its bone record, what the native ray
 // started from) through the placement the gun is drawn with: one local view's weapon in hand in first person (two views
