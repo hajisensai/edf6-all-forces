@@ -1,4 +1,4 @@
-// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp included whole, its draw run on a
+// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp and its parts included whole, its draw run on a
 // stand-in "EDF.dll" image whose quad and text functions (the RVAs hud.cpp calls) jump to recorders here, for a few
 // scenes of the warnings (warn.h) on a jet (one low on fuel: the fuel readout that replaces the stock FUEL gauge, LOW
 // FUEL lit), a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the drill tank, a Nix, the Proteus
@@ -29,10 +29,16 @@
 //   hud_view [--out DIR] [--lang en|zh-CN|zh-TW|ja]      (default %TEMP%\edf6_hud_view, every language), then:
 //   python tools/hud_view.py DIR
 #include "../src/turretcam.h"
-#include "../src/hud.cpp"
+#include "../src/hud.cpp"   // the HUD whole: hud.cpp and its parts (src/hud_internal.h)
+#include "../src/hud_text.cpp"
+#include "../src/hud_vehicle.cpp"
+#include "../src/hud_air.cpp"
+#include "../src/hud_map.cpp"
+#include "../src/hud_scope.cpp"
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
 #include <array>
+#include <cstdarg>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -113,6 +119,7 @@ float Width(const wchar_t* text) {
 struct Drew { float x0,y0,x1,y1; std::wstring text; bool world=false; std::uint64_t key=0; };
 std::vector<Drew> drew;
 std::set<std::pair<wchar_t,int>> glyphs;
+std::set<std::string> fitCuts;   // the lines FitLine cut with "..." ("<language> <text>", UTF-8): a slot's too-long text
 
 // The recorders the stand-in image's functions jump to.
 struct PanelBox { float x0,y0,x1,y1; };
@@ -210,6 +217,14 @@ void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar
         owedRestore=false;
     }
     if(rgba[3]<=0.0f)return;   // the world lines' restore (hud.cpp RestoreOrtho): nothing to see
+    if(recording) {   // a line FitLine cut (past kMinScale, "..." after it): listed in the summary, by language
+        const std::size_t n=std::wcslen(text);
+        if(n>3 && !std::wcscmp(text+n-3,L"...")) {
+            char narrow[256];
+            WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
+            fitCuts.insert(std::string(hudtext::Name(hudtext::InUse()))+" "+narrow);
+        }
+    }
     tallest=std::fmax(tallest,y1-y0);
     if(boxing){++drawn;Grow(x0,y0);Grow(x1,y1);}
     if(recording) {
@@ -230,13 +245,20 @@ void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
 }
 }  // namespace
 const Config& Cfg() noexcept { return config; }
-void Log(const char*,...) noexcept {}
+// The HUD losing text (LineSink: its lines full; TextWritten: a line cut at its characters): printed, a failure (lineLosses).
+static int lineLosses=0;
+void Log(const char* format,...) noexcept {
+    if(std::strncmp(format,"HUD lines full",14)!=0 && std::strncmp(format,"HUD a line's text cut",21)!=0)return;
+    va_list args;va_start(args,format);std::vprintf(format,args);va_end(args);
+    std::printf("\n");++lineLosses;
+}
 ULONGLONG GameMs() noexcept { return GetTickCount64(); }
 bool GamePaused() noexcept { return paused; }
 bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return hasJet; }
 bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;return hasHeli; }
 bool WarnLatest(Warnings* o) noexcept { if(hasWarn){*o=sceneWarn;o->step=stepfresh::Now();}return hasWarn; }
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
+bool PlayerBargaAim(bargaaim::Readout*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
 bool PlayerPayload(PayloadReadout* o) noexcept { if(hasMapPayload){*o=sceneMapPayload;return true;}if(hasHeli || hasStock){*o=PayloadReadout{};o->choices=hasStock ? sceneStock.arms : 3;o->switchButton=0x10;o->keys=hasHeli ? sceneHeli.f.keys : true;}return hasHeli || hasStock; }
@@ -2879,6 +2901,10 @@ int wmain(int argc,wchar_t** argv) {
     std::printf(textFailed ? "text: %d FAILED\n" : "text: on the screen, inside its panels, no overlap English lacks, in every language\n",textFailed);
     std::printf("glyphs: at most %zu in one scene (%s)\n",mostGlyphs,mostGlyphsAt.c_str());
     failed+=textFailed;
+    std::printf(lineLosses ? "lines: %d lost (LineSink / TextWritten above)\n" : "lines: none lost\n",lineLosses);
+    failed+=lineLosses;
+    std::printf("fit: %zu texts cut with ... by FitLine (past kMinScale in their slot)\n",fitCuts.size());
+    for(const std::string& c:fitCuts)std::printf("      %s\n",c.c_str());
     config.hudLanguage=1;hudtext::Use(hudtext::Lang::en);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     // The HUD's scale (src/hudscale.h).

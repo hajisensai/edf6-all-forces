@@ -221,6 +221,13 @@ K('StockVehicleHud', 'stockVehicleHud', BOOL, True,
       ';     每件武器按真实弹道算的弹着点（炮 = 弹着圈，榴弹 / 高弧 = 黄色十字，火箭 = 菱形，导弹 = 锁定框）、顶部航向带、',
       ';     屏幕下方的车体 / 炮塔指示、速度、HP、各武器弹数与装填、告警，并隐藏玩家座位的原版红色瞄准线；',
       ';     0 = 照原版（红线恢复，不画这套 HUD）')),
+K('BargaAimMarker', 'bargaAimMarker', BOOL, True,
+  note=("the player driving a Balam (501): its fists' reach, its lit hit spheres, the V605 cannon's landing (barga_aim.cpp)",),
+  ini=(
+      '; 1 = 玩家驾驶巴尔加（501：V515 复古巴尔加 / V605 巴尔加加农）时画出手的落点：每只拳头在这个键现在会出的那一招的够及点画一个判定球大小的圈',
+      ';     （L 青、R 绿，能出招时亮；圈心出屏时屏幕边上画箭头指过去）；出拳 / 出脚时在判定球碰到地面或敌人处打十字；',
+      ';     V605 蓄力和加农炮连射时画出剩余炮弹的落点连线和 50 m 爆炸圈（连射中只画还没打出去的）。只看本机状态，联机房主 / 客人都一样；',
+      ';     0 = 不画')),
 K('HideStockGauges', 'hideStockGauges', BOOL, True,
   note=("the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)",),
   ini=(

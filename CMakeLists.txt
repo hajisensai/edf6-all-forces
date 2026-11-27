@@ -10,7 +10,7 @@ set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only gene
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks (tools/check.py sets it from pylib/gamedir)")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/modules.cpp src/modules_load.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/blastsound.cpp src/sightzoom.cpp src/drivegear.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/modules.cpp src/modules_load.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/hud_text.cpp src/hud_vehicle.cpp src/hud_air.cpp src/hud_map.cpp src/hud_scope.cpp src/launcher.cpp src/barga_aim.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41_persist.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/body_box.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/blastsound.cpp src/sightzoom.cpp src/drivegear.cpp)
 # The sources the vehicles' sounds are made by (src/trace_rec.cpp records a run of them, tests/vehsound_replay_test.cpp
 # plays it back): their hash in a recording's header and in the replay, which holds a recording made from the same sources
 # to exactly what the game did (docs/trace-replay.md).
@@ -419,6 +419,12 @@ add_executable(katyusha_cab_check EXCLUDE_FROM_ALL tools/katyusha_cab_check.cpp)
 target_compile_options(katyusha_cab_check PRIVATE /W4 /WX /utf-8 /permissive-)
 target_include_directories(katyusha_cab_check PRIVATE ${CMAKE_SOURCE_DIR}/common)
 set_target_properties(katyusha_cab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Balam's impact marker's pure part (src/barga_aim.h: the cannon's sweep, the combo's availability, the hit spheres,
+# the reach arcs; the tables tools/gen_barga_reach.py), offline. cmake --build build --target barga_aim_check
+add_executable(barga_aim_check EXCLUDE_FROM_ALL tools/barga_aim_check.cpp)
+target_compile_options(barga_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
+target_include_directories(barga_aim_check PRIVATE ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(barga_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The gunship's muzzle (src/gunmuzzle.h) on the circles it flies: no round's line through its airframe, its start where the
 # muzzle is when it leaves, against the old origin start and the shell's stock wait, offline (tools/gunship_muzzle_check.cpp).
@@ -620,7 +626,7 @@ add_executable(sound_engine_check EXCLUDE_FROM_ALL tools/sound_engine_check.cpp)
 target_compile_options(sound_engine_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(sound_engine_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-# The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp against a stand-in image whose draw functions record;
+# The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp and its parts hud_*.cpp against a stand-in image whose draw functions record;
 # tools/hud_view.py makes the PNGs): the warnings' layout to look at. Not part of the plugin build:
 # cmake --build build --target hud_view && build\hud_view.exe && python tools\hud_view.py %TEMP%\edf6_hud_view
 add_executable(hud_view EXCLUDE_FROM_ALL tools/hud_view.cpp)
@@ -1270,6 +1276,8 @@ add_test(NAME redirect_owner_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 # 0-tick frames (n = 0) run no online pump and send nothing: the pump dedups on the logical frame, the senders sit on
 # tick paths, the per-frame files send nothing (tests/frame_rate_net_guard.py, docs/unlimited-fps-re.md §4.4).
 add_test(NAME frame_rate_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_net_guard.py")
+# Every HUD text in its 4 languages against its line's 127 characters and its slot's width (tests/hudtext_fit.py: hud_view's glyph table).
+add_test(NAME hudtext_fit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hudtext_fit.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.
@@ -1401,7 +1409,7 @@ set_target_properties(jet_escort_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CM
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS log_test common_host_check save_mode_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check surround_check sound_event_check sound_engine_check wing_engine_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check world_text_check jet_escort_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check katyusha_cab_check barga_aim_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check surround_check sound_event_check sound_engine_check wing_engine_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_mobility_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check rubble_pass_check enemy_points_check body_mark_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check dmgnum_check fp_view_check fp_flash_check cockpit_canvas_check unlock_ported_check firecontrol_check hash_index_check npc_grid_check frame_pacing_check fp_aim_check frame_rate_check scope_pip_check andryusha_check ride_along_check world_text_check jet_escort_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_dependencies(offline_checks objref_test)

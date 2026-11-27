@@ -33,6 +33,7 @@
     int heliHoverButton=0;          // optional XInput chord
     bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
     bool stockVehicleHud=true;      // any other stock vehicle the player drives or mans: our HUD and impact points, its seat's aim lines hidden (vhud.cpp)
+    bool bargaAimMarker=true;       // the player driving a Balam (501): its fists' reach, its lit hit spheres, the V605 cannon's landing (barga_aim.cpp)
     bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     float playerRotorLift=1.0f;     // a rotor craft the player flies: its vertical acceleration apart from its thrust, times the derived one (hover_lift.h; 0: one budget, the NPCs')
@@ -612,6 +613,7 @@
     n.heliHoverButton=ReadInt(L"HeliHoverButton",static_cast<DWORD>(n.heliHoverButton));
     n.playerHeliGunSight=ReadBool(L"PlayerHeliGunSight",n.playerHeliGunSight);
     n.stockVehicleHud=ReadBool(L"StockVehicleHud",n.stockVehicleHud);
+    n.bargaAimMarker=ReadBool(L"BargaAimMarker",n.bargaAimMarker);
     n.hideStockGauges=ReadBool(L"HideStockGauges",n.hideStockGauges);
     n.heliMouseAim=ReadBool(L"HeliMouseAim",n.heliMouseAim);
     n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);

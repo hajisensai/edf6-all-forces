@@ -109,6 +109,10 @@ jobs:
           # record of what it was made from (tools/gen_katyusha_cab.py --check).
           python tools/gen_katyusha_cab.py --check
           if ($LASTEXITCODE) { Write-Error 'common/edf/katyusha_cab_gen.h is stale: run python tools/gen_katyusha_cab.py (with the game) and commit it'; exit 1 }
+          # The Balam's attack table (src/barga_reach.inc, measured on the model's animations): its record of what it was
+          # made from (tools/gen_barga_reach.py --check).
+          python tools/gen_barga_reach.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/barga_reach.inc is stale: run python tools/gen_barga_reach.py (with the game) and commit it'; exit 1 }
           # docs/*.md named in the sources, and the repository paths the docs name, exist (tools/doc_links_check.py).
           python tools/doc_links_check.py
           if ($LASTEXITCODE) { Write-Error 'dead doc/code links: fix the paths tools/doc_links_check.py lists'; exit 1 }

@@ -279,10 +279,15 @@ HUDTEXT(npcPadKeys,L"%ls   X select   Y attack-move (hold: HOLD)   RB follow me 
         L"%ls   X 选择   Y 攻击移动（按住：原地坚守）   RB 跟随我   LB 停止   十字键 编队 1-4（按住：编入）",
         L"%ls   X 選擇   Y 攻擊移動（按住：原地堅守）   RB 跟隨我   LB 停止   十字鍵 編隊 1-4（按住：編入）",
         L"%ls   X 選択   Y 攻撃移動（長押し：その場で死守）   RB 自分に追従   LB 停止   十字キー グループ 1-4（長押し：登録）")
-HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack / board (drag: line; Shift: queue)   %ls attack-move   %ls fast   %ls reverse   %ls stop   %ls hold fire   %ls sub-group   Ctrl+1-9 group",
-        L"%ls   右键 移动 / 攻击 / 上车（拖动：横队；Shift 排队）   %ls 攻击移动   %ls 快速   %ls 倒车   %ls 停止   %ls 停火   %ls 子选择   Ctrl+1-9 编队",
-        L"%ls   右鍵 移動 / 攻擊 / 上車（拖曳：橫隊；Shift 排隊）   %ls 攻擊移動   %ls 快速   %ls 倒車   %ls 停止   %ls 停火   %ls 子選擇   Ctrl+1-9 編隊",
-        L"%ls   右クリック 移動 / 攻撃 / 乗車（ドラッグ：横隊、Shift で予約）   %ls 攻撃移動   %ls 高速   %ls 後退   %ls 停止   %ls 射撃停止   %ls サブ選択   Ctrl+1-9 グループ")
+// The mouse's two rows (hud_map.cpp MapScreen's band: one line could not hold them, a HUD line is 127 characters).
+HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack / board (drag: line; Shift: queue)",
+        L"%ls   右键 移动 / 攻击 / 上车（拖动：横队；Shift 排队）",
+        L"%ls   右鍵 移動 / 攻擊 / 上車（拖曳：橫隊；Shift 排隊）",
+        L"%ls   右クリック 移動 / 攻撃 / 乗車（ドラッグ：横隊、Shift で予約）")
+HUDTEXT(npcMouseKeys2,L"%ls attack-move  %ls fast  %ls reverse  %ls stop  %ls hold fire  %ls sub-group  Ctrl+1-9 group",
+        L"%ls 攻击移动   %ls 快速   %ls 倒车   %ls 停止   %ls 停火   %ls 子选择   Ctrl+1-9 编队",
+        L"%ls 攻擊移動   %ls 快速   %ls 倒車   %ls 停止   %ls 停火   %ls 子選擇   Ctrl+1-9 編隊",
+        L"%ls 攻撃移動   %ls 高速   %ls 後退   %ls 停止   %ls 射撃停止   %ls サブ選択   Ctrl+1-9 グループ")
 HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
 HUDTEXT(mapCommanderView,L"COMMANDER VIEW",L"指挥官视角",L"指揮官視角",L"指揮官視点")
 HUDTEXT(mapCommanderSwitch,L"%ls  Switch view",L"%ls 切换视角",L"%ls 切換視角",L"%ls 視点を切り替え")

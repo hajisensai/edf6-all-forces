@@ -226,6 +226,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kWastedFire,"wasted fire",nullptr) \
     M(kHeliSight,"heli sight",nullptr) \
     M(kStockHud,"stock hud",nullptr) \
+    M(kBargaAim,"barga aim",nullptr) \
     M(kGear,"gear",nullptr) \
     M(kTrace,"trace",nullptr) \
     M(kSazabiSound,"sazabi sound",nullptr) \
@@ -464,6 +465,7 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kWastedFire,&Call<&ResetWastedFire>},
     {RP::kMissionState,Id::kHeliSight,&Call<&ResetHeliSight>},
     {RP::kMissionState,Id::kStockHud,&Call<&ResetStockHud>},
+    {RP::kMissionState,Id::kBargaAim,&Call<&ResetBargaAim>},
     {RP::kMissionState,Id::kStockGauges,&Call<&ResetStockGauges>},
     {RP::kMissionState,Id::kRoomUi,&Call<&ResetRoomUi>},   // the room / HQ screen is gone: its menu and room sync go on the next screen frame
     {RP::kMissionState,Id::kPayload,&Call<&ResetPayload>},
@@ -592,6 +594,7 @@ constexpr VehicleEntry kVehicleSteps[]={
     {VP::kFrame,Id::kTwinBarrel,&Vehicle<&TwinBarrelFrame>,kNone},     // after every pull of this frame (stock, store, NPC): twin barrels in turn
     {VP::kFrame,Id::kHeliSight,&Vehicle<&HeliSightFrame>,kNone},   // after AimLines: the sight reads which lines are hidden
     {VP::kFrame,Id::kStockHud,&Vehicle<&StockHudFrame>,kNone},
+    {VP::kFrame,Id::kBargaAim,&Vehicle<&BargaAimFrame>,kNone},     // the player's Balam: its reach, hit spheres, cannon landing
     {VP::kFrame,Id::kJetSound,&Vehicle<&JetSound>,kNone},
     {VP::kFrame,Id::kJetLever,&Vehicle<&JetLeverFrame>,kNone},     // after its engine sound: online, a registered jet's lever sent / burnt here
     {VP::kFrame,Id::kLockSound,&Vehicle<&LockSound>,kNone},

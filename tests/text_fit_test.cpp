@@ -133,6 +133,38 @@ void Rows() {
     Check(l.rows==1 && l.row[0].ellipsis,"no second row asked: cut");
 }
 
+// The three policies (Fit, RequestOf): shrink smaller first, ellipsis never smaller, wrap two rows before smaller.
+tf::Laid FitOf(const wchar_t* s,float size,float maxW,tf::Policy p) {
+    tf::Laid l;
+    Check(tf::Fit(s,static_cast<int>(std::wcslen(s)),size,maxW,p,&Measure,&l),"fitted");
+    return l;
+}
+void Policies() {
+    const wchar_t* ten=L"abcdefghij";   // 120 wide at 24
+    tf::Laid l=FitOf(ten,24,100,tf::Policy::shrink);
+    Check(l.rows==1 && !l.row[0].ellipsis && Near(l.size,20),"shrink: smaller, whole");
+    l=FitOf(ten,24,100,tf::Policy::ellipsis);
+    Check(l.rows==1 && l.row[0].ellipsis && Near(l.size,24),"ellipsis: its size, cut");
+    Inside(ten,l,100,"ellipsis: inside");
+    l=FitOf(ten,24,130,tf::Policy::ellipsis);
+    Check(l.rows==1 && !l.row[0].ellipsis && l.row[0].len==10,"ellipsis: fits, as it is");
+    const wchar_t* two=L"aaaa   bbbb";   // 132 wide at 24, each half 48
+    l=FitOf(two,24,70,tf::Policy::wrap);
+    Check(l.rows==2 && Near(l.size,24) && !l.row[0].ellipsis && !l.row[1].ellipsis,"wrap: two rows at its size");
+    Check(l.row[0].len==4 && l.row[1].from==7 && l.row[1].len==4,"wrap: broken at the space run");
+    l=FitOf(two,24,40,tf::Policy::wrap);
+    Check(l.rows==2 && Near(l.size,20),"wrap: the two rows shrunk next");
+    Inside(two,l,40,"wrap: inside");
+    l=FitOf(two,24,70,tf::Policy::shrink);
+    Check(l.rows==1 && l.row[0].ellipsis,"shrink without size2: one row, cut past the floor");
+    l=FitOf(two,24,140,tf::Policy::wrap);
+    Check(l.rows==1 && !l.row[0].ellipsis && Near(l.size,24),"wrap: fits, one row");
+    const tf::Request e=tf::RequestOf(24,100,tf::Policy::ellipsis,30,19);
+    Check(Near(e.minSize,24) && Near(e.size2,0) && !e.shrinkOne,"ellipsis: the caller's floor and rows ignored");
+    const tf::Request w=tf::RequestOf(24,100,tf::Policy::wrap,0,19);
+    Check(Near(w.size2,19) && !w.shrinkOne,"wrap: the caller's row size");
+}
+
 void Refusals() {
     tf::Laid l;
     Check(!tf::Lay(L"",0,tf::Request{24,100,0,0},&Measure,&l),"empty: not laid");
@@ -149,6 +181,7 @@ int main() {
     Floors();
     Cuts();
     Rows();
+    Policies();
     Refusals();
     std::printf("text_fit: %d checks passed\n",checks);
     return 0;

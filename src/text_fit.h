@@ -5,6 +5,12 @@
 // The order: the line as it is when it fits; else its size scaled down so it does (widths scale with the size) as far
 // as MinSizeOf; else, at that size, as many characters as fit with an ellipsis after them. A line that may take two
 // rows (the hint bar) is broken at the space run (else the character) that best balances them before it is cut.
+//
+// Policy: what a slot's text may do when it is too wide (Fit below; the HUD's own lines: hud_text.cpp FitLine;
+// tests/hudtext_fit.py checks every hudtext.inc string against its slot or its declared policy):
+//   shrink   smaller as far as MinSizeOf, then cut with an ellipsis (the default)
+//   ellipsis cut with an ellipsis at its size (never smaller: a column of numbers, a key's name)
+//   wrap     two rows at its size first, those shrunk and cut as one row would be (needs the caller's two row tops)
 #include <cstddef>
 
 namespace crew::textfit {
@@ -72,7 +78,19 @@ inline bool BreakTwo(const wchar_t* text,const float* ends,int n,Break* out) noe
 
 // --- The whole fit: one row, or two (`size2` > 0: the rows' size), each maybe cut ---
 inline constexpr int kMostChars=256;   // longer lines are not fitted (drawn cut at the width)
-struct Request { float size=0.f,maxW=0.f,minSize=0.f,size2=0.f; };
+// shrinkOne false: one row is not made smaller (cut at its size; with size2, broken into two rows instead).
+struct Request { float size=0.f,maxW=0.f,minSize=0.f,size2=0.f; bool shrinkOne=true; };
+enum class Policy : unsigned char { shrink, ellipsis, wrap };
+// The request a policy makes of a line `size` tall into `maxW` (minSize, size2: the caller's own floor and second rows'
+// size, 0 the defaults; ellipsis ignores both, wrap's rows are `size` tall unless size2 says).
+constexpr Request RequestOf(float size,float maxW,Policy p,float minSize=0.f,float size2=0.f) noexcept {
+    switch(p) {
+    case Policy::ellipsis: return Request{size,maxW,size,0.f,false};
+    case Policy::wrap: return Request{size,maxW,minSize,size2>0.f ? size2 : size,false};
+    case Policy::shrink: break;
+    }
+    return Request{size,maxW,minSize,size2,true};
+}
 struct Row { int from=0,len=0; bool ellipsis=false; };
 struct Laid { int rows=1; float size=0.f; Row row[2]{}; };
 // `measure(s, n, size, ends)`: the partial extents of s[0, n) at `size` into ends[0, n) (design units); false: it
@@ -84,7 +102,7 @@ template<class Measure> bool Lay(const wchar_t* text,int n,const Request& r,Meas
     out->size=r.size;out->row[0]=Row{0,n,false};
     if(!(r.maxW>0.f))return true;
     if(!measure(text,n,r.size,ends))return false;
-    const Shrunk one=Shrink(ends[n-1],r.size,r.maxW,r.minSize);
+    const Shrunk one=Shrink(ends[n-1],r.size,r.maxW,r.shrinkOne ? r.minSize : r.size);
     out->size=one.size;
     if(!one.cut)return true;
     // a row of [from, from+len) cut to the width at `size` (ends measured at it)
@@ -113,6 +131,12 @@ template<class Measure> bool Lay(const wchar_t* text,int n,const Request& r,Meas
     out->rows=1;out->row[0]=Row{0,n,false};out->size=one.size;
     if(!measure(text,n,one.size,ends))return false;
     return cut(out->row[0],one.size);
+}
+
+// The text layout call: `text` [0, n) `size` tall into `maxW` by `policy`, measured by `measure` (as for Lay).
+template<class Measure> bool Fit(const wchar_t* text,int n,float size,float maxW,Policy policy,Measure&& measure,
+                                 Laid* out) noexcept {
+    return Lay(text,n,RequestOf(size,maxW,policy),measure,out);
 }
 
 }  // namespace crew::textfit

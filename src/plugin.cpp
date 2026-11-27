@@ -315,8 +315,8 @@ void LoadConfig() noexcept {
         n.heliAgility,n.heliYawRate,n.heliDoorGuns,n.medicGunnerAim,n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG soft edge: jets %.0f m / %.1f turns, ceiling %.0f m, helis %.0f m",n.airSoftEdge,n.airSoftTurns,n.airSoftCeil,n.heliSoftEdge);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
-    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d worldText3D=%d",
-        n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud,n.hideStockGauges,n.hudScale,n.hudLanguage,n.worldText3D);
+    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d bargaAimMarker=%d hideStockGauges=%d scale=%.2f language=%d worldText3D=%d",
+        n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud,n.bargaAimMarker,n.hideStockGauges,n.hudScale,n.hudLanguage,n.worldText3D);
     Log("CONFIG sazabi=%d walk=%.0f run=%.0f fly=%.0f dash=%.0f climb=%.0f gravity=%.1f turn=%.0f mouse=%.2f thrusters=%.1fs regen=%.2f invert=%d dashKey=0x%X descendKey=0x%X funnels=0x%X/%d cannon=0x%X/%d melee=0x%X/%d guard=0x%X/%d share=%.2f axe=%.0f cannon=%.0f funnel=%.0f testBoard=%d",
         n.sazabi,n.sazabiWalk,n.sazabiRun,n.sazabiFly,n.sazabiDash,n.sazabiClimb,n.sazabiGravity,n.sazabiTurn,n.sazabiMouseTurn,
         n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiFunnelKey,

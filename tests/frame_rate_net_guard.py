@@ -151,7 +151,7 @@ for n, head in (('crew.cpp', r'void SharedFrameTick\(\) noexcept \{'), ('support
           f'{head.split("(")[0].split()[-1]} runs once a logic frame')
 
 # --- 3. Who sends, who pumps ---
-PER_FRAME_FILES = ['dmgnum.cpp', 'firstperson.cpp', 'frame_pacing.cpp', 'frame_rate.cpp', 'frame_rate_view.cpp', 'frame_rate_objects.cpp', 'render_record.cpp', 'hud.cpp',
+PER_FRAME_FILES = ['dmgnum.cpp', 'firstperson.cpp', 'frame_pacing.cpp', 'frame_rate.cpp', 'frame_rate_view.cpp', 'frame_rate_objects.cpp', 'render_record.cpp', 'hud.cpp', 'hud_text.cpp', 'hud_vehicle.cpp', 'hud_air.cpp', 'hud_map.cpp', 'hud_scope.cpp',
                    'infantryscope.cpp', 'map.cpp', 'perf_probe.cpp', 'room_preview.cpp', 'room_ui.cpp', 'scope_lens.cpp',
                    'sightzoom.cpp', 'swap_flip.cpp', 'thermal.cpp', 'thermal_gpu.cpp', 'thermal_models.cpp',
                    'worldmap.cpp', 'worldmap_gpu.cpp', 'worldmap_text.cpp', 'worldmap_tiles.cpp']
