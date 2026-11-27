@@ -25,7 +25,25 @@ constexpr float kPopDrop=45.0f;           // m: its bombs go when they would lan
 constexpr int kPopBombs=2;
 constexpr float kPopClimb=1.6f;           // its climb away: up this much for each 1 along
 constexpr unsigned long long kPopClimbMs=4500;
-constexpr float kRainAlt=320.0f;
+// The rain flies level at kRainAlt over the mark (RainWant: its nose never down at a ground target) and opens fire only
+// once its height over the target is at least kRainSlope of its distance out (RainSteep). Its rounds leave in a
+// kSalvoFan fan and split in a kSalvoSplitCone cone, and PN (N = 3) brings a round started off the line of sight back
+// onto it by a bow below it that grows with the range, so what decides whether the low ones clear the ground is the
+// line of sight's slope, not the height alone (tools/sortie_check.cpp RainClearance, src/salvo_flight.h: at a slope of
+// 1/3 under 1% come down off the target, at 0.2 from 400 m 8%, at 0.16 from 320 m 14%). The dive it once flew at the
+// target (to mark+110) opened fire ~2000 m out 150-190 m up and put a third or more of the rounds into the ground
+// hundreds of metres short (player report 2026-11-27: 「一堆导弹全炸地上了」).
+constexpr float kRainAlt=400.0f;
+constexpr float kRainSlope=1.0f/3.0f;
+// From `pos` the target at `aim` is steep enough under it to open fire on: its height over the ground there (`floorY`,
+// the mark's, or the target's own when lower) at least kRainSlope of the distance (level); a target above it always is
+// (its rounds climb to it, away from the ground).
+inline bool RainSteep(const float* pos,const float* aim,float floorY) noexcept {
+    if(aim[1]>=pos[1])return true;
+    const float dx=pos[0]-aim[0],dz=pos[2]-aim[2];
+    const float floor=aim[1]<floorY ? aim[1] : floorY;
+    return pos[1]-floor>=kRainSlope*std::sqrt(dx*dx+dz*dz);
+}
 constexpr float kRainFrom=4000.0f,kRainTo=450.0f,kRainSpeed=155.0f;
 // The 256 rounds go in volleys (salvo_volley.h: 8 every 3 frames, the last 1.55 s after the first). Keep flying the
 // pass while the burst is draining, and as long before the next trigger.
@@ -45,8 +63,9 @@ constexpr float kRainFireCone=0.8f;
 constexpr float kRainRoundSpeed=pyconst::kSalvoChildSpeed;
 // The rain's hold before it opens fire (the user, 2026-11-26: 「不需要一进场就发射其实，可以稍微等一会」): its nose goes on the
 // target from kRainFrom out, but it fires only once inside kRainOpen of the mark (over the target area) and after its
-// nose has stayed within kRainSteadyCone of its aim for kRainHoldMs on end (a turn or a pull-up starts the count again);
-// once open it stays open for the rest of the pass, so the lock's dwell and the burst are not cut off by a wobble.
+// nose has stayed within kRainSteadyCone of its aim for kRainHoldMs on end (a turn or a pull-up starts the count again),
+// and with the target steep enough under it (`steep`: RainSteep); once open it stays open for the rest of the pass, so
+// the lock's dwell and the burst are not cut off by a wobble.
 constexpr float kRainOpen=2400.0f;           // m from the mark (level): over the target area
 constexpr float kRainSteadyCone=0.25f;       // rad between the nose and its aim: the nose settled
 constexpr unsigned long long kRainHoldMs=2500;
@@ -54,15 +73,25 @@ static_assert(kRainOpen<kRainFrom && kRainOpen>kRainTo+kRainSpeed*(kRainHoldMs+k
               "the hold and the burst fit between kRainOpen and the end of the window");
 static_assert(kRainSteadyCone<kRainFireCone,"settled is tighter than the fire cone");
 // One step of the hold. `phase` 0 waiting, 1 settled since `since`, 2 open; true: it may fire now.
-inline bool RainHoldStep(int& phase,unsigned long long& since,float dist,float noseOff,unsigned long long now) noexcept {
+inline bool RainHoldStep(int& phase,unsigned long long& since,float dist,float noseOff,bool steep,unsigned long long now) noexcept {
     if(phase==2)return true;
     if(!(dist<kRainOpen) || !(noseOff<=kRainSteadyCone)){phase=0;return false;}
     if(phase!=1){phase=1;since=now;}
-    if(now-since<kRainHoldMs)return false;
+    if(now-since<kRainHoldMs || !steep)return false;
     phase=2;
     return true;
 }
+// The rain's nose: `level` (unit: its Level flight at kRainAlt toward the target) unless the line of sight from `pos`
+// to `aim` climbs more (a target in the air above it: the nose on it); never the dive down at a ground target.
+inline void RainWant(const float* level,const float* pos,const float* aim,float* want) noexcept {
+    float los[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
+    const float l=std::sqrt(los[0]*los[0]+los[1]*los[1]+los[2]*los[2]);
+    const bool up=l>1.0f && los[1]/l>level[1];
+    for(int i=0;i<3;++i)want[i]=up ? los[i]/l : level[i];
+}
 constexpr unsigned long long kLockMs=700,kMissileGapMs=700;   // a sortie's missiles: the nose held, then one a gap
+static_assert(kRainAlt/kRainSlope<kRainOpen && kRainAlt/kRainSlope>kRainTo+kRainSpeed*(kLockMs+kRainBurstMs)/1000.0f,
+              "level at kRainAlt the rain turns steep inside kRainOpen, early enough for the lock's dwell and the burst");
 constexpr unsigned long long kSearchMs=45000;   // a pass that found nothing to strike this long after it came gives up
 constexpr float kRunMin=100.0f,kRunMax=2400.0f;
 // A call's way in (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」): (x, z) the unit heading it flies in on, or
