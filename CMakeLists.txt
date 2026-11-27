@@ -71,8 +71,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
 # The objects the game handed the plugin this step (src/live_set.h): asked instead of edf::Readable for them.
 target_sources(EDF6VehicleCrew PRIVATE src/live_set.cpp)
-# The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
-target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
+# The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h); HOLD FIRE's table every firing module asks
+# (src/unit_hold_fire.cpp: the tests of those modules link it as they are).
+target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp src/unit_hold_fire.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
 # The map's support pt (src/support_points.cpp, rules in src/support_points_logic.h; tests/support_points_test.cpp) and the
 # supports' warnings on the ground (src/support_warning.cpp, src/support_warning_logic.h; tests/support_warning_test.cpp).
@@ -3090,6 +3091,13 @@ foreach(_test IN LISTS _all_tests)
   endif()
   list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh)
   set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${_env}")
+endforeach()
+
+# The firing modules' tests link HOLD FIRE's table as it is (src/unit_hold_fire.cpp; mapcmd.h UnitHoldsFire).
+foreach(check IN ITEMS map_command_runtime_check map_command_identity_test heli_command_test heli_player_input_test
+        support_infantry_route_test npc_core_check npc_gunners_online_test real_npc_crew_test npc_driver_payload_test
+        npc_action_look_test command_native_dispatch_test)
+    target_sources(${check} PRIVATE src/unit_hold_fire.cpp)
 endforeach()
 
 # Every test's domains as its LABELS (ctest -L <domain>; tools/check.py runs only the ones a change selects):

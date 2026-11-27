@@ -174,6 +174,7 @@ std::atomic<bool> pvpHoldsPad{false};
 std::atomic<bool> enemyHoldsPad{false};
 std::atomic<int> pvpPadSelection{-1};
 std::atomic<bool> placeHoldsPad{false};   // MapPlaceHoldsPad
+std::atomic<bool> armedHoldsPad{false};   // MapPlaceHoldsPad too: a point armed (Q F R U T), the pad's A its click, B off
 std::atomic<bool> pvpOpen{false};         // MapPvpOpen: the PVP panel unfolded by a click on its title
 std::atomic<bool> legendOpen{false};      // MapLegendOpen: the legend unfolded by a click on its title
 std::atomic<bool> boxingNow{false};
@@ -209,22 +210,6 @@ stepfresh::Step readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 
 bool Down(int vk) noexcept { return (edf::AsyncKey(vk)&0x8000)!=0; }
-
-// HOLD FIRE's units (mapcmd.h SetUnitHoldFire): by identity, their health as last seen and when they were last hurt.
-struct HoldFireEntry { ObjRef ref{}; ULONGLONG hurtAt=0; float hpWas=0.0f; };
-constexpr int kHoldFireUnits=96;
-HoldFireEntry holdFire[kHoldFireUnits]{};
-HoldFireEntry* HoldFireOf(const void* unit) noexcept {
-    if(!unit)return nullptr;
-    for(auto& h:holdFire)if(h.ref.obj==unit && h.ref.Is(unit))return &h;
-    return nullptr;
-}
-float HpOf(const void* unit) noexcept {
-    __try {
-        const auto* o=static_cast<const unsigned char*>(unit);
-        return Readable(o,kHp+sizeof(float)) ? *reinterpret_cast<const float*>(o+kHp) : 0.0f;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return 0.0f;}
-}
 
 // Every unit that takes an order now, in a stable order (the vehicles' addresses), into `list`; how many.
 int ListUnits(Entry* list) noexcept {
@@ -1570,8 +1555,13 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         (!placeKeys && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
                         (k.padRight && !g.was.padRight))) ||
         (placeKeys && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
-                       (k.padRight && !g.was.padRight) || (g.place.open && k.padA && !g.was.padA)));
+                       (k.padRight && !g.was.padRight) || (g.place.open && k.padA && !g.was.padA))) ||
+        (armedHoldsPad.load() && ((k.padA && !g.was.padA) || (k.padB && !g.was.padB)));
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
+    // A point armed with the pad (no pointer to click with): A is its click at the screen's centre (TargetPoint), B
+    // leaves it as the right button does. Read before the PVP / enemy cards take A / B (armedHoldsPad: theirs wait).
+    const bool padArmedClick=armedHoldsPad.load() && in.usingPad && k.padA && !g.was.padA;
+    const bool padArmedCancel=armedHoldsPad.load() && in.usingPad && k.padB && !g.was.padB;
     EnemyControlCard(g);
     const bool enemyToggle=k.padEnemy && !g.was.padEnemy;
     const bool pvpToggle=k.padPvp && !g.was.padPvp;
@@ -1620,6 +1610,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     Refresh(g,ids);
     g.button=-1;g.armedClick=g.rightClick=g.rightOnUi=g.rightLine=false;g.rowPicked=false;g.placePress={};
     Pointer(g,in,k,haveView ? &v : nullptr);
+    if(padArmedClick && (g.armedOrder || g.armedSupport>=0))g.armedClick=true;
     using mapbtn::Id;
     const auto clicked=[&](Id b){return g.button==static_cast<int>(b);};
     // A point order's button: armed for the next click on the ground; clicked again (or the right button): not.
@@ -1629,7 +1620,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         Arm(g,!again,o,-1);
         if(!again)Note(g,hudtext::Tr(hudtext::Tx::cmdOrderArmed),OrderText(o));
     }
-    const bool cancel=(g.rightClick || g.rightLine) && (g.armedOrder || g.armedSupport>=0 || g.place.armed>=0);   // RTS: the right button leaves the targeting
+    const bool cancel=(g.rightClick || g.rightLine || padArmedCancel) && (g.armedOrder || g.armedSupport>=0 || g.place.armed>=0);   // RTS: the right button leaves the targeting
     if(cancel && g.place.armed>=0){g.place.armed=-1;g.rightClick=g.rightLine=false;Note(g,L"%ls",hudtext::Tr(hudtext::Tx::placeStopped));}
     else if(cancel){Arm(g,false,Order::none,-1);g.rightClick=g.rightLine=false;Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
     if(g.rightClick && (g.formationMenu || g.dismountMenu)){g.formationMenu=g.dismountMenu=false;g.rightClick=false;}   // ...and closes the formation menu
@@ -1799,6 +1790,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         if(g.armedClick && g.place.armed>=0 && !g.armedOrder && g.armedSupport<0)placeAt=g.place.armed;
     } else g.place=rangeplace::Panel{};
     placeHoldsPad.store(placeKeys && g.placeOn && (g.place.open || (placeHoldsPad.load() && (k.padA || k.padB))));
+    // Held from the arming until A / B is let go after it (the map's A centring, B shutting wait the while).
+    armedHoldsPad.store(g.armedOrder || g.armedSupport>=0 || (armedHoldsPad.load() && (k.padA || k.padB)));
     // The right button let go on the map (RTS, by what is under it): focus fire on an enemy, FOLLOW on the player's own
     // mark, BOARD on our vehicle's (the active squads on foot), else a move to the ground there. A right drag: a move
     // laid along its line (after Decide).
@@ -1957,12 +1950,12 @@ void ResetMapCommands() noexcept {
     for(auto& p:paced)p=PacedUnit{};
     PublishShares();
     npcmark::Assign(game.hover,{});
-    for(auto& h:holdFire)h=HoldFireEntry{};
+    ClearUnitHoldFire();
     EnemyControlHoldAbility(game.enemy.snapshot,0);
     npcmark::Assign(game.enemyCandidate,{});
     static const Game kFresh{};   // the state is large (its UnitRefs): copied from here, no temporary on the stack
     game=kFresh;
-    boxingNow.store(false);pointerCaptured.store(false);placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);enemyHoldsPad.store(false);
+    boxingNow.store(false);pointerCaptured.store(false);placeHoldsPad.store(false);armedHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);enemyHoldsPad.store(false);
     AcquireSRWLockExclusive(&lock);
     readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
@@ -1998,7 +1991,7 @@ void MapCommandPlaceButtons(const float* rects,const int* codes,int n,int window
     for(int i=0;i<n;++i){view.place[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.placeCode[i]=codes[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
-bool MapPlaceHoldsPad() noexcept { return placeHoldsPad.load() || pvpHoldsPad.load() || enemyHoldsPad.load(); }
+bool MapPlaceHoldsPad() noexcept { return placeHoldsPad.load() || armedHoldsPad.load() || pvpHoldsPad.load() || enemyHoldsPad.load(); }
 bool MapPvpOpen() noexcept { return pvpOpen.load(); }
 bool MapLegendOpen() noexcept { return legendOpen.load(); }
 void MapCommandLegendButton(const float* rect) noexcept {
@@ -2104,27 +2097,8 @@ void SuspendMapCommands() noexcept {
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;g.dismountMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
     AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
-    g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
+    g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);armedHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
-}
-
-void SetUnitHoldFire(const void* unit,bool on) noexcept {
-    if(!unit)return;
-    HoldFireEntry* h=HoldFireOf(unit);
-    if(!on){if(h)*h=HoldFireEntry{};return;}
-    if(!h)for(auto& e:holdFire)if(!e.ref.obj || !e.ref.Is(e.ref.obj)){h=&e;break;}   // a free one (or one whose unit is gone)
-    if(!h){Log("MAPCMD hold fire: the table's %d units full, %p not added",kHoldFireUnits,unit);return;}
-    *h=HoldFireEntry{ObjRef::Of(unit),0,HpOf(unit)};
-}
-bool UnitHoldFire(const void* unit) noexcept { return HoldFireOf(unit)!=nullptr; }
-void UnitStruck(const void* unit) noexcept { if(HoldFireEntry* h=HoldFireOf(unit))h->hurtAt=GetTickCount64(); }
-bool UnitHoldsFire(const void* unit) noexcept {
-    HoldFireEntry* h=HoldFireOf(unit);
-    if(!h)return false;
-    const float hp=HpOf(unit);
-    if(mapcmd::Hurt(h->hpWas,hp))h->hurtAt=GetTickCount64();
-    h->hpWas=hp;
-    return mapcmd::HoldsFire(true,h->hurtAt ? GetTickCount64()-h->hurtAt : ~0ull);
 }
 
 int MapCommandGuardAt(const float* at) noexcept {

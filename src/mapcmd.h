@@ -125,11 +125,12 @@ void SuspendMapCommands() noexcept;
 // top), kept on the machine that is their authority and dropped with the mission (ResetMapCommands). UnitHoldsFire:
 // switched on and not hurt within kReturnFireMs (the unit's own health sampled each ask, UnitStruck for a squad's
 // member hurt) -- every module that fires for a unit asks it before a shot (npcai.cpp Drive, the drivers' and gunners'
-// payloads, heli.cpp, jet.cpp). Game thread.
+// payloads, heli.cpp, jet.cpp). Game thread. The table is its own unit (unit_hold_fire.cpp); ClearUnitHoldFire drops it.
 void SetUnitHoldFire(const void* unit,bool on) noexcept;
 bool UnitHoldFire(const void* unit) noexcept;
 void UnitStruck(const void* unit) noexcept;
 bool UnitHoldsFire(const void* unit) noexcept;
+void ClearUnitHoldFire() noexcept;
 // npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
 // on the map, in a formation round it). How many accepted it; -1 none selected. Authority is checked per unit.
 int MapCommandGuardAt(const float* at) noexcept;

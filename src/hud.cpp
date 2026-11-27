@@ -5277,7 +5277,8 @@ void MapFrame(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float s
 }
 
 // The legend at the dock's foot: its title row (a click opens / folds it; never the pointer passing over it), the whole
-// legend in two columns while open, beside the dock over the map (its bottom level with the title's), so opening it
+// legend in three columns while open (the order paths' rows with it, no taller than the two columns it had before:
+// its top stays under the map scale's box, drawn after it), beside the dock over the map (its bottom level with the title's), so opening it
 // neither covers nor squeezes the dock's controls. The title's top: the dock's other panels end above it.
 float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bottom,bool pad,const MapCommandReadout& c,
                 Line* lines,int* at) noexcept {
@@ -5291,12 +5292,12 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
     static const Order kPaths[]={Order::move,Order::attackMove,Order::fastMove,Order::reverseMove,Order::unloadAt,Order::guard};
     constexpr int kPathRows=static_cast<int>(sizeof(kPaths)/sizeof(kPaths[0]));
     constexpr int kItems=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5+kPathRows;   // the player, the dots, the brackets, the paths
-    constexpr int kRows=(kItems+1)/2;
+    constexpr int kCols=3,kRows=(kItems+kCols-1)/kCols;
     const MapDock dock=MapDockAt(width,s);
     const float titleH=28.0f*s,rowH=22.0f*s,y1=bottom,y0=y1-titleH;
     if(y0<60.0f*s || *at+kItems+2>kMaxLines){MapCommandLegendButton(nullptr);return bottom;}
     const bool open=MapLegendOpen();
-    const float listW=std::fmin(360.0f*s,dock.x0-24.0f*s),lx1=dock.x0-8.0f*s,lx0=lx1-listW;
+    const float listW=std::fmin(540.0f*s,dock.x0-24.0f*s),lx1=dock.x0-8.0f*s,lx0=lx1-listW;
     const float listH=static_cast<float>(kRows)*rowH+10.0f*s;
     // Level with the title, or as low over it as clears every panel drawn so far (the support composition, the payload
     // panel): it covers the map only.
@@ -5326,7 +5327,7 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
     MapUiBox(drawer,ctx,lx0,listTop,lx1,listBottom,lines,*at);
     MapFrame(drawer,ctx,lx0,listTop,lx1,listBottom,s,kMapOrderDim);
     const int first=*at;
-    const float colW=(lx1-lx0)*0.5f;
+    const float colW=(lx1-lx0)/static_cast<float>(kCols);
     int item=0;
     float ix=0.0f,tx=0.0f,y=0.0f;
     auto slot=[&]{
@@ -5353,7 +5354,8 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
     }
     for(int i=first;i<*at;++i) {
         Line& row=lines[i];
-        MapFitLabel(text,row,row.x,row.x<lx0+colW ? lx0+colW-4.0f*s : lx1-6.0f*s);
+        const float col=std::floor((row.x-lx0)/colW);
+        MapFitLabel(text,row,row.x,col<static_cast<float>(kCols-1) ? lx0+colW*(col+1.0f)-4.0f*s : lx1-6.0f*s);
     }
     return y0;
 }
