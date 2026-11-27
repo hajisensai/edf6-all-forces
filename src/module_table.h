@@ -10,6 +10,7 @@
 #include "plugin_log.h"
 #include "config.h"
 #include "native_body_math.h"
+#include "native_bone_update.h"
 #include "scene.h"
 #include "boarding.h"
 #include "plugin_body.h"
@@ -331,7 +332,8 @@ constexpr InstallEntry kInstalls[]={
     {IP::kBeforeAppInit,Id::kFrameRate,&Install<&InstallFrameRate>},
     {IP::kBeforeAppInit,Id::kNativePerformance,[](const LoadContext&) noexcept {
         if(!Cfg().enabled)return;
-        Log("PHYSICS rigid-body growth and motion ID limit: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
+        Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
+        Log("PHYSICS attachment and collision: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
     }},
     {IP::kBeforeAppInit,Id::kFsBudget,&Install<&InstallFsLoaderBudget>},   // before the application's init starts CRI File System (fsbudget.cpp)
     {IP::kBeforeAppInit,Id::kTeamCapacity,&Install<&InstallTeamCapacity>}, // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
