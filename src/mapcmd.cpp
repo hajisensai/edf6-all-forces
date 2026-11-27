@@ -118,6 +118,9 @@ struct Game {
     // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
     bool armedOrder=false;Order armed=Order::none;
     int armedSupport=-1;
+    // An armed ground run's (SupportGroundRun) left press on the map (the user, 2026-11-27: the way first, then the
+    // length; Broken Arrow's order drag): its line's start (`runStarted`: the press had a ground point); the drag from it
+    // its way and length (sortie_plan.h RunFromDrag), let go: called.
     bool runStarted=false;
     float runStart[3]{};
     // The armed flown call's way in (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」): from the player toward its
@@ -128,6 +131,8 @@ struct Game {
     bool armedClick=false;
     int supportPick;
     int supportTab=0;          // the bar's tab shown (a click on a tab; [ ] picking into another tab: that tab)
+    int supportTop=0;          // the first of its rows shown (the wheel over the bar; a click on a tab: its top)
+    bool supportReveal=false;  // [ ] picked since the wheel last moved it: the bar shows the pick
     int marchPace=-1;           // the paced march (the card's PACE): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
     bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
@@ -198,6 +203,7 @@ struct View {
     int squads=0,payloads=0,panels=0,supports=0;
     mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kMapUiPanels]{},support[kMapSupportHits]{};
     int supportEntry[kMapSupportHits]{};
+    int supportTop=0,supportRows=0,supportFit=0;   // the window of the tab's rows the bar showed (map_buttons.h ColumnWindow)
     int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
     bool pvpVisible=false;
     int pvps=0;mapbtn::Rect pvp[kMapPvpItems]{};int pvpCode[kMapPvpItems]{};PvpStatus pvpStatus{};
@@ -730,15 +736,16 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         return;
     }
     if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed); one the mission forbids: why
-        if(const int tab=mapbtn::SupportTabOfHit(hit.entry);tab>=0 && tab<kSupportTabs){g.supportTab=tab;return;}   // a tab
+        if(const int tab=mapbtn::SupportTabOfHit(hit.entry);tab>=0 && tab<kSupportTabs){g.supportTab=tab;g.supportTop=0;g.supportReveal=false;return;}   // a tab
         const bool again=g.armedSupport==hit.entry;
         if(const wchar_t* why=again ? nullptr : SupportCallForbidden(hit.entry)){Note(g,L"%ls",why);return;}
         Arm(g,false,Order::none,again ? -1 : hit.entry);
         if(!again) {
             g.supportPick=hit.entry;
-            Note(g,hudtext::Tr(SupportGroundRun(hit.entry) ? hudtext::Tx::cmdRunStart :
-                               SupportCatalogFlown(hit.entry) ? hudtext::Tx::cmdSupportArmedFlown : hudtext::Tx::cmdSupportArmed),
-                 SupportCallName(hit.entry));
+            if(SupportGroundRun(hit.entry))
+                Note(g,hudtext::Tr(hudtext::Tx::cmdRunStart),SupportCallName(hit.entry),SupportRunLeast(hit.entry));
+            else Note(g,hudtext::Tr(SupportCatalogFlown(hit.entry) ? hudtext::Tx::cmdSupportArmedFlown : hudtext::Tx::cmdSupportArmed),
+                      SupportCallName(hit.entry));
         }
         return;
     }
@@ -811,7 +818,10 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
         g.uiPress=UiAt(*v,g.pointer.x,g.pointer.y);g.uiLeft=g.uiPress.kind!=Game::UiKind::none;g.moved=0;
         if(g.uiLeft)g.boxing=g.pressing=false;
         else if(k.ctrl || !armed){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
-        else g.pressing=true;
+        else {
+            g.pressing=true;
+            if(!g.armedOrder && g.armedSupport>=0 && SupportGroundRun(g.armedSupport))g.runStarted=TargetPoint(g,in,v,g.runStart);
+        }
     }
     pointerCaptured.store(g.uiLeft || g.uiRight || (g.suppressLeft && k.left) || (g.suppressRight && k.right));
     if(k.left || !g.was.left)return;
@@ -821,7 +831,10 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     }
     mapcmd::Mark marks[kCmdUnits];const int n=Marks(g,*v,marks);
     const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
-    const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
+    // An armed ground run's press is its click however far it was dragged (the drag its line).
+    const bool runDrag=g.pressing && g.runStarted && !g.armedOrder && g.armedSupport>=0 && SupportGroundRun(g.armedSupport);
+    const bool click=(g.boxing && !box) || (g.pressing && (g.moved<kClickMove || runDrag));
+    if(!click || g.boxing || UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none)g.runStarted=false;   // no line called
     if(click && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none){} // release over UI never selects what is underneath
     else if(click && armed && !g.boxing)g.armedClick=true;
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
@@ -1509,7 +1522,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         r.support[i].price=SupportCallPrice(i);r.support[i].afford=SupportPoints()>=r.support[i].price;r.support[i].tab=SupportCallTab(i);
     }
     r.supportReady=SupportCallReadiness();
-    r.points=SupportPoints();r.pointsMost=SupportPointsMost();r.supportTab=g.supportTab;
+    r.points=SupportPoints();r.pointsMost=SupportPointsMost();r.supportTab=g.supportTab;r.supportTop=g.supportTop;r.supportReveal=g.supportReveal;
     SupportCallStatus(r.supportStatus,_countof(r.supportStatus));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     r.placeOn=g.placeOn;r.placeOnline=placeOnline;r.placeOpen=g.placeOn && g.place.open;r.placeCategory=g.place.category;
@@ -1641,7 +1654,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         if(previous || following) {
             g.supportPick=(g.supportPick+(previous ? -1 : 1)+supportCount)%supportCount;
             Note(g,hudtext::Tr(hudtext::Tx::cmdSupportPicked),SupportCallName(g.supportPick));
-            g.supportTab=static_cast<int>(SupportCallTab(g.supportPick));   // its tab shown
+            g.supportTab=static_cast<int>(SupportCallTab(g.supportPick));   // its tab shown, scrolled to it
+            g.supportReveal=true;
         }
     }
     Hover(g,in,haveView ? &v : nullptr);
@@ -1754,7 +1768,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // Shift with any point order: after the points before it (mapcmd_logic.h Waypoints).
     const bool queue=k.shift;
     // G turns the armed flown call's way in by 45 deg (Shift+G back), kept for its click (which disarms it).
-    if(k.entryTurn && !g.was.entryTurn && g.armedSupport>=0 && SupportCatalogFlown(g.armedSupport) && !SupportGroundRun(g.armedSupport)) {
+    if(k.entryTurn && !g.was.entryTurn && g.armedSupport>=0 && SupportCatalogFlown(g.armedSupport)) {
         g.entryTurn=(g.entryTurn+(k.shift ? 7 : 1))%8;
         Note(g,hudtext::Tr(hudtext::Tx::cmdEntryTurn),g.entryTurn*45);
         Log("MAPCMD the armed call's way in turned %d deg from the player's toward its point",g.entryTurn*45);
@@ -1855,18 +1869,28 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     for(MapPingHeard heard{};TakeMapPing(&heard);)AddPing(g,heard.at,heard.kind,false);
     const bool allowed=Cfg().enabled;
+    // A ground run's line (sortie_plan.h RunFromDrag): from its press's point (the pad's A, or a press with no ground
+    // point: the pointer's) toward where the pointer is, at least as long as its jets need (SupportRunLeast); a plain
+    // click: from the player toward its start, turned by G, that least long.
+    const auto groundLine=[&](int catalog,bool held,sortie::RunSpec* line,float* centre,float* end,float* least) noexcept {
+        if(catalog<0 || !SupportGroundRun(catalog) || (!pointOk && !(held && g.runStarted)))return false;
+        const float* const start=held && g.runStarted ? g.runStart : point;
+        float way[3];SupportStrikeHeading(start,way);
+        const float a=static_cast<float>(catalog==turnedEntry ? entryTurn : 0)*0.785398163f,c=std::cos(a),s=std::sin(a);
+        *least=SupportRunLeast(catalog);
+        return sortie::RunFromDrag(start,pointOk ? point : start,*least,way[0]*c-way[2]*s,way[0]*s+way[2]*c,line,centre,end);
+    };
     sortie::RunSpec run;
     float runCentre[3]{};
     if(runClick>=0) {
         using hudtext::Tx;
-        if(!pointOk)Note(g,L"%ls",hudtext::Tr(Tx::cmdSupportNoPoint));
-        else if(!g.runStarted) {
-            std::memcpy(g.runStart,point,sizeof(g.runStart));
-            g.runStarted=true;
-            Note(g,L"%ls",hudtext::Tr(Tx::cmdRunEnd));
-        } else if(!sortie::RunFromPoints(g.runStart,point,&run,runCentre)) {
+        float end[3],least=0.0f;
+        if(!pointOk && !g.runStarted)Note(g,L"%ls",hudtext::Tr(Tx::cmdSupportNoPoint));
+        else if(!groundLine(runClick,true,&run,runCentre,end,&least)) {
+            g.runStarted=false;
             Note(g,L"%ls",hudtext::Tr(Tx::cmdRunLength));
         } else {
+            Log("MAPCMD ground run %d: its line %.0f m (at least %.0f m) heading (%.2f,%.2f)",runClick,2.0f*run.half,least,run.x,run.z);
             supportAt=runClick;
             if(g.composeEntry==supportAt)load=g.compose;
             Arm(g,false,Order::none,-1);
@@ -1891,9 +1915,14 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     };
     float previewEntry[3];
     const float* const previewHeading=entryHeading(g.armedSupport,previewEntry) ? previewEntry : aimedHeading(g.armedSupport);
-    // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route.
-    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point,previewHeading,
-                g.runStarted ? g.runStart : nullptr);
+    // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route; a ground
+    // run's line as it would be called now (held: the drag's; else a click's here), its length said while dragged.
+    sortie::RunSpec previewLine;float previewCentre[3],previewEnd[3],previewLeast=0.0f;
+    const bool held=g.pressing && k.left;
+    if(groundLine(g.armedSupport,held,&previewLine,previewCentre,previewEnd,&previewLeast)) {
+        WarnPreview(g.armedSupport,previewEnd,nullptr,held && g.runStarted ? g.runStart : point);
+        if(held && g.runStarted)Note(g,hudtext::Tr(hudtext::Tx::cmdRunDrag),2.0f*previewLine.half,previewLeast);
+    } else WarnPreview(g.armedSupport>=0 && pointOk && !SupportGroundRun(g.armedSupport) ? g.armedSupport : -1,point,previewHeading);
     if(supportAt>=0) {
         if(pointOk) {
             if(float way[3];run.half<=0.0f && entryHeading(supportAt,way))run=sortie::HeadingRun(way[0],way[2]);
@@ -1988,9 +2017,10 @@ void MapCommandButtons(const float* rects,const int* ids,int n) noexcept {
     ReleaseSRWLockExclusive(&viewLock);
 }
 
-void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept {
+void MapCommandSupportButtons(const float* rects,const int* entries,int n,int top,int rows,int fit) noexcept {
     n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupportHits)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.supports=n;
+    view.supportTop=n ? top : 0;view.supportRows=n ? rows : 0;view.supportFit=n ? fit : 0;
     if(!n)view.composes=0;   // no bar drawn: no composition panel beside it either
     for(int i=0;i<n;++i){view.support[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.supportEntry[i]=entries[i];}
     ReleaseSRWLockExclusive(&viewLock);
@@ -2011,8 +2041,29 @@ void MapCommandLegendButton(const float* rect) noexcept {
     if(rect)view.legendRow={rect[0],rect[1],rect[2],rect[3]};
     ReleaseSRWLockExclusive(&viewLock);
 }
+// The wheel over the support bar (its click targets' bounds): its tab's rows a row a notch, inside the ones it holds.
+static bool SupportWheel(Game& g,int delta) noexcept {
+    static int part=0;
+    if(!delta || !g.pointer.placed){part=0;return false;}
+    AcquireSRWLockShared(&viewLock);
+    const int n=view.supports,top=view.supportTop,rows=view.supportRows,fit=view.supportFit;
+    float x0=1e30f,y0=1e30f,x1=-1e30f,y1=-1e30f;
+    for(int i=0;i<n;++i) {
+        const mapbtn::Rect& q=view.support[i];
+        x0=(std::min)(x0,q.x0);y0=(std::min)(y0,q.y0);x1=(std::max)(x1,q.x1);y1=(std::max)(y1,q.y1);
+    }
+    ReleaseSRWLockShared(&viewLock);
+    const float x=g.pointer.x,y=g.pointer.y;
+    if(!n || x<x0 || x>=x1 || y<y0 || y>=y1){part=0;return false;}
+    part+=delta;
+    const int notches=part/WHEEL_DELTA;
+    part-=notches*WHEEL_DELTA;
+    if(notches){g.supportTop=mapbtn::ColumnWindow(rows,fit,top-notches,-1);g.supportReveal=false;}   // away from the user: up
+    return true;
+}
 bool MapCommandWheel(int delta) noexcept {
     Game& g=game;
+    if(SupportWheel(g,delta))return true;
     static int part=0;   // a fine wheel's part-notches, kept until they make one
     if(!delta || !g.placeOn || !g.place.open || !g.pointer.placed){part=0;return false;}
     // Over the list the HUD drew (its click targets' bounds: the title, the tabs, the rows and the arrows).

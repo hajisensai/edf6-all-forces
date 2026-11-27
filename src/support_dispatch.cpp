@@ -400,6 +400,11 @@ wchar_t variantNote[192]{};
 void NoteVariant(const wchar_t* text,const wchar_t* file) noexcept {
     if(!variantNote[0])_snwprintf_s(variantNote,_countof(variantNote),_TRUNCATE,text,file);
 }
+// Whether a variant in `file` is made so here and on every peer (DecideVariant's three tests), unlogged: the map's preview
+// (SupportRunLeast) asks it as the plan will decide it.
+bool VariantApplies(const wchar_t* file) noexcept {
+    return file && *file && SupportVariantReady(file) && SupportPeersApplyVariants() && SupportPeersHaveVariantFile(VariantHash(file));
+}
 std::uint64_t DecideVariant(std::uint32_t catalog,const wchar_t* file,std::uint64_t wanted) noexcept {
     if(!wanted || !file || !*file)return 0;
     if(!SupportVariantReady(file)) {
@@ -441,14 +446,50 @@ void PresetHands(std::uint32_t catalog,const SupportLoadout& load,int i,support_
         Log("SUPPORT plan catalog=%u: soldier %d's preset hands %d:%d not given (the weapon hooks / preload are not in): the requester's pick",
             catalog,i,h.right,h.left);
 }
-// The entry's tank / jets: its SupportVehicle_<key> pylons as a variant of the hull.
+// The catalog entry whose SupportVehicle_<key> pylons entry `catalog`'s hull flies (the user, 2026-11-27: every air
+// support flies the plane as configured outside the battle, no sortie with a loadout of its own): its own where its key
+// names a body (support_loadout.h kVehicleKeys: the tank's, the strike jet's, ...); a jet sortie's (SORTIE_*, no key of
+// its own) the first guarding call of the same jet role that has one (the dive, the carpet and the hit and run the
+// strike jet's STRIKE, the missile pass MULTIROLE, the wolf pack FIGHTER); -1 none (the helicopters take no pylons, the
+// gunship and the Zenith none either). Derived from the call table alone, so the same on every machine of the room.
+int HullOf(int catalog) noexcept {
+    if(catalog<0 || catalog>=kSupportConfigUnits)return -1;
+    if(VehicleBodyOfKey(SupportCallKey(catalog))!=VehicleBody::none)return catalog;
+    SupportAircraft spec;
+    if(catalog>=AirCount() || !SupportAircraftSpec(catalog,&spec) || !spec.sortie || spec.heli>=0 || spec.jet<0)return -1;
+    for(int i=0;i<AirCount() && i<kSupportConfigUnits;++i) {
+        SupportAircraft guard;
+        if(SupportAircraftSpec(i,&guard) && !guard.sortie && !guard.follow && guard.heli<0 && guard.jet==spec.jet &&
+           VehicleBodyOfKey(SupportCallKey(i))!=VehicleBody::none)return i;
+    }
+    return -1;
+}
+// Its hull catalog's configured pylons (PlanCfg: the requester's), or false: none configured for it.
+bool HullLoadout(std::uint32_t catalog,VehicleLoadout* out,wchar_t* file,std::size_t capacity) noexcept {
+    const int hull=HullOf(static_cast<int>(catalog));
+    if(hull<0)return false;
+    const auto& l=PlanCfg().vehicle[hull];
+    if(!l.On() || l.body!=VehicleBodyOfKey(SupportCallKey(hull)) || !VehicleVariantFile(l,file,capacity))return false;
+    *out=l;return true;
+}
+// The entry's tank / jets: its hull catalog's SupportVehicle_<key> pylons (HullOf) as a variant of the hull.
 std::uint64_t HullVariant(std::uint32_t catalog) noexcept {
-    if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
-    const auto& l=PlanCfg().vehicle[catalog];
-    if(!l.On() || l.body!=VehicleBodyOfKey(SupportCallKey(static_cast<int>(catalog))))return 0;
-    wchar_t file[96];
-    if(!VehicleVariantFile(l,file,_countof(file)))return 0;
+    VehicleLoadout l;wchar_t file[96];
+    if(!HullLoadout(catalog,&l,file,_countof(file)))return 0;
     return DecideVariant(catalog,file,LoadoutVariant(l));
+}
+// m: the shortest ground run's line (sortie_plan.h RunLeast) entry `catalog`'s jets let all their ground stores go down,
+// flying `variant`'s pylons where it is applied (else their stock stores); 0 for an entry that flies no ground run.
+float RunLeastOf(std::uint32_t catalog,std::uint64_t variant) noexcept {
+    SupportAircraft spec;
+    if(!SupportGroundRun(static_cast<int>(catalog)) || !SupportAircraftSpec(static_cast<int>(catalog),&spec))return 0.0f;
+    VehicleLoadout l;
+    const int hull=HullOf(static_cast<int>(catalog));
+    const bool pylons=(variant&kVariantApplied) && hull>=0 &&
+                      LoadoutOfVariant(variant,VehicleBodyOfKey(SupportCallKey(hull)),&l);
+    sortie::RunLoad load;float speed=0.0f;
+    if(!SupportRunLoad(spec,pylons ? &l : nullptr,&load,&speed))return 0.0f;
+    return sortie::RunLeast(load,speed,static_cast<SortiePass>(spec.sortie)==SortiePass::carpet);
 }
 // The file of a plan unit's variant (look or pylons; `path`: the CreateObject spelling), or false: none it can be.
 bool VariantFile(const SupportPlan& plan,const support_net::Unit& unit,wchar_t* out,std::size_t capacity,bool path) noexcept {
@@ -458,7 +499,8 @@ bool VariantFile(const SupportPlan& plan,const support_net::Unit& unit,wchar_t* 
         return LookOfVariant(unit.variant,&look) &&
             SupportLookFile(SupportSoldierWeapon(unit.resourceId),IsSupportLeaderResource(unit.resourceId),look,out,capacity,path)>0;
     }
-    const VehicleBody body=VehicleBodyOfKey(SupportCallKey(static_cast<int>(plan.catalogId)));
+    const int hull=HullOf(static_cast<int>(plan.catalogId));
+    const VehicleBody body=hull>=0 ? VehicleBodyOfKey(SupportCallKey(hull)) : VehicleBody::none;
     VehicleLoadout l;
     return !unit.role && unit.resourceId>=kAircraft && LoadoutOfVariant(unit.variant,body,&l) && VehicleVariantFile(l,out,capacity,path)>0;
 }
@@ -600,6 +642,21 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             return PlanResult::refused;
         }
         spec.count=AircraftCount(catalog,spec,1+AirCrew(catalog,spec));
+        // Its jets' pylons (SupportVehicle_<key> of its hull catalog, HullOf), decided once; a ground run's line made as long
+        // as they need to let every ground store go (sortie_plan.h RunLeast) from the same start on the same way: the
+        // requester's map drew it that long already, unless this decision flies other stores than it previewed (a peer
+        // lacks the pylons' file, so stock: DecideVariant).
+        const std::uint64_t hullVariant=HullVariant(catalog);
+        float aim[3]={target[0],target[1],target[2]};
+        if(plan.run.half>0.0f) {
+            const float least=RunLeastOf(catalog,hullVariant);
+            if(2.0f*plan.run.half+0.5f<least) {
+                Log("SUPPORT plan catalog=%u: its line %.0f m lengthened to %.0f m (its jets' ground stores, %s)",catalog,
+                    2.0f*plan.run.half,least,(hullVariant&kVariantApplied) ? "its configured pylons" : "stock");
+                sortie::RunLengthen(plan.run,aim,least);
+                std::memcpy(plan.target,aim,12);
+            }
+        }
         // The rescue takes off from the nearest takeoff point (a submarine carrier's deck: support_entry.h TakeoffRoute),
         // the edge only when there is none it can climb out of (2026-10-10, the user: 「能从机场起飞就从机场起飞吧」).
         auto refusal=support::Refusal::noEntry;
@@ -611,7 +668,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
                                                     catalog,route.from[0],route.from[1],route.from[2],n);
             else Log("SUPPORT plan catalog=%u: %s; from the map's edge",catalog,n ? "no takeoff point to climb out of" : "no takeoff point");
         }
-        if(refusal!=support::Refusal::none)refusal=PlanAirSupport(spec,target,player.pos,&route,entryHeading,run.half);
+        if(refusal!=support::Refusal::none)refusal=PlanAirSupport(spec,aim,player.pos,&route,entryHeading,plan.run.half);
         if(refusal!=support::Refusal::none) {
             if(refusal==support::Refusal::noSky)Refuse(catalog,"no open sky over the target",L"此处没有开放天空，航空支援无法进入");
             else if(refusal==support::Refusal::noArea)Refuse(catalog,"the measured play area is too small for an entry",L"本图场地过小，无法安排空中入场");
@@ -626,7 +683,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
             float at[3];support::AirFormationSlot(route,i,spacing,at);
             const unsigned parent=plan.count+1;
             if(!AddUnit(plan,kAircraft+kSupportAirborneOffset+catalog,0,at,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
-            plan.units[plan.count-1].variant=HullVariant(catalog);   // its pylons (SupportVehicle_<key>)
+            plan.units[plan.count-1].variant=hullVariant;   // its pylons (SupportVehicle_<key> of HullOf)
             for(unsigned c=0;c<AirCrew(catalog,spec);++c) {
                 if(!AddUnit(plan,crew,parent,at,route.heading)){Refuse(catalog,"plan full",L"支援单位过多");return PlanResult::refused;}
                 plan.units[plan.count-1].variant=SupportCrewVariant(catalog,crew);   // its pilot's / gunners' colours
@@ -1890,6 +1947,15 @@ bool SupportRescueAt(const float* target,wchar_t* note,std::size_t capacity) noe
         accepted ? "accepted" : "not accepted");
     return accepted;
 }
+int SupportHullCatalog(int index) noexcept { return HullOf(index); }
+float SupportRunLeast(int index) noexcept {
+    if(index<0 || index>=AirCount())return 0.0f;
+    VehicleLoadout l;wchar_t file[96];
+    const auto catalog=static_cast<std::uint32_t>(index);
+    const std::uint64_t variant=SupportPeersAcceptVariants() && HullLoadout(catalog,&l,file,_countof(file)) && VariantApplies(file) ?
+                                LoadoutVariant(l)|kVariantApplied : 0;
+    return RunLeastOf(catalog,variant);
+}
 SupportIcon SupportCallIcon(int index) noexcept {
     SupportAircraft spec;
     if(index==SupportRescueCatalog())return SupportIcon::heli;
@@ -1910,12 +1976,7 @@ SupportIcon SupportCallIcon(int index) noexcept {
     return kind==SupportVehicleKind::tank ? SupportIcon::tank : kind==SupportVehicleKind::transport ? SupportIcon::apc : SupportIcon::truck;
 }
 SupportTab SupportCallTab(int index) noexcept {
-    if(index>=0 && index<AirCount()) {
-        SupportAircraft spec;
-        if(SupportAircraftSpec(index,&spec) && spec.sortie && spec.jet!=static_cast<int>(JetRole::salvo))
-            return SupportTab::sortie;
-        return SupportTab::air;
-    }
+    if(index>=0 && index<AirCount())return SupportTab::sortie;   // every flown call (support_call.h SupportTab)
     if(int strike=0;index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportTab::strike;
     return SupportTab::ground;
 }

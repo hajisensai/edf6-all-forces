@@ -968,12 +968,22 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
     const wchar_t* names[kMapSupports];int idx[kMapSupports];int n=0;
     for(int i=0;i<c.supports;++i)if(static_cast<int>(c.support[i].tab)==tab){names[n]=c.support[i].name;idx[n++]=i;}
     mapbtn::Group groups[kMapSupports];
-    const int rows=mapbtn::GroupSupport(names,n,groups,kMapSupports);
+    const int allRows=mapbtn::GroupSupport(names,n,groups,kMapSupports);
     const float x0=8.0f*s,x1=std::fmin(kSupW*s,width*0.3f),titleH=24.0f*s;
     const float poolH=18.0f*s,tabH=kSupTabH*s;   // the pool's line, then the tabs, under the title
     const float tabsTop=top+titleH+poolH,rowsTop=tabsTop+tabH+kSupGap*s;
+    // The window of its rows that fits (map_buttons.h ColumnWindow): where the wheel scrolled it, moved to show the
+    // entry [ ] picked; `shown` its first row on.
+    const int fit=mapbtn::ColumnFit(rowsTop,bottom,kSupRowH*s,kSupGap*s);
+    int reveal=-1;
+    if(c.supportReveal)
+        for(int k=0;k<allRows && reveal<0;++k)
+            for(int e=groups[k].first;e<groups[k].first+groups[k].count;++e)if(idx[e]==c.supportPick)reveal=k;
+    const int first=mapbtn::ColumnWindow(allRows,fit,c.supportTop,reveal);
+    const mapbtn::Group* shown=groups+first;
+    const int rows=allRows-first;
     mapbtn::Rect row[kMapSupports]{},chip[kMapSupports]{};
-    const int placed=rows>0 ? mapbtn::Column(groups,rows,x0+4.0f*s,x1-4.0f*s,rowsTop,bottom,kSupRowH*s,kSupGap*s,4.0f*s,row,chip) : 0;
+    const int placed=rows>0 ? mapbtn::Column(shown,rows,x0+4.0f*s,x1-4.0f*s,rowsTop,bottom,kSupRowH*s,kSupGap*s,4.0f*s,row,chip) : 0;
     if(rowsTop>bottom){MapCommandSupportButtons(nullptr,nullptr,0);return;}
     const float last=placed>0 ? row[placed-1].y1 : rowsTop;
     MapUiBox(drawer,ctx,x0,top,x1,last+4.0f*s,lines,*at);
@@ -994,7 +1004,7 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
         rects[hits*4]=q.x0;rects[hits*4+1]=q.y0;rects[hits*4+2]=q.x1;rects[hits*4+3]=q.y1;entries[hits++]=entry;
     };
     // The tabs, side by side across the bar: the one shown lit; a click shows another (map_buttons.h SupportTabHit).
-    static constexpr Tx kTabText[kSupportTabs]={Tx::supportTabAir,Tx::supportTabSortie,Tx::supportTabStrike,Tx::supportTabGround};
+    static constexpr Tx kTabText[kSupportTabs]={Tx::supportTabSortie,Tx::supportTabStrike,Tx::supportTabGround};
     const float tabW=(x1-x0-8.0f*s-static_cast<float>(kSupportTabs-1)*kSupGap*s)/static_cast<float>(kSupportTabs);
     for(int t=0;t<kSupportTabs;++t) {
         const float tx0=x0+4.0f*s+static_cast<float>(t)*(tabW+kSupGap*s);
@@ -1014,7 +1024,7 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
     // that variant, not the row's. `g.first` and the chips are the tab's own positions; idx[] their catalog entries.
     mapbtn::Rect body[kMapSupports]{};int pickOf[kMapSupports]{};
     for(int k=0;k<placed;++k) {
-        const mapbtn::Group& g=groups[k];
+        const mapbtn::Group& g=shown[k];
         const mapbtn::Rect& q=row[k];
         bool lit=false;
         for(int e=g.first;e<g.first+g.count;++e)lit=lit || c.supportArmed==idx[e];
@@ -1040,7 +1050,7 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
         MapTipSet(c,body[k].x0,body[k].y0,body[k].x1,body[k].y1,Tr(Tx::supportTip),c.support[pick].name,c.support[pick].price);
     }
     for(int k=0;k<placed;++k) {
-        const mapbtn::Group& g=groups[k];
+        const mapbtn::Group& g=shown[k];
         if(g.count<=1)continue;
         for(int e=g.first;e<g.first+g.count;++e) {
             const mapbtn::Rect& q=chip[e];
@@ -1056,11 +1066,15 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
         }
     }
     for(int k=0;k<placed;++k)hit(body[k],pickOf[k]);
-    MapCommandSupportButtons(rects,entries,hits);
+    // More rows above or below the window: a chevron at the pool line's right (the wheel over the bar scrolls).
+    {const float cx=x1-14.0f*s,cy=top+titleH+poolH*0.4f,h=4.0f*s,w=1.4f*s;
+     if(first>0){Seg(drawer,ctx,cx-h-6.0f*s,cy+h*0.5f,cx-6.0f*s,cy-h*0.5f,w,kAmber);Seg(drawer,ctx,cx-6.0f*s,cy-h*0.5f,cx+h-6.0f*s,cy+h*0.5f,w,kAmber);}
+     if(first+placed<allRows){Seg(drawer,ctx,cx-h+6.0f*s,cy-h*0.5f,cx+6.0f*s,cy+h*0.5f,w,kAmber);Seg(drawer,ctx,cx+6.0f*s,cy+h*0.5f,cx+h+6.0f*s,cy-h*0.5f,w,kAmber);}}
+    MapCommandSupportButtons(rects,entries,hits,first,allRows,fit);
     // The armed support's composition beside its row (its name before the "·").
     int composeRow=-1;
     for(int k=0;k<placed && composeRow<0;++k)
-        for(int e=groups[k].first;e<groups[k].first+groups[k].count;++e)if(c.composeEntry==idx[e])composeRow=k;
+        for(int e=shown[k].first;e<shown[k].first+shown[k].count;++e)if(c.composeEntry==idx[e])composeRow=k;
     if(composeRow<0){MapCommandComposeButtons(nullptr,nullptr,0);return;}
     wchar_t base[40]{};
     const int most=static_cast<int>(_countof(base))-1,blen=mapbtn::BaseLength(c.support[c.composeEntry].name);

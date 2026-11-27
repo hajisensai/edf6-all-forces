@@ -339,7 +339,7 @@ void SortieFire(Jet& j,const unsigned char* v,const float* pos,const Arms& arms,
     }
     int bombs=0;
     for(int i=0;i<arms.storeCount;++i)if(arms.stores[i].spec->role==StoreRole::bomb)bombs+=arms.stores[i].ammo>0 ? arms.stores[i].ammo : 0;
-    const ULONGLONG gap=carpet ? sortie::CarpetGapMs(bombs+s.fired,Len(j.m.vel),half) : 150;
+    const ULONGLONG gap=carpet ? sortie::CarpetGapMs(bombs+s.fired,Len(j.m.vel),half) : sortie::kBombGapMs;
     if(s.fired && ms-s.bombAt<gap)return;
     for(int i=0;i<arms.storeCount;++i) {
         const Store& st=arms.stores[i];

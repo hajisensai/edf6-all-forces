@@ -117,6 +117,7 @@ bool SupportPeersAcceptTransports() noexcept{return true;}
 bool SupportPeersAcceptLoadout() noexcept{return true;}
 bool SupportAircraftReady(const SupportAircraft&) noexcept{return false;}
 const wchar_t* SupportAircraftFile(const SupportAircraft&) noexcept {return L"EDF6VC_TEST.SGO";}
+bool SupportRunLoad(const SupportAircraft&,const VehicleLoadout*,sortie::RunLoad*,float*) noexcept {return false;}
 bool TransportDeliver(const void*,const void* const*,int,const float*,bool) noexcept{return false;}
 bool TransportParadrop(const void*,const float*) noexcept{return false;}
 bool JetFerry(const void*,const float*,const float*) noexcept{return false;}

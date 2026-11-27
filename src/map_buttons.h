@@ -208,6 +208,24 @@ inline int Column(const Group* g,int rows,float x0,float x1,float top,float bott
     return placed;
 }
 
+// The rows of a tab that fit between `top` and `bottom` (Column's count for rows enough).
+inline int ColumnFit(float top,float bottom,float rowH,float gap) noexcept {
+    if(bottom<top+rowH || rowH<=0.0f)return 0;
+    return 1+static_cast<int>((bottom-top-rowH)/(rowH+gap));
+}
+// The first row a tab longer than its column shows (2026-11-27: every flown support in one tab, more rows than fit): the
+// one it scrolled to (`top`), kept inside [0, rows - fit], moved the least that puts row `reveal` in the window (-1: none;
+// [ ] picked an entry the window does not show).
+inline int ColumnWindow(int rows,int fit,int top,int reveal) noexcept {
+    const int most=rows>fit ? rows-fit : 0;
+    top=top<0 ? 0 : top>most ? most : top;
+    if(reveal>=0 && reveal<rows && fit>0) {
+        if(reveal<top)top=reveal;
+        else if(reveal>=top+fit)top=reveal-fit+1;
+    }
+    return top;
+}
+
 // The bar's tabs (support_call.h SupportTab) in its hit list: a tab's code, below every catalog entry (-1 is none).
 constexpr int kSupportTabHit=-2;
 constexpr int SupportTabHit(int tab) noexcept { return kSupportTabHit-tab; }

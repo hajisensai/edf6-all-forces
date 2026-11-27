@@ -117,6 +117,55 @@ inline bool RunFromPoints(const float* a,const float* b,RunSpec* out,float* cent
     for(int i=0;i<3;++i)centre[i]=a[i]+(b[i]-a[i])*0.5f;
     return true;
 }
+// What one aircraft of a ground run (a gun run's or a carpet's line) lets go along it: its bombs, its rockets (rounds),
+// its air-to-ground missiles. Its stores' rates on the line: a bomb every kBombGapMs (the hit and run's pair too; the
+// store's own ripple is 8 frames, pylib/vcobjects.py Bomb.interval), a rocket ripple of kRocketRipple every kRocketGapMs
+// (jet_combat.cpp Fire; vcobjects.py RKT burst), a missile after the lock's kLockMs and one every kMissileGapMs.
+struct RunLoad { int bombs=0,rockets=0,missiles=0; };
+constexpr unsigned long long kBombGapMs=150,kRocketGapMs=600;
+constexpr int kRocketRipple=4;
+// The shortest line it all goes down on (the user, 2026-11-27: the length "最短也得是能投完这架飞机所有对地挂载的距离"):
+// the time its slowest store takes to empty at `speed` m/s (a carpet lets go only its bombs), within kRunMin..kRunMax.
+inline float RunLeast(const RunLoad& l,float speed,bool carpet) noexcept {
+    float seconds=0.0f;
+    if(l.bombs>1)seconds=static_cast<float>(l.bombs-1)*static_cast<float>(kBombGapMs)*0.001f;
+    if(!carpet) {
+        const int ripples=(l.rockets+kRocketRipple-1)/kRocketRipple;
+        if(ripples>1)seconds=std::fmax(seconds,static_cast<float>(ripples-1)*static_cast<float>(kRocketGapMs)*0.001f);
+        if(l.missiles>0)
+            seconds=std::fmax(seconds,(static_cast<float>(kLockMs)+static_cast<float>(l.missiles-1)*static_cast<float>(kMissileGapMs))*0.001f);
+    }
+    const float length=(speed>0.0f && std::isfinite(speed) ? speed : 0.0f)*seconds;
+    return length<kRunMin ? kRunMin : length>kRunMax ? kRunMax : length;
+}
+// The map's ground run (the user, 2026-11-27: the way first, then the length; Broken Arrow's order drag): pressed at its
+// start `a`, dragged toward `b`: along a -> b, as long as the drag and at least `least` (at most kRunMax). A press let go
+// short of kRunDragLeast keeps the way it had (x, z: from the player toward the point, or turned) at `least`. `centre`
+// its middle (the request's target), `end` where it ends. False for no way at all.
+constexpr float kRunDragLeast=25.0f;   // m on the ground: a press let go nearer its start is a click
+inline bool RunFromDrag(const float* a,const float* b,float least,float x,float z,RunSpec* out,float* centre,float* end) noexcept {
+    const float dx=b[0]-a[0],dz=b[2]-a[2],dragged=std::hypot(dx,dz);
+    if(dragged>=kRunDragLeast && std::isfinite(dragged)){x=dx/dragged;z=dz/dragged;}
+    else {
+        const float n=std::hypot(x,z);
+        if(!(n>1e-4f) || !std::isfinite(n))return false;
+        x/=n;z/=n;
+    }
+    least=least<kRunMin ? kRunMin : least>kRunMax ? kRunMax : least;
+    const float length=dragged>=kRunDragLeast ? (dragged<least ? least : dragged>kRunMax ? kRunMax : dragged) : least;
+    *out=RunSpec{x,z,length*0.5f};
+    end[0]=a[0]+x*length;end[1]=b[1];end[2]=a[2]+z*length;
+    for(int i=0;i<3;++i)centre[i]=(a[i]+end[i])*0.5f;
+    return true;
+}
+// A line shorter than `least` (the host flies stock stores where the requester asked with its own pylons:
+// support_dispatch.cpp DecideVariant) made `least` long from the same start on the same way: its new centre.
+inline void RunLengthen(RunSpec& r,float* centre,float least) noexcept {
+    const float half=(least>kRunMax ? kRunMax : least)*0.5f;
+    if(!(r.half>0.0f) || r.half>=half)return;
+    centre[0]+=r.x*(half-r.half);centre[2]+=r.z*(half-r.half);
+    r.half=half;
+}
 // The gun run's strafe along a line (the user, 2026-11-26: 「扫射时间是不是不对」「只有机枪」). The nose (and the path,
 // the guns and rockets along it) on the point `lead` m on along the line: that point walks at the jet's speed, so the
 // whole line from -half to +half is under fire for 2 half / speed s, and the jet comes down as exp(-x / lead) (the slope

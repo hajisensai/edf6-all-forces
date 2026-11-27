@@ -38,10 +38,11 @@ std::int32_t SupportPointsMost() noexcept { return 30000; }
 void WarnPreview(int,const float*,const float*,const float*) noexcept {}
 int SupportCatalogStrike(int) noexcept {return -1;}
 bool SupportGroundRun(int) noexcept {return false;}
+float SupportRunLeast(int) noexcept {return 0.0f;}
 bool SupportCatalogFlown(int) noexcept {return false;}
 void SupportStrikeHeading(const float*,float* out) noexcept {out[0]=0.0f;out[1]=0.0f;out[2]=1.0f;}
 int SupportStrikeBarrage(int) noexcept {return -1;}
-SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
+SupportTab SupportCallTab(int) noexcept { return SupportTab::sortie; }
 int forbiddenEntry=-1;   // the entry the stub mission forbids (underground: an aircraft), -1 none
 const wchar_t* SupportCallForbidden(int index) noexcept { return index==forbiddenEntry ? L"underground: soldiers only" : nullptr; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};

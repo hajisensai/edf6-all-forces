@@ -185,7 +185,8 @@ int SupportStrikeCount() noexcept {return 2;}
 const wchar_t* SupportStrikeKey(int k) noexcept {return k>=0 && k<2 ? strikeKeys[k] : nullptr;}
 const wchar_t* SupportStrikeName(int k) noexcept {return k==0 ? L"火箭齐射" : L"天罚";}
 std::uint32_t SupportStrikePt(int k) noexcept {return k==0 ? 2000u : k==1 ? 15000u : 0u;}
-bool SupportGroundRun(int) noexcept {return false;}
+bool groundRun=false;   // whether the air calls fly a ground run (airstrike.cpp SupportGroundRun)
+bool SupportGroundRun(int) noexcept {return groundRun;}
 int SupportStrikeBarrage(int k) noexcept {return k==0 ? 0 : -1;}
 int strikesStarted=0;bool strikeStarts=true;
 bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity,const float*) noexcept {
@@ -228,9 +229,10 @@ bool soloHost=false;
 bool SupportSoloHostWorld() noexcept {return soloHost;}
 int airJet=-1,airHeli=static_cast<int>(HeliBody::eros506),airCount=1;bool airFollow=false;   // the air calls' spec
 int airSortie=0;   // a sortie call's pass (jet.h SortiePass; 0 none)
+int unsortied=-1;  // the one air call that flies no sortie while the rest do (support_dispatch.cpp HullOf's guarding call)
 bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
     if(id<0 || id>=21 || id==16)return false;
-    *out={airJet,airHeli,airCount,300,airFollow,false,airSortie};return true;
+    *out={airJet,airHeli,airCount,300,airFollow && id!=unsortied,false,id==unsortied ? 0 : airSortie};return true;
 }
 int plannedAircraft=0,plannedHeli=-2;
 support::Refusal planRefusal=support::Refusal::none;
@@ -275,6 +277,21 @@ bool NpcDriver(const unsigned char*) noexcept {return driverAboard;}
 #endif
 bool SupportAircraftReady(const SupportAircraft&) noexcept {return transportReady;}
 const wchar_t* SupportAircraftFile(const SupportAircraft&) noexcept {return L"EDF6VC_TEST.SGO";}
+// A jet's ground stores (jet_spawn.cpp, not linked here): stock, the fixture's; configured, its pylons' rounds by role.
+sortie::RunLoad stockRunLoad{6,0,0};int runLoadsAsked=0;const VehicleLoadout* lastRunPylons=nullptr;
+bool SupportRunLoad(const SupportAircraft& spec,const VehicleLoadout* pylons,sortie::RunLoad* load,float* speed) noexcept {
+    if(spec.heli>=0 || spec.jet<0)return false;
+    ++runLoadsAsked;lastRunPylons=pylons;*speed=200.0f;*load=stockRunLoad;
+    if(pylons && pylons->On()) {
+        *load={};
+        for(int i=0;i<pylons->count;++i)if(const LoadStore* s=LoadStoreOf(pylons->store[i])) {
+            const int n=kRoundCounts[pylons->rounds[i]&0xF];
+            if(s->role==LoadRole::bomb)load->bombs+=n;else if(s->role==LoadRole::rocket)load->rockets+=n;
+            else if(s->role==LoadRole::ground)load->missiles+=n;
+        }
+    }
+    return true;
+}
 bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool peersLoadout=true;
 bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
@@ -503,11 +520,13 @@ int main() {
     float target[3]={0,0,0};wchar_t note[128];
     airSortie=static_cast<int>(SortiePass::gunRun);
     airJet=static_cast<int>(JetRole::strike);airHeli=-1;
-    check(SupportCallTab(0)==SupportTab::sortie,"ordinary fixed-wing sorties remain in the sortie tab");
+    check(SupportCallTab(0)==SupportTab::sortie,"ordinary fixed-wing sorties are in the sortie tab");
     airSortie=static_cast<int>(SortiePass::missileRain);
     airJet=static_cast<int>(JetRole::salvo);
-    check(SupportCallTab(0)==SupportTab::air && SupportCallIcon(0)==SupportIcon::jet,
-          "the Zenith stays an aircraft and is available in the air support tab");
+    check(SupportCallTab(0)==SupportTab::sortie && SupportCallIcon(0)==SupportIcon::jet,
+          "the Zenith is an aircraft in the one sortie tab (no separate air tab)");
+    airSortie=0;airJet=static_cast<int>(JetRole::interceptor);
+    check(SupportCallTab(0)==SupportTab::sortie,"an aircraft that stays (guard / follow) is in the sortie tab too");
     airSortie=0;airJet=-1;airHeli=static_cast<int>(HeliBody::eros506);
     {
         // The loadout a request plans with: this machine's own for its own (peer 0), the member's published one for a
@@ -1383,6 +1402,37 @@ int main() {
         check(made>0 && lastAircraftVariant==L"app:/object/edf6vc_lo_strike_4000000000056562.sgo" &&
               (deployments[0].plan.units[0].variant&kVariantApplied),"the strike jets are made from their all-bombs file");
         ResetSupportDispatch();
+        // A jet sortie flies its airframe's configured pylons (2026-11-27: no sortie with a loadout of its own): entry 8's
+        // key (CARRIER here) names no body, so its hull is the guarding strike call's (2, STRIKE=MK82:6,MK82:6).
+        const int savedJet=airJet,savedHeli=airHeli,savedCount=airCount,savedSortie=airSortie;const bool savedFollow=airFollow;
+        airJet=static_cast<int>(JetRole::strike);airHeli=-1;airCount=1;airFollow=false;airSortie=static_cast<int>(SortiePass::gunRun);
+        unsortied=2;
+        check(SupportHullCatalog(8)==2 && SupportHullCatalog(2)==2 && SupportHullCatalog(tankEntry)==tankEntry,
+              "a jet sortie's hull is the guarding call of its jet role; a keyed entry is its own");
+        unsortied=-1;check(SupportHullCatalog(8)==-1,"no guarding call of that role: none (stock)");
+        unsortied=2;airHeli=static_cast<int>(HeliBody::eros506);
+        check(SupportHullCatalog(8)==-1,"a helicopter sortie takes no pylons");
+        airHeli=-1;
+        // Its least line: 12 bombs a 150 ms apart at 200 m/s, 330 m; stock (6 bombs) 150 m; no ground run none.
+        check(SupportRunLeast(8)==0.0f,"no ground run, no least line");
+        groundRun=true;
+        check(std::fabs(SupportRunLeast(8)-330.0f)<0.5f,"the configured pylons' 12 bombs need 330 m");
+        variantFiles.erase(strikeFile);
+        check(std::fabs(SupportRunLeast(8)-150.0f)<0.5f,"without the pylons' file it flies stock: 6 bombs, 150 m");
+        variantFiles.insert(strikeFile);
+        // A line drawn shorter is lengthened by the plan from the same start on the same way: 120 m along +x to 330 m.
+        made=0;fixtureMs+=40000;
+        const float start[3]={target[0]-60.0f,target[1],target[2]};
+        check(SupportCallComposedAt(8,target,nullptr,note,128,nullptr,sortie::RunSpec{1.0f,0.0f,60.0f}),"a ground run queued");
+        SupportDispatchTick();
+        const auto& sortiePlan=deployments[0].plan;
+        check(made>0 && (sortiePlan.units[0].variant&kVariantApplied) &&
+              lastAircraftVariant==L"app:/object/edf6vc_lo_strike_4000000000056562.sgo","the sortie's jets are made from STRIKE's file");
+        check(std::fabs(sortiePlan.run.half-165.0f)<0.5f && std::fabs(sortiePlan.target[0]-(start[0]+165.0f))<0.5f &&
+              std::fabs(sortiePlan.target[2]-start[2])<0.5f,"the short line lengthened to 330 m, its start kept");
+        ResetSupportDispatch();
+        groundRun=false;unsortied=-1;
+        airJet=savedJet;airHeli=savedHeli;airCount=savedCount;airSortie=savedSortie;airFollow=savedFollow;
     }
     {
         // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>
