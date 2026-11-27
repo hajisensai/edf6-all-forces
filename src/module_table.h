@@ -61,6 +61,7 @@
 #include "gravity.h"
 #include "gravity_net.h"
 #include "havok_mt.h"
+#include "object_update_mt.h"
 #include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
@@ -177,6 +178,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kInfantryScope,"infantry scope",nullptr) \
     M(kPhysics,"physics",kLoadOnly) \
     M(kHavokMultithread,"havok multithread",kLoadOnly) \
+    M(kObjectUpdateMultithread,"object update multithread",kLoadOnly) \
     M(kGunnerRecoil,"gunner recoil",kLoadOnly) \
     M(kStoreRecoil,"store recoil",kLoadOnly) \
     M(kSidecar,"sidecar",nullptr) \
@@ -383,6 +385,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kInfantryScope,&Install<&InstallInfantryScope>},   // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     {IP::kFeatures,Id::kPhysics,&Install<&InstallPhysics>},        // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     {IP::kFeatures,Id::kHavokMultithread,&Install<&InstallHavokMultithread>},   // the physics step on the game's Havok worker threads (ini HavokMultithread; havok_mt.cpp)
+    {IP::kFeatures,Id::kObjectUpdateMultithread,&Install<&InstallObjectUpdateMultithread>},   // slot5 bones -> collision proxies on worker threads (ini ObjectUpdateMT; object_update_mt.cpp)
     {IP::kFeatures,Id::kGunnerRecoil,&Install<&InstallGunnerRecoil>},   // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     {IP::kFeatures,Id::kStoreRecoil,&Install<&InstallStoreRecoil>},     // the 403's store holders past its seats: the hull push, not a seat's jitter (storerecoil.cpp)
     {IP::kFeatures,Id::kSidecar,&Install<&InstallSidecar>},        // the sidecar motorcycle's gunner (sidecar.cpp)
