@@ -1407,6 +1407,76 @@ bool BodyQuaternionUpdates() {
 
 
 
+bool ContactOwnerLookups() {
+    constexpr unsigned count=64;
+    alignas(16) unsigned char holder[0x60]{},world[0xF0]{},bodies[count*0xB0]{},buckets[32*0x10]{},property[0x28]{};
+    const void* owners[count]{};
+    std::uint32_t bits[2]{};
+    const auto* const table=image+kContactWorldVtable;
+    edf::Put(holder,0x58,world+0);
+    edf::Put(world,0x20,table);
+    edf::Put(world,0x38,bodies+0);
+    edf::Put(world,0x40,count);
+    edf::Put(world,0xD8,buckets+0);
+    edf::Put(property,8,bits+0);
+    edf::Put(property,0x20,owners+0);
+    const auto stock=reinterpret_cast<ContactOwnerFn>(image+kContactOwner);
+    for(unsigned i=0;i<count;++i) {
+        auto* const body=bodies+i*0xB0;
+        edf::Put(body,0x50,0x81000000u+i);
+        body[0x54]=i%5==0 ? 0 : i%2==0 ? 2 : 1;
+        owners[i]=i%7==0 ? nullptr : body;
+    }
+    const auto setTable=[&](unsigned mask,unsigned distance,bool found) {
+        edf::Put(world,0xE4,mask);
+        std::memset(buckets,0xFF,sizeof buckets);
+        const unsigned home=_byteswap_ulong(0x8001u*0x9E3779B1u)&mask;
+        for(unsigned i=0;i<distance;++i)
+            edf::Put(buckets,((home+i)&mask)*0x10,static_cast<std::uint16_t>(0x8002+i));
+        if(found) {
+            auto* const bucket=buckets+((home+distance)&mask)*0x10;
+            edf::Put(bucket,0,static_cast<std::uint16_t>(0x8001));
+            edf::Put(bucket,8,property+0);
+        }
+    };
+    for(const auto site:kContactOwnerCalls) {
+        const auto fast=Redirected<ContactOwnerFn>(site);
+        if(fast==stock)return false;
+        const auto check=[&](unsigned id) {return stock(holder,id)==fast(holder,id);};
+        std::mt19937 rng(77103);
+        for(unsigned i=0;i<6000;++i) {
+            const unsigned mask=(i&1u) ? 31 : 15;
+            setTable(i%19==0 ? 0 : mask,i%9,i%11!=0);
+            const unsigned n=rng()%65;
+            edf::Put(property,0x18,n);
+            bits[0]=rng();bits[1]=rng();
+            const unsigned row=rng()%count;
+            const unsigned generation=i%13==0 ? 0x80000000u : 0x81000000u;
+            if(!check(generation+row) || !check(0x81000000u+count) || !check(0x00FFFFFFu))return false;
+        }
+        const void* alternate[32];
+        std::memcpy(alternate,table,sizeof alternate);
+        edf::Put(world,0x20,alternate+0);
+        if(!check(0x81000001u))return false;
+        alternate[0x68/sizeof(void*)]=reinterpret_cast<const void*>(+[](const void*,std::uint32_t){return 0u;});
+        if(!check(0x81000001u) || fast(holder,0x81000001u))return false;
+        edf::Put(world,0x20,table);
+    }
+
+    edf::Put(property,0x18,count);
+    bits[0]=bits[1]=0xFFFFFFFFu;
+    const auto fast=Redirected<ContactOwnerFn>(kContactOwnerCalls[0]);
+    for(unsigned distance:{0u,6u}) {
+        setTable(31,distance,true);
+        const void* volatile result=nullptr;
+        Bench(distance ? "contact owner with colliding properties" : "contact owner with home bucket",
+              [&](unsigned i){result=stock(holder,0x81000000u+(i&(count-1)));},
+              [&](unsigned i){result=fast(holder,0x81000000u+(i&(count-1)));});
+        (void)result;
+    }
+    return true;
+}
+
 bool ContactManifolds() {
     alignas(16) unsigned char world[0x8A0]{},bodies[4*0xB0]{},motions[4*0x80]{};
     alignas(16) unsigned char event[0xB0]{},cache[0x40]{},compressed[0x240]{},lookup[0x60]{};
@@ -1725,6 +1795,10 @@ int main(int argc,char** argv) {
     }
     if(!BodyQuaternionUpdates()) {
         std::puts("FAIL: native body quaternion fast path or fallback mismatch");
+        return 1;
+    }
+    if(!ContactOwnerLookups()) {
+        std::puts("FAIL: contact owner lookup did not match the native property table");
         return 1;
     }
     if(!ContactManifolds()) {

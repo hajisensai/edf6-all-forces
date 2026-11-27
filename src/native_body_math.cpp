@@ -807,9 +807,14 @@ bool InstallClingBodyReuse() noexcept {
 constexpr unsigned kDecodeContact=0xDD2480,kUnpackContact=0xDD4230,kContactWorldVtable=0x18BC9C0;
 constexpr unsigned kIsBodyValid=0xDAC200,kBodyById=0xDAB170,kMotionById=0xDABA20;
 constexpr unsigned kContactDecoders[]{0x6DACD0,0x6F127A,0x11B9552};
+constexpr unsigned kContactOwnerCalls[]{0x6DAC96,0x6F12CF,0x6F131D};
 static_assert(sizeof(kAttachedBasisCalls)/sizeof(kAttachedBasisCalls[0])+
               sizeof(kAvoidanceCalls)/sizeof(kAvoidanceCalls[0])+
-              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+13==kNativeBodyMathSites);
+              sizeof(kContactDecoders)/sizeof(kContactDecoders[0])+
+              sizeof(kContactOwnerCalls)/sizeof(kContactOwnerCalls[0])+13==kNativeBodyMathSites);
+
+constexpr unsigned kContactOwner=0x11AD2E0,kWorldBodyProperty=0xDAB360;
+using ContactOwnerFn=const void*(__fastcall*)(const unsigned char*,std::uint32_t);
 
 using DecodeContactFn=const void*(__fastcall*)(const unsigned char*,const unsigned char*,void*);
 using UnpackContactFn=void(__fastcall*)(const void*,const void*,const void*,const void*,unsigned,void*);
@@ -824,6 +829,52 @@ __forceinline const unsigned char* FindContactBody(const unsigned char* world,st
     if(index==0xFFFFFFu || index>=edf::At<std::uint32_t>(world,0x40))return nullptr;
     const auto* const body=edf::At<const unsigned char*>(world,0x38)+index*0xB0ull;
     return (body[0x54]&3) && edf::At<std::uint32_t>(body,0x50)==id ? body : nullptr;
+}
+
+const void* __fastcall FindContactOwner(const unsigned char* holder,std::uint32_t id) noexcept {
+    const auto* const world=edf::At<const unsigned char*>(holder,0x58);
+    const auto* const table=edf::At<const void*>(world,0x20);
+    if(table!=image+kContactWorldVtable || edf::At<const void*>(table,0x68)!=image+kIsBodyValid ||
+       edf::At<const void*>(table,0xE8)!=image+kWorldBodyProperty)
+        return reinterpret_cast<ContactOwnerFn>(image+kContactOwner)(holder,id);
+    if(!FindContactBody(world,id))return nullptr;
+
+    // Native hknpWorld uses the 0x8001 property to resolve the xgs rigid body.
+    // The property table, bitmap and values are read on every query.
+    constexpr std::uint16_t ownerKey=0x8001;
+    constexpr unsigned ownerHash=0xB1F90F5B;   // bswap32(ownerKey * 0x9E3779B1)
+    const auto mask=edf::At<std::int32_t>(world,0xE4);
+    if(mask<=0)return nullptr;
+    const auto* const buckets=edf::At<const unsigned char*>(world,0xD8);
+    const auto index=id&0xFFFFFFu;
+    const auto slotMask=static_cast<unsigned>(mask);
+    for(auto slot=ownerHash&slotMask;;slot=(slot+1)&slotMask) {
+        const auto* const bucket=buckets+static_cast<std::size_t>(slot)*0x10;
+        const auto key=edf::At<std::uint16_t>(bucket,0);
+        if(key==0xFFFF)return nullptr;
+        if(key!=ownerKey)continue;
+
+        const auto* const property=edf::At<const void*>(bucket,8);
+        if(!property || index>=edf::At<std::uint32_t>(property,0x18))return nullptr;
+        const auto* const bits=edf::At<const std::uint32_t*>(property,8);
+        if(!(bits[index>>5]&(1u<<(index&31))))return nullptr;
+        const auto row=edf::At<std::uintptr_t>(property,0x20)+static_cast<std::uintptr_t>(index)*sizeof(void*);
+        return row ? *reinterpret_cast<const void* const*>(row) : nullptr;
+    }
+}
+
+unsigned InstallContactOwnerLookups() noexcept {
+    if(!NativeCodeMatches(kContactOwner,0x11AD340,0xD69F3A18130C4667ull) ||
+       !NativeCodeMatches(kIsBodyValid,0xDAC234,0x52B86E4E8BFBCCCEull) ||
+       !NativeCodeMatches(kWorldBodyProperty,0xDAB3F9,0xD1E1A4A52F786C96ull) ||
+       !NativeCodeMatches(0xE3E770,0xE3E7E1,0x44DF076A08030DF3ull))return 0;
+    unsigned installed=0;
+    for(const auto call:kContactOwnerCalls) {
+        bool changed=false;
+        edf::RedirectCall(image+call,image+kContactOwner,reinterpret_cast<void*>(&FindContactOwner),changed);
+        installed+=changed;
+    }
+    return installed;
 }
 
 const void* __fastcall DecodeContact(const unsigned char* event,const unsigned char* world,void* out) noexcept {
@@ -1543,6 +1594,7 @@ unsigned InstallNativeBodyMath() noexcept {
     installed+=InstallAvoidanceHeap();
     installed+=InstallAvoidanceScan();
     installed+=InstallClingBodyReuse();
+    installed+=InstallContactOwnerLookups();
     installed+=InstallContactDecoders();
     installed+=InstallStaticBodyQuaternionSkip();
     installed+=InstallEmptyBodySignalGate();
