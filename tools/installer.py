@@ -141,6 +141,13 @@ NEW_DEFAULTS_1126: dict[str, dict[str, tuple[str, str]]] = {
     SECTION: {'HeliHoverKey': ('0x24', '0x48')},
 }
 DEFAULTS_MARK_1126 = '; edf6vc-defaults-2026-11-26：悬停键仍为旧出厂值 Home 时改为 H，之后安装保留玩家选择'
+# Frames above 60 on by default (the maintainer, 2026-11-27: 「默认开启170帧数上限」): FrameRateCap shipped 0 (the game's
+# 59.94 Hz); merge_ini keeps an old ini's 0, which would never get the higher frame rate.
+NEW_DEFAULTS_1127: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'FrameRateCap': ('0', '170')},
+}
+DEFAULTS_MARK_1127 = ('; edf6vc-defaults-2026-11-27：安装器已把仍是旧出厂值 0 的 FrameRateCap 改成 170（最多 170 帧；'
+                      '想要原版 60 帧就改回 0，之后安装不会再改）')
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
@@ -150,6 +157,7 @@ DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = 
     (DEFAULTS_MARK_1110, NEW_DEFAULTS_1110),
     (DEFAULTS_MARK_1124, NEW_DEFAULTS_1124),
     (DEFAULTS_MARK_1126, NEW_DEFAULTS_1126),
+    (DEFAULTS_MARK_1127, NEW_DEFAULTS_1127),
 )
 
 

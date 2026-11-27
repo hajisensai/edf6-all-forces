@@ -80,7 +80,7 @@
     bool vehicleWelding=true;       // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true;      // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;     // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
-    int frameRateCap=0;             // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz (shipped), 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
+    int frameRateCap=170;           // ini FrameRateCap (frame_rate_logic.h FixCap): 170 shipped (the maintainer, 2026-11-27), 0 the game's 59.94 Hz, 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool frameRateFlip=false;       // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
     bool renderRecordThread=false;  // developer option, latched at plugin load
     bool renderPoseSnapshots=false; // developer option, latched at plugin load

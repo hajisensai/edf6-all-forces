@@ -17,7 +17,7 @@
 #include <cstdint>
 
 namespace crew::framerate {
-// ini FrameRateCap: 0 the game's own 59.94 Hz (nothing installed), 1 the display's refresh rate (the shipped default:
+// ini FrameRateCap (170 shipped): 0 the game's own 59.94 Hz (nothing installed), 1 the display's refresh rate (
 // no slots, the swap chain's sync interval 1 holds the frames to the refresh), -1 no cap (the GPU and the sync interval
 // are the limit: the game has no vsync setting, 0x11A3098's `sete dl` passes 1 except for the 8 frames after a catch-up,
 // docs/unlimited-fps-re.md §1), 61..1000 at most that many frames a second. 2..60 is no more than the game already gives

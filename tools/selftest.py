@@ -6505,7 +6505,7 @@ def edf41_mother_parts_default_migrates() -> None:
     assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
                                                          installer.DEFAULTS_MARK_1024, installer.DEFAULTS_MARK_1108,
                                                          installer.DEFAULTS_MARK_1110, installer.DEFAULTS_MARK_1124,
-                                                         installer.DEFAULTS_MARK_1126]
+                                                         installer.DEFAULTS_MARK_1126, installer.DEFAULTS_MARK_1127]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -6550,14 +6550,27 @@ def max_frame_latency_default_back_to_0() -> None:
 
 
 @test
-def frame_rate_cap_default_off() -> None:
-    """FrameRateCap ships 0, the game's own 59.94 Hz (docs/unlimited-fps-re.md §5): the shipped ini and the plugin's
-    default agree, and no defaults step moves it (1, the display's refresh rate, waits for the maintainer's checklist
-    and the other objects' interpolation; a later PR changes the default)."""
+def frame_rate_cap_default_170() -> None:
+    """FrameRateCap ships 170 (the maintainer, 2026-11-27: 「默认开启170帧数上限」; docs/unlimited-fps-re.md §5): the
+    shipped ini and the plugin's default agree, and the 11-27 defaults step moves an old ini's 0 to 170 once (a value the
+    player chose stays, a later install changes nothing)."""
     import installer
     ini, crew = src('EDF6VehicleCrew.ini'), src('src/config.h')
-    assert re.search(r'^FrameRateCap=0$', ini, re.M) and srcscan.has(crew, 'int frameRateCap=0;')
-    assert all('FrameRateCap' not in flips.get(installer.SECTION, {}) for _, flips in installer.DEFAULTS_STEPS)
+    assert re.search(r'^FrameRateCap=170$', ini, re.M) and srcscan.has(crew, 'int frameRateCap=170;')
+    assert installer.NEW_DEFAULTS_1127[installer.SECTION] == {'FrameRateCap': ('0', '170')}
+    steps = [m for m, flips in installer.DEFAULTS_STEPS if 'FrameRateCap' in flips.get(installer.SECTION, {})]
+    assert steps == [installer.DEFAULTS_MARK_1127], steps
+    text, flipped = installer.apply_new_defaults('[VehicleCrew]
+Enabled=1
+FrameRateCap=0
+')
+    assert 'FrameRateCap' in flipped and 'FrameRateCap=170' in text and installer.DEFAULTS_MARK_1127 in text
+    text2, flipped2 = installer.apply_new_defaults(text.replace('FrameRateCap=170', 'FrameRateCap=0'))
+    assert 'FrameRateCap' not in flipped2 and 'FrameRateCap=0' in text2, 'the player turned it back to 0 after the step'
+    kept, _ = installer.apply_new_defaults('[VehicleCrew]
+FrameRateCap=144
+')
+    assert 'FrameRateCap=144' in kept
 
 @test
 def high_cam_default_migrates() -> None:
