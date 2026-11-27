@@ -524,6 +524,7 @@
   "carrier_drone_net": {
    "labels": [
     "plugin-air",
+    "plugin-core",
     "plugin-native",
     "plugin-support"
    ],
@@ -1122,6 +1123,7 @@
   },
   "command_protocol": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "plugin-net",
     "plugin-support"
@@ -4706,6 +4708,7 @@
   },
   "map_cmd_check": {
    "labels": [
+    "plugin-core",
     "plugin-native",
     "plugin-support"
    ],
@@ -4751,6 +4754,7 @@
   },
   "map_pvp_input": {
    "labels": [
+    "plugin-core",
     "plugin-enemy",
     "plugin-native",
     "plugin-net",
@@ -7107,6 +7111,15 @@
    "labels": [
     "plugin-hud",
     "plugin-native"
+   ],
+   "scripts": []
+  },
+  "screen_view": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
