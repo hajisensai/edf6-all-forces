@@ -20,6 +20,38 @@ import test_domains as td  # noqa: E402
 BUILD = os.path.join(ROOT, 'build')
 
 
+_REPO: list = []
+
+
+def shared_repo() -> td.Repo:
+    """One Repo for the tests reading this repository as it is (OnTheBuild, BlindScans): a Repo only memoizes what it
+    reads from the files (each module's imports, closures), and building its closures again took a minute of this
+    test's (2026-11-27: OnTheBuild's test_deps, then the same selftest_deps from a fresh Repo)."""
+    if not _REPO:
+        _REPO.append(td.Repo())
+    return _REPO[0]
+
+
+@contextlib.contextmanager
+def scans_read_once():
+    """td.blind_scans of each (file, modules) parsed once while it lasts: what a file lists depends only on the file,
+    not on SCANNED, so blind_scan_problems' verdicts with each SCANNED entry taken out are the same as parsing anew
+    (each of its calls parsed every test script and tools/selftest.py again: 100 s of this test's)."""
+    real, memo = td.blind_scans, {}
+
+    def once(path: str, local_modules: set[str]):
+        key = (path, frozenset(local_modules))
+        if key not in memo:
+            memo[key] = real(path, local_modules)
+        return list(memo[key])
+
+    td.blind_scans = once
+    try:
+        yield
+    finally:
+        td.blind_scans = real
+
+
 def write(folder: str, name: str, text: str) -> str:
     path = os.path.join(folder, name)
     with open(path, 'w', encoding='utf-8') as f:
@@ -266,7 +298,7 @@ class OnTheBuild(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.repo = td.Repo()
+        cls.repo = shared_repo()
         cls.deps = td.test_deps(BUILD, cls.repo)
         cls.cpp = td.cpp_files(BUILD)
         cls.labels = td.load()
@@ -694,7 +726,10 @@ def imported_glob_naming_a_folder():
                                 'git_in_one_string', 'git_grep_list'})
 
     def test_every_blind_listing_is_declared_or_runs_everything(self) -> None:
-        repo, labels = td.Repo(), td.load()
+        repo, labels = shared_repo(), td.load()
+        scans = scans_read_once()
+        scans.__enter__()
+        self.addCleanup(scans.__exit__, None, None, None)
         self.assertEqual(td.blind_scan_problems(repo, labels), [])
         for key in list(td.SCANNED):   # each declaration is needed: without it the guard fails
             saved = td.SCANNED.pop(key)
@@ -711,7 +746,7 @@ def imported_glob_naming_a_folder():
             del td.SCANNED['tests/nothing.py::gone']
 
     def test_a_declared_listing_is_a_dependency(self) -> None:
-        repo = td.Repo()
+        repo = shared_repo()
         self.assertIn('edf41port/outfits/MENUOBJECT/EDF41_P_RANGER.SGO',
                       repo.declared('tools/selftest.py', {'edf41_outfits_shipped'}))
         self.assertIn('CMakeLists.txt', repo.declared('tools/selftest.py', {'_cmake_plugins'}))

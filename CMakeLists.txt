@@ -204,11 +204,12 @@ foreach(_wav ${_wt_wavs})
   configure_file("${_wav}" "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6VehicleCrew_wt/${_wav_name}" COPYONLY)
 endforeach()
 
-# The installer's native helpers (native/*.cpp: the CMPL codec, CRILAYLA, the SK maps' greedy LZSS and collision trees):
+# The installer's native helpers (native/*.cpp: the CMPL codec, CRILAYLA, the SK maps' greedy LZSS and collision trees,
+# the texture encoders, PNG's scanline filters):
 # pylib/edf6native.py loads them with ctypes, tools/build_release.py bundles the DLL. Each is a port of a Python
 # reference that stays the fallback (tests/test_native_*.py: the same bytes).
 # MODULE, not SHARED: nothing links it, and SHARED libraries are the game's plugins (selftest pack_ships_every_plugin).
-add_library(edf6cmpl MODULE native/cmpl.cpp native/crilayla.cpp native/lzss_greedy.cpp native/aabb_tree.cpp native/dxt1.cpp native/bc7.cpp)
+add_library(edf6cmpl MODULE native/cmpl.cpp native/crilayla.cpp native/lzss_greedy.cpp native/aabb_tree.cpp native/dxt1.cpp native/bc7.cpp native/png.cpp)
 target_compile_options(edf6cmpl PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(edf6cmpl PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pylib")
 
@@ -1103,7 +1104,7 @@ add_executable(wing_turn_test tests/wing_turn_test.cpp)
 target_compile_options(wing_turn_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME wing_turn COMMAND wing_turn_test)
 # ...and the hangar's whole flight home: its capture, its nose, its speed held (src/hangar_recover.h; test hub #42). Its
-# negative controls run under playerjet_recovery (tools/playerjet_recovery_check.py).
+# negative controls run under playerjet_recovery_<I> (tools/playerjet_recovery_check.py).
 add_executable(hangar_recover_test tests/hangar_recover_test.cpp)
 target_compile_options(hangar_recover_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME hangar_recover COMMAND hangar_recover_test)
@@ -1625,8 +1626,11 @@ add_test(NAME ifc_model COMMAND ifc_model_test)
 add_test(NAME ifc_model_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_guard.py")
 add_test(NAME ifc_model_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ifc_model_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(ifc_model_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
-    --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
+# In shares run side by side (each case a compile of its own): every 4th case from the I-th.
+foreach(_shard RANGE 0 3)
+  add_test(NAME playerjet_recovery_${_shard} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
+      --build-dir "${CMAKE_BINARY_DIR}" --negative-controls --shard ${_shard}/4)
+endforeach()
 # Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
 add_executable(drill_heat_test EXCLUDE_FROM_ALL tests/drill_heat_test.cpp)
 target_link_libraries(drill_heat_test PRIVATE edf6common user32)
@@ -2479,6 +2483,9 @@ add_dependencies(offline_checks edf41_sound_bank_test)
 add_test(NAME edf41_sound_bank COMMAND edf41_sound_bank_test)
 add_test(NAME edf41_sound_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_sound_lifecycle_test.py")
 add_test(NAME tracked_install COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_install.py")
+# The test processes' shared store of the tracked vehicles' builds (pylib/derivedcache.py): off for the installer, a hit
+# only for the same key, a torn entry built again, a stored build the same as a fresh one.
+add_test(NAME derived_cache COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_derivedcache.py")
 # Its lifecycle classes in one test, NativeRangeTests (a ~2 min build a vehicle) one vehicle a shard (EDF6_TEST_SHARD;
 # all in one run took ~330 s).
 add_test(NAME tracked_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_range.py"
@@ -3135,13 +3142,16 @@ add_test(NAME aura_vehicles_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 # otherwise starts a thread per core in each (busy-waiting between calls): N processes x every core oversubscribed.
 # And the installer's messages in Chinese (pylib/i18n.py EDF6_LANG) whatever the machine's display language: CI's
 # windows-latest is English, and the tests compare the Chinese words (tools/selftest.py installer_speaks_english: English).
+# And one store of the game-derived builds for every test process (pylib/derivedcache.py EDF6_DERIVED_CACHE): each test
+# built the same tracked vehicles from Root.cpk again (tools/selftest.py gives its workers the same folder).
 get_property(_all_tests DIRECTORY PROPERTY TESTS)
 foreach(_test IN LISTS _all_tests)
   get_test_property(${_test} ENVIRONMENT _env)
   if(NOT _env)
     set(_env)
   endif()
-  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh)
+  list(APPEND _env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 EDF6_LANG=zh
+       "EDF6_DERIVED_CACHE=${CMAKE_BINARY_DIR}/derived-cache")
   set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${_env}")
 endforeach()
 
