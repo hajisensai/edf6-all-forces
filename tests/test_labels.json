@@ -1117,8 +1117,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -4661,23 +4659,6 @@
     "tests/test_level_list.py"
    ]
   },
-  "live_set": {
-   "labels": [
-    "edf41",
-    "native-codec",
-    "plugin-air",
-    "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
-    "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
-    "plugin-support",
-    "test-data"
-   ],
-   "scripts": []
-  },
   "loadout_generate": {
    "labels": [
     "autoturret-tools",
@@ -5239,6 +5220,13 @@
    ],
    "scripts": []
   },
+  "native_bone_update": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "native_cmpl": {
    "labels": [
     "native-codec",
@@ -5326,8 +5314,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -5441,8 +5427,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -5464,8 +5448,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -5510,8 +5492,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -6665,8 +6645,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -7526,6 +7504,24 @@
    ],
    "scripts": []
   },
+  "step_objects": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "step_objects_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/step_objects_guard.py"
+   ]
+  },
   "stock_store_loadouts": {
    "labels": [
     "autoturret-tools",
@@ -7713,8 +7709,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -7950,6 +7944,14 @@
    "scripts": [
     "tests/sync_load_probe_native_audit.py"
    ]
+  },
+  "target_grid": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
   },
   "team_native": {
    "labels": [
@@ -15905,8 +15907,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "tools-misc"
