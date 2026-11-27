@@ -321,8 +321,8 @@ void RainTriggerCheck() {
 // The 2026-11-27 log's missile rain flown again (vc.log.1 15:34:28.670 - vc.log 15:35:08.134): a wing at 110 m/s (its
 // real speed) turning at 3.6 g (its ~340 m circles) held level at mark + kRainAlt, its nose toward its target as
 // RainWant's, the stock map's soft box (x -747..750, z -1250..250), spawned at (-1575,1200) on its line to the mark
-// (-182,264,-962), its target at (-630,164,-560). `arriving`: the soft edge lets it be till it has been inside
-// (airbound::Arriving), else KeepIn's `back` from its spawn as before; `trigger` RainTrigger, else the 0.8 rad cone it
+// (-182,264,-962), its target at (-630,164,-560). `arriving`: the soft edge holds it in its arrival box (airbound.h
+// ArriveBox / Arrive: drawn in after it) till that is the soft box, else KeepIn's `back` from its spawn as before; `trigger` RainTrigger, else the 0.8 rad cone it
 // had. The ms after it came its salvo goes, 0 if its window ended first.
 unsigned long long RainLogReplay(bool arriving,bool trigger) {
     namespace ab=crew::airbound;
@@ -333,7 +333,8 @@ unsigned long long RainLogReplay(bool arriving,bool trigger) {
     crew::vec::Normalize(head);
     float vel[3]={head[0]*speed,0.0f,head[2]*speed};
     const Line line=LineThrough(mark,pos,head);
-    bool back=false,arrived=false;
+    bool back=false,coming=arriving && !ab::Inside(soft,pos);
+    ab::Box held=coming ? ab::ArriveBox(soft,pos) : soft;
     signed char turn=0;
     float asked=0.0f;
     int phase=0;
@@ -356,7 +357,8 @@ unsigned long long RainLogReplay(bool arriving,bool trigger) {
             if(lockAt && ms-lockAt>=kLockMs)return ms;
         }
         float steer[3]={want[0],0.0f,want[2]};
-        if(!(arriving && ab::Arriving(soft,pos,&arrived)))ab::KeepIn(soft,pos,vel,r,react,steer,&back,&turn);
+        if(coming && ab::Arrive(soft,held,pos)){coming=false;back=false;turn=0;}
+        ab::KeepIn(coming ? held : soft,pos,vel,r,react,steer,&back,&turn);
         // The wing (airbound_check's): its heading turned toward `steer` at g, after `react` s of asking.
         const float have=std::atan2(vel[2],vel[0]),to=std::atan2(steer[2],steer[0]);
         float d=to-have;
@@ -376,7 +378,9 @@ void RainLog() {
     const unsigned long long edgeOnly=RainLogReplay(true,false),coneOnly=RainLogReplay(false,true);
     std::printf("      the log's rain: as it flew %llu ms (0: never); now %llu ms; the edge fixed alone %llu, the cone alone %llu\n",was,
                 now,edgeOnly,coneOnly);
-    Check(was==0,"the log's rain as it flew: its window ended with no salvo (the report)");
+    // `was` is no longer the log's flight: it flies today's KeepIn, whose `back` past a corner asks kBackIn / sqrt 2 of
+    // each side (airbound.h) -- the old kBackIn on each, more than any heading has there, held it round the target 29 s.
+    Check(edgeOnly>0 && edgeOnly<20000,"the log's rain, its arrival held by its arrival box: its salvo goes on its way in");
     Check(now>0 && now<20000,"the log's rain now: its salvo goes on its way in, inside 20 s of its coming");
 }
 

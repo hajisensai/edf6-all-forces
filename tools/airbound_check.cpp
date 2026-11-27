@@ -113,14 +113,6 @@ int main() {
     Check(ClampIn(soft,post,1400.0f) && Near(post[0],1400.0f,0.1f) && Near(post[2],-1400.0f,0.1f) && post[1]==30.0f,"post clamped in");
     float home[3]={100.0f,0.0f,-200.0f};
     Check(!ClampIn(soft,home,1400.0f) && home[0]==100.0f && home[2]==-200.0f,"post inside kept");
-    // A sortie coming in from off the map: let be till it has been inside once, then held by the edge for good.
-    {
-        bool arrived=false;
-        const float off[3]={4000.0f,0.0f,0.0f},in[3]={2700.0f,0.0f,0.0f};
-        const bool a=Arriving(soft,off,&arrived),b=Arriving(soft,off,&arrived),out=!arrived;
-        const bool c=Arriving(soft,in,&arrived),d=Arriving(soft,off,&arrived);
-        Check(a && b && out && !c && arrived && !d,"arriving: free till first inside, then the edge's");
-    }
     // A turn's reach: straight out, its radius plus the roll; along the line, nothing; halfway, r (1 - cos 30).
     Check(Near(Excursion(200.0f,200.0f,1000.0f,1.0f),1200.0f,0.5f),"excursion straight out");
     Check(Excursion(200.0f,0.0f,1000.0f,1.0f)==0.0f && Excursion(200.0f,-50.0f,1000.0f,1.0f)==0.0f,"excursion along / in");

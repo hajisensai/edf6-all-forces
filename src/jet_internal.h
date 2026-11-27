@@ -534,8 +534,6 @@ struct Sortie {
     float strafeLead=0.0f;
     bool reentered=false;
     float reenterSide=1.0f;
-    // Inside its soft box once since it came (airbound.h Arriving): till then the soft edge does not hold it.
-    bool arrived=false;
 };
 struct Jet {
     ObjRef ref;              // the vehicle: address and weak-this control block, on which a weak reference is

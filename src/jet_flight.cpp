@@ -656,9 +656,10 @@ void SoftEdge(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float react=kReact+0.5f*kPi*0.5f/(k.roll>0.1f ? k.roll : 0.1f);
     float band=0.0f;
     const airbound::Box own=JetSoftBox(j,&band);
-    // Made past it (a call's arrival from off the map), it is arriving: held in its arrival box (airbound.h ArriveBox),
-    // drawn in after it, until that is its soft box. Taken as one that had flown out past it, it was turned "back in
-    // first" on its first frame, levelled and, past two sides, flown round in circles at the edge (2026-11-27 log).
+    // Made past it (a call's arrival from off the map, a sortie on its pass's line or not), it is arriving: held in its
+    // arrival box (airbound.h ArriveBox), drawn in after it, until that is its soft box. Taken as one that had flown out
+    // past it, it was turned "back in first" on its first frame, levelled and, past two sides, flown round in circles at
+    // the edge (2026-11-27 log: gun runs 13 s, a missile rain 29 s round its target 117 m inside the third side).
     if(!j.m.edgeSeen) {
         j.m.edgeSeen=true;
         j.m.arriving=!airbound::Inside(own,pos);
@@ -671,7 +672,8 @@ void SoftEdge(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     }
     if(j.m.arriving && airbound::Arrive(own,j.m.arrive,pos)) {
         j.m.arriving=false;j.m.edgeBack=false;j.m.edgeTurn=0;
-        Log("JET v=%p arrived inside its soft edge at (%.0f,%.0f): held by it from here",j.Vehicle(),pos[0],pos[2]);
+        Log("JET v=%p arrived inside its soft edge at (%.0f,%.0f), %llu ms after it was made: held by it from here",j.Vehicle(),
+            pos[0],pos[2],static_cast<unsigned long long>(ms-j.bornAt));
     }
     const airbound::Box soft=j.m.arriving ? j.m.arrive : own;
     const bool was=j.m.edgeBack;
@@ -692,16 +694,7 @@ void SoftEdge(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
     const bool line=j.phase==jetphase::Phase::ferry;   // (withdrawing it is no ferry: jet_logic.h)
     const bool leaving=!SoftEdgeHolds(j);
-    // A sortie flying in from off the map on its pass's line (airbound.h Arriving) is let be until it has been inside:
-    // not `back`, so its pass steers it and its targets in the play area stay its own (jet_combat.cpp).
-    const bool sortie=j.sortie.pass!=SortiePass::none && !j.sortie.done,came=!j.sortie.arrived;
-    if(sortie && airbound::Arriving(soft,pos,&j.sortie.arrived)) {
-        j.m.edgeBack=false;j.m.edgeTurn=0;
-    } else {
-        if(sortie && came)Log("JET v=%p sortie: inside the soft edge at (%.0f,%.0f), %llu ms after it came",j.Vehicle(),pos[0],
-                              pos[2],ms-j.sortie.begun);
-        airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
-    }
+    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
     if(j.m.edgeBack!=was && !line && !leaving)
         Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
             was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,

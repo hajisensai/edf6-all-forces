@@ -7726,9 +7726,6 @@ def soft_edge_wired() -> None:
     # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
     # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
     soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    # A sortie from off the map is let be till it has been inside (airbound::Arriving; the player 2026-11-27, its rain
-    # held 29 s by `back` from its spawn).
-    assert 'airbound::Arriving(soft,pos,&j.sortie.arrived)' in soft_edge
     assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
     # And the paratroop plane on its pass line (ferry_line.h, 2026-10-10): its line's ends stand off the map with room to
     # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made.

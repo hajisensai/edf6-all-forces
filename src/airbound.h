@@ -88,15 +88,6 @@ inline float Depth(const Box& b,const float* p) noexcept {
     return d;
 }
 inline bool Inside(const Box& b,const float* p) noexcept { return Depth(b,p)>=0.0f; }
-// A wing flying in from off the map on a line planned for it (a sortie's pass, support_entry.h AirRoute) is not past a
-// soft edge it was never inside: true while it has not been inside `b` yet, `arrived` latched the first time it is.
-// KeepIn's `back` from its spawn bent its way in by kBackIn off every side it came near and held that until kBackDepth
-// inside: a missile rain spawned outside two sides, its target 117 m inside the third, flew 29 s of `back` turns round the
-// target and never settled on it (2026-11-27 15:34:28-15:34:57 log).
-inline bool Arriving(const Box& b,const float* p,bool* arrived) noexcept {
-    if(!*arrived && Inside(b,p))*arrived=true;
-    return !*arrived;
-}
 // `p` (x, y, z) put inside `b` shrunk by `in` (its y untouched). True when it moved.
 inline bool ClampIn(const Box& b,float* p,float in) noexcept {
     const Box s=Inset(b,in);
