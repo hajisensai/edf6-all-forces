@@ -111,6 +111,67 @@ inline int Flow(const float* w,int n,float width,float bottom,float rowH,float g
     return rows;
 }
 
+// Broken Arrow's action panel (the user, 2026-11-27: 「这个操作方式和显示都抄抄断箭吧」): `n` cells alike, `cellW` x `rowH`,
+// `gap` apart, in the screen's bottom-right corner (the right column at `width-margin`), as many columns as fit in
+// `share` of the width less the margin (at least one, at most `n`); filled left to right from the top row, the bottom
+// row's bottom at `bottom`. A cell wider than the screen less its margins is cut to it. Rows past the screen's top are
+// left out (their cells zero: x1 == x0). Returns the rows used.
+inline int Grid(int n,float cellW,float width,float share,float bottom,float rowH,float gap,float margin,Rect* out) noexcept {
+    for(int i=0;i<n;++i)out[i]=Rect{};
+    if(n<=0)return 0;
+    const float cw=cellW<width-2.0f*margin ? cellW : width-2.0f*margin;
+    if(!(cw>0.0f))return 0;
+    const float room=width*share-margin;
+    int cols=static_cast<int>((room+gap)/(cw+gap));
+    if(cols<1)cols=1;
+    if(cols>n)cols=n;
+    int rows=(n+cols-1)/cols;
+    const int most=static_cast<int>((bottom+gap)/(rowH+gap));
+    if(rows>most)rows=most<0 ? 0 : most;
+    const float x0=width-margin-static_cast<float>(cols)*cw-static_cast<float>(cols-1)*gap;
+    for(int r=0;r<rows;++r) {
+        const float y1=bottom-static_cast<float>(rows-1-r)*(rowH+gap),y0=y1-rowH;
+        for(int c=0;c<cols;++c) {
+            const int i=r*cols+c;
+            if(i>=n)break;
+            const float x=x0+static_cast<float>(c)*(cw+gap);
+            out[i]=Rect{x,y0,x+cw,y1};
+        }
+    }
+    return rows;
+}
+
+// Broken Arrow's selection panel: `n` cards `cardW` x `cardH`, `gap` apart, from `left` rightwards up to `right`, rows
+// upwards from `bottom` (the bottom one first) no higher than `top`. Returns the cards placed (the rest have no room).
+inline int Cards(int n,float cardW,float cardH,float left,float right,float top,float bottom,float gap,Rect* out) noexcept {
+    const int cols=static_cast<int>((right-left+gap)/(cardW+gap));
+    if(cols<1 || n<=0)return 0;
+    int placed=0;
+    for(int i=0;i<n;++i) {
+        const int r=i/cols,c=i%cols;
+        const float y1=bottom-static_cast<float>(r)*(cardH+gap),y0=y1-cardH;
+        if(y0<top)break;
+        const float x=left+static_cast<float>(c)*(cardW+gap);
+        out[i]=Rect{x,y0,x+cardW,y1};
+        ++placed;
+    }
+    return placed;
+}
+
+// The selection's cards (Cards): the selected units grouped by kind (mapcmd::SameKind) and owner, in the order first
+// seen; each group's first unit `first` and its count. Returns the groups (at most `most`).
+struct CardGroup { int first; int count; };
+inline int GroupCards(const char* const* kind,const int* owner,int n,CardGroup* out,int most) noexcept {
+    int k=0;
+    for(int i=0;i<n;++i) {
+        int at=-1;
+        for(int j=0;j<k && at<0;++j)if(owner[out[j].first]==owner[i] && mapcmd::SameKind(kind[out[j].first],kind[i]))at=j;
+        if(at>=0)++out[at].count;
+        else if(k<most)out[k++]=CardGroup{i,1};
+    }
+    return k;
+}
+
 // The button under (x, y) (-1 none) of the `n` laid out.
 inline int Hit(const Rect* r,int n,float x,float y) noexcept {
     for(int i=0;i<n;++i)if(x>=r[i].x0 && x<r[i].x1 && y>=r[i].y0 && y<r[i].y1)return i;

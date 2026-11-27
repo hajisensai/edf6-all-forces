@@ -898,4 +898,11 @@ inline Wave Notes(const float* hz,int n,float gap,float ring) {
 inline Wave MarkOwn() { const float hz[2]={1318.5f,1975.5f};return Notes(hz,2,0.07f,0.06f); }
 inline Wave MarkTeam() { const float hz[3]={1568.0f,1174.7f,1568.0f};return Notes(hz,3,0.08f,0.05f); }
 inline Wave MarkOff() { const float hz[1]={659.3f};return Notes(hz,1,0.0f,0.035f); }
+// The M map's order cues (mapcmd.cpp; the user, 2026-11-27: 「按v上下高度一点反馈没有」): an order taken, two short notes
+// level (Broken Arrow's units answer by voice; EDF6 has no NPC voice to answer with); ALTITUDE up, three notes rising; down,
+// three falling; an order nobody took, two low notes.
+inline Wave CmdAck() { const float hz[2]={1046.5f,1046.5f};return Notes(hz,2,0.06f,0.03f); }
+inline Wave CmdUp() { const float hz[3]={783.99f,1046.5f,1396.9f};return Notes(hz,3,0.06f,0.04f); }
+inline Wave CmdDown() { const float hz[3]={1396.9f,1046.5f,783.99f};return Notes(hz,3,0.06f,0.04f); }
+inline Wave CmdRefuse() { const float hz[2]={392.0f,329.6f};return Notes(hz,2,0.09f,0.035f); }
 }  // namespace crew::vsynth

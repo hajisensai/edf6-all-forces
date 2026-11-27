@@ -36,7 +36,8 @@ bool Running() noexcept;   // Start succeeded (Beat keeps it going)
 // a rail gun's discharge near and far, its capacitors charging and its ready click; a 40 mm grenade launcher's thump, a
 // rocket off its rail and the next one latched on; the cases landing (a medium gun's brass, a tank gun's stub base, a
 // grenade's aluminium); the separate loading's breech opening, shell rammed, charge module and primer. Last the Q mark's
-// cues (qmark.cpp): this machine's player marked, a teammate marked, a mark let go (not heard where they are: UI cues).
+// cues (qmark.cpp): this machine's player marked, a teammate marked, a mark let go (not heard where they are: UI cues);
+// after the Sazabi's shield, the M map's order cues (mapcmd.cpp PlayCue: taken, altitude up / down, refused).
 enum Clip : int { kClipTurret, kClipTurretStop,
                   kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipMg, kClipGatling,
                   kClipBurstTail, kClipAutocannon, kClipBrass, kClipCaseSmall, kClipMissile, kClipSzBeamShot, kClipSzBeamHit,
@@ -46,7 +47,7 @@ enum Clip : int { kClipTurret, kClipTurretStop,
                   kClipGunHeavyNear, kClipGunHeavyFar, kClipRailShot, kClipRailFar, kClipRailCharge, kClipRailReady,
                   kClipGrenadeShot, kClipRocketRail, kClipRocketLoad, kClipCaseMedium, kClipCaseStub, kClipCaseGrenade,
                   kClipBreechOpen, kClipShellRam, kClipCharge, kClipPrimer, kClipMarkOwn, kClipMarkTeam, kClipMarkOff,
-                  kClipSzShieldBlock, kClipCount };
+                  kClipSzShieldBlock, kClipCmdAck, kClipCmdUp, kClipCmdDown, kClipCmdRefuse, kClipCount };
 // The Sazabi's one-shots' clips in sazabi_sound.h SzSfx's order (its missiles the vehicles' launch), its loops' in SzLoop's.
 constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kClipSzSaberOff,kClipSzWhoosh,kClipSzSaberHit,
                                 kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,

@@ -58,10 +58,18 @@
 #include "npc_mark.h"
 #include "support_call.h"
 #include "support_aircraft.h"
+#include "jetaudio.h"
+#include "sound.h"
 #include "support_points.h"
 #include "support_warning.h"
 #include "barrage_plan.h"
 #include "transport.h"
+#include "loadout_store.h"
+#include "map_loadout.h"
+#include "mod_file.h"
+#include "support_net.h"
+#include "support_variants.h"
+#include "support_config.h"
 #include <Xinput.h>
 #include <algorithm>
 #include <atomic>
@@ -113,6 +121,9 @@ struct Game {
     float bx,by,moved;
     wchar_t note[80];
     ULONGLONG noteAt;
+    // The last ALTITUDE given (the user, 2026-11-27: 「按v上下高度一点反馈没有」): the aircraft it switched (their tags blink
+    // mapcue::kSwitchMs), when.
+    mapcmd::UnitKey altSwitched[kCmdUnits];int altSwitchedN;ULONGLONG altSwitchedAt;
     int button;                 // the button a click let go on this frame (mapbtn::Id), -1 none
     // What the next left click on the ground is (one at a time: arming one disarms the other): a point order's point
     // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
@@ -128,6 +139,9 @@ struct Game {
     int entryTurn=0;
     // The armed support's composed load (map_buttons.h ComposePanel), while it has seats; -1 none.
     int composeEntry=-1;SupportLoadout compose{};
+    // The armed support's loadout panel (map_loadout.h, LoadoutRows): built for this entry (-1: none), when (its rows'
+    // states change as the mission preloads and a peer's hello comes: built again every kLoadoutRowsMs), the rows.
+    MapLoadoutReadout loadout{};int loadoutBuilt=-1;ULONGLONG loadoutAt=0;
     bool armedClick=false;
     int supportPick;
     int supportTab=0;          // the bar's tab shown (a click on a tab; [ ] picking into another tab: that tab)
@@ -149,7 +163,7 @@ struct Game {
     char subKind[24]{};
     // The pings shown (F1-F4 here, the room's heard: command protocol v11), oldest first.
     MapCommandReadout::Ping ping[MapCommandReadout::kPings]{};int pings=0;
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,stats,place,pvp,enemy,legend };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,loadout,stats,place,pvp,enemy,legend };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; PvpStatus pvp{}; enemy_control::Snapshot enemy{}; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -205,6 +219,7 @@ struct View {
     int supportEntry[kMapSupportHits]{};
     int supportTop=0,supportRows=0,supportFit=0;   // the window of the tab's rows the bar showed (map_buttons.h ColumnWindow)
     int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
+    int loadouts=0;mapbtn::Rect loadout[maploadout::kRowsMost]{};int loadoutCode[maploadout::kRowsMost]{};
     bool pvpVisible=false;
     int pvps=0;mapbtn::Rect pvp[kMapPvpItems]{};int pvpCode[kMapPvpItems]{};PvpStatus pvpStatus{};
     bool enemyVisible=false;int enemies=0;mapbtn::Rect enemy[kMapEnemyItems]{};int enemyCode[kMapEnemyItems]{};enemy_control::Snapshot enemyStatus{};
@@ -518,6 +533,32 @@ int ActiveCount(const Game& g) noexcept {
     for(int i=0;i<g.count;++i)n+=Active(g,g.list[i]) ? 1 : 0;
     return n;
 }
+// The active selection's aircraft by altitude: this machine's by their `high` (heli.cpp / jet.cpp set it as ALTITUDE is
+// given), another machine's unknown (its authority keeps it; ALTITUDE skips them: notAuthority).
+mapcue::Altitudes ActiveAltitudes(const Game& g) noexcept {
+    mapcue::Altitudes a;
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(!Active(g,e) || !Takes(e,Order::altitude))continue;
+        if(!IsOnlineAuthority(e.u.v))++a.unknown;
+        else if(e.u.high)++a.high;
+        else ++a.low;
+    }
+    return a;
+}
+// An order's cue (mapcmd_cue.h), heard from nowhere like the Q mark's (qmark.cpp PlayCues), at MapCueVolume.
+void PlayCue(mapcue::Cue cue) noexcept {
+    const float v=Cfg().mapCueVolume;
+    if(cue==mapcue::Cue::none || !(v>0.0f) || !Cfg().enabled)return;
+    const int clip=cue==mapcue::Cue::up ? audio::kClipCmdUp : cue==mapcue::Cue::down ? audio::kClipCmdDown :
+                   cue==mapcue::Cue::refuse ? audio::kClipCmdRefuse : audio::kClipCmdAck;
+    __try {
+        if(!audio::ClipsReady())return;   // made on their own thread from the first call: the first cue may be missed
+        audio::Beat(GameEffectVolume());
+        const audio::Heard h{1.41421356f*v,0.0f,1.0f,0.0f,1.0f,audio::AirCutoff(0.0f),false};
+        audio::PlayOnce(clip,h);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
 // Whether any active unit takes `o` (a key for an order none of them has does nothing: its note says so).
 bool AnyTakes(const Game& g,Order o) noexcept {
     for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],o))return true;
@@ -614,6 +655,8 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
     i=mapbtn::Hit(v.compose,v.composes,x,y);
     if(i>=0){hit.kind=Game::UiKind::compose;hit.entry=v.composeCode[i];return hit;}
+    i=mapbtn::Hit(v.loadout,v.loadouts,x,y);
+    if(i>=0){hit.kind=Game::UiKind::loadout;hit.entry=v.loadoutCode[i];return hit;}
     i=mapbtn::Hit(v.enemy,v.enemies,x,y);
     if(i>=0){hit.kind=Game::UiKind::enemy;hit.entry=v.enemyCode[i];hit.enemy=v.enemyStatus;return hit;}
     i=mapbtn::Hit(v.pvp,v.pvps,x,y);
@@ -646,6 +689,58 @@ void Arm(Game& g,bool order,Order o,int support) noexcept {
         g.composeEntry=-1;g.compose=SupportLoadout{};
         if(g.armedSupport>=0 && SupportCallPreset(g.armedSupport,&g.compose))g.composeEntry=g.armedSupport;
     }
+}
+// The armed support's loadout panel (the user, 2026-11-27: 「包括m里面装配东西」; map_loadout.h): a call whose hull takes a
+// SupportVehicle_<KEY> (a tank's, a jet's, a mech's: support_dispatch.cpp HullOf) lists stock and the variants the
+// installer generated for its body (mod_file: Mods/OBJECT as installed; one written while the game runs is no choice
+// here), the key's value now lit. Built again when armed, after a pick and every kLoadoutRowsMs. A support with seats
+// keeps its composition panel beside the row too (hud_map.cpp: the loadout panel right of it).
+constexpr ULONGLONG kLoadoutRowsMs=1000;
+maploadout::State LoadoutState(const wchar_t* file) noexcept {
+    if(!SupportVariantReady(file))return maploadout::State::next;   // not preloaded this mission: the call flies stock
+    // Host: a peer without it flies stock too (support_dispatch.cpp DecideVariant); a client is told nothing (true).
+    return SupportPeersHaveVariantFile(VariantHash(file)) ? maploadout::State::ready : maploadout::State::peerMissing;
+}
+void LoadoutRows(Game& g) noexcept {
+    const int entry=g.armedSupport;
+    const ULONGLONG now=GetTickCount64();
+    if(entry==g.loadoutBuilt && (entry<0 || now-g.loadoutAt<kLoadoutRowsMs))return;
+    g.loadoutBuilt=entry;g.loadoutAt=now;g.loadout=MapLoadoutReadout{};
+    const int hull=entry>=0 ? SupportHullCatalog(entry) : -1;
+    const wchar_t* key=hull>=0 ? SupportCallKey(hull) : nullptr;
+    const VehicleBody body=key ? VehicleBodyOfKey(key) : VehicleBody::none;
+    if(body==VehicleBody::none || hull>=kSupportConfigUnits)return;
+    const VehicleLoadout& current=SupportCfg().vehicle[hull];
+    const auto& files=mod_file::dirs[0].files;   // Mods/OBJECT
+    const int n=static_cast<int>((std::min)(files.size(),static_cast<std::size_t>(0x7FFFFFFF)));
+    g.loadout.rows=maploadout::BuildRows(body,current.On() && current.body==body ? current : VehicleLoadout{},n,
+                                         [&](int i) noexcept {return files[static_cast<std::size_t>(i)].c_str();},&LoadoutState,
+                                         g.loadout.row,maploadout::kRowsMost);
+    if(g.loadout.rows<=0)return;
+    g.loadout.entry=entry;
+    if(hull!=entry)_snwprintf_s(g.loadout.shared,_countof(g.loadout.shared),_TRUNCATE,L"%ls",SupportCallName(hull));
+}
+// A loadout row clicked: the hull's SupportVehicle_<KEY> set to it (loadout_store.h: the ini written, the config
+// reloaded; online, room_sync.cpp sends the new config on its next tick, the host plans this machine's calls by it).
+void PickLoadout(Game& g,int row) noexcept {
+    if(g.loadout.entry<0 || row<0 || row>=g.loadout.rows)return;
+    const maploadout::Row& r=g.loadout.row[row];
+    if(r.current)return;
+    const wchar_t* key=SupportCallKey(SupportHullCatalog(g.loadout.entry));
+    wchar_t why[160]{};
+    const wchar_t* shown=r.value[0] ? r.value : hudtext::Tr(hudtext::Tx::loadoutStock);
+    if(key && SaveSupportLoadout(LoadoutField::vehicle,key,r.value,why,_countof(why))) {
+        const hudtext::Tx word=r.state==maploadout::State::ready ? hudtext::Tx::loadoutReady : r.state==maploadout::State::next ?
+                               hudtext::Tx::loadoutNext : r.state==maploadout::State::peerMissing ? hudtext::Tx::loadoutPeerMissing :
+                               hudtext::Tx::loadoutStock;
+        Note(g,hudtext::Tr(hudtext::Tx::cmdLoadoutSaved),shown,hudtext::Tr(word));
+        PlayCue(mapcue::Cue::ack);
+    } else {
+        Note(g,hudtext::Tr(hudtext::Tx::cmdLoadoutFailed),why[0] ? why : L"?");
+        PlayCue(mapcue::Cue::refuse);
+    }
+    g.loadoutBuilt=-2;   // built again now, from the config as saved
+    LoadoutRows(g);
 }
 // The formation menu's pick (map_buttons.h MenuEntry): a defence for the selected squads on a guard point, or the march
 // of the player's squads; the menu closed.
@@ -730,6 +825,7 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
     if(hit.kind==Game::UiKind::fold){g.panelOpen=!g.panelOpen;return;}
     if(hit.kind==Game::UiKind::formation){if(mapbtn::MenuDismount(hit.entry))PickDismount(g,hit.entry);else PickFormation(g,hit.entry);return;}
+    if(hit.kind==Game::UiKind::loadout){PickLoadout(g,hit.entry);return;}
     if(hit.kind==Game::UiKind::compose) {   // a kind: one more aboard; a taken seat: emptied
         if(g.composeEntry>=0 && !mapbtn::ComposeApply(g.compose,SupportCallSeats(g.composeEntry),hit.entry) && hit.entry>=0)
             Note(g,L"%ls",hudtext::Tr(hudtext::Tx::supportLoadoutTooMany));
@@ -1464,8 +1560,23 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     if(InSession())for(int i=0;i<g.count;++i)
         if(!queues[i] && !IsOnlineAuthority(g.list[i].u.v))
             hostWayCount[i]=ReadMapCommandWays(g.list[i].id,&hostNow[i],hostWays[i],mapcmd::kWaypointsMost);
+    // The aircraft's altitude (the map's tags): this machine's high / low and their height over the ground below.
+    const mapcue::Altitudes altitudes=ActiveAltitudes(g);
+    std::int8_t high[kCmdUnits];float agl[kCmdUnits];std::uint32_t altSince[kCmdUnits];
+    const ULONGLONG nowMs=GetTickCount64();
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        high[i]=-1;agl[i]=-1.0f;altSince[i]=0xFFFFFFFFu;
+        if(e.owner!=Owner::heli && e.owner!=Owner::jet)continue;
+        if(IsOnlineAuthority(e.u.v))high[i]=e.u.high ? 1 : 0;
+        float ground=0.0f;
+        if(MapGroundNear(e.u.pos[0],e.u.pos[2],e.u.pos[1],&ground) && std::isfinite(ground))agl[i]=(std::max)(0.0f,e.u.pos[1]-ground);
+        if(g.altSwitchedAt && nowMs-g.altSwitchedAt<mapcue::kSwitchMs)
+            for(int k=0;k<g.altSwitchedN;++k)if(mapcmd::SameKey(g.altSwitched[k],Key(e.id)))altSince[i]=static_cast<std::uint32_t>(nowMs-g.altSwitchedAt);
+    }
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
+    r.altitudes=altitudes;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
     r.allowedOrders=0;r.selectedSquads=0;
     r.holdFireOn=r.highOn=false;
@@ -1492,6 +1603,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
         m.of=reinterpret_cast<std::uintptr_t>(e.id.obj);
         m.groups=groups[i];m.ways=0;
+        m.high=high[i];m.agl=agl[i];m.altSince=altSince[i];m.holdFire=e.u.holdFire;
         if(const UnitQueue* q=queues[i])
             for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
         else if(hostWayCount[i]) {   // another machine's: its current order from its host (this machine lists it with none)
@@ -1515,6 +1627,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.march=NpcMarchShape();
     r.armedOrder=g.armedOrder;r.armed=g.armed;r.supportArmed=g.armedSupport;r.supportPick=g.supportPick;
     r.composeEntry=g.composeEntry;r.composeSeats=g.composeEntry>=0 ? SupportCallSeats(g.composeEntry) : 0;r.compose=g.compose;
+    r.loadout=g.loadout;
     r.supports=(std::min)(SupportMenuCount(),kMapSupports);   // the sea rescue is no map call
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
@@ -1723,7 +1836,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // Broken Arrow's keys (map_keys.h). Q F R U arm a point order (the next left click its point; again: not), U twice
     // unloads where they are; H V switch (the param from the active units' state); Z X C B at once. A key for an order
     // none of the active units has does nothing but say so.
-    const auto unavailable=[&](Order o){Note(g,hudtext::Tr(hudtext::Tx::cmdUnavailable),OrderText(o));};
+    const auto unavailable=[&](Order o){Note(g,hudtext::Tr(hudtext::Tx::cmdUnavailable),OrderText(o));PlayCue(mapcue::Cue::refuse);};
     const auto armKey=[&](mapkeys::Key key,Order o) {
         if(!edge(key))return;
         if(g.armedOrder && g.armed==o){Arm(g,false,Order::none,-1);Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
@@ -1746,10 +1859,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && !g.list[i].u.holdFire)holdParam=1;   // any not holding: all hold
     }
     if(now1(mapkeys::altitude,Order::altitude)) {
-        p.altitude=true;altitudeParam=mapcmd::kAltitudeHigh;
-        bool low=false;
-        for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],Order::altitude) && !g.list[i].u.high)low=true;
-        if(!low)altitudeParam=mapcmd::kAltitudeLow;   // all high already: down
+        // Up unless every one this machine flies is high already (another machine's are not given it: notAuthority).
+        p.altitude=true;altitudeParam=mapcue::VGoesHigh(ActiveAltitudes(g)) ? mapcmd::kAltitudeHigh : mapcmd::kAltitudeLow;
     }
     p.sprint=now1(mapkeys::sprint,Order::sprint);
     p.smoke=now1(mapkeys::smoke,Order::smoke);
@@ -1837,8 +1948,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The Broken Arrow orders' buttons: the switches as their keys (the param from the active units), the rest at once.
     if(clicked(Id::holdFire)){p.holdFire=true;for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && !g.list[i].u.holdFire)holdParam=1;}
     if(clicked(Id::altitude)) {
-        p.altitude=true;altitudeParam=mapcmd::kAltitudeLow;
-        for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],Order::altitude) && !g.list[i].u.high)altitudeParam=mapcmd::kAltitudeHigh;
+        p.altitude=true;altitudeParam=mapcue::VGoesHigh(ActiveAltitudes(g)) ? mapcmd::kAltitudeHigh : mapcmd::kAltitudeLow;
     }
     if(clicked(Id::sprint)){if(AnyTakes(g,Order::sprint))p.sprint=true;else unavailable(Order::sprint);}
     if(clicked(Id::smoke)){if(AnyTakes(g,Order::smoke))p.smoke=true;else unavailable(Order::smoke);}
@@ -1954,9 +2064,16 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     else if(s.why==mapcmd::Refusal::noUnit)Note(g,L"%ls",Tr(Tx::cmdNoUnit));
     else if(s.why==mapcmd::Refusal::noPoint)Note(g,L"%ls",Tr(Tx::cmdNoGround));
     else if(s.why==mapcmd::Refusal::noMark)Note(g,L"%ls",Tr(Tx::cmdNoMark));
+    if(s.why!=mapcmd::Refusal::none)PlayCue(mapcue::Cue::refuse);
     if(s.issue) {
         int skipped=0;
         const bool queued=queue && mapcmd::PointOrder(s.cmd.order);
+        const bool altitude=s.cmd.order==Order::altitude,altitudeHigh=altitude && s.cmd.param==mapcmd::kAltitudeHigh;
+        mapcmd::UnitKey switching[kCmdUnits];int switchingN=0;   // the ones ALTITUDE reaches (this machine's aircraft)
+        if(altitude)for(int i=0;i<g.count;++i) {
+            const Entry& e=g.list[i];
+            if(Active(g,e) && Takes(e,Order::altitude) && IsOnlineAuthority(e.u.v))switching[switchingN++]=Key(e.id);
+        }
         const int given=Dispatch(g,s.cmd,&skipped,{queued,g.marchPace==1});
         wchar_t tail[40]{};
         if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
@@ -1966,7 +2083,13 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         else if(s.cmd.order==Order::board)Note(g,Tr(Tx::cmdBoardAssigned),g.affected,tail);
         else if(queued)Note(g,Tr(Tx::cmdQueued),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else if(mapcmd::PointOrder(s.cmd.order))Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
+        else if(altitude && given)Note(g,Tr(Tx::cmdAltitudeResult),Tr(altitudeHigh ? Tx::altHigh : Tx::altLow),given,tail);
         else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);
+        if(altitude && given) {
+            std::memcpy(g.altSwitched,switching,sizeof(switching[0])*static_cast<std::size_t>(switchingN));
+            g.altSwitchedN=switchingN;g.altSwitchedAt=GetTickCount64();
+        }
+        PlayCue(mapcue::ForOrder(altitude,altitudeHigh,given));
         Log("MAPCMD %s%s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it; not: %d script, %d riding, %d cannot take it, "
             "%d another machine's, %d refused (%s)",OrderName(s.cmd.order),queued ? " (queued)" : "",s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],active,given,g.count,
             g.skipScript,g.skipRiding,g.skipCannot,g.skipRemote,g.skipFailed,ReasonName(g.failure));
@@ -1974,6 +2097,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(sweep)Sweep(g);
     if(health)Health(g);
     RememberSelection(g);
+    LoadoutRows(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(centred){std::memcpy(centre,centreAt,12);return std::isfinite(centre[0]+centre[1]+centre[2]);}
     if(!picked)return false;
@@ -2003,7 +2127,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
+    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=stepfresh::Now();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -2021,7 +2145,7 @@ void MapCommandSupportButtons(const float* rects,const int* entries,int n,int to
     n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupportHits)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.supports=n;
     view.supportTop=n ? top : 0;view.supportRows=n ? rows : 0;view.supportFit=n ? fit : 0;
-    if(!n)view.composes=0;   // no bar drawn: no composition panel beside it either
+    if(!n)view.composes=view.loadouts=0;   // no bar drawn: no composition or loadout panel beside it either
     for(int i=0;i<n;++i){view.support[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.supportEntry[i]=entries[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -2108,6 +2232,12 @@ void MapCommandEnemyButtons(const float* rects,const int* codes,int n,const enem
     for(int i=0;i<n;++i){view.enemy[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.enemyCode[i]=codes[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
+void MapCommandLoadoutButtons(const float* rects,const int* codes,int n) noexcept {
+    n=rects && codes ? (std::max)(0,(std::min)(n,maploadout::kRowsMost)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.loadouts=n;
+    for(int i=0;i<n;++i){view.loadout[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.loadoutCode[i]=codes[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
 void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept {
     n=rects && codes ? (std::max)(0,(std::min)(n,mapbtn::kComposeItems)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.composes=n;
@@ -2158,7 +2288,7 @@ void SuspendMapCommands() noexcept {
     g.frameAt=0;g.boxing=g.pressing=g.rpressing=g.rStartOk=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=g.rightLine=false;
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;g.dismountMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
     g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);armedHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }

@@ -9,10 +9,12 @@
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "mapcmd_cue.h"
 #include "npc_command.h"
 #include "range_place.h"
 #include "support_call.h"
 #include "transport.h"
+#include "map_loadout_row.h"
 
 namespace crew {
 using mapcmd::Command;
@@ -105,6 +107,8 @@ void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
 void MapCommandSupportButtons(const float* rects,const int* entries,int n,int top=0,int rows=0,int fit=0) noexcept;
 // hud.cpp: the support composition panel's seats and kinds as drawn (`codes`: map_buttons.h ComposeApply's), for the clicks.
 void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept;
+// hud.cpp: the loadout panel's rows as drawn (`codes`: each one's row, MapLoadoutReadout::row), for the clicks.
+void MapCommandLoadoutButtons(const float* rects,const int* codes,int n) noexcept;
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
 // Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
 void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
@@ -171,7 +175,12 @@ constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 // the one it is on its way to (`way`, mapcmd_logic.h Waypoints).
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false;
     std::uint16_t groups=0; std::uint8_t ways=0; float way[mapcmd::kWaypointsMost][3]{};
-    std::uint64_t of=0; };   // `of`: the unit (its top's identity; the list is sorted by address, so not its index)
+    std::uint64_t of=0;      // `of`: the unit (its top's identity; the list is sorted by address, so not its index)
+    // An aircraft's altitude (ALTITUDE, V): `high` 1 high / 0 low / -1 unknown (another machine's: its authority alone
+    // knows); `agl` its height over the ground below, m (-1 none found); `altSince` ms since V switched it (mapcue::kSwitchMs
+    // and over: not lately).
+    std::int8_t high=-1; float agl=-1.0f; std::uint32_t altSince=0xFFFFFFFFu;
+    bool holdFire=false; };   // HOLD FIRE on (the selection's cards)
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=64;
 constexpr int kMapSupportHits=kMapSupports*2;   // its rows and chips as hit (MapCommandSupportButtons)
@@ -179,6 +188,9 @@ constexpr int kMapTransportLinks=16;   // the transports' lines the map draws (M
 // `allowed`: SupportCallForbidden none; `price`: its pt now (SupportCallPrice), `afford` the pool holds them.
 struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; bool allowed; std::int32_t price; bool afford;
                          SupportTab tab; };   // `tab`: the bar's tab it is on
+// The armed support's loadout panel (map_loadout.h): its entry (-1: closed), the call whose hull's loadout it is when
+// another (its name; empty: its own), the rows.
+struct MapLoadoutReadout { int entry=-1; int rows=0; wchar_t shared[40]{}; maploadout::Row row[maploadout::kRowsMost]{}; };
 struct MapCommandReadout {
     bool allowed;              // command framework enabled; each target still validates authority and execution
     bool all;                  // every unit selected (more than one)
@@ -219,6 +231,7 @@ struct MapCommandReadout {
     int composeEntry;
     int composeSeats;
     SupportLoadout compose;
+    MapLoadoutReadout loadout;
     int supports;              // the catalog, in its order
     MapSupportEntry support[kMapSupports];
     SupportReadiness supportReady;
@@ -245,6 +258,7 @@ struct MapCommandReadout {
     float lineFrom[3]{},lineTo[3]{};
     // The selection's switches as the card lights them: HOLD FIRE on, flying high (any of the active units), the paced march.
     bool holdFireOn=false,highOn=false,paced=false;
+    mapcue::Altitudes altitudes{};   // the active selection's aircraft by altitude (the ALTITUDE button's word and tip)
     // The pings (F1-F4; command protocol v11 Kind::ping): this machine's and the room's, each shown kPingMs.
     struct Ping { float at[3]; unsigned kind; std::uint64_t at_ms; bool mine; };
     static constexpr int kPings=8;
