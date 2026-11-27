@@ -77,6 +77,10 @@ test('review: publishing checks the version and that translations have the same 
   assert.equal(res.items.length, 1);
   assert.equal(res.items[0].active, false);
   assert.equal((await call(e, '/api/review/results')).status, 403);
+  // The page shows the results panel to developers only (the flag; the results themselves stay 403 for others).
+  assert.equal((await (await call(e, '/api/review', undefined, { user: 'dev' })).json()).dev, true);
+  assert.equal((await (await call(e, '/api/review', undefined, { user: 'alice' })).json()).dev, false);
+  assert.equal((await (await call(e, '/api/review')).json()).dev, false);
   assert.equal((await call(e, '/api/review/source', undefined, { user: 'alice' })).status, 403);
   const src = await (await call(e, '/api/review/source', undefined, { user: 'dev' })).json();
   assert.deepEqual(src.outlines.map((x) => [x.group, x.book, x.version]), [['a', 1, 1]]);

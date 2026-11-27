@@ -301,8 +301,35 @@ $('remove').addEventListener('click', async () => {
 $('prev').addEventListener('click', () => go(at - 1));
 $('next').addEventListener('click', () => go(at + 1));
 
+// Developers (logged in): every published outline's scores and all comments, newest first.
+let isDev = false;   // from the first load: a score's reply does not repeat it
+async function loadResults() {
+  if (!isDev) return;
+  $('results').classList.remove('hide');
+  $('resultsNote').textContent = '加载中……';
+  let out;
+  try { out = await api('/api/review/results'); } catch (e) { $('resultsNote').textContent = '加载失败：' + e.message; return; }
+  const num = (v) => (v == null ? '-' : v.toFixed(2));
+  const total = out.items.reduce((a, it) => a + it.entries.length, 0);
+  $('resultsNote').textContent = `共 ${out.items.length} 份大纲、${total} 条评分 / 评论。访客文字只作展示。`;
+  $('resultsList').replaceChildren(...out.items.slice().sort((a, b) => b.active - a.active || b.id - a.id).map((it) => h('div', { class: 'report' },
+    h('h3', { style: 'margin:0' }, it.title),
+    h('div', { class: 'muted' }, `${it.group || '（未分组）'} · 第 ${it.book} 份 · 版本 ${it.version} · ${it.active ? '展示中' : '已下架'}`),
+    h('div', {}, h('b', {}, `平均 ★ ${num(it.avg)}（${it.n} 人评分）`), '　',
+      h('span', { class: 'muted' }, Object.entries(it.by_lang).map(([k, v]) => `${LANGS[k]} ${num(v.avg)}（${v.n}）`).join(' · '))),
+    h('div', { class: 'muted' }, '分布：' + [5, 4, 3, 2, 1].map((s) => `${s}★ ${it.entries.filter((e) => e.score === s).length}`).join(' · ')
+      + ` · 只评论 ${it.entries.filter((e) => e.score == null).length}`),
+    it.entries.length ? it.entries.slice().reverse().map((e) => h('div', { class: 'reply' },
+      h('div', { class: 'muted' }, `${e.score ? '★ ' + e.score : '未打分'} · ${e.name || '匿名'} · ${LANGS[e.lang] || e.lang} · 访客 ${e.rater} · `
+        + new Date(e.at).toLocaleString('zh-CN', { hour12: false })),
+      e.body ? h('p', { class: 'reviewBody' }, e.body) : null)) : h('p', { class: 'muted' }, '还没有人评。'))));
+}
+$('reload').addEventListener('click', () => loadResults());
+
 async function load() {
   state = await api('/api/review');
+  isDev = !!state.dev;
+  loadResults();
   order = shuffle(state.items.map((x) => x.id));
   const first = order.findIndex((id) => !state.mine[id]);
   at = first < 0 ? 0 : first;
