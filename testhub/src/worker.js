@@ -10,6 +10,7 @@ import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
 import { storyRoute } from './story.js';
 import { outlineRoute } from './outline.js';
+import { designRoute } from './design.js';
 import { reviewRoute } from './review.js';
 import { shareRoute, putSharePart, headSharePart, publishShare } from './share.js';
 import MISSIONS from './missions.json' with { type: 'json' };
@@ -25,7 +26,7 @@ export const REPORT_STATUSES = ['open', 'doing', 'verify', 'done', 'closed'];
 // And the external review page (/rate.html, src/review.js): anyone reads and scores the published outlines.
 const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css', '/download.html', '/download.js', '/chunked-download.mjs', '/pack-download.mjs',
   '/plan.html', '/plan.js', '/story.html', '/story.js', '/outline.html', '/outline.js', '/groups.js',
-  '/rate.html', '/rate.js', '/ui.js']);
+  '/rate.html', '/rate.js', '/ui.js', '/design.html', '/design.js']);
 const SESSION_DAYS = 60;
 
 export default {
@@ -98,7 +99,7 @@ async function route(request, env) {
     // readable as a visitor (the script digests are not: they are the game's own files).
     if (method === 'GET' && !request.headers.get('authorization')) {
       if (path === '/api/missions') return json({ me: null, missions: MISSIONS });
-      const read = { '/api/plan': planRoute, '/api/story': storyRoute, '/api/outline': outlineRoute };
+      const read = { '/api/plan': planRoute, '/api/story': storyRoute, '/api/outline': outlineRoute, '/api/design': designRoute };
       if (Object.hasOwn(read, path)) return json(await read[path](request, env, null, MISSIONS, groupsOf(accounts), path, url));
     }
     if (path === '/' || path.endsWith('.html')) return redirect('/login.html');
@@ -110,6 +111,10 @@ async function route(request, env) {
   if (path === '/api/missions' && method === 'GET') return json({ me, missions: MISSIONS });
   if (path === '/api/story' || path.startsWith('/api/story/')) {
     const out = await storyRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
+    if (out) return json(out);
+  }
+  if (path === '/api/design' || path.startsWith('/api/design/')) {
+    const out = await designRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
     if (out) return json(out);
   }
   if (path === '/api/outline' || path.startsWith('/api/outline/')) {

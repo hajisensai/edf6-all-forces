@@ -1,10 +1,13 @@
 // The group's missions in campaign order (/story.html, 关卡策划): what each mission is (goal, enemies, story, how it hands
 // over to the next), the stock mission whose map it borrows, and the outline step it plays out (book + step id of the
 // same group's /outline.html). Independent of the stock planning outline (/plan.html) and the game's mission list.
-// Any member of the group edits, moves and deletes any of its missions (as with the outline); every edit names the
+// Any member of the group edits, moves and deletes any of its missions (as with the outline); when the group has an
+// outline open to every account (src/outline.js), any account also adds, edits and moves them (deleting stays with the
+// group). Every edit names the
 // version it was made from, so two people editing one mission at once cannot overwrite each other (the later one gets a 409).
 import { Plan, anonymous, between, canWrite, clean, int, pick, readable, scope } from './plan.js';
 import { HttpError, body } from './http.js';
+import { openGroup, openScope } from './outline.js';
 
 export const STATUSES = ['planned', 'writing', 'testing', 'done'];
 export const STORY_LIMIT = { missions: 1000, title: 100, body: 10000, goal: 2000, enemies: 2000, handoff: 2000 };
@@ -30,13 +33,18 @@ export async function storyRoute(request, env, me, missions, groups, path, url) 
     const shown = await readable(db, me, groups, 'SELECT DISTINCT grp FROM story_missions');
     const group = pick(me, url.searchParams.get('group'), shown, groups);
     const rows = group == null ? { results: [] } : await db.prepare('SELECT * FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all();
-    return { me, group, groups: shown, editable: group != null && canWrite(me, group), limit: L,
+    const member = group != null && canWrite(me, group);
+    const editable = member || (me != null && group != null && await openGroup(db, group));
+    return { me, group, groups: shown, editable, member, limit: L,
       rows: anonymous(me, rows.results.map(({ grp, ...row }) => row), ['author', 'updated_by']) };
   }
   if (request.method !== 'POST' || !['/api/story/save', '/api/story/move', '/api/story/remove'].includes(path)) return null;
   const b = await body(request);
   if (!b || typeof b !== 'object' || Array.isArray(b)) throw new HttpError(400, 'JSON object expected');
-  const group = scope(me, b.group);
+  if (path === '/api/story/remove' && me.role !== 'dev' && b.group != null && String(b.group) !== me.group) {
+    throw new HttpError(403, '只有本组成员能删除关卡');
+  }
+  const group = path === '/api/story/remove' ? scope(me, b.group) : await openScope(db, me, b);
   let row = null;
   if (b.id != null) {
     row = await db.prepare('SELECT * FROM story_missions WHERE id = ?1 AND grp = ?2').bind(int(b.id), group).first();
