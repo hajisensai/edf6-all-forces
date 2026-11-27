@@ -136,6 +136,7 @@ void FullLedger(){Object root;std::vector<std::unique_ptr<Object>> all;all.reser
 }
 }
 namespace crew {
+void Log(const char*,...) noexcept {}   // LazyRows (src/lazy_rows.h) logs a refused allocation
 unsigned char* image=nullptr;
 void* EnemyBossTestFunction(unsigned rva) noexcept {if(rva==boss_pvp_detail::kPublish)return reinterpret_cast<void*>(Publish);if(rva==boss_pvp_detail::kDelete)return reinterpret_cast<void*>(Delete);if(rva==kSetTeam)return reinterpret_cast<void*>(SetTeam);return nullptr;}
 bool EnemyControlOwnsTargetSelector(const void* root,const void* function) noexcept {return selectorOwner.obj==root && selectorOwner.Is(root) && selectorTable && edf::At<const void*>(root,0)==selectorTable && function==selectorFunction;}

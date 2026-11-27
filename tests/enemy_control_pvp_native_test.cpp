@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace crew {unsigned char* image=nullptr;}
+namespace crew {unsigned char* image=nullptr;void Log(const char*,...) noexcept {}}   // Log: LazyRows (src/lazy_rows.h)
 namespace native_pvp_fixture {
 using namespace crew;using namespace crew::native_pvp_detail;
 struct Region {const void* pointer;std::size_t size;};
