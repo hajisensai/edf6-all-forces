@@ -1704,6 +1704,47 @@ int main() {
             reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5010)),reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5020))};
         Expect(watchedTargets==all,"Gather watches every enemy of the frame, once an object");
     }
+    // stepobj (common/edf/step_objects.h): with the fixture's objects in a stand-in System's list for this frame, a
+    // soldier's PreThink and Think ask edf::Readable for none of them (stress:100: ~63,000 asks a step before).
+    {
+        struct Node { void* next; void* prev; void* object; void* ctrl; };
+        alignas(16) static unsigned char sys[0x1000]{};
+        static Node nodes[4]{},listHead{},addedHead{};
+        static unsigned char blocks[4][0x10]{};
+        InitializeCriticalSection(reinterpret_cast<CRITICAL_SECTION*>(sys+stepobj::kLock));
+        void* objects[4]={human,dead,other,vehicle};
+        listHead.next=listHead.prev=&listHead;addedHead.next=addedHead.prev=&addedHead;
+        for(int i=0;i<4;++i) {
+            Put<int>(blocks[i],8,1);
+            nodes[i]={&listHead,listHead.prev,objects[i],blocks[i]};
+            static_cast<Node*>(listHead.prev)->next=&nodes[i];listHead.prev=&nodes[i];
+        }
+        Put<void*>(sys,stepobj::kObjects,&listHead);Put<std::uint64_t>(sys,stepobj::kObjects+8,4);
+        Put<void*>(sys,stepobj::kAdded,&addedHead);Put<std::uint64_t>(sys,stepobj::kAdded+8,0);
+        Put<void*>(sys,stepobj::kScene,sys);
+        static void* sysPtr=sys;
+        struct Stock { static void __fastcall Run(void*,const float*) {} };
+        const ThinkFn keep=nextThink[0];nextThink[0]=&Stock::Run;
+        const float dt=1.0f/60.0f;
+        const auto asks=[&]() {
+            Reset();Put<void*>(human,kLeader,other);++frame;world.frame=frame;
+            edf::TakeReadableStats();
+            PreThink(human);ThinkHook<0>(human,&dt);
+            return edf::TakeReadableStats().asks;
+        };
+        asks();
+        const unsigned long long off=asks();
+        stepobj::Install(const_cast<const void* const*>(&sysPtr));stepobj::Released(true);
+        const unsigned long long on=asks();
+        const stepobj::Stats st=stepobj::TakeStats();
+        stepobj::Install(nullptr);
+        nextThink[0]=keep;
+        char what[200];
+        std::snprintf(what,sizeof(what),"a soldier's PreThink + Think: %llu Readable asks without stepobj, %llu with (%llu found in the copy)",
+                      off,on,st.yes);
+        Expect(off>0 && on*4<=off && on<=4,what);
+        Expect(st.copies==1,"one copy of the System's list for the frame");
+    }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
 #endif
