@@ -222,10 +222,22 @@ private:
         const std::size_t m=v.size();
         if(m<16){lo=*std::min_element(v.begin(),v.end());hi=*std::max_element(v.begin(),v.end());return;}
         const std::size_t k=m/64>0 ? m/64 : 1;
-        std::nth_element(v.begin(),v.begin()+static_cast<std::ptrdiff_t>(k),v.end());
-        const float q0=v[k];
-        std::nth_element(v.begin(),v.begin()+static_cast<std::ptrdiff_t>(m-1-k),v.end());
-        const float q1=v[m-1-k];
+        const auto first=v.begin(),last=v.end();
+        const float pivot=v[m/2];
+        const bool allEqual=v.front()==pivot && v.back()==pivot &&
+            std::all_of(first,last,[pivot](float x){return x==pivot;});
+        float q0=pivot,q1=pivot;
+        if(!allEqual) {
+            // Each rank only needs to search the side that contains it. Small arrays use the original selection.
+            const auto split=m>=256 ? std::partition(first,last,[pivot](float x){return x<pivot;}) : first;
+            const auto select=[first,split,last](auto rank) {
+                const bool below=rank<split;
+                std::nth_element(below ? first : split,rank,below ? split : last);
+                return *rank;
+            };
+            q0=select(first+static_cast<std::ptrdiff_t>(k));
+            q1=select(first+static_cast<std::ptrdiff_t>(m-1-k));
+        }
         const float pad=(q1-q0)*0.25f+2.0f*cell;
         lo=q0-pad;hi=q1+pad;
     }
