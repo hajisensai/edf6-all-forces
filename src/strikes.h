@@ -17,9 +17,6 @@ BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,
 void BarrageTick() noexcept;
 void ResetBarrages() noexcept;
 bool InstallBarrages() noexcept;
-// airstrike.cpp: the caller's HUD line for its strike calls (hud.cpp StrikeBanner, the draw thread): a sortie's second wave
-// not called; a moment.
-bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the map's bar (airstrike.cpp
 // SupportStrikeAt) starts its show at `at` by `caller` with `damage`; UltimateTick plays it a frame at a time

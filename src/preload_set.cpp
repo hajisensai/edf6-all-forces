@@ -88,9 +88,6 @@ void SupportPreloadCatalog(const SupportConfig& cfg,preload::Set& out) noexcept 
         if(!cfg.Enabled(i) || !SupportCatalogReachOf(i,r))continue;
         if(r.sub){out.Add(Item::sub);out.Add(Item::laser);out.Add(preload::Body(preload::body::drone));}
         if(r.aircraft)AddSupportAircraftItems(r.spec,out);
-        // A sortie's second wave is called with the first, whatever its own entry says (SupportCallUnpaidAt).
-        const int next=i<SupportAirCallCount() ? SupportAirCallThen(i) : -1;
-        if(SupportAircraft then;next>=0 && SupportAircraftSpec(next,&then))AddSupportAircraftItems(then,out);
         if(r.chute)out.Add(Item::chute);
         if(r.rope)out.Add(Item::rope);
         if(r.airdrop)out.Add(Item::airdrop);

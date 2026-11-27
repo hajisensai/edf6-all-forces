@@ -2222,12 +2222,5 @@ void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at
     if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
     else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
 }
-// The caller's strike calls (airstrike.cpp PlayerStrikeCue): a barrage that could not start, a sortie's second wave not
-// called; a moment, under the ultimate's banner.
-void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
-    wchar_t line[200];
-    if(!PlayerStrikeCue(line,_countof(line)))return;
-    Label(text,lines,at,width*0.5f,height*0.5f+370.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
-}
 }  // namespace hudi
 }  // namespace crew

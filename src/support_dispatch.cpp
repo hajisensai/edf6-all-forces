@@ -172,9 +172,9 @@ void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexc
         return;
     }
     // A paid call's pt (support_points.h): kept once delivered, given back when it came to nothing. A request not paid for
-    // (a second wave) owes nothing and settles nothing. A sortie's second wave held under it goes with its pt (airstrike.cpp).
-    if(request && state==RequestStatus::active){SupportPointsSettle(request,false);SupportFollowUpSettle(request,true);}
-    else if(request && state>=RequestStatus::refused){SupportPointsSettle(request,true);SupportFollowUpSettle(request,false);}
+    // (a test's) owes nothing and settles nothing.
+    if(request && state==RequestStatus::active)SupportPointsSettle(request,false);
+    else if(request && state>=RequestStatus::refused)SupportPointsSettle(request,true);
     if(!localRequest.acceptNotices || !request || request<localRequest.id)return;
     if(request==localRequest.id && localRequest.hasNotice) {
         if(localRequest.state>=RequestStatus::refused)return;
@@ -1680,15 +1680,12 @@ constexpr std::uint32_t kGroundPt[]={3000,7500,          // SQUAD, PLATOON
                                      10800,7200,2000};    // TANK_AIRDROP, TRANSPORT_AIRDROP, TRUCK_AIRDROP
 static_assert(sizeof(kGroundPt)/sizeof(kGroundPt[0])==2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries,
               "a price per infantry, ground, transport and airdrop entry");
-// The offline call's price while it is planned (given back when its plan is refused or not made), and whether its second
-// wave (a sortie's, airstrike.cpp) is to come once it is made.
-std::int32_t offlineCharge=0;bool offlineFollowUp=false;
-// A request of entry `index` (the map's bar, or a sortie's second wave): local offline planning or the registered
+// The offline call's price while it is planned (given back when its plan is refused or not made).
+std::int32_t offlineCharge=0;
+// A request of entry `index` (the map's bar, or the autopilot's test call): local offline planning or the registered
 // online host transaction; a strike started here (it is never planned). `price`: its pt, taken once it is accepted (0:
-// a second wave, paid with its first). Not enough pt: refused before anything is asked. `followUp`: a sortie's first
-// wave, whose second (airstrike.cpp SupportFollowUpQueue) comes only once it is out, as its pt stay spent only then:
-// offline once it is made (SupportDispatchTick), online once its request is active (RequestNotice).
-bool Request(int index,const float* target,const SupportLoadout* load,std::int32_t price,bool followUp,wchar_t* note,
+// a test's call). Not enough pt: refused before anything is asked.
+bool Request(int index,const float* target,const SupportLoadout* load,std::int32_t price,wchar_t* note,
              std::size_t capacity,const float* strikeHeading=nullptr,const sortie::RunSpec& run=sortie::RunSpec()) noexcept {
     if(!note || !capacity)return false;
     // Its price, held before anything is asked (support_points.h SupportPointsHold): once the call is taken, paying for it
@@ -1748,13 +1745,6 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
             if(localRequest.hasNotice && localRequest.state==RequestStatus::accepted && localRequest.id)held.Owe(localRequest.id);
             else if(!localRequest.hasNotice || localRequest.state==RequestStatus::active)held.Keep();
         }
-        // Its second wave with its pt: held under its open request (settled by RequestNotice), or due now that it is out.
-        if(accepted && followUp) {
-            using support_net::RequestStatus;
-            if(localRequest.hasNotice && localRequest.state==RequestStatus::accepted && localRequest.id)
-                SupportFollowUpQueue(index,target,localRequest.id,run);
-            else if(!localRequest.hasNotice || localRequest.state==RequestStatus::active)SupportFollowUpQueue(index,target,0,run);
-        }
         if(!accepted || !localRequest.hasNotice) {
             localRequest.shown=true;localRequest.acceptNotices=accepted;localRequest.hasNotice=false;
             _snwprintf_s(localRequest.text,_countof(localRequest.text),_TRUNCATE,L"%ls",
@@ -1769,7 +1759,6 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
         planning.loadout=loadout;planning.run=run;
         offlinePending=true;offlinePlanned=false;accepted=true;Status(L"正在安排支援入口及路线");
         offlineCharge=held.on ? price : 0;held.Keep();
-        offlineFollowUp=followUp;
         Log("SUPPORT request catalog=%d accepted offline, load %llX, %d pt",index,static_cast<unsigned long long>(loadout),price);
     }
     if(SupportCfg().problems[0] && !configNoticeShown) {
@@ -1786,7 +1775,7 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
 }
 bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity,const sortie::RunSpec& run) noexcept {
     if(!note || !capacity || index==SupportRescueCatalog())return false;
-    return Request(index,target,nullptr,0,false,note,capacity,nullptr,run);
+    return Request(index,target,nullptr,0,note,capacity,nullptr,run);
 }
 std::uint32_t SupportCallPt(int index) noexcept {
     if(index<0 || index>=SupportCallCount() || index==SupportRescueCatalog())return 0;
@@ -1913,7 +1902,7 @@ bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* l
         Status(L"海上救援只在玩家落海时自动呼叫");_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return false;
     }
     // A flown call may bring a sortie's second wave (airstrike.cpp), queued once this one is out.
-    return Request(index,target,load,SupportCallPrice(index),index>=0 && index<SupportAirCallCount(),note,capacity,strikeHeading,run);
+    return Request(index,target,load,SupportCallPrice(index),note,capacity,strikeHeading,run);
 }
 namespace {
 // Offline rescue is planned and made at once (an air plan never waits), with no queue,
@@ -2067,11 +2056,10 @@ void SupportDispatchTick() noexcept {
     AirdropTestCall();
     if(offlinePending && !LocalAuthority()) {
         offlinePending=false;offlinePlanned=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");
-        SupportPointsRefund(offlineCharge);offlineCharge=0;offlineFollowUp=false;
+        SupportPointsRefund(offlineCharge);offlineCharge=0;
     }
     if(offlinePending) {
         SupportPlan& plan=offlinePlan;
-        const int catalog=static_cast<int>(planning.catalog);float at[3];std::memcpy(at,planning.target,12);
         auto result=support_net::PlanResult::ready;
         if(!offlinePlanned) {
             plan=SupportPlan{};plan.run=planning.run;
@@ -2091,9 +2079,8 @@ void SupportDispatchTick() noexcept {
                 made=SpawnDeployment(nextOffline++,plan,false,false);
                 if(!made)Status(L"支援资源、真实机组或席位分配失败");
             }
-            if(!made)SupportPointsRefund(offlineCharge);   // its plan refused or not made: its pt back, and no second wave
-            else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0,plan.run);   // out: its second wave's wait starts
-            offlineCharge=0;offlineFollowUp=false;
+            if(!made)SupportPointsRefund(offlineCharge);   // its plan refused or not made: its pt back
+            offlineCharge=0;
         }
     }
     for(auto& deployed:deployments) {
@@ -2317,7 +2304,7 @@ void SupportDispatchTick() noexcept {
 void ResetSupportDispatch() noexcept {
     airdropTestSince=0;airdropTestAsked=false;
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
-    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;offlinePlanned=false;offlineCharge=0;offlineFollowUp=false;nextOffline=1;status[0]=0;configNoticeShown=false;
+    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;offlinePlanned=false;offlineCharge=0;nextOffline=1;status[0]=0;configNoticeShown=false;
     rescueNote[0]=0;rescueSubmitting=false;rescueEnded=false;rescueRequest=0;
     legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;
     localRequest={};

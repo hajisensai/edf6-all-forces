@@ -71,7 +71,6 @@
 #include "playarea.h"
 #include "sazabi_sound.h"
 #include "seat_turret.h"
-#include "support_aircraft.h"   // SupportFollowUpTick
 #include "support_points.h"
 #include "support_warning.h"
 #include "warn.h"

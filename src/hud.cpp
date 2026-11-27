@@ -797,7 +797,6 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
         RescueCueBanner(t,width,height,s,lines,&at);
-        StrikeBanner(t,width,height,s,lines,&at);
         ModuleBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         AuraHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);

@@ -254,7 +254,6 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kAutoTurret,"auto turret",nullptr) \
     M(kNpcPost,"npc post",nullptr) \
     M(kUltimate,"ultimate",nullptr) \
-    M(kFollowUp,"follow-up",nullptr) \
     M(kSupportWarnings,"support warnings",nullptr) \
     M(kSupportPoints,"support points",nullptr) \
     M(kSupportDispatch,"support dispatch",nullptr) \
@@ -472,7 +471,6 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kAirstrikes,&Call<&ResetAirstrikes>},
     {RP::kMissionState,Id::kUltimate,&Call<&ResetUltimate>},
     {RP::kMissionState,Id::kBarrage,&Call<&ResetBarrages>},
-    {RP::kMissionState,Id::kFollowUp,&Call<&ResetSupportFollowUps>},
     {RP::kMissionState,Id::kSupportFirepower,&Call<&ResetSupportFirepower>},
     {RP::kMissionState,Id::kSupportWarnings,&Call<&ResetSupportWarnings>},
     {RP::kMissionState,Id::kSupportPoints,&Call<&SupportPointsReset>},
@@ -565,7 +563,6 @@ constexpr TickEntry kTicks[]={
     {TP::kAfterHudPublish,Id::kUltimate,&Call<&UltimateTick>},       // the ultimate strike's show (ultimate.cpp), on with the plugin off too
     {TP::kAfterHudPublish,Id::kBarrage,&Call<&BarrageTick>},         // the long-range barrages' rounds (barrage.cpp)
     {TP::kAfterHudPublish,Id::kAndryusha,&Call<&AndryushaTick>},     // the Andryusha's airburst fuses and bomblets (andryusha.cpp)
-    {TP::kAfterHudPublish,Id::kFollowUp,&Call<&SupportFollowUpTick>},   // the sorties' second waves (airstrike.cpp)
     {TP::kAfterHudPublish,Id::kSupportPoints,&Call<&SupportPointsTick>},   // the map's support pt from the team score (support_points.cpp)
     {TP::kAfterHudPublish,Id::kSupportWarnings,&Call<&SupportWarningTick>},   // the supports' warnings on the ground (support_warning.cpp)
     {TP::kAfterHudPublish,Id::kGravity,&Call<&GravityTick>},         // what is thrown: its impacts and contacts (gravity.cpp)

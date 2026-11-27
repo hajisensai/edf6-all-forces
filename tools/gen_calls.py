@@ -1,7 +1,7 @@
 """Writes src/calls.inc, the plugin's side of the call table (src/airstrike.cpp includes it), from tools/calls.py:
-  kCalls       the supports the plugin flies (Call), in CALLS order: the map's support bar's (src/support_dispatch.cpp
-               catalog 0..kCallCount-1); a sortie's pass (jet.h SortiePass, 0 none), its second wave (`then`: another
-               kCalls index, -1 none; after ms) and last what it costs on the map (calls.Call.pt)
+  kCalls       the supports the plugin flies (Call), in calls.FLOWN order (each vehicle's sortie right after its guard
+               and follow entries): the map's support bar's (src/support_dispatch.cpp catalog 0..kCallCount-1); a
+               sortie's pass (jet.h SortiePass, 0 none) and last what it costs on the map (calls.Call.pt)
   kCallLabels  their names on the bar (the SC names their weapons carried)
   kCallRows    every live weapon row tools/call_weapons.py installs (vehicle requests, thrown drones, guns): its id, its
                weapon SGO under Mods/WEAPON and the object SGO a vehicle request brings under Mods/OBJECT (nullptr: none)
@@ -48,10 +48,8 @@ def _opt(enum: str, value: str) -> str:
 
 def _call(c: calls.Call) -> str:
     sortie = 1 + calls.SORTIE_PASSES.index(c.sortie) if c.sortie else 0
-    then = [f.id for f in calls.FLOWN].index(c.then) if c.then else -1
     return (f'    {{{_float(c.mark)},{BRINGS[c.brings]},{_opt("JetRole", c.role)},{_opt("HeliBody", c.body)},'
-            f'{c.count},{c.fuel_sec},{"true" if c.follow else "false"},"{c.log}",{_wstr(c.id)},{sortie},{then},'
-            f'{c.then_after * 1000}u,{c.pt}u}},')
+            f'{c.count},{c.fuel_sec},{"true" if c.follow else "false"},"{c.log}",{_wstr(c.id)},{sortie},{c.pt}u}},')
 
 
 def _throw(c: calls.Call) -> str:
@@ -77,7 +75,7 @@ def render() -> str:
         '// Included by src/airstrike.cpp after its Brings / Call / CallRow definitions.',
         '',
         "// The supports the plugin flies from the map's support bar (src/support_dispatch.cpp catalog 0..kCallCount-1), in "
-        'tools/calls.py CALLS order.',
+        'tools/calls.py FLOWN order.',
         'const Call kCalls[]={',
         *[_call(c) for c in calls.FLOWN],
         '};',
@@ -93,10 +91,12 @@ def render() -> str:
         *[_row(c) for c in calls.CALLS if not c.on_map],
         '};',
         'constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));',
-        "// The rows of the supports moved to the map (2026-10-26): their placeholders' ids, un-owned at every save load.",
+        "// The rows of the supports moved to the map (2026-10-26) and of the sorties retired (2026-11-27, calls.Call.retired):",
+        "// their placeholders' ids, un-owned at every save load.",
         'const wchar_t* const kMovedRows[]={' + ','.join(_wstr(calls.retired_id(c.id)) for c in calls.CALLS if c.on_map)
         + '};',
         'constexpr int kMovedRowCount=static_cast<int>(sizeof(kMovedRows)/sizeof(kMovedRows[0]));',
+        f'constexpr int kRetiredCallCount={sum(1 for c in calls.CALLS if c.retired)};   // the sorties retired (no kCalls entry)',
         '// The thrown drones: their weapons\' AmmoHitSizeAdjust bits (weapon +0x8C4), in tools/calls.py CALLS order.',
         'const Throw kThrows[]={',
         *[_throw(c) for c in calls.CALLS if c.brings == 'throw'],

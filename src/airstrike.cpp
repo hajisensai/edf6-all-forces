@@ -7,8 +7,7 @@
 //    puts any soldier that had one equipped back on its default weapon. No radio call of the plugin's is read any more:
 //    the stock bombers, Vesta, Phobos and the missions' strafing runs keep their native init, payload and cleanup.
 //  - A flown support (kCalls) uses the shared deployment transaction: verified entry, real crew, all-peer ACK, actual
-//    boarding, then flight (support_dispatch.cpp); its spec here (SupportAircraftSpec), its second wave (a sortie's `then`:
-//    SupportFollowUpQueue).
+//    boarding, then flight (support_dispatch.cpp); its spec here (SupportAircraftSpec).
 //  - A strike (kStrikes, SupportStrikeAt): a long-range barrage (barrage.cpp: this machine plans and fires it, and tells the
 //    others, barrage_net_protocol.h) or the ultimate (ultimate.cpp, ultimate_net_protocol.h), called by the local player
 //    from the bar onto the point clicked, heading from the player to it.
@@ -87,11 +86,10 @@ using DeleteFn=void(*)(void*);
 // What a support brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
 // (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
-// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (jet.h SortiePass, 0 none), `then` the kCalls index of
-// its second wave (-1 none), called onto the same mark `thenMs` after this one went out (SupportFollowUpQueue). `pt`
-// its price on the map's bar (tools/calls.py Call.pt).
+// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (jet.h SortiePass, 0 none). `pt` its price on the
+// map's bar (tools/calls.py Call.pt).
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
-              bool follow; const char* name; const wchar_t* id; int sortie; int then; DWORD thenMs; std::uint32_t pt; };
+              bool follow; const char* name; const wchar_t* id; int sortie; std::uint32_t pt; };
 // A weapon table row tools/call_weapons.py installs (a vehicle request, a thrown drone, a gun): its id, its SGO in
 // Mods/WEAPON and the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
 struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* objectFile; };
@@ -183,17 +181,6 @@ bool EntryClear(const float* from,const float* to) noexcept {
     return true;
 }
 
-// The caller's HUD line for its strike calls (PlayerStrikeCue; hud.cpp StrikeBanner reads it on the draw thread).
-SRWLOCK strikeCueLock=SRWLOCK_INIT;
-wchar_t strikeCueText[200]{};
-ULONGLONG strikeCueAt=0;
-void StrikeCue(const wchar_t* format,...) noexcept {
-    wchar_t text[200];
-    va_list a;va_start(a,format);_vsnwprintf_s(text,_countof(text),_TRUNCATE,format,a);va_end(a);
-    AcquireSRWLockExclusive(&strikeCueLock);
-    std::memcpy(strikeCueText,text,sizeof(text));strikeCueAt=GetTickCount64();
-    ReleaseSRWLockExclusive(&strikeCueLock);
-}
 const wchar_t* BarrageWhy(BarrageResult r) noexcept {
     using hudtext::Tx;
     switch(r) {
@@ -505,74 +492,7 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
     return true;
 }
 
-// A sortie's second wave (Call::then): due `thenMs` after its first wave went out, called onto the same mark by this
-// machine, the caller's (SupportFollowUpTick: SharedFrameTick). It goes only when the first did, as the first's pt are
-// kept only then (docs/plan-2026-10-26-map-support-pt.md §1: it is paid with the first): queued by support_dispatch.cpp
-// once the first is made (offline: SpawnDeployment), or, online, held under the first's request until its outcome
-// (SupportFollowUpSettle: active starts its wait, refused / timed out / cancelled / interrupted forgets it).
-// Due while another call is still being planned offline (SupportCallReadiness planning: the dispatcher takes one
-// request at a time), it waits for that plan and is called the frame it is over. Any other refusal (the entry disabled in
-// the ini, the mission's support rules, the plugin off, ...) would refuse it again: it is given up at once and the caller
-// told why on the HUD. Online `accepted` is this machine's request queued for the host: a refusal there is the host's to
-// say (support_net).
-namespace {
-// `request`: the first wave's online request still open (0: the first is out, `due` set).
-// `run`: the first wave's way in (its line too where the second flies one: SupportGroundRun).
-struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; std::uint32_t request=0; DWORD afterMs=0;
-                  sortie::RunSpec run{}; };
-FollowUp followUps[8]{};
-}  // namespace
-void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request,const sortie::RunSpec& run) noexcept {
-    if(catalog<0 || catalog>=kCallCount || kCalls[catalog].then<0 || !target)return;
-    for(auto& f:followUps)if(f.catalog<0) {
-        f=FollowUp{};f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.afterMs=kCalls[catalog].thenMs;
-        f.run=run.half>0.0f && !SupportGroundRun(f.catalog) ? sortie::HeadingRun(run.x,run.z) : run;
-        f.request=request;
-        if(!request)f.due=GameMs()+f.afterMs;
-        if(request)Log("SUPPORT %s: its second wave (%s) %lu s after request %u is out",kCalls[catalog].name,
-                       kCalls[f.catalog].name,f.afterMs/1000,request);
-        else Log("SUPPORT %s: its second wave (%s) in %lu s",kCalls[catalog].name,kCalls[f.catalog].name,f.afterMs/1000);
-        return;
-    }
-    Log("SUPPORT %s: no room for its second wave (8 waiting)",kCalls[catalog].name);
-}
-void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept {
-    if(!request)return;
-    for(auto& f:followUps) {
-        if(f.catalog<0 || f.request!=request)continue;
-        if(out){f.request=0;f.due=GameMs()+f.afterMs;Log("SUPPORT request %u out: its second wave (%s) in %lu s",request,
-                                                        kCalls[f.catalog].name,f.afterMs/1000);}
-        else {Log("SUPPORT request %u came to nothing: its second wave (%s) is not called",request,kCalls[f.catalog].name);f=FollowUp{};}
-    }
-}
-void SupportFollowUpTick() noexcept {
-    const ULONGLONG ms=GameMs();
-    for(auto& f:followUps) {
-        if(f.catalog<0 || f.request || ms<f.due)continue;
-        if(SupportCallReadiness().state==SupportReady::planning) {   // another call still planned: its turn comes
-            if(!f.waited)Log("SUPPORT second wave %s: waiting for the call being planned",kCalls[f.catalog].name);
-            f.waited=true;
-            continue;
-        }
-        const FollowUp now=f;
-        f=FollowUp{};
-        wchar_t note[128]{};
-        const bool ok=SupportCallUnpaidAt(now.catalog,now.at,note,_countof(note),now.run);   // paid with the first; no wave of its own
-        Log("SUPPORT second wave %s: accepted=%d",kCalls[now.catalog].name,ok);
-        if(!ok)StrikeCue(hudtext::Tr(hudtext::Tx::followUpRefused),note[0] ? note : L"-");
-    }
-}
-void ResetSupportFollowUps() noexcept { for(auto& f:followUps)f=FollowUp{}; }
-bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept {
-    constexpr ULONGLONG kShowMs=8000;
-    AcquireSRWLockShared(&strikeCueLock);
-    const bool fresh=strikeCueAt && GetTickCount64()-strikeCueAt<=kShowMs && out && capacity;
-    if(fresh)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",strikeCueText);
-    ReleaseSRWLockShared(&strikeCueLock);
-    return fresh;
-}
 int SupportAirCallCount() noexcept { return kCallCount; }
-int SupportAirCallThen(int index) noexcept { return index>=0 && index<kCallCount ? kCalls[index].then : -1; }
 // Every class's equipped weapons (the game status's slots, npc_arms.cpp ReadInventory's layout): a class switched in the
 // room's last beat before the start still counts. Read on the room's tick and at a mission's start.
 void AddEquippedCallItems(preload::Set& out) noexcept {

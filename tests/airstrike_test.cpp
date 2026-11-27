@@ -47,9 +47,6 @@ bool UltimateStart(const unsigned char* caller,const float*,float damage,std::ui
 }
 unsigned char* playerHuman=nullptr;
 unsigned char* PlayerHuman() noexcept { return playerHuman; }
-int unpaidCalls=0;
-bool SupportCallUnpaidAt(int,const float*,wchar_t*,std::size_t,const sortie::RunSpec&) noexcept {++unpaidCalls;return true;}
-SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }   // the second waves (airstrike.cpp SupportFollowUpTick)
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
 bool InSession() noexcept { return testOnline; }
@@ -198,7 +195,7 @@ int main() {
 
     // ---- The rows: the live ones owned, the supports' placeholders told apart (and un-owned at a save load) ----
     for(const auto& r:kCallRows)Check(IsCallRow(r.id) && !IsMovedRow(r.id),"a live row is a call row, never a moved one");
-    Check(kMovedRowCount==kCallCount+kStrikeCount,"every flown support and strike's row is retired");
+    Check(kMovedRowCount==kCallCount+kRetiredCallCount+kStrikeCount,"every flown support, retired sortie and strike's row is retired");
     for(const wchar_t* id:kMovedRows)Check(IsMovedRow(id) && !IsCallRow(id) && !std::wcsncmp(id,L"EDF6VC_RETIRED_",15),
                                            "a support's row is its placeholder");
     Check(!IsMovedRow(L"EDF6VC_RETIRED_KATYUSHA") && !IsMovedRow(L"EDF6VC_CALL_INTERCEPTOR"),
@@ -206,30 +203,6 @@ int main() {
     {unsigned char record[12]{1|4,3,3,3,3,3,3,3,3,0,0,0};
      Check(ported::Disown(record) && record[0]==0 && record[4]==3,"un-owned: owned and NEW cleared, stars left");
      Check(!ported::Disown(record),"a record not owned stays as it is");}
-
-    // ---- A sortie's second wave: called for no pt, only once its first is out ----
-    {int combo=-1;for(int i=0;i<kCallCount;++i)if(kCalls[i].then>=0)combo=i;
-     Check(combo>=0,"a combined sortie exists");
-     const float at[3]={0,0,0};
-     SupportFollowUpQueue(combo,at,0);gameMs+=kCalls[combo].thenMs-1;SupportFollowUpTick();
-     Check(unpaidCalls==0,"not before then_after");
-     gameMs+=1;SupportFollowUpTick();
-     Check(unpaidCalls==1,"the second wave is called unpaid (paid with its first)");
-     SupportFollowUpTick();Check(unpaidCalls==1,"called once");
-     // Online: held under the first's open request (2026-10-27 review: a first refused and refunded brought its second free).
-     SupportFollowUpQueue(combo,at,41);gameMs+=kCalls[combo].thenMs*4;SupportFollowUpTick();
-     Check(unpaidCalls==1,"the first's request still open: no second wave however long");
-     SupportFollowUpSettle(40,false);SupportFollowUpSettle(41,false);gameMs+=kCalls[combo].thenMs*4;SupportFollowUpTick();
-     Check(unpaidCalls==1,"the first came to nothing (refused, timed out, cancelled, interrupted): its second never comes");
-     SupportFollowUpSettle(41,true);gameMs+=kCalls[combo].thenMs;SupportFollowUpTick();
-     Check(unpaidCalls==1,"forgotten: a later outcome of that id brings nothing");
-     SupportFollowUpQueue(combo,at,42);gameMs+=kCalls[combo].thenMs;SupportFollowUpTick();
-     SupportFollowUpSettle(42,true);SupportFollowUpTick();
-     Check(unpaidCalls==1,"out now: its wait starts from now, not from the request");
-     gameMs+=kCalls[combo].thenMs;SupportFollowUpTick();
-     Check(unpaidCalls==2,"the first made: its second wave comes then_after later");
-     SupportFollowUpQueue(combo,at,43);ResetSupportFollowUps();SupportFollowUpSettle(43,true);gameMs+=kCalls[combo].thenMs;
-     SupportFollowUpTick();Check(unpaidCalls==2,"a new mission forgets a held one");}
 
     // ---- Installation leaves every stock radio call native ----
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));

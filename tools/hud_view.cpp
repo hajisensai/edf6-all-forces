@@ -390,8 +390,6 @@ bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return
 // The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
 bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
-// The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
-bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
 namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.

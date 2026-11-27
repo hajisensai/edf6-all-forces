@@ -80,21 +80,25 @@ class Call:
     barrage: str = ''
     damage: float = 0.0
     # ...or (brings 'jets' / 'helis') a sortie (docs/plan-2026-10-25-strikes.md §1.2): its aircraft make one pass of
-    # SORTIE_PASSES[sortie] at the mark and leave the map, no guard / follow version; `then` another flown call's id the
-    # caller's machine calls onto the same mark `then_after` s after this one went out (a strike in two waves).
+    # SORTIE_PASSES[sortie] at the mark and leave the map, no guard / follow version: its airframe's 「·出击」 (call_name),
+    # what it fires the stores configured for that airframe (src/support_dispatch.cpp HullOf).
     sortie: str = ''
-    then: str = ''
-    then_after: int = 0
+    # A support taken off the map's bar (that date): its row stays a placeholder (on_map, kMovedRows) as every row stays,
+    # but it is no call any more (not flown, not in kCalls / the catalog). 2026-11-27 (the user: 「出击里面的，什么俯冲扫射
+    # 之类的删掉吧，都换成载具名」): the sorties named for an attack whose airframe already had one (the missile hunter, the
+    # carpet, the hit and run) and the two-wave combinations (hammer and anvil); each airframe keeps one sortie, listed
+    # under the airframe's name (call_name: its 「·出击」 chip beside 守点 / 跟随).
+    retired: str = ''
 
     @property
     def flown(self) -> bool:
         """The plugin launches what it brings at the call (kCalls); a vehicle request is the game's own, a gun is no call."""
-        return self.brings in ('jets', 'helis', 'sub')
+        return self.brings in ('jets', 'helis', 'sub') and not self.retired
 
     @property
     def modal(self) -> bool:
         """It comes in a guard and a follow version, and its name says which (a sortie does not: one pass and gone)."""
-        return self.brings in ('jets', 'helis') and not self.sortie
+        return self.brings in ('jets', 'helis') and not self.sortie and not self.retired
 
     @property
     def on_map(self) -> bool:
@@ -133,8 +137,8 @@ def mark_bits(call: 'Call') -> int:
 
 # The sorties' passes: src/jet.h SortiePass after its `none` (1 + the index here; tools/gen_calls.py writes the enum,
 # src/sortie_pass.inc).
-SORTIE_PASSES = ('gunRun', 'missilePass', 'carpet', 'popUp', 'missileRain', 'gunshipLap', 'heliStrafe', 'heliHunter',
-                 'heliCircle')
+# 2026-11-27: the carpet, the hit and run and the missile hunter went with their calls (Call.retired).
+SORTIE_PASSES = ('gunRun', 'missilePass', 'missileRain', 'gunshipLap', 'heliStrafe', 'heliCircle')
 # The barrage kinds: src/barrage_plan.h Kind and kKindNames in this order (tools/gen_calls.py writes them,
 # src/barrage_kind.inc).
 BARRAGE_KINDS = ('katyusha', 'guided', 'thermobaric', 'cluster', 'creeping', 'mrsi', 'heavy', 'cruise', 'ballistic')
@@ -312,7 +316,7 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_SORTIE_HELI_STRAFE', 7801, 'sortie_heli_strafe', False, 2, 1500, 0.8, 'helis', 'heli strafing pass', 150,
          body='eros506', sortie='heliStrafe'),
     Call('EDF6VC_CALL_SORTIE_HELI_HUNTER', 7802, 'sortie_heli_hunter', False, 1, 1600, 0.9, 'helis', 'heli missile hunter', 150,
-         body='eros506', sortie='heliHunter'),
+         body='eros506', retired='2026-11-27'),
     Call('EDF6VC_CALL_SORTIE_HELI_CIRCLE', 7803, 'sortie_heli_circle', False, 1, 1400, 0.7, 'helis', 'heli death circle', 150,
          body='brute410', sortie='heliCircle'),
     Call('EDF6VC_CALL_SORTIE_DIVE', 7804, 'sortie_dive', False, 2, 1800, 0.9, 'jets', 'diving strafing run', 150, 'strike',
@@ -320,17 +324,19 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_SORTIE_MISSILE_PASS', 7805, 'sortie_missile_pass', False, 2, 2200, 1.1, 'jets', 'missile pass', 150,
          'multirole', sortie='missilePass'),
     Call('EDF6VC_CALL_SORTIE_CARPET', 7806, 'sortie_carpet', False, 3, 2600, 1.3, 'jets', 'carpet bombing', 150, 'strike',
-         sortie='carpet'),
+         retired='2026-11-27'),
     Call('EDF6VC_CALL_SORTIE_POPUP', 7807, 'sortie_popup', False, 1, 1500, 0.8, 'jets', 'hit and run', 150, 'strike',
-         sortie='popUp'),
+         retired='2026-11-27'),
     Call('EDF6VC_CALL_SORTIE_MISSILE_RAIN', 7808, 'sortie_missile_rain', False, 1, 2400, 1.3, 'jets', 'missile rain', 150,
          'salvo', sortie='missileRain'),
     Call('EDF6VC_CALL_SORTIE_HAMMER', 7809, 'sortie_hammer', False, 2, 3200, 1.5, 'helis', 'hammer and anvil', 150,
-         body='eros506', sortie='heliStrafe', then='EDF6VC_CALL_SORTIE_POPUP', then_after=25),
+         body='eros506', retired='2026-11-27'),
     Call('EDF6VC_CALL_SORTIE_WOLFPACK', 7810, 'sortie_wolfpack', False, 4, 2400, 1.2, 'jets', 'wolf pack', 150, 'fighter',
          sortie='gunRun'),
-    Call('EDF6VC_CALL_SORTIE_GUIDED', 7811, 'sortie_guided', False, 1, 3600, 1.7, 'jets', 'guided strike', 180, 'gunship',
-         sortie='gunshipLap', then='EDF6VC_CALL_SORTIE_DIVE', then_after=25),
+    # The gunship's sortie: one lap of its circle round the mark, firing, then away (2026-11-27: no second wave of DN
+    # Bombers after it any more, so it costs what one lap is worth).
+    Call('EDF6VC_CALL_SORTIE_GUIDED', 7811, 'sortie_guided', False, 1, 2400, 1.7, 'jets', 'gunship sortie', 180, 'gunship',
+         sortie='gunshipLap'),
     # Appended 2026-11-10 (test site #37, the player JOY; the maintainer: 「37 做」): the Andryusha, the Katyusha's truck
     # firing incendiary cluster rockets with an impact or a proximity fuse (tools/make_katyusha.py, src/andryusha.cpp).
     Call('EDF6VC_CALL_ANDRYUSHA', 0, 'andryusha', False, 0, 7500, 1.0, 'vehicle', vehicle='EDF6VC_ANDRYUSHA',
@@ -377,7 +383,24 @@ def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
 
 CALLS = _with_xmorph(CALLS)
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
-FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
+
+
+def _base(c: Call) -> str:
+    """An aircraft's name without its variant (what call_name puts before the 「·」)."""
+    return KINDS[c.kind]['SC'][0] if c.kind != 'heli' else ('Eros 506' if c.body == 'eros506' else 'Brute 410')
+
+
+def _catalog(flown: list[Call]) -> tuple[Call, ...]:
+    """The flown calls in catalog order: CALLS order, but a sortie right after the last call flying the same airframe (its
+    「·出击」 chip on that airframe's row of the map's bar, src/map_buttons.h GroupSupport: consecutive entries, one name)."""
+    out = [c for c in flown if not c.sortie]
+    for c in (c for c in flown if c.sortie):
+        twins = [i for i, o in enumerate(out) if _base(o) == _base(c)]
+        out.insert(twins[-1] + 1 if twins else len(out), c)
+    return tuple(out)
+
+
+FLOWN: tuple[Call, ...] = ()   # the plugin's kCalls (the map's catalog 0..), in this order; set after KINDS below
 # The strikes on the map's support bar (the plugin's kStrikes): the barrages in CALLS order, then the ultimate.
 STRIKES: tuple[Call, ...] = (tuple(c for c in CALLS if c.brings == 'barrage')
                              + tuple(c for c in CALLS if c.brings == 'ultimate'))
@@ -958,10 +981,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                               'back. Their gunners aim at hurt friends (you included) on their own and never at enemies.'),
     },
     'sortie_heli_strafe': {
-        'SC': ('直升机扫射（Eros 506）', '出击：两架 Eros 直升机并排低空掠过标记点，沿途用机炮和导弹一路扫射，飞过后直接离场。'),
-        'CN': ('直升機掃射（Eros 506）', '出擊：兩架 Eros 直升機並排低空掠過標記點，沿途用機砲和飛彈一路掃射，飛過後直接離場。'),
-        'JA': ('ヘリ機銃掃射（エロス 506）', '出撃。エロス 2 機が並んで指示地点の上を低空で通過し、機関砲とミサイルで一直線に掃射して、そのまま離脱する。'),
-        'EN': ('Heli Strafing Pass (Eros 506)', 'Sortie: two Eros helicopters sweep low side by side over the mark, raking it with guns and missiles on the way, and fly straight off.'),
+        'SC': ('Eros 506', '出击：两架 Eros 直升机并排低空掠过标记点，沿途用机炮和导弹一路扫射，飞过后直接离场。'),
+        'CN': ('Eros 506', '出擊：兩架 Eros 直升機並排低空掠過標記點，沿途用機砲和飛彈一路掃射，飛過後直接離場。'),
+        'JA': ('エロス 506', '出撃。エロス 2 機が並んで指示地点の上を低空で通過し、機関砲とミサイルで一直線に掃射して、そのまま離脱する。'),
+        'EN': ('Eros 506', 'Sortie: two Eros helicopters sweep low side by side over the mark, raking it with guns and missiles on the way, and fly straight off.'),
     },
     'sortie_heli_hunter': {
         'SC': ('导弹猎手（Eros 506）', '出击：一架 Eros 直升机在标记点外约 300 米处悬停，导弹逐发锁定附近不同的敌人连射，打完或 40 秒后离场。'),
@@ -970,22 +993,22 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Missile Hunter (Eros 506)', 'Sortie: an Eros hovers some 300 m off the mark and fires its missiles one by one, each at a different enemy near it, then leaves (empty or after 40 s).'),
     },
     'sortie_heli_circle': {
-        'SC': ('死亡回旋（Brute 410）', '出击：一架布鲁特直升机绕标记点低空飞一整圈，舱门机枪一直朝着圆心扫射，转完离场。'),
-        'CN': ('死亡迴旋（Brute 410）', '出擊：一架布魯特直升機繞標記點低空飛一整圈，艙門機槍一直朝著圓心掃射，轉完離場。'),
-        'JA': ('デスサークル（ブルート 410）', '出撃。ブルート 1 機が指示地点の周りを低空で一周し、ドアガンで円の中心を撃ち続け、一周したら離脱する。'),
-        'EN': ('Death Circle (Brute 410)', 'Sortie: a Brute flies one low circle round the mark, its door guns firing into the middle all the way round, then leaves.'),
+        'SC': ('Brute 410', '出击：一架布鲁特直升机绕标记点低空飞一整圈，舱门机枪一直朝着圆心扫射，转完离场。'),
+        'CN': ('Brute 410', '出擊：一架布魯特直升機繞標記點低空飛一整圈，艙門機槍一直朝著圓心掃射，轉完離場。'),
+        'JA': ('ブルート 410', '出撃。ブルート 1 機が指示地点の周りを低空で一周し、ドアガンで円の中心を撃ち続け、一周したら離脱する。'),
+        'EN': ('Brute 410', 'Sortie: a Brute flies one low circle round the mark, its door guns firing into the middle all the way round, then leaves.'),
     },
     'sortie_dive': {
-        'SC': ('俯冲扫射（DN 轰炸机）', '出击：两架 DN 轰炸机沿地图上拉出的攻击线浅角度俯冲，火箭、对地导弹、炸弹和机炮沿线打完后爬升离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
-        'CN': ('俯衝掃射（DN 轟炸機）', '出擊：兩架 DN 轟炸機沿地圖上拉出的攻擊線淺角度俯衝，火箭、對地飛彈、炸彈和機砲沿線打完後爬升離場。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
-        'JA': ('急降下掃射（DN 爆撃機）', '出撃。DN 爆撃機 2 機がマップで引いた攻撃線に沿って浅い角度で急降下し、ロケット・対地ミサイル・爆弾・機関砲を線上に撃ち込んで上昇離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
-        'EN': ('Diving Strafing Run (DN Bomber)', 'Sortie: two DN Bombers dive in at a shallow angle along the attack line drawn on the map, emptying rockets, air-to-ground missiles, bombs and cannon along it, and climb away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
+        'SC': ('DN 轰炸机', '出击：两架 DN 轰炸机沿地图上拉出的攻击线浅角度俯冲，火箭、对地导弹、炸弹和机炮沿线打完后爬升离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('DN 轟炸機', '出擊：兩架 DN 轟炸機沿地圖上拉出的攻擊線淺角度俯衝，火箭、對地飛彈、炸彈和機砲沿線打完後爬升離場。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('DN 爆撃機', '出撃。DN 爆撃機 2 機がマップで引いた攻撃線に沿って浅い角度で急降下し、ロケット・対地ミサイル・爆弾・機関砲を線上に撃ち込んで上昇離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('DN Bomber', 'Sortie: two DN Bombers dive in at a shallow angle along the attack line drawn on the map, emptying rockets, air-to-ground missiles, bombs and cannon along it, and climb away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_missile_pass': {
-        'SC': ('导弹掠过（DN 防御者战斗机）', '出击：两架 DN 防御者战斗机高速掠过标记点，各自把空对地导弹分别打向不同的目标，不减速飞走。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
-        'CN': ('飛彈掠過（DN 防禦者戰鬥機）', '出擊：兩架 DN 防禦者戰鬥機高速掠過標記點，各自把空對地飛彈分別打向不同的目標，不減速飛走。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
-        'JA': ('ミサイル航過（DN ディフェンダー）', '出撃。DN ディフェンダー 2 機が高速で指示地点の上を航過し、空対地ミサイルを別々の目標へ撃ち分け、減速せずに飛び去る。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
-        'EN': ('Missile Pass (DN Defender)', 'Sortie: two DN Defenders sweep fast over the mark, each putting its air-to-ground missiles on different targets, and fly on without slowing. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
+        'SC': ('DN 防御者战斗机', '出击：两架 DN 防御者战斗机高速掠过标记点，各自把空对地导弹分别打向不同的目标，不减速飞走。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('DN 防禦者戰鬥機', '出擊：兩架 DN 防禦者戰鬥機高速掠過標記點，各自把空對地飛彈分別打向不同的目標，不減速飛走。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('DN ディフェンダー', '出撃。DN ディフェンダー 2 機が高速で指示地点の上を航過し、空対地ミサイルを別々の目標へ撃ち分け、減速せずに飛び去る。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('DN Defender', 'Sortie: two DN Defenders sweep fast over the mark, each putting its air-to-ground missiles on different targets, and fly on without slowing. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_carpet': {
         'SC': ('地毯轰炸（DN 轰炸机）', '出击：三架 DN 轰炸机编队沿地图上拉出的攻击线平飞，把炸弹均匀铺满整条线后离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
@@ -1012,16 +1035,16 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Hammer and Anvil (Eros 506 / DN Bomber)', 'Combined sortie: two Eros helicopters suppress the mark with a strafing pass, and 25 s later a DN Bomber finishes it with a low bombing run (Heli Strafing Pass, then Hit and Run).'),
     },
     'sortie_wolfpack': {
-        'SC': ('狼群（DN 战斗机）', '出击：四架 DN 战斗机从远处扑来，沿地图上拉出的攻击线各自俯冲扫射一轮后散开离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
-        'CN': ('狼群（DN 戰鬥機）', '出擊：四架 DN 戰鬥機從遠處撲來，沿地圖上拉出的攻擊線各自俯衝掃射一輪後散開離場。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
-        'JA': ('ウルフパック（DN 戦闘機）', '出撃。DN 戦闘機 4 機が遠方から襲いかかり、マップに引いた攻撃線に沿ってそれぞれ急降下掃射を 1 回行ってから散開して離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
-        'EN': ('Wolf Pack (DN Fighter)', 'Sortie: four DN Fighters pounce from afar, each makes one diving strafing run along the attack line drawn on the map, and they scatter away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
+        'SC': ('DN 战斗机', '出击：四架 DN 战斗机从远处扑来，沿地图上拉出的攻击线各自俯冲扫射一轮后散开离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('DN 戰鬥機', '出擊：四架 DN 戰鬥機從遠處撲來，沿地圖上拉出的攻擊線各自俯衝掃射一輪後散開離場。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('DN 戦闘機', '出撃。DN 戦闘機 4 機が遠方から襲いかかり、マップに引いた攻撃線に沿ってそれぞれ急降下掃射を 1 回行ってから散開して離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('DN Fighter', 'Sortie: four DN Fighters pounce from afar, each makes one diving strafing run along the attack line drawn on the map, and they scatter away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_guided': {
-        'SC': ('引导打击（C-130／DN 轰炸机）', '出击组合：炮艇机在标记点上空盘旋一圈并开火标定，25 秒后再呼叫两架 DN 轰炸机俯冲扫射，然后各自撤离（相当于炮艇机一圈接「俯冲扫射」）。'),
-        'CN': ('引導打擊（C-130／DN 轟炸機）', '出擊組合：砲艇機在標記點上空盤旋一圈並開火標定，25 秒後再呼叫兩架 DN 轟炸機俯衝掃射，然後各自撤離（相當於砲艇機一圈接「俯衝掃射」）。'),
-        'JA': ('誘導打撃（C-130／DN 爆撃機）', '出撃の組み合わせ。ガンシップが指示地点の上空を一周しながら射撃で目標を示し、25 秒後に DN 爆撃機 2 機が急降下掃射を行って、それぞれ離脱する（ガンシップ一周のあとに「急降下掃射」）。'),
-        'EN': ('Guided Strike (C-130 / DN Bomber)', 'Combined sortie: a gunship circles the mark once, firing to mark it, and 25 s later two DN Bombers make their diving strafing runs; then all leave (a gunship lap, then Diving Strafing Run).'),
+        'SC': ('C-130 炮艇机', '出击：炮艇机在标记点上空盘旋一整圈，一路向附近的地面敌人开炮，转完离场。'),
+        'CN': ('C-130 砲艇機', '出擊：砲艇機在標記點上空盤旋一整圈，一路向附近的地面敵人開砲，轉完離場。'),
+        'JA': ('C-130 ガンシップ', '出撃。ガンシップが指示地点の上空を一周しながら付近の地上の敵へ砲撃し、一周したら離脱する。'),
+        'EN': ('C-130 Gunship', 'Sortie: the gunship flies one full circle over the mark, shelling the ground enemies near it, then leaves.'),
     },
     'barrage_katyusha': {
         'SC': ('火箭齐射', '远程炮击：标记一点后，约 2.4 公里外的火箭炮连续齐射 40 发，火箭从远处划过头顶，'
@@ -1123,6 +1146,9 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
     },
 }
 KINDS.update({u.key: {lang: xm_units.text(u, lang) for lang in xm_units.LANGS} for u in xm_units.ported()})
+FLOWN = _catalog([c for c in CALLS if c.flown])
+# A sortie's chip on its airframe's row (call_name), beside MODES' two.
+SORTIE_MODE: dict[str, str] = {'SC': '·出击', 'CN': '·出擊', 'JA': '（出撃）', 'EN': ' (Sortie)'}
 MODES: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {  # (hold, follow): (name suffix, sentence)
     'SC': (('·守点', '守在标记的地点上空。'), ('·跟随', '跟随呼叫者行动。')),
     'CN': (('·守點', '守在標記的地點上空。'), ('·跟隨', '跟隨呼叫者行動。')),
@@ -1235,6 +1261,8 @@ def call_name(call: Call, lang: str) -> str:
     name = KINDS[call.kind][lang][0]
     if call.kind == 'heli':
         name = 'Eros 506' if call.body == 'eros506' else 'Brute 410'
+    if call.sortie and any(_base(o) == _base(call) for o in FLOWN if o is not call):
+        return name + SORTIE_MODE[lang]   # its airframe's row on the map's bar, beside 守点 / 跟随
     return name + MODES[lang][call.follow][0] if call.modal else name
 
 

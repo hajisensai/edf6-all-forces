@@ -137,8 +137,7 @@ const wchar_t* SupportCallKey(int index) noexcept;
 // is accepted, given back when it comes to nothing); the sea rescue entry is refused here and by SupportCallComposedAt
 // (only the rescue's own trigger asks for it).
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
-// The same call for no pt: a sortie's second wave (airstrike.cpp, paid with its first), the autopilot's AirdropTest.
-// `run`: the first wave's way in, kept (sortie_plan.h RunSpec).
+// The same call for no pt: the autopilot's AirdropTest. `run`: its way in (sortie_plan.h RunSpec).
 bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity,const sortie::RunSpec& run={}) noexcept;
 // An entry's pt (tools/calls.py Call.pt for the calls and strikes, support_dispatch.cpp kGroundPt for the rest; the rescue
 // 0) and its price now (times SupportPtScale: support_points.h).
