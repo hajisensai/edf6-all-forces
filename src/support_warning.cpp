@@ -9,6 +9,7 @@
 #include "jet.h"
 #include "heli.h"            // MapRay
 #include "memory.h"
+#include "objref.h"
 #include "support_aircraft.h"
 #include "support_call.h"
 #include "support_net.h"

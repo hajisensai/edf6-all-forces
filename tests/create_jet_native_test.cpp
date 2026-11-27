@@ -23,6 +23,8 @@
 namespace { [[noreturn]] void UnexpectedWorldCall() {std::fputs("FAIL unexpected aircraft world service\n",stderr);std::abort();} }
 namespace crew {
 ULONGLONG GameMs() noexcept {UnexpectedWorldCall();}
+const JetWeaponRow* JetWeapon(int) noexcept {UnexpectedWorldCall();}           // stores.cpp: SupportRunLoad, not reached here
+const StoreSpec* StoreSpecOfPrefix(const wchar_t*) noexcept {UnexpectedWorldCall();}
 float BodyMark(const void*) noexcept {UnexpectedWorldCall();}
 bool IsHelicopter(const void*) noexcept {UnexpectedWorldCall();}
 float MapRay(const float*,const float*,float*) noexcept {UnexpectedWorldCall();}
