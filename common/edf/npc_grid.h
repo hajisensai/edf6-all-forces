@@ -170,7 +170,11 @@ public:
         return Clip{ClampX(x-r-px),ClampX(x+r+px),ClampZ(z-r-pz),ClampZ(z+r+pz)};
     }
     template<class Stop,class F> void NearFirst(float x,float z,Clip clip,Stop&& stop,F&& f) const {
-        for(int i:apart)f(i);   // first, whatever the clip and the bound (the caller's own test still applies)
+        NearFirstUntil(x,z,clip,stop,[&](int i){ f(i);return false; });
+    }
+    // NearFirst whose f(i) may end the walk (true: no point after it is visited).
+    template<class Stop,class F> void NearFirstUntil(float x,float z,Clip clip,Stop&& stop,F&& f) const {
+        for(int i:apart)if(f(i))return;   // first, whatever the clip and the bound (the caller's own test still applies)
         if(!nx || clip.cx0>clip.cx1 || clip.cz0>clip.cz1)return;
         const int cx=CellXUnclamped(x),cz=CellZUnclamped(z);
         // The ring that first meets the clip, the last one that does.
@@ -185,9 +189,9 @@ public:
             const int x0=(std::max)(cx-r,clip.cx0),x1=(std::min)(cx+r,clip.cx1),z0=(std::max)(cz-r,clip.cz0),z1=(std::min)(cz+r,clip.cz1);
             if(x0>x1 || z0>z1)continue;
             for(int row=z0;row<=z1;++row) {
-                if(row==cz-r || row==cz+r){for(int c=x0;c<=x1;++c)Run(row*nx+c,f);continue;}
-                if(cx-r>=clip.cx0)Run(row*nx+cx-r,f);   // the ring's sides
-                if(r>0 && cx+r<=clip.cx1)Run(row*nx+cx+r,f);
+                if(row==cz-r || row==cz+r){if(AnyInSpan(row*nx+x0,row*nx+x1,f))return;continue;}   // a whole row span
+                if(cx-r>=clip.cx0 && AnyInSpan(row*nx+cx-r,row*nx+cx-r,f))return;   // the ring's sides
+                if(r>0 && cx+r<=clip.cx1 && AnyInSpan(row*nx+cx+r,row*nx+cx+r,f))return;
             }
         }
     }
@@ -233,10 +237,6 @@ private:
     float Pad(float a,float b) const noexcept {
         const float m=(std::max)({std::fabs(a),std::fabs(b),std::fabs(minX),std::fabs(minZ)});
         return std::isfinite(m) ? 1e-3f+m*4e-6f : 0.0f;
-    }
-    template<class F> void Run(int c,F& f) const {
-        const int e=start[static_cast<std::size_t>(c)+1];
-        for(int k=start[static_cast<std::size_t>(c)];k<e;++k)f(item[static_cast<std::size_t>(k)]);
     }
     // The items for adjacent cells are already contiguous. Two offsets cover a whole row span.
     template<class Match> bool AnyInSpan(int first,int last,Match& match) const {

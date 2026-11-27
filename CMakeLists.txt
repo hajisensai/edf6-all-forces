@@ -2648,6 +2648,7 @@ add_test(NAME pvp_native_fixture COMMAND pvp_native_fixture)
 # memoepoch::Clock (src/memo_epoch.h), the key of VerdictOf's per-frame memo; offline, unlike hit_accept_native.
 add_executable(memo_epoch_test EXCLUDE_FROM_ALL tests/memo_epoch_test.cpp)
 target_compile_options(memo_epoch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_include_directories(memo_epoch_test PRIVATE common)
 add_dependencies(offline_checks memo_epoch_test)
 add_test(NAME memo_epoch COMMAND memo_epoch_test)
 # stepobj (common/step_objects.cpp): the System's objects this period, against a stand-in System's lists.

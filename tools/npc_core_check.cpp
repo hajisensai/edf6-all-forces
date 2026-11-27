@@ -310,13 +310,32 @@ const void* wastedTarget=nullptr;
 // Decide's peek reads for a target HoldFire plans for (heldTarget, or any with a weak spot to aim at).
 bool PlanKind(const void* target) noexcept;
 void StubPlanMade(const void* self,const void* target,float speed,float gravity) noexcept;
+// A crowd's targets every shooter's fire is wasted on (the invincible flag: shunned[k] for the object at
+// crowdBase+k*crowdStride), and the targets one shooter's own hits held (fedShooter: fed[k]); wastedAsks counts the asks.
+const unsigned char* crowdBase=nullptr;std::size_t crowdStride=0;
+std::vector<unsigned char> shunned,fed;
+const void* fedShooter=nullptr;
+long long wastedAsks=0;
+int CrowdIndex(const void* target) noexcept {
+    const auto p=static_cast<const unsigned char*>(target);
+    if(!crowdBase || p<crowdBase || p>=crowdBase+crowdStride*shunned.size())return -1;
+    return static_cast<int>(static_cast<std::size_t>(p-crowdBase)/crowdStride);
+}
 bool WastedFire(const void* self,const void* target) noexcept {
+    ++wastedAsks;
     if(PlanKind(target))StubPlanMade(self,target,0.0f,0.0f);
+    if(const int k=CrowdIndex(target);k>=0)
+        return shunned[static_cast<std::size_t>(k)] || (self==fedShooter && fed[static_cast<std::size_t>(k)]);
     return target && target==wastedTarget;
 }
 // wastedfire.cpp WatchTarget: the objects Gather had watched, in order.
 std::vector<const void*> watchedTargets;
 void WatchTarget(const void* target) noexcept { watchedTargets.push_back(target); }
+// wastedfire.cpp WastedOnEveryShooter: the crowd's shunned (the invincible flag), none else.
+bool WastedOnEveryShooter(const void* target) noexcept {
+    const int k=CrowdIndex(target);
+    return k>=0 && shunned[static_cast<std::size_t>(k)];
+}
 // HoldFire: the same target held, and one due to open (heldTarget) aimed at and held; `aim` the weak spot when set.
 const void* heldTarget=nullptr;float weakAim[3]{};bool weakAimSet=false;
 float predictedSpeed=0.0f,predictedGravity=0.0f;
@@ -1751,6 +1770,70 @@ int main() {
             }
             Expect(differ==0,"IsAnyPlayerSelf reads the fields IsAnyPlayer reads, the same answer");
         }
+    }
+    // A crowd of targets no fire hurts (bench:4000, 2026-11-28: every enemy invincible) with a few that can be hurt among
+    // them. Gather leaves the crowd out of the picks (IndexPicks: WastedOnEveryShooter), so each pick asks of the few;
+    // without it (every row a pick's, as a shooter's own held fire leaves them) a pick stops after kPickRejects noes.
+    // Each pick: the nearest it can hurt (the scan's) unless its noes ran out first, never one its fire is wasted on.
+    {
+        Reset();
+        std::mt19937 rng(20261128u);
+        const auto U=[&rng](float a,float b){ return std::uniform_real_distribution<float>(a,b)(rng); };
+        constexpr int kCrowd=4000,kShooters=120;
+        constexpr std::size_t kStride=0x40;
+        std::vector<unsigned char> objects(static_cast<std::size_t>(kCrowd)*kStride,0);
+        // mode 0: Gather's picks (the crowd left out); 1: every row a pick's (pickAll); 2: one shooter's own held fire
+        // on the crowd (fed: not left out by Gather, its noes bounded).
+        for(const int mode:{0,1,2})
+        for(const int kHurt:{0,10}) {
+            crowdBase=objects.data();crowdStride=kStride;
+            shunned.assign(kCrowd,mode==2 ? 0 : 1);fed.assign(kCrowd,mode==2 ? 1 : 0);fedShooter=mode==2 ? other : nullptr;
+            for(int k=0;k<kHurt;++k){const std::size_t r=rng()%kCrowd;shunned[r]=0;fed[r]=0;}
+            world.enemies=kCrowd;Room(world.enemy,kCrowd);
+            for(int i=0;i<kCrowd;++i) {
+                Enemy& e=world.enemy[static_cast<std::size_t>(i)];
+                e.object=objects.data()+static_cast<std::size_t>(i)*kStride;
+                e.aim[0]=U(-250,250);e.aim[1]=U(0,5);e.aim[2]=U(-250,250);e.points=1;
+            }
+            IndexFixture();
+            if(mode!=1)IndexPicks(world,[](int k) noexcept { return WastedOnEveryShooter(world.enemy[static_cast<std::size_t>(k)].object); });
+            Expect(world.pickAll==(mode==1 || mode==2),"the picks leave out the rows every shooter's fire is wasted on alone");
+            Expect(mode!=0 || world.picks==kHurt,"Gather's picks: the hurtable rows alone");
+            int differ=0,early=0,wasted=0;long long asks=0,most=0;
+            LARGE_INTEGER f0,t0,t1;QueryPerformanceFrequency(&f0);
+            double ms=0.0;
+            for(int k=0;k<kShooters;++k) {
+                const float from[3]={U(-200,200),1.5f,U(-200,200)};
+                const void* self=other;
+                Soldier sol{};
+                const float scope=400.0f,reach=300.0f;
+                const int want=npc::PickTarget(world.enemies,[](int r) noexcept { return world.enemy[r].aim; },
+                    [](int) noexcept { return false; },
+                    [self](int r) noexcept { return !WastedFire(self,world.enemy[r].object); },from,from,scope,reach);
+                const long long before=wastedAsks;
+                QueryPerformanceCounter(&t0);
+                const Pick pick=PickTarget(sol,self,from,from,scope,reach);
+                QueryPerformanceCounter(&t1);
+                ms+=static_cast<double>(t1.QuadPart-t0.QuadPart)*1000.0/static_cast<double>(f0.QuadPart);
+                const long long n=wastedAsks-before;
+                asks+=n;most=(std::max)(most,n);
+                const Enemy* const wantE=want<0 ? nullptr : &world.enemy[static_cast<std::size_t>(want)];
+                if(pick.e!=wantE) {
+                    // Only a pick whose noes ran out may differ (none taken, or one it can hurt: never a wasted one).
+                    if(n>=kPickRejects)++early;else ++differ;
+                }
+                if(pick.e && WastedFire(self,pick.e->object))++wasted;
+            }
+            std::printf("crowd of %d (%d hurtable, %s): %d picks, %.1f WastedFire asks a pick (most %lld), %d stopped at the bound, %.4f ms a pick\n",
+                        kCrowd,kHurt,mode==0 ? "crowd left out" : mode==1 ? "every row" : "own held fire",kShooters,
+                        static_cast<double>(asks)/kShooters,most,early,ms/kShooters);
+            Expect(differ==0,"a crowd no fire hurts: each pick the nearest target it can hurt (the scan's), or none at the bound");
+            Expect(wasted==0,"a crowd no fire hurts: no pick one the soldier's fire is wasted on");
+            Expect(most<=kPickRejects+1,"a crowd no fire hurts: a pick asks at most kPickRejects noes and its one yes");
+            Expect(mode!=0 || most<=kHurt,"Gather's picks: a pick asks of the hurtable rows alone");
+        }
+        crowdBase=nullptr;shunned.clear();fed.clear();fedShooter=nullptr;
+        IndexFixture();
     }
     // A fault part way through Gather's walks: the grids are made from the lists as the walk left them (Gather's
     // __finally), not left over the last frame's rows; the row whose point could not be read is not made.
