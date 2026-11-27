@@ -551,21 +551,43 @@ void WastedFirePrime(const void* const* targets,int count) noexcept {
     for(int i=0;i<count;++i)if(targets[i])PrimeOne(targets[i],primedEpoch);
     peekVersion.fetch_add(1,std::memory_order_relaxed);
 }
-int WastedFirePeek(const void* shooter,const void* target) noexcept {
-    if(!target)return 0;
-    if(!shooter)return 0;   // VerdictOf's fire, and Feedback has no shooter's hits to hold
-    const TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
-    if(m.target!=target || m.frame!=primedEpoch || !primedEpoch)return -1;
-    if(m.readable) {
-        if(m.kind!=Kind::none && m.kind!=Kind::yes)return -1;   // its plan: the game thread's (PlanFor)
-        if(m.verdict==hitpredict::Verdict::skip)return 1;
-    }
-    // Feedback at the frame's clock (FeedbackMs, read by the prime).
+namespace {
+// Feedback at the frame's clock (FeedbackMs, read by the prime).
+int PeekFeedback(const void* shooter,const void* target) noexcept {
     if(primedMs>=latestHoldMirror.load(std::memory_order_relaxed))return 0;
     AcquireSRWLockShared(&lock);
     const bool wasted=wastedfire::Wasted(book,shooter,target,primedMs);
     ReleaseSRWLockShared(&lock);
     return wasted ? 1 : 0;
+}
+// The pair's last plan for a round of `speed` / `gravity` made on the game thread (PlanFor), while it holds at the
+// prime's clock (kPlanMs), from wherever it was made: a step late at most (PlanFor itself makes a new one only once the
+// eye has moved). Null: none.
+const Plan* PeekPlan(const void* shooter,const void* target,float speed,float gravity) noexcept {
+    const Plan* p=plans.Find(PlanKey{shooter,target,speed,gravity});
+    return p && p->used && primedMs>=p->at && primedMs-p->at<kPlanMs ? p : nullptr;
+}
+}  // namespace
+FirePeek WastedFirePeekFor(const void* shooter,const void* target,float speed,float gravity) noexcept {
+    FirePeek r{0,0,false,{}};
+    if(!target || !shooter)return r;   // VerdictOf's fire, and Feedback has no shooter's hits to hold
+    const TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
+    if(m.target!=target || m.frame!=primedEpoch || !primedEpoch){r.wasted=r.hold=-1;return r;}
+    if(m.readable && m.kind!=Kind::none && m.kind!=Kind::yes) {   // its plan: the game thread's last one (PlanFor)
+        const Plan* w=PeekPlan(shooter,target,0.0f,0.0f);
+        const Plan* h=speed==0.0f && gravity==0.0f ? w : PeekPlan(shooter,target,speed,gravity);
+        const int fed=w || h ? PeekFeedback(shooter,target) : 0;
+        r.wasted=!w ? -1 : w->verdict==hitpredict::Verdict::skip ? 1 : fed;
+        r.hold=!h ? -1 : h->verdict!=hitpredict::Verdict::fire ? 1 : fed;
+        if(h && h->aimSet){r.aimSet=true;std::memcpy(r.aim,h->aim,12);}
+        return r;
+    }
+    if(m.readable && m.verdict==hitpredict::Verdict::skip){r.wasted=r.hold=1;return r;}
+    r.wasted=r.hold=PeekFeedback(shooter,target);
+    return r;
+}
+int WastedFirePeek(const void* shooter,const void* target) noexcept {
+    return WastedFirePeekFor(shooter,target,0.0f,0.0f).wasted;
 }
 std::uint64_t WastedFireVersion() noexcept { return peekVersion.load(std::memory_order_relaxed); }
 }  // namespace crew

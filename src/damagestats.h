@@ -58,6 +58,13 @@ bool HoldFire(const void* shooter,const void* target,const float* from=nullptr,f
 //    under another version is not the answer now.
 void WastedFirePrime(const void* const* targets,int count) noexcept;
 int WastedFirePeek(const void* shooter,const void* target) noexcept;
+//  - WastedFirePeekFor: both answers at once, WastedFire's (`wasted`) and HoldFire's for a round of `speed` / `gravity`
+//    (`hold`, with the point to aim at when the plan has one). An ordinary target as WastedFirePeek. A target with a
+//    plan (a damage window, a lock-point override): the pair's last plan the game thread made (PlanFor), while it holds
+//    (150 ms at the prime's clock) from wherever it was made, so a step late at most; -1 when there is none (the game
+//    thread's ask makes one, and the next frames' peeks read it).
+struct FirePeek { int wasted,hold; bool aimSet; float aim[3]; };
+FirePeek WastedFirePeekFor(const void* shooter,const void* target,float speed,float gravity) noexcept;
 std::uint64_t WastedFireVersion() noexcept;
 void ResetWastedFire() noexcept;      // mission.cpp MissionStart: the last mission's objects forgotten
 // The window and motion of `target` observed for this frame, once a frame whoever asks (a teleportation ship's hatch, an

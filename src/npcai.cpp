@@ -779,12 +779,30 @@ Arms ArmsOf(const unsigned char* h,ArmsSeen& seen) noexcept {
 // function of its inputs and of a world that does not change in the pass, so a kept answer is the one the ask would get
 // now: the frame comes out the same as with every ask made on the game thread (NpcParallelThink=0), for any pool size.
 namespace mt {
+// The asks Drive makes, and why one was made at Apply (the PERF NPCMT row's counts).
+enum Ask : int { kAskPick,kAskHold,kAskClose,kAskRay,kAskClear,kAsks };
+enum Cause : int {
+    kNoAnswer,   // the Decide made no answer of the kind (not guessed: a new target, a ray not due, the hand not firing)
+    kOther,      // answers of the kind, for other objects (the stock Think turned the target, a mark, the stock target)
+    kWeapon,     // the same object, another weapon's question (its blast / speed / gravity; the pick's scope / reach)
+    kHeld,       // the pick asked with another held target
+    kDrift,      // the same object and weapon, from or to farther than kNear (a lock point's aim, a moved anchor)
+    kPlan,       // its verdict a plan's and none made yet (WastedFirePeekFor -1: the game thread's ask makes one)
+    kLine,       // a question of no object (a stock trigger along the look)
+    kCauses
+};
+// A kept answer stands for an ask of the same object and weapon from within this of where the Decide asked from (and
+// to): a step's motion at most. Nothing moves in the pass (physics steps after it), but the anchors are copied at the
+// fork and a target's lock point comes from the pair's last plan (a step late, as the plan itself holds 150 ms).
+constexpr float kNear=0.5f;
 struct PickQ { float eye[3],anchor[3],scope,reach; int held,row; };
-struct ClearQ { float from[3],to[3],blast; bool clear; };
-struct RayQ { float a[3],b[3],hit[3],dist; };
-struct CloseQ { float at[3],r; bool yes; };
-struct HoldQ { const void* target; bool hold; };
-constexpr int kTargets=2,kClears=4,kRays=2,kCloses=2,kHolds=2;
+struct ClearQ { const void* target; float from[3],to[3],blast; bool clear; };
+struct RayQ { const void* target; float a[3],b[3],hit[3],dist; };
+struct CloseQ { const void* target; float at[3],r; bool yes; };
+// wasted / hold: WastedFire's and HoldFire's answers (-1 not known: a plan's verdict with none made yet); aim: the
+// point HoldFire aims at (the plan's lock point) when aimSet.
+struct HoldQ { const void* target; float speed,gravity; signed char wasted,hold; bool aimSet; float aim[3]; };
+constexpr int kClears=4,kRays=1,kCloses=1,kHolds=3;
 struct Intent {
     const unsigned char* h;
     ObjRef ref;
@@ -792,7 +810,9 @@ struct Intent {
     std::uint64_t version;      // WastedFireVersion at the Decide: the pick and the holds stand only under it
     bool done;                  // its Decide ran to its end (a fault: false, every ask made at Apply)
     bool wantPick;              // the pick guessed (Drive picked last time, its anchor read by the fork)
-    bool pickOk;                // the pick known (no candidate needed the game thread's verdict)
+    bool pickOk;                // the pick known (every candidate's verdict peeked)
+    unsigned char hands;        // the hands Veto tests besides the target's shot (bit k: hand k; the fork's guess)
+    int stockRow;               // the stock AI's target's row at the fork (-1 none)
     PickQ pick;
     int clears,rays,closes,holds;
     ClearQ clear[kClears];
@@ -800,6 +820,8 @@ struct Intent {
     CloseQ close[kCloses];
     HoldQ hold[kHolds];
 };
+// The kept answers its Drive used (bit per answer: kUsedPick, then each kind's entries from its base).
+constexpr unsigned kUsedPick=1u,kUsedHold=2u,kUsedClose=kUsedHold<<kHolds,kUsedRay=kUsedClose<<kCloses,kUsedClear=kUsedRay<<kRays;
 // What Drive last asked with (Remember): the Decide's guess at this frame's questions.
 struct Guess {
     ObjRef ref;                 // the soldier it is of (its slot may go to another)
@@ -807,6 +829,7 @@ struct Guess {
     const float* anchor;        // where Drive read its anchor (a position an object, a squad, the world or the soldier holds)
     float scope,reach;
     Arms arms;
+    unsigned char hands;        // the hands Veto found pulled last time (bit k)
     ULONGLONG intentFrame;      // the fork its intent is of, and its index there
     int intentAt;
 };
@@ -815,16 +838,23 @@ std::vector<Intent> intents;    // by the fork's index
 std::vector<int> forkSlots;     // the fork's index -> the soldier's slot
 std::vector<const void*> primeTargets;
 const Intent* applying=nullptr; // the soldier whose Drive runs now: its intent (game thread)
+unsigned used=0;                // the kept answers of `applying` its Drive used (kUsed*)
+unsigned char vetoed=0;         // the hands Veto found pulled in the Drive running now (game thread)
+int remembered=-1;              // the slot Remember wrote in the Drive running now
 ULONGLONG forkFrame=~0ull;
 struct Stats {
-    unsigned frames,decided,faults,applied,noIntent,hits,misses,stale,mismatches;
+    unsigned frames,decided,faults,applied,noIntent,hits,misses,stale,shadowed,differs;
+    unsigned asked[kAsks],cause[kCauses],unused[kAsks];
     LONGLONG gather,decide,stock,think,sync;   // QPC ticks (PerfProbe>=1)
 };
 Stats stats{};
 unsigned shadowTick=0;
-ULONGLONG mismatchLogAt=0,faultLogAt=0;
-bool Same3(const float* a,const float* b) noexcept { return std::memcmp(a,b,12)==0; }
+ULONGLONG differLogAt=0,faultLogAt=0;
 bool Same1(float a,float b) noexcept { return std::memcmp(&a,&b,4)==0; }
+bool Near3(const float* a,const float* b) noexcept {
+    const float x=a[0]-b[0],y=a[1]-b[1],z=a[2]-b[2];
+    return x*x+y*y+z*z<=kNear*kNear;   // NaN: not near
+}
 // The intent for `self`'s ask now, or null.
 const Intent* For(const void* self) noexcept {
     const Intent* i=applying;
@@ -835,25 +865,43 @@ bool Fresh(const Intent& i) noexcept {
     ++stats.stale;
     return false;
 }
-// Debug=1: one kept answer in 32 asked again on the game thread and compared (NPCMT MISMATCH: the kept one was not the
-// answer now; the game thread's is used).
-bool Shadow() noexcept { return Cfg().debug && (++shadowTick&31)==0; }
-void Mismatch(const char* what,const void* self) noexcept {
-    ++stats.mismatches;
+// A kept answer used (counted, its bit set).
+void Kept(unsigned bit) noexcept { ++stats.hits;used|=bit; }
+// Debug=1: one kept answer in 32 asked again on the game thread and compared. The kept one is used either way (the
+// behaviour does not depend on Debug); a difference is counted (the shadow's differ rate: how often the step-late
+// answer is not the one the game thread would give now) and logged at most every 2 s.
+bool Shadow() noexcept {
+    if(!Cfg().debug || (++shadowTick&31)!=0)return false;
+    ++stats.shadowed;
+    return true;
+}
+void Differs(const char* what,const void* self) noexcept {
+    ++stats.differs;
     const ULONGLONG ms=GetTickCount64();
-    if(mismatchLogAt && ms-mismatchLogAt<2000)return;
-    mismatchLogAt=ms;
-    Log("NPCMT MISMATCH %s: soldier %p's kept answer differs from the game thread's (%u so far)",what,self,stats.mismatches);
+    if(differLogAt && ms-differLogAt<2000)return;
+    differLogAt=ms;
+    Log("NPCMT SHADOW %s: soldier %p's kept answer differs from the game thread's now (%u of %u shadowed)",what,self,
+        stats.differs,stats.shadowed);
 }
 LONGLONG Ticks() noexcept { LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart; }
-// An ask made at Apply (a miss when the soldier had an intent), timed under PerfProbe.
+// An ask made at Apply (a miss when the soldier had an intent: counted by its kind and cause), timed under PerfProbe.
 struct Sync {
     LONGLONG at;
-    explicit Sync(bool counted) noexcept : at(Cfg().perfProbe ? Ticks() : 0) { if(counted)++stats.misses; }
+    Sync(const Intent* in,Ask ask,Cause cause) noexcept : at(Cfg().perfProbe ? Ticks() : 0) {
+        if(!in)return;
+        ++stats.misses;++stats.asked[ask];
+        if(cause<kCauses)++stats.cause[cause];   // kCauses: stale (counted by Fresh)
+    }
     ~Sync() { if(at)stats.sync+=Ticks()-at; }
     Sync(const Sync&)=delete;
     Sync& operator=(const Sync&)=delete;
 };
+constexpr Cause kStaleCause=kCauses;
+// The better of two causes for a kind's entries (the nearest to a hit: drift, then weapon, then another object).
+Cause Closer(Cause a,Cause b) noexcept {
+    const auto rank=[](Cause c) noexcept { return c==kDrift ? 0 : c==kPlan ? 1 : c==kWeapon ? 2 : c==kOther ? 3 : 4; };
+    return rank(a)<=rank(b) ? a : b;
+}
 }  // namespace mt
 
 // --- The target ---
@@ -884,16 +932,24 @@ Pick PickTarget(const Soldier& s,const void* self,const float* eye,const float* 
     const int held=EnemyRow(s.target);
     int i=-1;
     const mt::Intent* in=mt::For(self);
-    if(in && in->pickOk && in->pick.held==held && mt::Same3(in->pick.eye,eye) && mt::Same3(in->pick.anchor,anchor) &&
-       mt::Same1(in->pick.scope,scope) && mt::Same1(in->pick.reach,reach) && mt::Fresh(*in)) {
-        ++mt::stats.hits;
+    // The kept pick: asked with the same held target, scope and reach (its weapons and orders as they were), from about
+    // where Drive asks from (mt::kNear), under the wastedfire book it was made under.
+    mt::Cause cause=mt::kNoAnswer;
+    bool kept=false;
+    if(in && in->wantPick) {
+        if(!in->pickOk)cause=mt::kPlan;
+        else if(in->pick.held!=held)cause=mt::kHeld;
+        else if(!mt::Same1(in->pick.scope,scope) || !mt::Same1(in->pick.reach,reach))cause=mt::kWeapon;
+        else if(!mt::Near3(in->pick.eye,eye) || !mt::Near3(in->pick.anchor,anchor))cause=mt::kDrift;
+        else if(!mt::Fresh(*in))cause=mt::kStaleCause;
+        else kept=true;
+    }
+    if(kept) {
+        mt::Kept(mt::kUsedPick);
         i=in->pick.row;
-        if(mt::Shadow()) {
-            const int now=PickRowNow(self,held,eye,anchor,scope,reach);
-            if(now!=i){mt::Mismatch("target pick",self);i=now;}
-        }
+        if(mt::Shadow() && PickRowNow(self,held,eye,anchor,scope,reach)!=i)mt::Differs("target pick",self);
     } else {
-        const mt::Sync sync(in!=nullptr);
+        const mt::Sync sync(in,mt::kAskPick,cause);
         i=PickRowNow(self,held,eye,anchor,scope,reach);
     }
     return i<0 ? Pick{nullptr,0.0f} : Pick{&world.enemy[i],npc::Dist(eye,world.enemy[i].aim)};
@@ -935,89 +991,99 @@ bool FriendNearNow(const void* self,const float* at,float r) noexcept {
     });
 }
 
-// The asks as Drive makes them: the soldier's kept answer (its intent: the same inputs bit for bit), else made now.
-bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
+// The asks as Drive makes them: the soldier's kept answer (its intent: the same object and weapon, from about the same
+// place: mt::kNear), else made now. `target`: the object the question is about (null: none, a line along the look).
+bool ShotClearOf(const void* self,const void* target,const float* from,const float* to,float blast) noexcept {
     const mt::Intent* in=mt::For(self);
-    if(in)for(int k=0;k<in->clears;++k) {
+    mt::Cause cause=target ? mt::kNoAnswer : mt::kLine;
+    if(in && target)for(int k=0;k<in->clears;++k) {
         const mt::ClearQ& c=in->clear[k];
-        if(!mt::Same3(c.from,from) || !mt::Same3(c.to,to) || !mt::Same1(c.blast,blast))continue;
-        ++mt::stats.hits;
-        if(mt::Shadow()) {
-            const bool now=ShotClearNow(self,from,to,blast);
-            if(now!=c.clear){mt::Mismatch("shot clear",self);return now;}
-        }
+        if(c.target!=target){cause=mt::Closer(cause,mt::kOther);continue;}
+        if(!mt::Same1(c.blast,blast)){cause=mt::Closer(cause,mt::kWeapon);continue;}
+        if(!mt::Near3(c.from,from) || !mt::Near3(c.to,to)){cause=mt::Closer(cause,mt::kDrift);continue;}
+        mt::Kept(mt::kUsedClear<<k);
+        if(mt::Shadow() && ShotClearNow(self,from,to,blast)!=c.clear)mt::Differs("shot clear",self);
         return c.clear;
     }
-    const mt::Sync sync(in!=nullptr);
+    const mt::Sync sync(in,mt::kAskClear,cause);
     return ShotClearNow(self,from,to,blast);
 }
-bool FriendNear(const void* self,const float* at,float r) noexcept {
+bool FriendNear(const void* self,const void* target,const float* at,float r) noexcept {
     const mt::Intent* in=mt::For(self);
+    mt::Cause cause=mt::kNoAnswer;
     if(in)for(int k=0;k<in->closes;++k) {
         const mt::CloseQ& c=in->close[k];
-        if(!mt::Same3(c.at,at) || !mt::Same1(c.r,r))continue;
-        ++mt::stats.hits;
-        if(mt::Shadow()) {
-            const bool now=FriendNearNow(self,at,r);
-            if(now!=c.yes){mt::Mismatch("friend near",self);return now;}
-        }
+        if(c.target!=target){cause=mt::Closer(cause,mt::kOther);continue;}
+        if(!mt::Same1(c.r,r)){cause=mt::Closer(cause,mt::kWeapon);continue;}
+        if(!mt::Near3(c.at,at)){cause=mt::Closer(cause,mt::kDrift);continue;}
+        mt::Kept(mt::kUsedClose<<k);
+        if(mt::Shadow() && FriendNearNow(self,at,r)!=c.yes)mt::Differs("friend near",self);
         return c.yes;
     }
-    const mt::Sync sync(in!=nullptr);
+    const mt::Sync sync(in,mt::kAskClose,cause);
     return FriendNearNow(self,at,r);
 }
-// The map ray a->b (heli.h MapRay: metres to the hit, -1 none; `hit` written on a hit only).
-float MapRayQ(const void* self,const float* a,const float* b,float* hit) noexcept {
+// The map ray a->b at `target` (heli.h MapRay: metres to the hit, -1 none; `hit` written on a hit only).
+float MapRayQ(const void* self,const void* target,const float* a,const float* b,float* hit) noexcept {
     const mt::Intent* in=mt::For(self);
+    mt::Cause cause=mt::kNoAnswer;
     if(in)for(int k=0;k<in->rays;++k) {
         const mt::RayQ& r=in->ray[k];
-        if(!mt::Same3(r.a,a) || !mt::Same3(r.b,b))continue;
-        ++mt::stats.hits;
+        if(r.target!=target){cause=mt::Closer(cause,mt::kOther);continue;}
+        if(!mt::Near3(r.a,a) || !mt::Near3(r.b,b)){cause=mt::Closer(cause,mt::kDrift);continue;}
+        mt::Kept(mt::kUsedRay<<k);
         if(mt::Shadow()) {
             float now[3];
             const float d=MapRay(a,b,now);
-            if(!mt::Same1(d,r.dist) || (d>=0.0f && !mt::Same3(now,r.hit))) {
-                mt::Mismatch("map ray",self);
-                if(d>=0.0f)std::memcpy(hit,now,12);
-                return d;
-            }
+            if((d>=0.0f)!=(r.dist>=0.0f) || (d>=0.0f && std::fabs(d-r.dist)>mt::kNear))mt::Differs("map ray",self);
         }
         if(r.dist>=0.0f)std::memcpy(hit,r.hit,12);
         return r.dist;
     }
-    const mt::Sync sync(in!=nullptr);
+    const mt::Sync sync(in,mt::kAskRay,cause);
     return MapRay(a,b,hit);
 }
-// WastedFire / HoldFire of an ordinary target (its verdict the invincible flag and the shooter's wasted hits: the same
-// answer to both, `aim` untouched), kept while the wastedfire book stands as it was at the Decide.
-const mt::HoldQ* KeptHold(const void* self,const void* target) noexcept {
+// WastedFire / HoldFire of `target` (HoldFire's for a round of `speed` / `gravity`: the weapon's), kept while the
+// wastedfire book stands as it was at the Decide. Null with *cause set: none kept.
+const mt::HoldQ* KeptHold(const void* self,const void* target,bool wasted,float speed,float gravity,mt::Cause* cause,
+                          unsigned* bit) noexcept {
     const mt::Intent* in=mt::For(self);
+    *cause=mt::kNoAnswer;
     if(!in || !target)return nullptr;
-    for(int k=0;k<in->holds;++k)if(in->hold[k].target==target)return mt::Fresh(*in) ? &in->hold[k] : nullptr;
+    for(int k=0;k<in->holds;++k) {
+        const mt::HoldQ& q=in->hold[k];
+        if(q.target!=target){*cause=mt::Closer(*cause,mt::kOther);continue;}
+        if(!wasted && (!mt::Same1(q.speed,speed) || !mt::Same1(q.gravity,gravity))){*cause=mt::Closer(*cause,mt::kWeapon);continue;}
+        if((wasted ? q.wasted : q.hold)<0){*cause=mt::Closer(*cause,mt::kPlan);continue;}
+        if(!mt::Fresh(*in)){*cause=mt::kStaleCause;return nullptr;}
+        *bit=mt::kUsedHold<<k;
+        return &q;
+    }
     return nullptr;
 }
 bool WastedFireQ(const void* self,const void* target) noexcept {
-    if(const mt::HoldQ* q=KeptHold(self,target)) {
-        ++mt::stats.hits;
-        if(mt::Shadow()) {
-            const bool now=WastedFire(self,target);
-            if(now!=q->hold){mt::Mismatch("wasted fire",self);return now;}
-        }
-        return q->hold;
+    mt::Cause cause;unsigned bit=0;
+    if(const mt::HoldQ* q=KeptHold(self,target,true,0.0f,0.0f,&cause,&bit)) {
+        mt::Kept(bit);
+        if(mt::Shadow() && WastedFire(self,target)!=(q->wasted>0))mt::Differs("wasted fire",self);
+        return q->wasted>0;
     }
-    const mt::Sync sync(mt::For(self)!=nullptr);
+    const mt::Sync sync(mt::For(self),mt::kAskHold,cause);
     return WastedFire(self,target);
 }
 bool HoldFireQ(const void* self,const void* target,const float* from,float speed,float gravity,float* aim=nullptr) noexcept {
-    if(const mt::HoldQ* q=KeptHold(self,target)) {
-        ++mt::stats.hits;
+    mt::Cause cause;unsigned bit=0;
+    if(const mt::HoldQ* q=KeptHold(self,target,false,speed,gravity,&cause,&bit)) {
+        mt::Kept(bit);
         if(mt::Shadow()) {
-            const bool now=HoldFire(self,target,from,speed,gravity,aim);
-            if(now!=q->hold){mt::Mismatch("hold fire",self);return now;}
+            float now[3];
+            if(aim)std::memcpy(now,aim,12);
+            if(HoldFire(self,target,from,speed,gravity,aim ? now : nullptr)!=(q->hold>0))mt::Differs("hold fire",self);
         }
-        return q->hold;
+        if(aim && q->aimSet)std::memcpy(aim,q->aim,12);
+        return q->hold>0;
     }
-    const mt::Sync sync(mt::For(self)!=nullptr);
+    const mt::Sync sync(mt::For(self),mt::kAskHold,cause);
     return HoldFire(self,target,from,speed,gravity,aim);
 }
 
@@ -1115,7 +1181,7 @@ int ChooseArm(Soldier& s,unsigned char* h,const Arms& a,const Enemy* t,const flo
     if(!t || a.n==0)return a.held[0];
     const float dist=npc::Dist(eye,t->aim);
     const auto kind=KindOf(*t,pos);
-    const bool friendNear=FriendNear(h,t->aim,kFriendNearTarget);
+    const bool friendNear=FriendNear(h,t->object,t->aim,kFriendNearTarget);
     const int pick=npc::PickArm(a.arm,a.n<3 ? a.n : 3,a.held[0],dist,kind,friendNear);
     // Only d82..d84 exist. An inaccessible fourth weapon must not hide a usable second one, but an already held
     // fourth weapon can still win the same hysteresis comparison and be fired without selecting it again.
@@ -1148,11 +1214,11 @@ bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const
     if(npc::AimError(At<float>(h,kViewPitch),At<float>(h,kViewYaw),dir)>(cone>kFireConeMin ? cone : kFireConeMin))return false;
     if(GameFrame()-s.losFrame>=kLosFrames || s.losObject!=t.object) {
         float hit[3];
-        const float wall=MapRayQ(h,eye,t.aim,hit);
+        const float wall=MapRayQ(h,t.object,eye,t.aim,hit);
         s.los=wall<0.0f || wall>dist-2.0f;s.losFrame=GameFrame();s.losObject=t.object;
     }
     if(!s.los)return false;
-    return ShotClearOf(h,eye,t.aim,a.arm[i].blast);
+    return ShotClearOf(h,t.object,eye,t.aim,a.arm[i].blast);
 }
 
 // A pulled trigger taken off a shot at `t` that would hit a friend. Each hand is tested with the weapon its own WeaponSet
@@ -1170,19 +1236,20 @@ float LongestReach(const Arms& a) noexcept {
 }
 // Whether a round of `blast` at `t` (none: along the look, as far as `reach` or the ground) keeps off every friend.
 bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {
-    if(t)return ShotClearOf(h,eye,t->aim,blast);
+    if(t)return ShotClearOf(h,t->object,eye,t->aim,blast);
     if(reach<=0.0f)return false;
     float dir[3];
     const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
     dir[0]=std::sin(yaw)*std::cos(pitch);dir[1]=-std::sin(pitch);dir[2]=std::cos(yaw)*std::cos(pitch);
     float to[3]={eye[0]+dir[0]*reach,eye[1]+dir[1]*reach,eye[2]+dir[2]*reach},hit[3];
     if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
-    return ShotClearOf(h,eye,to,blast);
+    return ShotClearOf(h,nullptr,eye,to,blast);
 }
 // Every trigger is taken off a shot at a target its fire is wasted on (WastedFire): the stock AI's own target included.
 void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a,int firstHand=0) noexcept {
     for(int k=firstHand;k<kHands;++k) {
         if(!h[kTrigger+k])continue;
+        mt::vetoed|=static_cast<unsigned char>(1u<<k);   // the next fork's guess at the hands Veto tests
         const int w=a.held[k];
         const bool known=w>=0 && w<a.n;
         if(t && HoldFireQ(h,t->object,eye,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f))h[kTrigger+k]=0;
@@ -1814,8 +1881,8 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
             }))continue;
         } else {
             dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
-            const float wall=MapRayQ(h,eye,t->aim,hit);
-            if(!ShotClearOf(h,eye,t->aim,0.0f) || (wall>=0.0f && wall<dist-2.0f))continue;
+            const float wall=MapRayQ(h,t->object,eye,t->aim,hit);
+            if(!ShotClearOf(h,t->object,eye,t->aim,0.0f) || (wall>=0.0f && wall<dist-2.0f))continue;
         }
         if(!(mask&kMaskLook))return;
         Look(h,dir);
@@ -2191,6 +2258,7 @@ namespace mt {
 // What Drive asked with this frame (game thread): the next fork asks the same from where the soldier stands then.
 void Remember(const Soldier& s,const unsigned char* h,const float* anchor,float scope,float reach,bool pick,const Arms& a) noexcept {
     const int i=soldierIndex.Find(h);
+    remembered=i;
     if(i<0)return;
     if(guesses.size()<soldiers.size())guesses.resize(soldiers.size());
     Guess& g=guesses[static_cast<std::size_t>(i)];
@@ -2204,71 +2272,110 @@ bool CopyAnchor(const float* from,float* to) noexcept {
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-void AddClear(Intent& in,const float* from,const float* to,float blast) noexcept {
+void AddClear(Intent& in,const void* target,const float* from,const float* to,float blast) noexcept {
     for(int k=0;k<in.clears;++k)
-        if(Same3(in.clear[k].from,from) && Same3(in.clear[k].to,to) && Same1(in.clear[k].blast,blast))return;
+        if(in.clear[k].target==target && Same1(in.clear[k].blast,blast) && std::memcmp(in.clear[k].to,to,12)==0)return;
     if(in.clears>=kClears)return;
     ClearQ& c=in.clear[in.clears];
-    std::memcpy(c.from,from,12);std::memcpy(c.to,to,12);c.blast=blast;
+    c.target=target;std::memcpy(c.from,from,12);std::memcpy(c.to,to,12);c.blast=blast;
     c.clear=ShotClearNow(in.h,from,to,blast);
     ++in.clears;
 }
+// HoldFire's (and WastedFire's) answers for `target` with a round of `speed` / `gravity`, kept (once a weapon).
+const HoldQ* AddHold(Intent& in,const void* target,float speed,float gravity) noexcept {
+    for(int k=0;k<in.holds;++k)
+        if(in.hold[k].target==target && Same1(in.hold[k].speed,speed) && Same1(in.hold[k].gravity,gravity))return &in.hold[k];
+    if(in.holds>=kHolds)return nullptr;
+    const FirePeek p=WastedFirePeekFor(in.h,target,speed,gravity);
+    HoldQ& q=in.hold[in.holds++];
+    q.target=target;q.speed=speed;q.gravity=gravity;
+    q.wasted=static_cast<signed char>(p.wasted);q.hold=static_cast<signed char>(p.hold);
+    q.aimSet=p.aimSet;std::memcpy(q.aim,p.aim,12);
+    return &q;
+}
+// Veto's asks of the hands in `hands` at `t` (each hand with its own weapon, an unknown one with the largest blast).
+void VetoAsks(Intent& in,const Enemy& t,const float* eye,const Arms& a,unsigned hands) noexcept {
+    for(int k=0;k<kHands;++k) {
+        if(!(hands&(1u<<k)))continue;
+        const int w=a.held[k];
+        const bool known=w>=0 && w<a.n;
+        AddHold(in,t.object,known ? a.speed[w] : 0.0f,known ? a.gravity[w] : 0.0f);
+        AddClear(in,t.object,eye,t.aim,known ? a.arm[w].blast : LargestBlast(a));
+    }
+}
 struct ForkCtx { ULONGLONG frame; };
-// One soldier's Decide (a pool thread or the game thread, inside Run): Drive's read-only asks of this frame made from
-// what it asked last time and where it stands, each kept with its inputs. Reads the frame's world (written by Gather
-// alone, before the fork), the soldier's entry and guess (written by its Think alone: none runs during Run), the
-// soldier's and the targets' memory (the pass moves nothing: physics steps after it), the wastedfire memo (primed
-// before the fork, WastedFirePeek: no write) and the map (MapRay: a query of the Havok world, not stepping in the pass).
-// Writes its own intent only. No clock, config, log, random number or native object's virtual call.
+// One soldier's Decide (a pool thread or the game thread, inside Run): the asks its Drive will make, from what it asked
+// last time (its guess: anchor, scope, reach, arms, the hands Veto tests) at the target this frame's pick gives (or the
+// one it holds, when the pick needs the game thread), each kept with its question. Only the asks Drive makes: the
+// target's hold, friends round it, and, when its held weapon is ready, in reach and the look near enough on it to fire
+// within the step, the shot's map ray (when the kept one is due) and line; Veto's hands; with no target, Veto's at the
+// stock AI's target. Reads the frame's world (written by Gather alone, before the fork), the soldier's entry and guess
+// (written by its Think alone: none runs during Run), the soldier's and the targets' memory (the pass moves nothing:
+// physics steps after it), the wastedfire memo and plans (primed before the fork, WastedFirePeekFor: no write) and the
+// map (MapRay: a query of the Havok world, not stepping in the pass). Writes its own intent only. No clock, config,
+// log, random number or native object's virtual call.
 void Decide(void* ctx,int index) noexcept {
     const ULONGLONG frame=static_cast<const ForkCtx*>(ctx)->frame;
     Intent& in=intents[static_cast<std::size_t>(index)];
     const std::size_t slot=static_cast<std::size_t>(forkSlots[static_cast<std::size_t>(index)]);
     const Soldier& s=soldiers[slot];
     const Guess& g=guesses[slot];
+    const Arms& a=g.arms;
     const float* pos=Pos(in.h);
     const float eye[3]={pos[0],pos[1]+kEye,pos[2]};
+    if(a.held[0]<0) {   // the held weapon not known: Drive's Veto at the stock target, every hand pulled
+        if(in.stockRow>=0)VetoAsks(in,world.enemy[static_cast<std::size_t>(in.stockRow)],eye,a,in.hands);
+        in.done=true;
+        return;
+    }
     const int held=EnemyRow(s.target);
-    int rows[kTargets],n=0;
+    int row=held;   // the target Drive will fight: the pick's, else (its verdicts the game thread's) the one it holds
     if(in.wantPick) {   // its anchor copied by the fork (in.pick.anchor)
         std::memcpy(in.pick.eye,eye,12);in.pick.scope=g.scope;in.pick.reach=g.reach;in.pick.held=held;
         bool known=true;
         const void* const self=in.h;
         in.pick.row=PickRow(held,eye,in.pick.anchor,g.scope,g.reach,[self,&known](int k) noexcept {
             const int w=WastedFirePeek(self,world.enemy[static_cast<std::size_t>(k)].object);
-            if(w<0)known=false;   // its verdict a plan's (PlanFor): the game thread's, so the pick is too
+            if(w<0)known=false;   // a plan's verdict with none made yet: the game thread's, so the pick is too
             return w==0;
         });
         in.pickOk=known;
-        if(known && in.pick.row>=0)rows[n++]=in.pick.row;
+        if(known)row=in.pick.row;
     }
-    if(held>=0 && (n==0 || rows[0]!=held))rows[n++]=held;
-    const Arms& a=g.arms;
-    const int w0=a.held[0],w1=a.held[1];
-    for(int r=0;r<n;++r) {
-        const Enemy& t=world.enemy[static_cast<std::size_t>(rows[r])];
-        if(in.holds<kHolds) {
-            const int w=WastedFirePeek(in.h,t.object);
-            if(w>=0){in.hold[in.holds].target=t.object;in.hold[in.holds].hold=w>0;++in.holds;}
-        }
-        if(in.closes<kCloses) {   // ChooseArm's friends round the target
-            CloseQ& c=in.close[in.closes];
-            std::memcpy(c.at,t.aim,12);c.r=kFriendNearTarget;c.yes=FriendNearNow(in.h,t.aim,kFriendNearTarget);
-            ++in.closes;
-        }
-        // ShotOk with the held weapon (ChooseArm fires only it): its map ray when the kept one is due, its line clear.
-        const float dist=npc::Dist(eye,t.aim);
-        if(w0>=0 && w0<a.n && a.arm[w0].ready && dist<=a.arm[w0].reach && dist>=npc::MinRange(a.arm[w0])) {
+    if(row<0) {   // no target: Drive's Veto at the stock target, its first hand let go
+        if(in.stockRow>=0)VetoAsks(in,world.enemy[static_cast<std::size_t>(in.stockRow)],eye,a,in.hands&~1u);
+        in.done=true;
+        return;
+    }
+    const Enemy& t=world.enemy[static_cast<std::size_t>(row)];
+    const int w0=a.held[0];
+    const bool armed=w0<a.n;
+    const HoldQ* hold=AddHold(in,t.object,armed ? a.speed[w0] : 0.0f,armed ? a.gravity[w0] : 0.0f);
+    {   // ChooseArm's friends round the target
+        CloseQ& c=in.close[in.closes++];
+        c.target=t.object;std::memcpy(c.at,t.aim,12);c.r=kFriendNearTarget;c.yes=FriendNearNow(in.h,t.aim,kFriendNearTarget);
+    }
+    // ShotOk with the held weapon at the point HoldFire aims it at, unless HoldFire holds it.
+    const float* aim=hold && hold->aimSet ? hold->aim : t.aim;
+    if(armed && (!hold || hold->hold<=0) && a.arm[w0].ready) {
+        const float dist=npc::Dist(eye,aim);
+        const float dir[3]={aim[0]-eye[0],aim[1]-eye[1],aim[2]-eye[2]};
+        const float cone=std::atan(kHitRadius/(dist>1.0f ? dist : 1.0f));
+        // ShotOk's aim test: the look (kViewPitch / kViewYaw, the game's, eased by its step: Drive writes the aim, not
+        // the look) is the same at Drive; the margin is the angle a kept answer's drift (kNear) makes at the target.
+        const bool onIt=npc::AimError(At<float>(in.h,kViewPitch),At<float>(in.h,kViewYaw),dir)<=
+                        (cone>kFireConeMin ? cone : kFireConeMin)+std::atan(kNear/(dist>1.0f ? dist : 1.0f));
+        if(onIt && dist<=a.arm[w0].reach && dist>=npc::MinRange(a.arm[w0])) {
             if((frame-s.losFrame>=kLosFrames || s.losObject!=t.object) && in.rays<kRays) {
                 RayQ& q=in.ray[in.rays];
-                std::memcpy(q.a,eye,12);std::memcpy(q.b,t.aim,12);
-                q.dist=MapRay(eye,t.aim,q.hit);
+                q.target=t.object;std::memcpy(q.a,eye,12);std::memcpy(q.b,aim,12);
+                q.dist=MapRay(eye,aim,q.hit);
                 ++in.rays;
             }
-            AddClear(in,eye,t.aim,a.arm[w0].blast);
+            AddClear(in,t.object,eye,aim,a.arm[w0].blast);
         }
-        AddClear(in,eye,t.aim,w1>=0 && w1<a.n ? a.arm[w1].blast : LargestBlast(a));   // Veto from hand 1
     }
+    VetoAsks(in,t,eye,a,in.hands&~1u);   // Veto from hand 1, at the target itself
     in.done=true;   // last: a fault before it leaves every ask to the game thread
 }
 // The frame's fork (the first soldier's Think after the world is gathered, game thread): every soldier Drive saw
@@ -2294,6 +2401,10 @@ void Fork(ULONGLONG frame,ULONGLONG ms) noexcept {
         in.h=h;in.ref=s.ref;in.frame=frame;
         if(pick)std::memcpy(in.pick.anchor,anchor,12);
         in.wantPick=pick;   // an anchor not readable now: the pick made at its Think
+        // The hands Veto will test: those it found pulled last time or pulled now (the stock AI pulls them in its Think).
+        in.hands=static_cast<unsigned char>(g.hands|(h[kTrigger] ? 1u : 0u)|(h[kTrigger+1] ? 2u : 0u));
+        const Enemy* stock=StockTarget(h);
+        in.stockRow=stock ? static_cast<int>(stock-world.enemy.data()) : -1;
     }
     if(intents.empty()){if(t0)stats.decide+=Ticks()-t0;return;}
     primeTargets.clear();
@@ -2318,7 +2429,7 @@ void Fork(ULONGLONG frame,ULONGLONG ms) noexcept {
 }
 // The soldier's intent for its Drive now (game thread, its Think), or none.
 void Begin(const unsigned char* h) noexcept {
-    applying=nullptr;
+    applying=nullptr;used=0;vetoed=0;remembered=-1;
     if(intents.empty())return;
     const int i=soldierIndex.Find(h);
     const Guess* g=i>=0 && static_cast<std::size_t>(i)<guesses.size() ? &guesses[static_cast<std::size_t>(i)] : nullptr;
@@ -2327,6 +2438,19 @@ void Begin(const unsigned char* h) noexcept {
     const Intent& in=intents[static_cast<std::size_t>(g->intentAt)];
     if(!in.done || in.h!=h || in.frame!=forkFrame || !in.ref.Is(h)){++stats.noIntent;return;}
     applying=&in;++stats.applied;
+}
+// After its Drive (game thread): the hands Veto found pulled kept for the next fork, the kept answers it did not use
+// counted (the Decide's work for nothing).
+void End() noexcept {
+    if(remembered>=0 && static_cast<std::size_t>(remembered)<guesses.size())guesses[static_cast<std::size_t>(remembered)].hands=vetoed;
+    if(const Intent* in=applying) {
+        if(in->wantPick && in->pickOk && !(used&kUsedPick))++stats.unused[kAskPick];
+        for(int k=0;k<in->holds;++k)if(!(used&(kUsedHold<<k)))++stats.unused[kAskHold];
+        for(int k=0;k<in->closes;++k)if(!(used&(kUsedClose<<k)))++stats.unused[kAskClose];
+        for(int k=0;k<in->rays;++k)if(!(used&(kUsedRay<<k)))++stats.unused[kAskRay];
+        for(int k=0;k<in->clears;++k)if(!(used&(kUsedClear<<k)))++stats.unused[kAskClear];
+    }
+    applying=nullptr;remembered=-1;
 }
 }  // namespace mt
 
@@ -2516,6 +2640,7 @@ void Think(unsigned char* h,int cls) noexcept {
     s->hpSeen=hpNow;
     if(!npc::Scripted(control))mt::Begin(h);
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
+    if(!npc::Scripted(control))mt::End();
     mt::applying=nullptr;
     if(!npc::Scripted(control))   // a script's unit keeps its stock moves
         Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil);
@@ -3359,7 +3484,7 @@ bool InstallNpcAi() noexcept {
 void ResetNpcParallel() noexcept {
     mt::guesses.clear();mt::intents.clear();mt::forkSlots.clear();mt::primeTargets.clear();
     mt::applying=nullptr;mt::forkFrame=~0ull;
-    mt::stats=mt::Stats{};mt::shadowTick=0;mt::mismatchLogAt=mt::faultLogAt=0;
+    mt::stats=mt::Stats{};mt::shadowTick=0;mt::differLogAt=mt::faultLogAt=0;mt::used=0;mt::vetoed=0;mt::remembered=-1;
 }
 void NpcParallelReport(unsigned steps) noexcept {
     const mt::Stats st=mt::stats;
@@ -3370,10 +3495,16 @@ void NpcParallelReport(unsigned steps) noexcept {
     const LONGLONG apply=st.think-st.gather-st.decide;
     Log("PERF NPCMT %s, %d threads: %.1f soldiers decided a step, %u faults; a step: gather %.3f ms, decide %.3f ms, "
         "stock think %.3f ms, apply %.3f ms (asks made at apply %.3f ms); kept answers %u, asked at apply %u, "
-        "no intent %u, stale %u, mismatches %u",Cfg().npcParallelThink ? "on" : "off",workers::Threads(),
+        "no intent %u, stale %u, shadow differs %u of %u; asked at apply: pick %u, hold %u, close %u, ray %u, clear %u; "
+        "why: no answer %u, other object %u, weapon %u, held %u, drift %u, plan %u, line %u; "
+        "kept unused: pick %u, hold %u, close %u, ray %u, clear %u",Cfg().npcParallelThink ? "on" : "off",workers::Threads(),
         static_cast<double>(st.decided)/f,st.faults,static_cast<double>(st.gather)*ms,static_cast<double>(st.decide)*ms,
         static_cast<double>(st.stock)*ms,static_cast<double>(apply>0 ? apply : 0)*ms,static_cast<double>(st.sync)*ms,
-        st.hits,st.misses,st.noIntent,st.stale,st.mismatches);
+        st.hits,st.misses,st.noIntent,st.stale,st.differs,st.shadowed,
+        st.asked[mt::kAskPick],st.asked[mt::kAskHold],st.asked[mt::kAskClose],st.asked[mt::kAskRay],st.asked[mt::kAskClear],
+        st.cause[mt::kNoAnswer],st.cause[mt::kOther],st.cause[mt::kWeapon],st.cause[mt::kHeld],st.cause[mt::kDrift],
+        st.cause[mt::kPlan],st.cause[mt::kLine],
+        st.unused[mt::kAskPick],st.unused[mt::kAskHold],st.unused[mt::kAskClose],st.unused[mt::kAskRay],st.unused[mt::kAskClear]);
 }
 
 namespace {
