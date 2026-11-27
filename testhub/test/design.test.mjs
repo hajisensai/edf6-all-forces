@@ -56,6 +56,7 @@ test('design + story: an outline open to every account opens the group\'s entrie
   assert.equal((await call(e, '/api/design/save', entry('以太炮 改', { group: 'a', id: 1, version: 1 }), 'bob')).status, 200);
   assert.deepEqual((await list(e, 'alice')).rows.map((r) => r.name), ['以太炮 改', '刻印军刀']);
   assert.equal((await call(e, '/api/design/remove', { group: 'a', id: 1 }, 'bob')).status, 403);
+  assert.equal((await (await call(e, '/api/story', undefined, 'bob')).json()).group, 'a');   // 关卡策划 opens the main outline's group too
   const story = await (await call(e, '/api/story?group=a', undefined, 'bob')).json();
   assert.deepEqual([story.editable, story.member], [true, false]);
   assert.equal((await call(e, '/api/story/save', { group: 'a', id: story.rows[0].id, version: 1, title: '以太炮击（改）', status: 'writing', body: '' }, 'bob')).status, 200);

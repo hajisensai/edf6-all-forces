@@ -7,7 +7,7 @@
 // version it was made from, so two people editing one mission at once cannot overwrite each other (the later one gets a 409).
 import { Plan, anonymous, between, canWrite, clean, int, pick, readable, scope } from './plan.js';
 import { HttpError, body } from './http.js';
-import { openGroup, openScope } from './outline.js';
+import { mainFirst, openGroup, openScope } from './outline.js';
 
 export const STATUSES = ['planned', 'writing', 'testing', 'done'];
 export const STORY_LIMIT = { missions: 1000, title: 100, body: 10000, goal: 2000, enemies: 2000, handoff: 2000 };
@@ -30,8 +30,8 @@ export async function storyRoute(request, env, me, missions, groups, path, url) 
   const L = STORY_LIMIT;
   if (path === '/api/story' && request.method === 'GET') {
     // Readable by anyone (me = null: a visitor, who does not see who wrote or last changed a mission).
-    const shown = await readable(db, me, groups, 'SELECT DISTINCT grp FROM story_missions');
-    const group = pick(me, url.searchParams.get('group'), shown, groups);
+    const [shown, main] = await mainFirst(db, await readable(db, me, groups, 'SELECT DISTINCT grp FROM story_missions'));
+    const group = pick(me, url.searchParams.get('group') ?? main, shown, groups);
     const rows = group == null ? { results: [] } : await db.prepare('SELECT * FROM story_missions WHERE grp = ?1 ORDER BY sort, id').bind(group).all();
     const member = group != null && canWrite(me, group);
     const editable = member || (me != null && group != null && await openGroup(db, group));

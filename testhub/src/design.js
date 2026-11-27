@@ -6,7 +6,7 @@
 // its entries too, though deleting stays with the group. Every edit names the version it was made from (409 when stale).
 import { Plan, anonymous, canWrite, clean, int, pick, readable, scope } from './plan.js';
 import { HttpError, body } from './http.js';
-import { openGroup, openScope } from './outline.js';
+import { mainFirst, openGroup, openScope } from './outline.js';
 
 export const KINDS = ['character', 'vehicle', 'weapon', 'gear', 'map', 'monster', 'other'];
 export const DESIGN_STATUSES = ['todo', 'drafting', 'making', 'done'];
@@ -36,11 +36,8 @@ export async function designRoute(request, env, me, missions, groups, path, url)
   const L = DESIGN_LIMIT;
   if (path === '/api/design' && request.method === 'GET') {
     // The groups with entries, plus those with an outline (so a group starting its list is listed to everyone who may write it).
-    let shown = await readable(db, me, groups, `${FILLED} UNION SELECT grp FROM story_outlines WHERE json_array_length(data, '$.lanes') > 0`);
-    const main = await db.prepare('SELECT grp FROM story_outlines WHERE main = 1 LIMIT 1').first();
-    if (main && shown.includes(main.grp)) shown = [main.grp, ...shown.filter((g) => g !== main.grp)];
-    const named = url.searchParams.get('group');
-    const group = pick(me, named ?? (main && shown.includes(main.grp) ? main.grp : null), shown, groups);
+    const [shown, main] = await mainFirst(db, await readable(db, me, groups, `${FILLED} UNION SELECT grp FROM story_outlines WHERE json_array_length(data, '$.lanes') > 0`));
+    const group = pick(me, url.searchParams.get('group') ?? main, shown, groups);
     const member = group != null && canWrite(me, group);
     const editable = member || (me != null && group != null && await openGroup(db, group));
     const rows = group == null ? { results: [] } : await db.prepare('SELECT * FROM story_designs WHERE grp = ?1 ORDER BY id').bind(group).all();
