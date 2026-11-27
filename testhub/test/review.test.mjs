@@ -82,7 +82,7 @@ test('review: publishing checks the version and that translations have the same 
   assert.deepEqual(src.outlines.map((x) => [x.group, x.book, x.version]), [['a', 1, 1]]);
 });
 
-test('review: visitors score and comment once each, change and remove it; others show only after scoring', async () => {
+test('review: visitors score and comment once each, change and remove it; the average shows only after scoring, no comments by others', async () => {
   const { e, id } = await setup();
   const rate = (token, data, opts = {}) => call(e, '/api/review/rate', { token, item: id, ...data }, opts);
   assert.equal((await rate(TA, { score: 6 })).status, 400);
@@ -91,19 +91,19 @@ test('review: visitors score and comment once each, change and remove it; others
   assert.equal((await call(e, '/api/review/rate', { item: id, score: 3 })).status, 400);   // no token
   assert.equal((await call(e, '/api/review/rate', { token: TA, item: id + 1, score: 3 })).status, 404);
   assert.equal((await rate(TA, { score: 4, name: 'Ann' + String.fromCharCode(0x202e), body: 'nice' + String.fromCharCode(0x200b) + ' one', lang: 'en' })).status, 200);
-  // B has not scored: sees the outline but neither the average nor A's comment.
+  // B has not scored: sees the outline but not the average.
   const b0 = await (await call(e, '/api/review', undefined, { token: TB })).json();
-  assert.deepEqual([b0.mine, b0.stats, b0.comments], [{}, {}, {}]);
+  assert.deepEqual([b0.mine, b0.stats], [{}, {}]);
   const b1 = await (await rate(TB, { score: 2, body: '', lang: 'ja' })).json();
   assert.deepEqual(b1.mine[id].score, 2);
   assert.deepEqual(b1.stats[id], { n: 2, avg: 3 });
-  assert.equal(b1.comments[id].length, 1);   // B wrote no text
-  assert.deepEqual([b1.comments[id][0].name, b1.comments[id][0].body, b1.comments[id][0].own, b1.comments[id][0].lang], ['Ann', 'nice one', false, 'en']);
-  assert.ok(!('rater' in b1.comments[id][0]));
+  // A's comment and name reach no other visitor, before or after they score.
+  for (const out of [b0, b1]) assert.doesNotMatch(JSON.stringify(out), /nice|Ann/);
+  assert.deepEqual(Object.keys(b1).sort(), ['items', 'langs', 'mine', 'stats']);
   // A changes theirs (a comment without a score is allowed), then B removes theirs.
   const a1 = await (await rate(TA, { score: null, body: 'changed my mind' })).json();
   assert.deepEqual(a1.stats[id], { n: 1, avg: 2 });
-  assert.equal(a1.comments[id][0].own, true);
+  assert.deepEqual([a1.mine[id].body, a1.mine[id].name], ['changed my mind', '']);   // their own entry, as last sent
   const b2 = await (await call(e, '/api/review/unrate', { token: TB, item: id })).json();
   assert.deepEqual([b2.mine, b2.stats], [{}, {}]);
   const res = await (await call(e, '/api/review/results', undefined, { user: 'dev' })).json();
