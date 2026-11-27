@@ -3082,6 +3082,15 @@ add_executable(aura_logic_test EXCLUDE_FROM_ALL tests/aura_logic_test.cpp)
 target_compile_options(aura_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks aura_logic_test)
 add_test(NAME aura_logic COMMAND aura_logic_test)
+# The heli / jet mission phases (src/heli_logic.h, src/jet_logic.h; design-review-1126 step 8): transition tables, illegal
+# transitions rejected, Derive() over every bool combination the old code made, old-vs-new random sequences.
+foreach(t heli_phase_test jet_phase_test)
+  add_executable(${t} EXCLUDE_FROM_ALL tests/${t}.cpp)
+  target_compile_options(${t} PRIVATE /W4 /WX /utf-8 /permissive-)
+  add_dependencies(offline_checks ${t})
+endforeach()
+add_test(NAME heli_phase COMMAND heli_phase_test)
+add_test(NAME jet_phase COMMAND jet_phase_test)
 # The aura trucks' registries (tools/make_aura_vehicles.py, calls, vcobjects, cockpits, ledger, installer, range) and,
 # where the game is, their built models (each its marker under body).
 add_test(NAME aura_vehicles_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/aura_vehicles_guard.py")

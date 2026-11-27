@@ -410,7 +410,7 @@ StrafeResult StrafeCase(Role role,float half,float cross,float angleDeg) {
         Wing(j,k,v,pos,clear,nose,want,speed,kDt,nowMs);
         HoldOffGround(j,pos,clear,kDt,nowMs);
         j.m.ready=true;
-        if(j.mode!=Mode::withdraw)Fire(j,v,pos,nose,j.sortie.strafing ? j.sortie.shotPoint : mark,gunsOk,missileOk,arms,nowMs);
+        if(j.phase!=jetphase::Phase::withdraw)Fire(j,v,pos,nose,j.sortie.strafing ? j.sortie.shotPoint : mark,gunsOk,missileOk,arms,nowMs);
         else v[kFireGun]=v[kFireMissile]=0;
         const bool rocket=j.t.rocketAt!=rocketSeen,missile=j.t.missileAt!=missileSeen;
         rocketSeen=j.t.rocketAt;missileSeen=j.t.missileAt;
@@ -567,7 +567,8 @@ int SelfTest(const char* outDir) {
             support::PassLine line{};
             const support::Reach reach{WorldHalf()-kArrivalRoom,1000.0f};
             const bool lined=support::MakePassLine(MapPlayArea(),reach,point,dir,FerryTurn(KindOf(role)),line);
-            j.ferry=true;j.ferryLine=line;j.ferryPass=ferry::Pass{};j.ferryGone=false;
+            j.phase=jetphase::Phase::fly;j.reap=false;EnterPhase(j,jetphase::Event::ferry,nowMs);
+            j.ferryLine=line;j.ferryPass=ferry::Pass{};
             int crossings=0,ends=0;float worstAcross=0.0f,mostOut=0.0f,firstAt=-1.0f;
             bool lastAhead=true,inEnd=false,gone=false;float goneAt[3]{};
             const ULONGLONG born=nowMs;
@@ -586,7 +587,7 @@ int SelfTest(const char* outDir) {
                 HoldOffGround(j,pos,clear,kDt,nowMs);
                 j.m.ready=true;
                 Move(j,v);
-                if(j.ferryGone){gone=true;std::memcpy(goneAt,pos,12);}
+                if(j.reap){gone=true;std::memcpy(goneAt,pos,12);}
                 float along,across;ferry::Along(line,pos,&along,&across);
                 const bool ahead=along<0.0f ? j.ferryPass.dir>0 : j.ferryPass.dir<0;   // the point still ahead on this pass
                 if(lastAhead && !ahead && std::fabs(along)<200.0f) {   // over the point (along its pass)
@@ -1096,7 +1097,7 @@ int WithdrawSuite() {
     int cases=0,fails=0;
     {
         Jet salvo{};
-        salvo.mode=Mode::withdraw;salvo.modeAt=1000;salvo.sortie.pass=SortiePass::missileRain;
+        salvo.phase=jetphase::Phase::withdraw;salvo.phaseAt=salvo.modeAt=1000;salvo.sortie.pass=SortiePass::missileRain;
         const auto& kind=KindOf(Role::interceptor);
         salvo.sortie.line.dir[0]=1.0f;
         groundHalf=2100.0f;

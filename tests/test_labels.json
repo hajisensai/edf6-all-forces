@@ -3168,6 +3168,12 @@
    ],
    "scripts": []
   },
+  "heli_phase": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "heli_physical_sight": {
    "labels": [
     "plugin-native"
@@ -3418,6 +3424,12 @@
    "scripts": []
   },
   "jet_lever_net": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "jet_phase": {
    "labels": [
     "plugin-native"
    ],

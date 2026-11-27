@@ -136,12 +136,13 @@ void Leave(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,float hp,float h
     if(!why && kind.weapon==Weapon::drones) {
         if(OutOfDrones(j))why="out of drones";
     } else if(mother) {
-        if(j.mode!=Mode::recover && j.mode!=Mode::withdraw) {
+        if(!jetphase::Leaving(j.phase)) {
             const ULONGLONG sortie=kind.weapon==Weapon::charge ? kKamikazeSortieMs : kDroneSortieMs;
             const char* back=why ? why : ms-j.bornAt>sortie ? "sortie over" : hpMax>0.0f && hp<hpMax*0.5f ? "damaged" :
-                             mother->mode==Mode::withdraw ? "carrier leaving" :
+                             mother->phase==jetphase::Phase::withdraw ? "carrier leaving" :
                              ms-(j.t.seenTarget ? j.t.seenTarget : j.bornAt)>kIdleMs ? "nothing to attack" : nullptr;
-            if(back){Log("JET v=%p back to carrier %p: %s",j.Vehicle(),mother->Vehicle(),back);SetMode(j,Mode::recover,ms);}
+            if(back && EnterPhase(j,jetphase::Event::recover,ms))
+                Log("JET v=%p back to carrier %p: %s",j.Vehicle(),mother->Vehicle(),back);
         }
         why=nullptr;
     }
@@ -171,6 +172,12 @@ void Escort(Jet& j,const Kind& k,const float* pos,const float* anchor,float heig
 void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos,const float* nose,const float* anchor,
            const float* viewer,const float* lead,float height,float clear,bool walled,ULONGLONG ms,float* want,float* speed,
            bool* gunsOk,bool* missileOk) noexcept {
+    // On its way out its phase flies it (jet_logic.h), whatever its mode was when it began.
+    if(j.phase==jetphase::Phase::recover) {
+        if(mother && Recover(j,*mother,pos,want,speed))Dock(j,*mother,ms);
+        return;
+    }
+    if(j.phase==jetphase::Phase::withdraw){Away(j,kind,pos,nose,viewer,walled,ms,want,speed);return;}
     switch(j.mode) {
     case Mode::takeoff:
         want[0]=nose[0];want[1]=0.6f;want[2]=nose[2];Normalize(want);
@@ -179,17 +186,11 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     case Mode::bomb:
         BombRun(j,pos,ms,want,speed);
         return;
-    case Mode::recover:
-        if(mother && Recover(j,*mother,pos,want,speed))Dock(j,*mother,ms);
-        return;
-    case Mode::withdraw:
-        Away(j,kind,pos,nose,viewer,walled,ms,want,speed);
-        return;
     default:
         break;
     }
     if(j.sortie.pass!=SortiePass::none && SortieGuide(j,kind,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk))return;
-    if(j.ferry) {   // the paratroop plane: passes along its line over its point (Ferry), never Patrol's ring round it
+    if(j.phase==jetphase::Phase::ferry) {   // the paratroop plane: passes along its line over its point (Ferry), never Patrol's ring round it
         if(j.mode!=Mode::patrol)SetMode(j,Mode::patrol,ms);
         *speed=Ferry(j,pos,height,want);
         return;
@@ -225,7 +226,7 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
     float goal[3]={anchor[0],height,anchor[2]},face[3];
     float climb=kHoverClimb,speed=kind.cruise;
     bool faced=false;
-    if(j.mode==Mode::withdraw)for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
+    if(j.phase==jetphase::Phase::withdraw)for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
     else if(kind.weapon==Weapon::charge) {
         // At its target, at the carrier's dock when recalled, or hovering above the assigned area while waiting.
         // At a flyer it climbs as fast as it flies: at half that (12.5 m/s, a doll drone) the flyers it chased kept above
@@ -233,7 +234,7 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
         // 28-110 m under its target; the user: the drones and their carrier are to attack the flyers).
         climb=j.t.target && j.t.flyer ? kind.cruise : kind.cruise*0.5f;
         const float* mp=mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : nullptr;
-        if(j.mode==Mode::recover && mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];}
+        if(j.phase==jetphase::Phase::recover && mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];}
         else if(j.t.target) {
             // Where the target will be kChargeLead on (its velocity, PickTarget): Hover closes on its goal at half the gap a
             // second, which behind a target moving at v stays 2v off it (26 m under a flyer climbing 13 m/s, outside even
@@ -448,9 +449,9 @@ namespace {
 // deleted (JetReap); its NPC pilot flies on.
 void GunnerHold(Jet& j,ULONGLONG ms) noexcept {
     if(j.seen && ms>j.seen)j.bornAt+=ms-j.seen;
-    if(j.mode!=Mode::withdraw)return;
+    if(j.phase!=jetphase::Phase::withdraw)return;
     j.reap=false;j.why=nullptr;
-    SetMode(j,Mode::patrol,ms);
+    EnterPhase(j,jetphase::Event::resume,ms);
     Log("JET v=%p withdrawal called off: the player is at its gun",j.Vehicle());
 }
 
@@ -468,7 +469,8 @@ constexpr ULONGLONG kCommandSeenMs=500;   // game ms: a jet JetFrame stepped thi
 bool Commandable(const Jet& j,ULONGLONG ms) noexcept {
     if(!j.ref || j.reap || j.supportPending || j.supportMetadata || !Alive(j.ref) || IsPrimer(j) || MotherOf(j))return false;
     // A ferry takes none: its point is its drop's (transport.cpp keeps the stick's), a new one would carry the soldiers off.
-    if(j.mode==Mode::withdraw || j.ferry || ms-j.seen>kCommandSeenMs)return false;
+    // Nor one withdrawing (MotherOf: a carrier's drone, the only one that recovers, is out already).
+    if(j.phase!=jetphase::Phase::fly || ms-j.seen>kCommandSeenMs)return false;
     const unsigned char* v=j.Vehicle();
     return CommandVehicleLive(j.ref) && !HostileJet(v) && !PlayerJetHolds(v);
 }
@@ -502,7 +504,7 @@ void SeeFocus(void* ctx,const void* object,const float*) noexcept {
 // The map's orders (mapcmd.cpp Give). guard / follow / release: ApplyMapCommand. focus: `focus` (the enemy the player
 // marked) attacked first, its order kept (ApplyMapFocus); refused when that is no enemy of it now.
 // A ferry (transport.cpp, the paratroop plane): its command point `at` (ApplyMapCommand's guard), flown at kFerryAlt over
-// it, no target taken (Jet::ferry), in passes along the straight line through it along `heading` (the heading its plan
+// it, no target taken (jetphase::Phase::ferry), in passes along the straight line through it along `heading` (the heading its plan
 // brought it in on), each end off the map (support_entry.h MakePassLine, ferry_line.h). Its stick jumps over the point
 // (transport.cpp); JetFerryDone then lets it fly on to the end of that pass, where it is deleted (JetFrame reaps it; its
 // crew first: support_dispatch.cpp Retire). The same point again (the deployment's Assign after BoardAirborne): kept as
@@ -511,7 +513,8 @@ bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
         if(!j || !at || !heading || j->reap)return false;
-        if(j->ferry && j->ferryLine.at[0]==at[0] && j->ferryLine.at[1]==at[1] && j->ferryLine.at[2]==at[2])return true;
+        if(j->phase==jetphase::Phase::ferry && j->ferryLine.at[0]==at[0] && j->ferryLine.at[1]==at[1] && j->ferryLine.at[2]==at[2])
+            return true;
         const support::Reach reach{ArrivalHalf(),NearDrawDistance()};
         support::PassLine line;
         if(!support::MakePassLine(MapPlayArea(),reach,at,heading,FerryTurn(KindOf(*j)),line)) {
@@ -519,7 +522,12 @@ bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept
                 at[0],at[1],at[2],heading[0],heading[2]);
             return false;
         }
-        j->ferry=true;j->ferryGone=false;j->ferryLine=line;j->ferryPass=ferry::Pass{};
+        // On its way out (withdrawing, recovering) it takes none (it used to set its ferry flag, which its way out overrode).
+        if(!EnterPhase(*j,jetphase::Event::ferry,GameMs())) {
+            Log("JET v=%p ferry to (%.0f,%.0f,%.0f): %s, not a ferry",vehicle,at[0],at[1],at[2],jetphase::Name(j->phase));
+            return false;
+        }
+        j->ferryLine=line;j->ferryPass=ferry::Pass{};
         ApplyMapCommand(*j,Command{Order::guard,{at[0],at[1],at[2]}},GameMs());
         Log("JET v=%p ferry to (%.0f,%.0f,%.0f), %.0f m over it: passes along (%.2f,%.2f) from %.0f to %.0f m of it",vehicle,at[0],at[1],
             at[2],kFerryAlt,line.dir[0],line.dir[2],line.lo,line.hi);
@@ -529,7 +537,7 @@ bool JetFerry(const void* vehicle,const float* at,const float* heading) noexcept
 bool JetFerryDone(const void* vehicle) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
-        if(!j || !j->ferry || j->reap)return false;
+        if(!j || j->phase!=jetphase::Phase::ferry || j->reap)return false;
         if(!j->ferryPass.done)Log("JET v=%p ferry: stick out, on along the line (%+d) to its end off the map",vehicle,j->ferryPass.dir);
         j->ferryPass.done=true;
         return true;
@@ -539,7 +547,7 @@ bool JetWithdrawNow(const void* vehicle,const char* why) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
         if(!j || j->reap)return false;
-        if(j->mode!=Mode::withdraw)Withdraw(*j,why ? why : "ordered",GameMs());
+        if(j->phase!=jetphase::Phase::withdraw)Withdraw(*j,why ? why : "ordered",GameMs());
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -564,7 +572,7 @@ void JetHangarRelease(unsigned char* v) noexcept {
         Jet* const j=FindJet(v);
         if(!j || !j->held)return;
         j->held=false;j->escort=true;
-        if(j->mode==Mode::withdraw || j->mode==Mode::recover)j->mode=Mode::patrol;
+        if(jetphase::Leaving(j->phase))EnterPhase(*j,jetphase::Event::resume,GameMs());
         j->modeAt=GameMs();
         Log("JET v=%p let go by its hangar at %.0f m/s",v,Len(j->m.vel));
     } __except(EXCEPTION_EXECUTE_HANDLER){}
@@ -590,7 +598,7 @@ bool JetMotion(const void* vehicle,float* vel) noexcept {
 bool JetLeaving(const void* vehicle) noexcept {
     __try {
         const Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
-        return j && !j->reap && (j->mode==Mode::withdraw || j->mode==Mode::recover);
+        return j && !j->reap && jetphase::Leaving(j->phase);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -725,11 +733,11 @@ void JetFrame(unsigned char* v) noexcept {
         targetAnchor=runAnchor;
     }
     const bool moving=j->sortie.pass==SortiePass::none && !j->focus && MapCommandMoving(*j,pos,anchor,targetRange);
-    if(!moving && !j->ferry && j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)
+    if(!moving && j->phase==jetphase::Phase::fly && j->mode!=Mode::takeoff)
         PickTarget(*j,v,pos,targetAnchor,targetRange,dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,SortieStoreFlyer(*j,j->t.flyer),Len(to));}
-    if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
+    if(kind.weapon==Weapon::charge && j->t.target && !jetphase::Leaving(j->phase)) {
         // Its run at the target (airchase::Step): within its trigger it goes off; held off it (by its body, from any side)
         // within its charge's blast, as well; farther out it keeps after it.
         const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};
@@ -744,19 +752,18 @@ void JetFrame(unsigned char* v) noexcept {
     // Guidance, then the flight its kind flies.
     const float clear=GroundClearance(pos);
     const float base=j->t.target && !j->t.flyer ? j->t.aim[1] : anchor[1];
-    const float height=base+(j->ferry ? kFerryAlt : kind.alt);
+    const float height=base+(j->phase==jetphase::Phase::ferry ? kFerryAlt : kind.alt);
     float want[3]={nose[0],0,nose[2]},speed=kind.cruise;
     bool gunsOk=false,missileOk=false;
     Guide(*j,kind,arms,mother,pos,nose,anchor,viewer,lead,height,clear,walled,ms,want,&speed,&gunsOk,&missileOk);
     if(kind.flight==FlightModel::rotor)Rotor(*j,kind,v,mother,pos,anchor,want,height,hp,hpMax,dt,ms);
     else Wing(*j,kind,v,pos,clear,nose,want,speed,dt,ms);
     HoldOffGround(*j,pos,clear,dt,ms);
-    if(j->ferryGone)j->reap=true;   // past its last pass's end, off the map (Ferry): deleted there
     j->m.ready=true;
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
     else Arm(*j,kind,v,pos,nose,j->sortie.strafing ? j->sortie.shotPoint : lead,gunsOk,missileOk,arms,ms);
-    if(!gunner && j->mode!=Mode::withdraw)SortieFire(*j,v,pos,arms,ms);   // a sortie's bombs (jet_sortie.cpp)
+    if(!gunner && j->phase!=jetphase::Phase::withdraw)SortieFire(*j,v,pos,arms,ms);   // a sortie's bombs (jet_sortie.cpp)
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000) {
         j->loggedAt=ms;
@@ -845,11 +852,12 @@ void jet::ResumeNpc(unsigned char* v,const float* vel) noexcept {
     j->m.ready=false;j->m.prevAt=0;j->m.blockedFor=0;
     j->t.target=nullptr;j->t.lockAt=0;j->t.lockSeen=0;
     j->carrier.ordered=false;
-    if(j->mode!=Mode::withdraw && j->mode!=Mode::bomb && j->mode!=Mode::recover) {
+    if(!jetphase::Leaving(j->phase) && j->mode!=Mode::bomb) {
         const float clear=GroundClearance(reinterpret_cast<const float*>(v+kPosition));
         SetMode(*j,clear!=kNoGround && clear<kTakeoffClear ? Mode::takeoff : Mode::patrol,ms);
     }
-    Log("JET v=%p back to its NPC pilot: %s, %.0f m/s, %.0f s of its fuel flown",v,kModeNames[static_cast<int>(j->mode)],Len(vel),
+    Log("JET v=%p back to its NPC pilot: %s, %.0f m/s, %.0f s of its fuel flown",v,
+        jetphase::Leaving(j->phase) ? jetphase::Name(j->phase) : kModeNames[static_cast<int>(j->mode)],Len(vel),
         static_cast<float>(ms-j->bornAt)*0.001f);
     Publish(true);
 }
@@ -923,7 +931,7 @@ bool IsPrimerVehicle(const void* vehicle) noexcept {
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept {
     if(!vehicle)return false;
     for(const auto& j:jets)
-        if(j.ref.obj==vehicle && j.ref.ctrl==ctrl && !j.reap && j.mode!=Mode::withdraw && Alive(j.ref) && !j.Vehicle()[kDead])return true;
+        if(j.ref.obj==vehicle && j.ref.ctrl==ctrl && !j.reap && j.phase!=jetphase::Phase::withdraw && Alive(j.ref) && !j.Vehicle()[kDead])return true;
     return false;
 }
 
@@ -953,7 +961,7 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept {
     out->role=KindOf(*j).name;
     out->fuelSec=j->drone.carried ? -1.0f : j->fuelMs>flown ? static_cast<float>(j->fuelMs-flown)*0.001f : 0.0f;
     out->drones=KindOf(*j).weapon==Weapon::drones ? j->carrier.sorties : -1;
-    out->leaving=j->mode==Mode::withdraw;
+    out->leaving=j->phase==jetphase::Phase::withdraw;
     return true;
 }
 }  // namespace crew

@@ -108,7 +108,7 @@ void CarrierStation(Jet& c,const float* pos,const float* anchor,float height,flo
 // Whether a drone of the carrier's is coming back within kDockHold of it.
 bool DroneDocking(const Jet& c,const float* pos,ULONGLONG ms) noexcept {
     for(const auto& d:jets) {
-        if(!Flown(d,ms) || d.drone.mother!=c.ref.ctrl || d.mode!=Mode::recover || d.reap)continue;
+        if(!Flown(d,ms) || d.drone.mother!=c.ref.ctrl || d.phase!=jetphase::Phase::recover || d.reap)continue;
         const float to[3]={d.m.prevPos[0]-pos[0],d.m.prevPos[1]-pos[1],d.m.prevPos[2]-pos[2]};
         if(Dot(to,to)<kDockHold*kDockHold)return true;
     }
@@ -280,7 +280,7 @@ Jet* MotherOf(const Jet& d) noexcept {
     return nullptr;
 }
 
-// A drone's way back (Mode::recover): at the point kDockBelow under its carrier where the carrier will be
+// A drone's way back (jetphase::Phase::recover): at the point kDockBelow under its carrier where the carrier will be
 // half a second on, at the carrier's speed plus what the distance adds; true once within kDockDist.
 bool Recover(const Jet& d,const Jet& mother,const float* pos,float* want,float* speed) noexcept {
     const float* mp=reinterpret_cast<const float*>(mother.Vehicle()+kPosition);
@@ -339,7 +339,7 @@ void CarrierGoal(Jet& c,const Kind& k,const float* pos,const float* anchor,float
 // entry (FreeSlot says so in the log, at most every few seconds), trying nothing meanwhile.
 void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexcept {
     ReplaceLost(c,ms);
-    if(!c.t.target || c.mode==Mode::withdraw || c.carrier.sorties<=0 || ms-c.carrier.launchAt<kLaunchGapMs)return;
+    if(!c.t.target || c.phase==jetphase::Phase::withdraw || c.carrier.sorties<=0 || ms-c.carrier.launchAt<kLaunchGapMs)return;
     LaunchOne(c,pos,nose,c.t.aim,c.t.target,ms);
 }
 
@@ -359,15 +359,15 @@ bool PlayerLaunchDrone(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
     return LaunchOne(*c,pos,m+8,at,nullptr,ms);
 }
 
-// Its drones out called back to it (Mode::recover: Recover, Dock); how many.
+// Its drones out called back to it (jetphase::Phase::recover: Recover, Dock); how many.
 int ApplyCarrierSupportRecallImpl(const ObjRef& parent,ULONGLONG ms) noexcept {
     Jet* const c=CarrierEntry(parent,false);if(!c)return 0;
     c->carrier.ordered=false;
     int n=0;
     for(auto& d:jets) {
-        if(!d.ref || d.supportPending || d.drone.mother!=c->ref.ctrl || d.reap || d.mode==Mode::recover ||
-           d.mode==Mode::withdraw || d.drone.blastAt)continue;
-        SetMode(d,Mode::recover,ms);++n;
+        if(!d.ref || d.supportPending || d.drone.mother!=c->ref.ctrl || d.reap || jetphase::Leaving(d.phase) ||
+           d.drone.blastAt)continue;
+        if(EnterPhase(d,jetphase::Event::recover,ms))++n;
     }
     if(n)Log("JET v=%p carrier: %d drones recalled by authenticated driver",parent.obj,n);
     return n;

@@ -206,6 +206,18 @@
 - 做法：先加 `Phase Derive(const Heli&)` 只读推导，跑一段时间核对日志，确认推导结果和现有 bool 一致后再切换写入路径。
 - 护栏：转移表的离线 ctest（非法转移直接拒绝）；autopilot 跑一局「呼叫、指挥移动、离场」。
 - 规模：每个文件改动约 500 行。风险中高（飞行行为），排在最后，并且要在第 2、4 步之后做。
+- 已做（分支 `wave1-phases`）：
+  - 直升机：`src/heli_logic.h` 的 `heliphase::State`（phase：follow / guard / ferry / ferryLand / leaving / gone，加上值守 duty、指令前的值守 own）取代 guard / leaving / reap / ferry / ferryLand / ownGuard 六个 bool，heli.cpp 只经 `Enter()` → `Transition()` 改它。called / keep / medic（属性）、extend（交战战术）、orbiting / orbitSet（飞控）、cmdMoving（与战机共用的 `AirCommandTransit` 滞回）不是阶段，留在原处。
+  - 战机：`src/jet_logic.h` 的 `jetphase::Phase`（fly / ferry / recover / withdraw）取代 `Mode::withdraw`、`Mode::recover` 和 ferry / ferryGone，jet*.cpp 只经 `EnterPhase()` 改它；退场 / 回收时 Mode 停在 patrol，由 Guide 先按阶段飞（Away / Recover）。reap（待删除）与阶段正交，仍是 bool。
+  - `HeliCommand` / `JetCommand` 签名不变。
+  - 离线护栏：`heli_phase` / `jet_phase` 两个 ctest，覆盖转移表（含拒绝）、`Derive()` 遍历旧代码能产生的全部 bool 组合，并用随机操作序列把旧模型和新转移逐步对照。
+  - 被改判的隐式组合（其余都与旧行为一致）：
+    - 直升机运送中受损退场：旧代码不清 ferry，会悬停或降落在投放点，`HeliFerry(nullptr)` 也结束不了；现在退场时丢下运送。
+    - 战机退场 / 回收中再 `JetFerry`：旧代码接受，但 ferry 被盖住不起作用；现在拒绝。
+    - 退场中的前运送机 `JetFerryDone`：现在返回 false，调用方随即 `JetWithdrawNow`，本来就在退场。
+    - 取消退场（玩家上炮手位、机库放飞）后：现在不再接着运送。
+    - 运送机最后一程：在同一帧由 `Ferry()` 直接置 reap，取代 ferryGone 这个中间态。
+  - 仍待实机：autopilot 跑一局「呼叫、指挥移动、离场」。
 
 ### 第 9 步（低成本收尾）：剩余手写补丁并入 `edf::PatchCode` / 新的 `RedirectToThunk`（解决 P9）
 - 范围：physics.cpp、edf5online.cpp、berserker、timeship、edf41natives、viewdiag、crash_dump（crash_dump 在加载锁内运行，确认新原语不取锁后再迁）。
