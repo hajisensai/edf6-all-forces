@@ -4693,6 +4693,7 @@
     "plugin-air",
     "plugin-core",
     "plugin-native",
+    "plugin-net",
     "plugin-support"
    ],
    "scripts": []
@@ -4719,6 +4720,7 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
+    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
@@ -4731,6 +4733,7 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
+    "plugin-sound",
     "plugin-support"
    ],
    "scripts": []
