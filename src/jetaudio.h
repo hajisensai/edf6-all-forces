@@ -80,6 +80,8 @@ void PlayWt(int clip,int variant,const Heard& h) noexcept;
 // A looping voice of War Thunder's `group` (its first variant, the engines' layers: sound_engine.h), silent until
 // SetLoop, closed by CloseLoop; -1: not there (WtThere), or every loop voice in use.
 int OpenWtLoop(int group) noexcept;
+int OpenWtOnce(int group,int variant) noexcept;   // ...or once from its start (moved by SetLoop; closed by the caller)
+float WtSeconds(int group,int variant) noexcept;  // a variant's length (s); 0: not read
 int LoopsOpen() noexcept;                 // the loop voices in use (the log's voice count)
 int LoopsFree() noexcept;                 // ...and those still free (kLoopPool of them in all)
 // The loop voices (every engine's layers, the turrets' loops): 1024, from tools/jet_voice_bench.cpp (2026-11-27,

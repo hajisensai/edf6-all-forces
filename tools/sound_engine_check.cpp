@@ -141,15 +141,16 @@ void Space() {
               GainOf(kJetPlayer,In(2750.0f,1.0f,1.0f),50.0f,180.0f,crew::wt::k_jet_ab)>0.0f,"the afterburner: heard only lit");
     Check(Power(kJetPlayer,mil,10.0f,180.0f)>Power(kJetPlayer,mil,500.0f,180.0f) && Power(kJetPlayer,mil,1001.0f,180.0f)==0.0f,
           "the player's jet: quieter the farther, silent past 1 km (its Distance curves)");
-    Check(Near(Rolloff(kJetAi,50.0f),1.0f) && Near(Rolloff(kJetAi,200.0f),0.5f) && Near(Rolloff(kJetAi,9000.0f),100.0f/3000.0f),
-          "the AI's rolloff: min / d between its min and max distance");
+    Check(Rolloff(kJetAi,50.0f)==1.0f && Rolloff(kJetAi,9000.0f)==1.0f &&
+              MasterDb(kJetAi,In(2400.0f,1.0f),100.0f)>MasterDb(kJetAi,In(2400.0f,1.0f),2000.0f)+10.0f,
+          "the AI jet: no rolloff, its positioning's distance curve instead");
     const Inputs far=In(2400.0f,1.0f,0.0f,0.0f,100.0f);
     Check(GainOf(kJetAi,far,2500.0f,180.0f,crew::wt::k_jet_far)>0.0f && GainOf(kJetAi,far,2500.0f,180.0f,crew::wt::k_jet_max_rear)==0.0f,
           "the AI jet far off: its far recording, not the near ones");
     Check(GainOf(kJetAi,far,300.0f,10.0f,crew::wt::k_jet_approach)>GainOf(kJetAi,far,300.0f,170.0f,crew::wt::k_jet_approach)*10.0f,
           "the AI jet: its approach coming, not going");
     Check(Near(Doppler(kJetAi,2.0f,0.0f),1.3f) && Near(Doppler(kJetAi,2.0f,180.0f),1.8f) &&
-              Near(Doppler(kJetPlayer,2.0f,0.0f),1.54f) && Near(Doppler(kTracksPlayer,2.0f,0.0f),1.0f) &&
+              Near(Doppler(kJetPlayer,2.0f,0.0f),1.3f) && Near(Doppler(kJetPlayer,2.0f,180.0f),1.6f) && Near(Doppler(kTracksPlayer,2.0f,0.0f),1.0f) &&
               Doppler(kJetAi,NAN,0.0f)==1.0f,"the Doppler at each event's scale");
     Check(Power(kTurbineAi,In(50.0f,0.5f),5.0f,90.0f)>Power(kTurbineAi,In(50.0f,0.5f),500.0f,90.0f)*50.0f,
           "the AI's tank: far quieter far off");

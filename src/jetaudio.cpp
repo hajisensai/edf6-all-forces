@@ -799,6 +799,36 @@ int OpenWtLoop(int group) noexcept {
     loopsNoneFree.fetch_add(1,std::memory_order_relaxed);
     return -1;
 }
+// A one-shot that follows its source (the jets' passby: SetLoop moves it every frame): variant `variant` of `group`
+// played once from its start, silent until set; its voice stays the caller's (CloseLoop) after it ends (WtSeconds).
+int OpenWtOnce(int group,int variant) noexcept {
+    if(!WtThere(group) || variant<0 || variant>=wt::kVariants[group])return -1;
+    const ClipPcm& c=wtClips[group][variant];
+    if(c.pcm.empty())return -1;
+    for(int i=0;i<kLoops;++i) {
+        if(loops[i].used)continue;
+        IXAudio2SourceVoice* v=nullptr;
+        if(FAILED(engine->CreateSourceVoice(&v,&c.format,XAUDIO2_VOICE_USEFILTER,kMaxRatio)))return -1;
+        XAUDIO2_BUFFER b{};
+        b.AudioBytes=static_cast<UINT32>(c.pcm.size()*2);b.pAudioData=reinterpret_cast<const BYTE*>(c.pcm.data());
+        b.Flags=XAUDIO2_END_OF_STREAM;
+        if(FAILED(v->SubmitSourceBuffer(&b))){v->DestroyVoice();return -1;}
+        Place(v,c.format.nChannels,surround::Placing{0.0f,0.0f,1.0f,0.0f,false});   // silent until set
+        v->Start();
+        loops[i]=LoopVoice{v,static_cast<int>(c.format.nChannels),true};
+        const int open=loopsOpen.fetch_add(1,std::memory_order_relaxed)+1;
+        if(open>loopsPeak.load(std::memory_order_relaxed))loopsPeak.store(open,std::memory_order_relaxed);
+        return i;
+    }
+    loopsNoneFree.fetch_add(1,std::memory_order_relaxed);
+    return -1;
+}
+float WtSeconds(int group,int variant) noexcept {
+    if(!WtThere(group) || variant<0 || variant>=wt::kVariants[group])return 0.0f;
+    const ClipPcm& c=wtClips[group][variant];
+    const unsigned ch=c.format.nChannels ? c.format.nChannels : 1u;
+    return c.format.nSamplesPerSec ? static_cast<float>(c.pcm.size()/ch)/static_cast<float>(c.format.nSamplesPerSec) : 0.0f;
+}
 int LoopsOpen() noexcept;
 int LoopsFree() noexcept { return kLoops-LoopsOpen(); }
 int LoopsOpen() noexcept {

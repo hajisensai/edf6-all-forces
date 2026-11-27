@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace {
-int failures=0,opens=0,closes=0,sets=0,shots=0;
+int failures=0,opens=0,closes=0,sets=0,shots=0,onces=0;
 // A stand-in fault: raised inside a stub, `faultPending` while the stub's frame is still on the stack (the filter
 // runs then; the stub's __finally clears it when the stack unwinds, before the handler).
 bool faultPending=false,setFaults=false,jetFaults=false;
@@ -23,10 +23,13 @@ crew::jetsound::Lever heardLever{};
 crew::jet::Jet npc{};
 // The voices open (by loop index) and what each was last set to: the engine's level is their sum.
 bool used[256]{};
+int groupOf[256]{};   // the WT group each one plays
 crew::audio::Heard lastSet[256]{};
 int pool=256;   // the stand-in voice pool's size (the plugin's: audio::kLoopPool)
 float Loud() noexcept { float g=0.0f;for(int i=0;i<256;++i)if(used[i])g+=lastSet[i].gain;return g; }
 int Open() noexcept { int n=0;for(bool u:used)n+=u ? 1 : 0;return n; }
+int OpenOf(int group) noexcept { int n=0;for(int i=0;i<256;++i)n+=used[i] && groupOf[i]==group ? 1 : 0;return n; }
+int oncesOf[crew::wt::kCount]{};    // the one-time voices opened, by WT group
 void Check(bool pass,const char* name) {
     std::printf("%s %s\n",pass ? "PASS" : "FAIL",name);
     if(!pass)++failures;
@@ -55,11 +58,17 @@ Jet* FindJet(const unsigned char*) noexcept {if(jetFaults)RaiseFault();return np
 }
 namespace audio {
 bool Start() noexcept {return true;}
-int OpenWtLoop(int) noexcept {
+int OpenWtLoop(int group) noexcept {
     if(::Open()>=pool)return -1;
-    for(int i=0;i<256;++i)if(!used[i]){used[i]=true;lastSet[i]=Heard{};++opens;return i;}
+    for(int i=0;i<256;++i)if(!used[i]){used[i]=true;groupOf[i]=group;lastSet[i]=Heard{};++opens;return i;}
     return -1;
 }
+int OpenWtOnce(int group,int) noexcept {
+    const int i=OpenWtLoop(group);
+    if(i>=0){++onces;if(group>=0 && group<crew::wt::kCount)++oncesOf[group];}
+    return i;
+}
+float WtSeconds(int,int) noexcept {return 2.0f;}
 void CloseLoop(int i) noexcept {if(i<0 || !used[i])return;used[i]=false;++closes;if(faultPending)++closesBeforeUnwind;}
 void SetLoop(int i,const Heard& h) noexcept {if(setFaults)RaiseFault();++sets;if(i>=0)lastSet[i]=h;}
 void PlayWt(int,int,const Heard&) noexcept {++shots;}
@@ -88,6 +97,8 @@ int main() {
     Put<const float*>(soundSystem.data(),kListeners,cam);Put<std::uint64_t>(soundSystem.data(),kListenerCount,1);
     Put<unsigned char*>(image,kSoundSystem,soundSystem.data());
     auto* v=vehicle.data();
+    // The air's layers (jet_air.h) off for the engine's own checks; theirs below.
+    config.jetSoundPassby=config.jetSoundWind=config.jetSoundOverload=false;
     auto body=[&](unsigned char* p,float x) {
         Put<void*>(p,kSelfCtrl,seat.data());Put<void*>(p,kSeats,seat.data());
         Put<float>(p,kMatrix,1.0f);Put<float>(p,kMatrix+20,1.0f);Put<float>(p,kMatrix+40,1.0f);
@@ -289,7 +300,78 @@ int main() {
     const int heldOpen=Open();
     config.jetSoundFar=8000.0f;
     Check(farOpen==0 && heldOpen>0,"a jet 8.5 km off: unheard past JetSoundFar 8000; heard at its 3 km level with it 0");
+
+    // The passby (jet_air.h): a jet flying past the camera 50 m off at 250 m/s whooshes once a pass, ducking the
+    // engines a moment; none with JetSoundPassby off; at most 3 at once.
+    auto pass=[&](int count,float lateral,int n) {
+        for(int i=0;i<count;++i){body(jetAt(i),-900.0f);Put<float>(jetAt(i),kPosition+8,lateral+10.0f*static_cast<float>(i));}
+        float x=-900.0f,leastDuck=1.0f;int most=0;
+        for(int f=0;f<n;++f) {
+            x+=250.0f/60.0f;
+            for(int i=0;i<count;++i)Put<float>(jetAt(i),kPosition,x);
+            frames(1,0,count);
+            int on=0;for(const Passby& b:passbys)on+=b.on ? 1 : 0;
+            most=on>most ? on : most;
+            const float d=PassbyDuck();
+            leastDuck=d<leastDuck ? d : leastDuck;
+        }
+        return std::pair<int,float>{most,leastDuck};
+    };
+    const int medClip=wt::k_jet_passby_med;
+    ResetJetSound();
+    config.jetSoundPassby=true;
+    oncesOf[medClip]=0;
+    auto [most1,duck1]=pass(1,50.0f,900);
+    std::printf("  a jet 50 m by at 250 m/s: %d passby(s), the engines ducked to %.3f\n",oncesOf[medClip],duck1);
+    Check(oncesOf[medClip]==1 && most1==1 && duck1<0.1f,"a jet flying by 50 m off: one passby, the other engines ducked");
+    Check(OpenOf(wt::k_jet_passby_close)==0 && OpenOf(medClip)==0,"...its voices closed once played out");
+    ResetJetSound();
+    oncesOf[medClip]=0;
+    pass(1,600.0f,900);
+    Check(oncesOf[medClip]==0,"a jet going by 600 m off: no passby (WT's 300 m)");
+    ResetJetSound();
+    oncesOf[medClip]=0;
+    auto [most4,duck4]=pass(4,50.0f,900);
+    Check(oncesOf[medClip]>=3 && most4==jetair::kMostPassbys,"four jets by at once: at most 3 passbys (WT's maxVoices)");
+    ResetJetSound();
+    config.jetSoundPassbyDuck=false;
+    oncesOf[medClip]=0;
+    auto [most5,duck5]=pass(1,50.0f,900);
+    Check(oncesOf[medClip]==1 && duck5==1.0f,"JetSoundPassbyDuck 0: the passby, no duck");
+    config.jetSoundPassbyDuck=true;
+    ResetJetSound();
+    config.jetSoundPassby=false;
+    oncesOf[medClip]=0;
+    pass(1,50.0f,900);
+    Check(oncesOf[medClip]==0,"JetSoundPassby 0: no passby");
+    (void)most5;(void)duck4;
     npcState=false;
+
+    // The wind and the airframe (the own jet): the wind's loops by its speed, switched within a run.
+    ResetJetSound();
+    config.jetSoundWind=config.jetSoundOverload=true;
+    playerState=true;occupied=true;flight={false,true,false,false,1.0f,200.0f};
+    body(v,0.0f);
+    {
+        float z=0.0f;
+        for(int i=0;i<300;++i){z+=200.0f/60.0f;Put<float>(v,kPosition+8,z);cam[2]=z;frameOn();}
+        const int wind=OpenOf(wt::k_jet_wind_low)+OpenOf(wt::k_jet_wind_high);
+        Check(wind>0 && OpenOf(wt::k_jet_overload)==0,"the own jet at 200 m/s: its wind heard, no airframe in level flight");
+        config.jetSoundWind=false;
+        z+=200.0f/60.0f;Put<float>(v,kPosition+8,z);cam[2]=z;frameOn();
+        Check(OpenOf(wt::k_jet_wind_low)+OpenOf(wt::k_jet_wind_high)==0,"JetSoundWind 0: the wind closed at once");
+        config.jetSoundWind=true;
+        cam[2]=0.0f;Put<float>(v,kPosition+8,0.0f);
+    }
+    Check(jetair::OverloadAt(1.0f)==0.0f && jetair::OverloadAt(6.0f)>0.0f && jetair::OverloadAt(9.0f)>jetair::OverloadAt(6.0f),
+          "the airframe: none at 1 g, louder the more g");
+    const jetair::Wind slow=jetair::WindAt(15.0f,600.0f),quick=jetair::WindAt(95.0f,900.0f);
+    Check(slow.low>0.0f && slow.high==0.0f && quick.high>quick.low && quick.high>slow.low,
+          "the wind: wind_low slow, wind_hi_4 fast and louder");
+    ResetJetSound();
+    Check(Open()==0,"mission reset closes the air's voices too");
+    config.jetSoundPassby=config.jetSoundWind=config.jetSoundOverload=false;
+    playerState=false;occupied=false;
 
     const auto fast=jetsound::For({true,true,false,false,1.0f,150.0f});
     const auto taxi=jetsound::For({true,true,false,false,0.1f,3.0f});
