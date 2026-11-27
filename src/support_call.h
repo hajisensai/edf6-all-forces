@@ -198,10 +198,10 @@ void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;
 enum class SupportIcon : std::uint8_t { jet, heli, carrier, gunship, sub, squad, platoon, tank, apc, truck, barrage, satellite };
 SupportIcon SupportCallIcon(int index) noexcept;
 // Which of its kind's variants an entry is (the bar's chip icon): an aircraft guarding the mark or following the player,
-// a ground vehicle crewed or delivered empty; none for the ones with no variants (the infantry, the submarine carrier).
+// or its one attack pass (a sortie, 2026-11-27: the 「·出击」 chip on its airframe's row), a ground vehicle crewed or delivered empty; none for the ones with no variants (the infantry, the submarine carrier).
 // The transports' (support_dispatch.cpp TransportCatalog): a squad or a platoon flown in (the row: a helicopter assault, a
 // paratroop drop). The container airdrops' (AirdropCatalog): the vehicle the plane drops (the row: the plane).
-enum class SupportVariant : std::uint8_t { none, guard, follow, crewed, empty, squad, platoon, tank, apc, truck };
+enum class SupportVariant : std::uint8_t { none, guard, follow, sortie, crewed, empty, squad, platoon, tank, apc, truck };
 SupportVariant SupportCallVariant(int index) noexcept;
 // The bar's tabs (2026-10-26: every support on the bar, more rows than its column holds): everything flown (2026-11-27: the
 // one 「出击」 tab: the aircraft that stay, guard / follow, the carriers, and the sorties, each flying the airframe the player

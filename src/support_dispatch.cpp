@@ -1987,7 +1987,9 @@ SupportTab SupportCallTab(int index) noexcept {
 }
 SupportVariant SupportCallVariant(int index) noexcept {
     SupportAircraft spec;
-    if(index<AirCount())return SupportAircraftSpec(index,&spec) ? (spec.follow ? SupportVariant::follow : SupportVariant::guard) : SupportVariant::none;
+    if(index<AirCount())
+        return !SupportAircraftSpec(index,&spec) ? SupportVariant::none : spec.sortie ? SupportVariant::sortie :
+               spec.follow ? SupportVariant::follow : SupportVariant::guard;
     if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))
         return platoon ? SupportVariant::platoon : SupportVariant::squad;
     if(SupportVehicleKind dropped{};AirdropCatalog(static_cast<std::uint32_t>(index),dropped))
