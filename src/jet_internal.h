@@ -529,6 +529,7 @@ struct Sortie {
     float strafeLead=0.0f;
     bool reentered=false;
     float reenterSide=1.0f;
+    spread::Place place{};   // its slot in its call's formation (flight_spread.h: its lane, its break)
 };
 struct Jet {
     ObjRef ref;              // the vehicle: address and weak-this control block, on which a weak reference is
@@ -828,9 +829,12 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
           ULONGLONG ms) noexcept;
 
 // --- jet_sortie.cpp ---
-// A sortie's start (ActivateSupportAircraft): its pass at `mark`, its line from where it is (`pos`) and the way it flies.
+// A sortie's start (ActivateSupportAircraft): its pass at `mark`, its line the lane of its `place` in its flight
+// (flight_spread.h LaneLine) along the way it flies.
 void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms,
-                 const sortie::RunSpec& run={}) noexcept;
+                 const sortie::RunSpec& run={},const spread::Place& place={}) noexcept;
+// Its way out after its pass (Away): its lane's break (flight_spread.h BreakAway).
+void SortieAway(const Jet& j,float* away) noexcept;
 // Its guidance this frame (Guide, before its kind's): true when it set `want` / `speed` (and the fire gates); false: its
 // kind's own (the gunship's circle) or done.
 bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,

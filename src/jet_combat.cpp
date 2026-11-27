@@ -75,7 +75,8 @@ constexpr float kDogfightKeep=1.5f;
 // The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
 // `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
 struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; bool charges;
-             const void* best; float score,aim[3]; bool flyer,focus,focusSeen; };
+             const void* best; float score,aim[3]; bool flyer,focus,focusSeen;
+             const void* claimed[kMaxJets]={}; int claims=0; };   // its flight-mates' targets (flight_spread.h Claims)
 // Whether `object` (lock point `p`) flies: its root more than kFlyerClear over the ground, or no ground
 // under it (see kFlyerProbe); one ray per object per kFlyerMemoMs, shared by every jet.
 // The memo: kFlyerSets sets of kFlyerWays, an object's set picked by a multiplicative hash of its address (the
@@ -151,6 +152,10 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     // A sortie strikes the ground (jet_sortie.cpp), each missile at another target (SortieStruck).
     const Prefer prefer=k.j->sortie.pass!=SortiePass::none ? Prefer::ground : k.j->loadSet ? k.j->loadPrefer : KindOf(*k.j).prefer;
     if(SortieStruck(*k.j,object))score+=4000.0f;
+    // One a flight-mate is on counts farther (flight_spread.h): each its own while there are others to go round.
+    int mates=0;
+    for(int i=0;i<k.claims;++i)if(k.claimed[i]==object)++mates;
+    score+=spread::ClaimScore(mates);
     if(prefer!=Prefer::any && flyer!=(prefer==Prefer::air))score+=2000.0f;   // the other kind: only with none of its own
     if(!k.best || score<k.score){k.best=object;k.score=score;std::memcpy(k.aim,p,12);k.flyer=flyer;}
 }
@@ -450,6 +455,10 @@ void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float
 
 void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,float range,float dt,ULONGLONG ms) noexcept {
     Pick pick{&j,pos,anchor,range,ms,Charges(j),nullptr,0.0f,{},false,false,false};
+    const bool hostile=HostileJet(v);   // a mission's placed flight holds both sides: only its own side's claims
+    for(const Jet& o:jets)
+        if(&o!=&j && o.flight==j.flight && o.t.target && Flown(o,ms) && !jetphase::Leaving(o.phase) && HostileJet(o.Vehicle())==hostile)
+            pick.claimed[pick.claims++]=o.t.target;
     VisitEnemies(v,&VisitTarget,&pick);
     if(j.focus && !pick.focusSeen) {
         Log("JET v=%p focus target %p no longer among the enemies: back to its order",j.Vehicle(),j.focus.obj);

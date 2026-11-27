@@ -368,7 +368,7 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     const bool bomber=j.bay.bombSpeed>0.0f;
     const bool sortie=j.sortie.pass!=SortiePass::none;
     float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
-    if(sortie)std::memcpy(away,j.sortie.line.dir,12);
+    if(sortie)SortieAway(j,away);   // its lane's break: the flight fans out (flight_spread.h)
     else if(bomber)std::memcpy(away,j.bay.bombDir,12);
     if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
     const float top=CeilingY()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;

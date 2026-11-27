@@ -169,17 +169,25 @@ void MarkedRun(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const f
 }
 }  // namespace
 
+static_assert(static_cast<int>(SortiePass::gunRun)==spread::kPassGunRun && static_cast<int>(SortiePass::carpet)==spread::kPassCarpet &&
+              static_cast<int>(SortiePass::missilePass)==spread::kPassMissilePass &&
+              static_cast<int>(SortiePass::gunshipLap)==spread::kPassGunshipLap,"flight_spread.h's pass numbers are SortiePass's");
 void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms,
-                 const sortie::RunSpec& run) noexcept {
+                 const sortie::RunSpec& run,const spread::Place& place) noexcept {
     Sortie& s=j.sortie;
     s=Sortie{};
-    s.pass=pass;s.begun=ms;s.phaseAt=ms;
+    s.pass=pass;s.begun=ms;s.phaseAt=ms;s.place=place;
     const float explicitHeading[3]={run.x,0.0f,run.z};
-    s.line=sortie::LineThrough(mark,pos,sortie::HasHeading(run) ? explicitHeading : heading);
+    // Its own lane beside its flight's (flight_spread.h): where it came in abreast only orders them, never decides how
+    // far apart (LineThrough's kMaxOffset clamp put the 70 m formation's outer two 10 m apart).
+    s.line=spread::LaneLine(mark,pos,sortie::HasHeading(run) ? explicitHeading : heading,static_cast<int>(pass),place);
     s.runHalf=run.half;
     s.missileSeen=j.t.missileAt;
-    Log("JET v=%p sortie: %s at (%.0f,%.0f,%.0f)",j.Vehicle(),kPassNames[static_cast<int>(pass)],mark[0],mark[1],mark[2]);
+    Log("JET v=%p sortie: %s at (%.0f,%.0f,%.0f), slot %d of %d: its lane through (%.0f,%.0f)",j.Vehicle(),
+        kPassNames[static_cast<int>(pass)],mark[0],mark[1],mark[2],place.slot,place.count,s.line.at[0],s.line.at[2]);
 }
+
+void SortieAway(const Jet& j,float* away) noexcept { spread::BreakAway(j.sortie.line,j.sortie.place,away); }
 
 bool SortieStruck(const Jet& j,const void* object) noexcept {
     for(int i=0;i<j.sortie.struckCount;++i)if(j.sortie.struck[i]==object)return true;

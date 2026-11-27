@@ -222,6 +222,25 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     }
 }
 
+// Its flight-mates kept off (flight_spread.h Separate): every other wing of its flight on its side flown here, its `want`
+// turned off where it would pass one nearer than kSepWant and its speed eased behind one it closes on. Before the ground
+// guard (Wing: Guard), which has the last word. A mate's table index orders who gives way (its wing may repeat after a
+// loss).
+void FlightSeparation(const Jet& j,const float* pos,float* want,float* speed,ULONGLONG ms) noexcept {
+    spread::Mate mates[kMaxJets];int count=0;
+    const bool hostile=HostileJet(j.Vehicle());
+    for(int i=0;i<kMaxJets;++i) {
+        const Jet& o=jets[i];
+        if(&o==&j || o.flight!=j.flight || !Flown(o,ms) || KindOf(o).flight!=FlightModel::wing || HostileJet(o.Vehicle())!=hostile)continue;
+        const float* p=reinterpret_cast<const float*>(o.Vehicle()+kPosition);
+        spread::Mate& m=mates[count++];
+        std::memcpy(m.pos,p,12);std::memcpy(m.vel,o.m.vel,12);m.wing=i;
+    }
+    if(!count)return;
+    float share=1.0f;
+    if(spread::Separate(pos,j.m.vel,static_cast<int>(&j-jets),mates,count,want,&share))*speed*=share;
+}
+
 // s a charge drone leads its target by (Rotor): 1 / Hover's vertical gain (its wantV[1]: half the gap a second).
 constexpr float kChargeLead=2.0f;
 
@@ -782,6 +801,7 @@ void JetFrame(unsigned char* v) noexcept {
     float want[3]={nose[0],0,nose[2]},speed=kind.cruise;
     bool gunsOk=false,missileOk=false;
     Guide(*j,kind,arms,mother,pos,nose,anchor,viewer,lead,height,clear,walled,ms,want,&speed,&gunsOk,&missileOk);
+    if(kind.flight==FlightModel::wing && j->mode!=Mode::takeoff)FlightSeparation(*j,pos,want,&speed,ms);   // its mates kept off
     // SPRINT (the map's Z): its afterburner -- the speed it asks for raised past its saturated thrust (Wing: JetFlames burns).
     if(ms<j->burnUntil && kind.flight!=FlightModel::rotor)speed*=mapcmd::kAfterburnerSpeed;
     if(kind.flight==FlightModel::rotor)Rotor(*j,kind,v,mother,pos,anchor,want,height,hp,hpMax,dt,ms);

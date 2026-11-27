@@ -27,7 +27,9 @@
 namespace crew {
 namespace spread {
 
-struct Place { int slot=0,count=1; };
+// offset: m from the lead's planned place to its own (level): the flight's centre, where its lead comes in, is where it is
+// less this.
+struct Place { int slot=0,count=1; float offset[3]={0.0f,0.0f,0.0f}; };
 
 // m across the heading of formation slot `slot` (support_entry.h AirFormationSlot's order, in its units).
 inline float SlotSide(int slot) noexcept {
@@ -56,12 +58,14 @@ constexpr int kPassGunRun=1,kPassMissilePass=2,kPassCarpet=3,kPassGunshipLap=6; 
 inline float LaneGap(int pass) noexcept {
     return pass==kPassGunRun ? kLaneGun : pass==kPassCarpet ? kLaneCarpet : pass==kPassMissilePass ? kLaneMissile : kLaneOther;
 }
-// Its lane's line: along `heading` (as LineThrough: none, from `from` toward the mark) through the mark moved across by
-// its lane. The gunship's lap is round the mark itself, never a lane.
-inline sortie::Line LaneLine(const float* mark,const float* from,const float* heading,int pass,const Place& p) noexcept {
-    sortie::Line l=sortie::LineThrough(mark,from,heading);   // its way (its `at` laid again: the lane, not where it is)
+// Its lane's line: the flight's line (LineThrough from the flight's centre: along `heading`, none from there toward the
+// mark, across as far as the centre comes in, kMaxOffset at most) moved across by its lane. One aircraft's is its own
+// LineThrough. The gunship's lap is round the mark itself, never a lane.
+inline sortie::Line LaneLine(const float* point,const float* from,const float* heading,int pass,const Place& p) noexcept {
+    const float centre[3]={from[0]-p.offset[0],from[1],from[2]-p.offset[2]};
+    sortie::Line l=sortie::LineThrough(point,centre,heading);
     const float across=pass==kPassGunshipLap ? 0.0f : LaneUnits(p)*LaneGap(pass);
-    for(int i=0;i<3;++i)l.at[i]=mark[i]+l.side[i]*across;
+    for(int i=0;i<3;++i)l.at[i]+=l.side[i]*across;
     return l;
 }
 // Its way out (unit, level): the line's way turned toward its lane's side by kBreakStep a lane.

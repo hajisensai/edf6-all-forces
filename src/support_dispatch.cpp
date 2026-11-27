@@ -1317,6 +1317,22 @@ void Destroy(std::uint64_t id) noexcept {
     DestroyMissionCrewPlan(id);
     DestroyCommanderPlan(id);
 }
+// Aircraft `unit`'s place in its plan's formation (flight_spread.h Place): the plan makes its aircraft in slot order
+// (PlanSupport: AirFormationSlot 0, 1, ..., each one's crew after it), so its slot is the aircraft before it and its
+// offset where it was planned from where the first (the lead) was.
+spread::Place AircraftPlace(const SupportPlan& plan,unsigned unit) noexcept {
+    spread::Place place{};place.count=0;
+    const float* lead=nullptr;
+    for(unsigned i=0;i<plan.count;++i) {
+        if(plan.units[i].role || !IsSupportAircraft(plan.units[i].resourceId))continue;
+        if(!lead)lead=plan.units[i].matrix+12;
+        if(i<unit)++place.slot;
+        if(i==unit){place.offset[0]=plan.units[i].matrix[12]-lead[0];place.offset[2]=plan.units[i].matrix[14]-lead[2];}
+        ++place.count;
+    }
+    if(place.count<1)place.count=1;
+    return place;
+}
 // `networked`: a committed support_net transaction (registered IDs on every peer); else this machine's own
 // deployment (LocalAuthority): unregistered objects only it simulates.
 // Airborne aircraft of a just created deployment: each one's real crew (made inside it, unregistered) take their seats
@@ -1341,7 +1357,7 @@ bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
         }
         if(!deployed.remote) {
             SupportAircraft spec;
-            if(!AircraftSpecOf(plan.catalogId,&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true,plan.run))return false;
+            if(!AircraftSpecOf(plan.catalogId,&spec) || !ActivateSupportAircraft(vehicle,spec,plan.target,true,plan.run,AircraftPlace(plan,i)))return false;
             // The paratroop plane flies its passes from the first frame (ferry_line.h): along the line it was planned on
             // (the heading in its matrix, support_entry.h AirRoute), not the strike body's patrol until every peer acks.
             if(bool platoon=false,plane=false;TransportCatalog(plan.catalogId,platoon,plane) && plane &&
@@ -2164,7 +2180,8 @@ void SupportDispatchTick() noexcept {
                 auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
                 if(resource>=kAircraft && resource<kVehicle) {
                     SupportAircraft spec;   // an older host's runway hull
-                    started=AircraftSpecOf(deployed.plan.catalogId,&spec) && ActivateSupportAircraft(object,spec,deployed.plan.target,false,deployed.plan.run) && started;
+                    started=AircraftSpecOf(deployed.plan.catalogId,&spec) && ActivateSupportAircraft(object,spec,deployed.plan.target,false,deployed.plan.run,
+                                                                                    AircraftPlace(deployed.plan,i)) && started;
                 } else if(resource>=kVehicle)started=NpcPrepareVehicleRoutePost(object,
                     reinterpret_cast<const float*>(object+kPosition),kVehicleDriverHold) && started;
                 // A walking squad's leader its quiet route from where it stands; one aboard a hull (role 1: a crewed APC's

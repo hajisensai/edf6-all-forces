@@ -106,7 +106,20 @@ void Lanes() {
     Check(std::fabs(std::fabs(c0-c1)-2.0f*kLaneCarpet)<0.01f,"three carpets lay three bands kLaneCarpet apart");
     const float none[3]={0,0,0},side[3]={500,300,-3000};
     const sortie::Line l=LaneLine(mark,side,none,kPassCarpet,Place{0,1});
-    Check(l.at[0]==0.0f && l.dir[2]>0.98f,"no heading: toward the mark, still through it");
+    Check(std::fabs(l.at[0])<0.01f && l.dir[2]>0.98f,"no heading: toward the mark, still through it");
+    // Where the flight comes in: one aircraft 250 m off flies its own LineThrough (kMaxOffset across, no turn to make); a
+    // flight 40 m off has its lanes about its centre's line, 40 m across, each still kLaneGun from the next.
+    const float off[3]={250,300,-3000};
+    Check(std::fabs(LaneLine(mark,off,heading,kPassGunRun,Place{}).at[0]-sortie::LineThrough(mark,off,heading).at[0])<0.01f,
+          "one aircraft's lane is its LineThrough");
+    bool centred=true;
+    for(int k=0;k<4;++k) {
+        Place p{k,4};p.offset[0]=SlotSide(k)*70.0f;
+        const float own[3]={40.0f+p.offset[0],300,-3000};
+        const float want=40.0f+LaneUnits(p)*kLaneGun;
+        if(std::fabs(LaneLine(mark,own,heading,kPassGunRun,p).at[0]-want)>0.01f)centred=false;
+    }
+    Check(centred,"a flight's lanes about its centre's line, wherever each of them is in its formation");
 }
 
 // The marked strafe: 2.0 s settling onto the lane's line from the formation 3 km out, down a 600 m line (the lead point

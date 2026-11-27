@@ -187,6 +187,7 @@ bool Alive(const ObjRef& ref) noexcept {
 }
 
 bool Preloaded(Body) noexcept { return true; }   // every body there (Charges: a doll carrier launches doll drones)
+bool HostileJet(const unsigned char*) noexcept { return false; }   // the sim's jets one side (PickTarget's claims)
 }  // namespace jet
 }  // namespace crew
 

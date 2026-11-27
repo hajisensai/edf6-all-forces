@@ -296,7 +296,7 @@ bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool peersLoadout=true;
 bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
 bool lastAirborne=false;
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne,const sortie::RunSpec&) noexcept {
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne,const sortie::RunSpec&,const spread::Place&) noexcept {
     if(!pvpActivateOrder)pvpActivateOrder=++pvpLifecycle;
     ++activated;lastAirborne=airborne;return true;
 }
