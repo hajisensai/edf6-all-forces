@@ -52,7 +52,15 @@
 // The gun object is {GunBattery*, ...} with its owner at +0x10; the owner's guns are the vector of 16-byte
 // {gun*, control} at +0x1AA8 (count +0x1AB8), in gun_control's order. The target is 0x30C0F0(owner) (null: none), its
 // position the vec4 at +0x90 (the vec4 at *(*(+0x368)) + 0x10 when +0x378 is set), the owner's at +0x90.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "edf41.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "edf41classes.h"
 #include "enemy_control.h"
 #include "hector_ai.h"

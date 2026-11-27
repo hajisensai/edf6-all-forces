@@ -3,6 +3,7 @@
 #include "../src/pvp_controlled.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/edf_layout.h"
 
 namespace npc_fixture {
 using namespace crew;using namespace crew::controlled_pvp;

@@ -1,6 +1,10 @@
 // Collect an ordinary GameObject's native raw-child list for one atomic PvP operation.
 #pragma once
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 
 namespace crew { namespace enemy_pvp_native {

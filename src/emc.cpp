@@ -14,7 +14,18 @@
 // Everything is fired by the EMC: its side's enemies only (the IFC's team is its owner's), its kills.
 // An NPC driver's EMC is stock (its AI pulls the weapon itself); so is the player's without the files (tools/make_emc.py).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "emc.h"
+#include "heli.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "py_consts.inc"
 #include "body506.h"
 #include "emc_plan.h"

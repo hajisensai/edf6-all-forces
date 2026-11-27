@@ -9,7 +9,10 @@
 //    an MSVC std::wstring of the upper-cased path (inline under 8 characters' capacity, +0x38).
 #include "stores.h"
 #include "store_burden.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "payload.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

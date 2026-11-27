@@ -12,6 +12,10 @@
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "bay_rounds.h"
+#include "plugin_body.h"
 
 namespace crew {
 namespace jet {

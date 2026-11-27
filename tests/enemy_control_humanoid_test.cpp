@@ -3,7 +3,6 @@
 #include <cstdio>
 #include <cstring>
 #include "../src/enemy_control_humanoid.h"
-#include "../src/crew.h"
 #include "../src/memory.h"
 namespace crew { unsigned char* image=nullptr; }
 #include "../src/enemy_control_humanoid.cpp"

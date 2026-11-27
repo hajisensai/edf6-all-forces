@@ -59,7 +59,11 @@
 // (kPlayerNetId | index), the same on every machine and out of the script positions' range (code offsets).
 // More than four only where every machine creates them (edf5online_room.h): EDF6Coop 2.5.0's BvmPlayerTableHooks here
 // and every mission player's machine telling the room it runs this; otherwise every one creates four, and says why.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "campaign.h"
+#include "playarea.h"
 #include "memory.h"
 #include "mission_participant_gate.h"
 #include "spawn_layout.h"

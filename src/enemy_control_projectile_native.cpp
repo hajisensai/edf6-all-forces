@@ -1,12 +1,17 @@
 // Supported EDF.dll 678CCB46 BulletCreateInfo value/weak/resource contract.
 // References remain local; only declared numbers, matrices and full IDs cross codecs.
 #include "enemy_control_projectile_native.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 #include "command_identity.h"
 #include "support_soldier.h"
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 namespace crew::enemy_native {
 #ifdef ENEMY_CONTROL_PROJECTILE_NATIVE_TEST
 void* ProjectileNativeTestFunction(unsigned) noexcept;

@@ -28,7 +28,8 @@
 // call to its return: a recording without a projection (loading) leaves no first for a projection by another caller of
 // 0x11978D0.
 #include "render_record.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "edf/memory.h"
 #include "edf/patch.h"
 #include "scope_lens.h"

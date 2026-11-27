@@ -2,6 +2,13 @@
 #include "../src/body506.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/dreadnought.h"
+#include "../src/heli.h"
+#include "../src/jet.h"
+#include "../src/sazabi.h"
 namespace crew {
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}

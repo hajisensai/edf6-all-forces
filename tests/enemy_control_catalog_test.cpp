@@ -6,7 +6,6 @@
 #include "../src/enemy_control_catalog.h"
 #include "../src/enemy_control_deiroi.h"
 #include "../src/enemy_control_types.h"
-#include "../src/crew.h"
 #include "../src/memory.h"
 namespace crew { unsigned char* image=nullptr; }
 namespace crew::enemy_native {

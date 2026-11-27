@@ -6,6 +6,7 @@
 #include "../src/barrage_plan.h"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/netprobe.h"
 
 namespace crew {
 unsigned char* image=nullptr;

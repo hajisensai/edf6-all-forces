@@ -2,7 +2,11 @@
 // under them (MapRay: terrain or a roof) once, when they are made; the HUD copies them under the lock.
 #include "support_warning.h"
 #include "support_warning_logic.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "jet.h"
 #include "heli.h"            // MapRay
 #include "memory.h"
 #include "support_aircraft.h"

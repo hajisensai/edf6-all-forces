@@ -3,6 +3,11 @@
 #include "../src/npc_tier.h"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/config.h"
+#include "../src/scene.h"
+#include "../src/heli.h"
+#include "../src/netprobe.h"
+#include "../src/seats.h"
 namespace crew {
 unsigned char* image=nullptr;Config config{};
 void Log(const char*,...) noexcept {}

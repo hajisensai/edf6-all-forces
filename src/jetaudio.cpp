@@ -12,7 +12,10 @@
 // vsynth.h on a thread of their own (MakeClips) or read from the player's WAVs, looping voices from a pool of kLoops and
 // one-shots from a pool of kShots, each with its filter and its ears as the jets' are.
 #include "jetaudio.h"
-#include "crew.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "shield.h"
+#include "sound.h"
 #include "lock_cue.h"
 #include "surround.h"
 #include "wt_clips.h"

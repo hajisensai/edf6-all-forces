@@ -35,7 +35,18 @@
 //    as the arcs they are.
 // Computed on the game thread from the vehicle's input (crew.cpp InputHook, after AimLines), published with the HUD's
 // frame (hud.cpp HudPublish, the snapshot's triple buffer) and drawn by it.
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "heli.h"
+#include "helisight.h"
+#include "launchers.h"
+#include "seats.h"
+#include "vhud.h"
+#include "payload.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"

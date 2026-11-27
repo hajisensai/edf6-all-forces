@@ -29,7 +29,10 @@
 // The key is read the way the class reads its own (classic SGO): 0x528A0(&object+0xA0, name) gives the node or null.
 // Hooks: MovingFortress's vtable 0x17C6900, slot 4 (update 0x4C67E0) and slot 9 (messages 0x4C6240), EDF.dll
 // TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "edf41fortress_action.h"
 #include "memory.h"
 

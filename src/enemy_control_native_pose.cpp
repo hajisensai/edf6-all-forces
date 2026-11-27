@@ -1,7 +1,12 @@
 // Native pose fallback: canonical semantic wire, preflighted writes, and retained rollback journals.
 #include "enemy_control_native_pose.h"
 #include "enemy_control_pose_codec.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
+#include "scopereticle.h"
 #include "memory.h"
 #include "lazy_rows.h"
 #include <cmath>

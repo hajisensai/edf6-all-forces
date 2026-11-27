@@ -3,7 +3,8 @@
 // game's own code still makes, zeroes, locks (+0x58) and frees each World; nothing of the plugin runs per agent.
 #include "aiworld_capacity.h"
 #include "aiworld_capacity_logic.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace {

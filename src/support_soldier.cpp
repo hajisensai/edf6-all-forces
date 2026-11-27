@@ -8,6 +8,10 @@
 #include "npc_tier.h"
 #include <cmath>
 #include <iterator>
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace support_native {

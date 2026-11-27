@@ -2,6 +2,8 @@
 // vehicles' readouts and the carriers' panel, the payload and seat cues, the loadout strip, the drill, the Sazabi, the
 // Dreadnought, the Balam's marks, the turret's aim, and the stock vehicles' HUD and ammo (vhud.cpp gathers it).
 #include "hud_internal.h"
+#include "config.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace hudi {

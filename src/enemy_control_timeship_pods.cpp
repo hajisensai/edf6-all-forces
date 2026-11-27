@@ -3,7 +3,7 @@
 #include "enemy_control_timeship_pods_script.h"
 #include "enemy_control.h"
 #include "enemy_control_action_native.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

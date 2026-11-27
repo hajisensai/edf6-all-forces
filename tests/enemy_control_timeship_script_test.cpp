@@ -1,6 +1,7 @@
 #include "../src/enemy_control_timeship_script.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/netprobe.h"
 namespace crew {unsigned char* image=nullptr;}
 namespace {
 using namespace crew;using namespace crew::enemy_native;

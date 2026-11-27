@@ -7,7 +7,8 @@
 #include "enemy_control_action_native.h"
 #include "enemy_control_gun_factory.h"
 #include "enemy_control_projectile_native.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "scopereticle.h"
 #include "memory.h"
 #include "lazy_rows.h"
 #include <cstring>

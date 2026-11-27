@@ -3,6 +3,10 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "lockon.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "mapbounds.h"
+#include "damagestats.h"
 
 namespace crew {
 namespace jet {

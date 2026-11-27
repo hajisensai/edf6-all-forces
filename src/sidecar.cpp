@@ -41,7 +41,18 @@
 // angular velocity the car step sets (setAngVel at 0x6746C6, physics.cpp ChassisSetAngVel) loses its roll part,
 // replaced by a rate that brings the roll back to level (SidecarLevel): no lean in a turn, no falling over.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "boarding.h"
+#include "hud.h"
+#include "sidecar.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "exit_ground.h"
 #include "heli.h"

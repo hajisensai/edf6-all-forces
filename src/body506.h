@@ -2,7 +2,8 @@
 // playerjet.cpp; jet.cpp has its own copies until it switches, docs/review-fix-plan.md) do the same way.
 // Game thread only, under the caller's __try.
 #pragma once
-#include "crew.h"
+#include <Windows.h>
+#include <cstddef>
 #include <cstdint>
 
 namespace crew {

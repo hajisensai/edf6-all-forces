@@ -21,7 +21,12 @@
 // plays its effects out.
 #include "command_identity.h"
 #include "preload_set.h"
-#include "crew.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "jet.h"
+#include "sound.h"
+#include "strikes.h"
 #include "edf41classes.h"
 #include "far_object.h"
 #include "heli.h"          // MapRay

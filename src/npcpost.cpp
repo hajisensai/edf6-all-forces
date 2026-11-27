@@ -25,7 +25,13 @@
 //    (mission_crew.h MissionAiVehicle) keeps no post until the player gives it one: its stock walk is the script's.
 // What the plugin wrote last is remembered: a stick still holding it is the plugin's, not the stock AI driving (a
 // frame without the AI pass clears nothing), and it is taken back when the drive ends.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "body506.h"
 #include "layout.h"
 #include "online_authority.h"

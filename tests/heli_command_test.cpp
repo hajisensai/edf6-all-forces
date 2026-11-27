@@ -3,6 +3,7 @@
 #include "../src/heli.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/hud.h"
 
 namespace crew {
 void SupportAircraftFrame(unsigned char*) noexcept {}   // jet_spawn.cpp: no support aircraft here

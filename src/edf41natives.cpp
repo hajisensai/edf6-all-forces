@@ -18,7 +18,9 @@
 // continues at 0x2100C3: the stack falls by 2 slots, as 4.1's native's. The stub's page is above the image, inside the
 // table entry's 32-bit reach (the entry is an unsigned offset from the image base, 0x21000A..0x210011).
 // EDF.dll TimeDateStamp 0x678CCB46; every byte the patch relies on is checked first.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 
 #include <cstdint>

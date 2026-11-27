@@ -11,7 +11,9 @@
 // again so it is not tried twice), the next nearest enemies (by the stock's distance score) are put to the same
 // 0x62DE60, the first that passes is the target. The reach, the arc and the ray stay the stock's; nothing here
 // decides a range of its own.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include <algorithm>
 #include <array>

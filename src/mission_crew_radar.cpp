@@ -1,5 +1,6 @@
 #include "mission_crew_radar.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include <windows.h>
 #include <atomic>
 #include <cstring>

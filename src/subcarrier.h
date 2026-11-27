@@ -2,7 +2,10 @@
 // carriers the plugin drives, so no one else reads a carrier's matrix or keeps a list of carriers of its own.
 // Game thread only.
 #pragma once
-#include "crew.h"
+#include "objref.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 
 namespace crew {
 // The hull (the SGO's rigid box, testrange/gen.py 'edf6tr_sub_carrier_mission' rigid: centre (0, 178.08, -7.58),

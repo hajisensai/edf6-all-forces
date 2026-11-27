@@ -6,6 +6,9 @@
 #include "support_soldier.h"
 #include <cmath>
 #include <cstring>
+#include "edf_layout.h"
+#include "heli.h"
+#include "payload.h"
 
 namespace crew::enemy_target {
 namespace {

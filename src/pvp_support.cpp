@@ -10,6 +10,7 @@
 #include "support_soldier.h"
 #include "memory.h"
 #include <cstring>
+#include "netprobe.h"
 
 namespace crew {
 namespace {

@@ -10,7 +10,9 @@
 // 2026-10-10, the user: "改一下上限，改成无限"): unlimited -- past the world's diagonal and the mission's far pass end
 // (crew.h UnlimitedViewDistance), so the plugin's clip is never what cuts a vehicle or a soldier off. (Static RE: M;
 // untested in game. The depth range grows with it: far/near 30000 at 3000 m, the stock 10000.)
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "view.h"
 #include "memory.h"
 #include "view_clip.h"
 #include "decal_depth.h"

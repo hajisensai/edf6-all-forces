@@ -3,6 +3,9 @@
 #include "../src/npc_arms.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
 
 namespace crew {
 unsigned char* image=nullptr;

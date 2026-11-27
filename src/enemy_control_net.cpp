@@ -15,6 +15,9 @@
 #include "memory.h"
 #include <atomic>
 #include <cstring>
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace {

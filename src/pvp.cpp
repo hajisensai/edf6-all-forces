@@ -6,7 +6,12 @@
 #include "debug_spawn_net.h"
 #include "map.h"
 #include "coop_member_attribute_api.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "hudtext.h"
 #include <atomic>
 #include <cstring>

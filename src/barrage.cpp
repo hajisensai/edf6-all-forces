@@ -18,7 +18,16 @@
 // plans the same rounds from them (barrage_plan.h Seed) and fires them on its copy of the caller; the damage counts on the
 // caller's machine alone (ShellMake: OnlineShotCounts). The guided rockets' aims are this machine's nearest enemies to the
 // mark (each machine's own view of them).
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "strikes.h"
+#include "world.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "barrage_net.h"
 #include "barrage_net_protocol.h"
 #include "barrage_plan.h"

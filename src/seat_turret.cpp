@@ -4,7 +4,14 @@
 // dreadnought's turrets are (dreadnought_turrets.inc). The V603 aims, reads and poses seat 0 alone
 // (docs/independent-seat-re.md), so nothing native turns these.
 #include "seat_turret.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "netprobe.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "heli.h"
 #include "layout.h"

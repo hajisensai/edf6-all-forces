@@ -38,6 +38,13 @@
 #include "pvp.h"
 #include "support_drone.h"
 #include <intrin.h>
+#include "plugin_log.h"
+#include "plugin_body.h"
+#include "booster.h"
+#include "playerjet.h"
+#include "missile.h"
+#include "view.h"
+#include <initializer_list>
 
 namespace crew {
 namespace jet {

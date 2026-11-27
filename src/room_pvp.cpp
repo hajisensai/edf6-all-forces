@@ -9,7 +9,9 @@
 // the host's ready button still cancels, and the guests have been sent nothing.
 #include "room_pvp.h"
 #include "coop_attr.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include "mod_room.h"
 #include "room_sync.h"

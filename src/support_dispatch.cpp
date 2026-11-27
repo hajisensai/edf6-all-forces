@@ -1,6 +1,15 @@
 // Support requests select and verify an entry before any object exists. The host sends the resulting
 // matrices to peers. Real soldiers board stationary hulls, then the existing vehicle controllers enter.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "jet.h"
+#include "netprobe.h"
+#include "strikes.h"
+#include "view.h"
+#include "mapcmd.h"
+#include "scopereticle.h"
 #include "lazy_rows.h"
 #include "support_call.h"
 #include "support_aircraft.h"

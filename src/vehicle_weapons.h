@@ -6,7 +6,7 @@
 // offline and online alike (online the room's set decides the vehicles; every member runs the same build: the same lists).
 // Header-only: the files that preload vehicles are in several tests' builds.
 #include "vehicle_weapons_logic.h"
-#include "crew.h"
+#include "plugin_log.h"
 #include "lazy_rows.h"
 #include <windows.h>
 #include <cstdio>

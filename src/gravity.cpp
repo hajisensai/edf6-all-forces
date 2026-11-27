@@ -18,6 +18,13 @@
 #include "memory.h"
 #include <cmath>
 #include <cstring>
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "plugin_body.h"
+#include "heli.h"
 
 namespace crew::gravity {
 namespace {

@@ -24,7 +24,18 @@
 //    machine's copy of the weapon and is sent to the vehicle's copies (andryusha_net.h 'AFUZ', AndryushaFrame): each
 //    writes the same fuse into its copy, so every machine's carriers burst alike (room protocol 10).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "launchers.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "andryusha.h"
 #include "andryusha_net.h"
 #include "heli.h"            // MapRay

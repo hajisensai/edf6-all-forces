@@ -61,6 +61,21 @@
 #include <cmath>
 #include <cstring>
 #include <cwchar>
+#include "edf/input_source.h"
+#include "plugin_log.h"
+#include "bay_rounds.h"
+#include "boarding.h"
+#include "plugin_body.h"
+#include "booster.h"
+#include "dreadnought.h"
+#include "hud.h"
+#include "launchers.h"
+#include "map.h"
+#include "missile.h"
+#include "shield.h"
+#include "sightzoom_api.h"
+#include "world.h"
+#include "vhud.h"
 
 namespace crew {
 namespace {

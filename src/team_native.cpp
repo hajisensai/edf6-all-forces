@@ -4,7 +4,8 @@
 //  - a match's relations are written under the manager's lock and again after each stock reset (mission start /
 //    reload), which would otherwise put the stock defaults back.
 #include "team_native.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include <atomic>
 #include <cstring>

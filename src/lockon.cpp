@@ -18,7 +18,11 @@
 //    (IsPlayer), or a vehicle, one of whose seats has it among its holders (seat +0xC8, count +0xD8, the weapon at
 //    holder +0x10) with the player in it (docs/lockon-re.md §5).
 #include "lockon.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "hud.h"
 #include "memory.h"
 #include "salvo_volley.h"
 #include "stores.h"
@@ -26,6 +30,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <initializer_list>
 
 namespace crew {
 namespace {

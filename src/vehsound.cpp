@@ -41,7 +41,18 @@
 // and kept to be given back the moment a group is off (its volume 0, VehicleSound=0, the plugin off) or the sounds
 // cannot be made. A group whose volume is 0 keeps its stock sound. All addresses are RVAs into EDF.dll TimeDateStamp
 // 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "heli.h"
+#include "sound.h"
+#include "subcarrier.h"
+#include "vhud.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "jetaudio.h"
 #include "vehmix.h"
 #include "vsynth.h"

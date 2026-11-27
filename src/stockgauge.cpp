@@ -29,7 +29,16 @@
 // The fuel tank: every heli (HelicopterBase slot 46 0x6530E0: +0x1690), the 503 bike (+0x29B0) and the 511 (+0x2B00)
 // have a FuelTank {+0 on, +4 capacity, +8 left, +0xC burn a unit of rotor or throttle} (made by 0x5EFA70, burnt by
 // 0x5EF8E0: left -= |input| x burn a frame); the fuel weapon v_fuel01 (AmmoCount 1) is how the stock gauge shows it.
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "vhud.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 #include "stock_armor_hud.h"
 #include "enemy_control.h"

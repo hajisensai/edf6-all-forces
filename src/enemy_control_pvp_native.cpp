@@ -8,6 +8,7 @@
 #include "team_native_logic.h"
 #include <cstring>
 #include <limits>
+#include "scopereticle.h"
 
 namespace crew {
 bool EnemyControlOwnsTargetSelector(const void* root,const void* function) noexcept;

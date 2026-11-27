@@ -29,6 +29,7 @@
 #include <atomic>
 #include <cstring>
 #include <iterator>
+#include "vecmath.h"
 
 namespace crew {
 void RepublishStockKeys() noexcept;   // plugin.cpp: the published config's keys from the store, when they changed

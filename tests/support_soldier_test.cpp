@@ -4,6 +4,10 @@
 #include <cstdlib>
 #include <limits>
 #include "../src/support_net.h"
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/netprobe.h"
 
 namespace crew {
 unsigned char* image=nullptr;

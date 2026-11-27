@@ -1,6 +1,8 @@
 // The game's pad read filtered by the plugin's owned chord (native_pad.h, pad_chord_logic.h).
 #include "native_pad.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
 #include "memory.h"
 #include "pad_chord_logic.h"
 #include "step_fresh.h"

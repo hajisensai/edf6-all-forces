@@ -5,6 +5,8 @@
 // runs the same production code against the real EDF.dll.
 #include "../src/proteus.cpp"
 #include <cstdio>
+#include "../src/bay_rounds.h"
+#include "../src/hud.h"
 namespace crew {
 unsigned char* image=nullptr;PlayerFix player{};
 namespace {

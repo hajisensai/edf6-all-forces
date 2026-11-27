@@ -5,7 +5,7 @@
 // tests/profile_native_test.cpp checks each one against the real EDF.dll and that a changed byte is refused.
 #pragma once
 #include <cstddef>
-#include "crew.h"
+#include "edf_layout.h"
 
 namespace crew {
 namespace sigs {

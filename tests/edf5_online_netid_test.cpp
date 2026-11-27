@@ -10,7 +10,7 @@
 // never sends it. Patched, each is under kPlayerNetId | its index, the same on every machine; the host's own is the one
 // entry the sync takes (+0x128 bit 1), and the game's own send test (NetworkObject slot 4, 0x774920) says send.
 // Never starts the game.
-#include "../src/crew.h"
+#include "../src/vecmath.h"
 #include "../src/memory.h"
 #include <cstdarg>
 #include <cstdio>

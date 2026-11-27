@@ -9,7 +9,13 @@
 //   jet_hooks.cpp   the 506 physics step (body506.cpp hands it here), the bullets' pass-through, install
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
-#include "crew.h"
+#include "edf_layout.h"
+#include "scene.h"
+#include "heli.h"
+#include "jet.h"
+#include "payload.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "body506.h"
 #include "memory.h"
 #include "scene_object.h"

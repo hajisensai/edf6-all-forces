@@ -1,6 +1,10 @@
 // The Sazabi's arms' constants and state (src/sazabi_arms.inc runs them; sazabi.cpp's Mech owns an Arms).
 #pragma once
-#include "crew.h"
+#include "objref.h"
+#include "bay_rounds.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "sazabi_funnels.h"
 #include <cstddef>
 #include <cstdint>

@@ -9,7 +9,11 @@
 //    functions (checked to be what the tables hold).
 //  - MissileBullet01's motion (rounds.h Motor): its update 0x26A880, checked at the instructions that read its state.
 // Off (any check fails): every round is flown as an arc and every missile counted homing by its LockonType, as before.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "heli.h"
+#include "vhud.h"
 #include "layout.h"
 #include "memory.h"
 #include "rounds.h"

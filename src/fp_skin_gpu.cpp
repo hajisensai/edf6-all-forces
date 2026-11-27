@@ -1,5 +1,6 @@
 #include "fp_skin_gpu.h"
-#include "crew.h"
+#include "plugin_log.h"
+#include "infantryscope.h"
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <array>

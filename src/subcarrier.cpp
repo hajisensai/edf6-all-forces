@@ -44,6 +44,15 @@
 #include <cmath>
 #include <cstring>
 #include <cwchar>
+#include "step_fresh.h"
+#include "config.h"
+#include "plugin_body.h"
+#include "carrierlaser.h"
+#include "heli.h"
+#include "hud.h"
+#include "jet.h"
+#include "map.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace {

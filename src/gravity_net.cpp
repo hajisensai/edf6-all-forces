@@ -10,6 +10,8 @@
 #include "support_soldier.h"
 #include <cmath>
 #include <cstring>
+#include "plugin_log.h"
+#include "netprobe.h"
 
 namespace crew {
 namespace {

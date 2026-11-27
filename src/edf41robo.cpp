@@ -29,7 +29,14 @@
 // kill count, the model's drawing and its animation clock.
 // Every game pointer goes through Readable; every EDF.dll function is fingerprinted (edf41classes.cpp); a failure is logged
 // once and the object is left as EventAnimationObject made it.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "edf41.h"
+#include "payload.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "edf41classes.h"
 #include "edf41robo_ai.h"
 #include "edf41robo_body.h"

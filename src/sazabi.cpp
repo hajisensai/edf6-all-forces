@@ -42,6 +42,17 @@
 #include "vehicle_look.h"
 #include <cmath>
 #include <cstring>
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "boarding.h"
+#include "plugin_body.h"
+#include "netprobe.h"
+#include "sazabi.h"
+#include "booster.h"
 
 namespace crew {
 namespace {

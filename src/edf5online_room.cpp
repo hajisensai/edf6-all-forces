@@ -3,7 +3,9 @@
 // The game-facing half of src/edf5online.cpp's count; the member attributes through coop_attr.h.
 #include "edf5online_room.h"
 #include "coop_attr.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "campaign.h"
 #include <Windows.h>
 #include <cstdio>
 #include <cstring>

@@ -12,7 +12,15 @@
 // released by the callee (0x781878 / 0x781894), so each is a copy holding one weak count of its own.
 #include "edf41net.h"
 
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
+#include "payload.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "edf41classes.h"
 #include "memory.h"
 #include "object_net_transport.h"

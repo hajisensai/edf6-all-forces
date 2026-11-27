@@ -3,7 +3,9 @@
 // of the table at kAabbTable (+type*0x100+0x18)(shape, transform, out min/max). The Shield Bearer's shield sphere
 // (shield.cpp) and the plugin missiles' warhead safety (missile.cpp, fuze.h) read it.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "patches.h"
 #include "memory.h"
 #include <cmath>
 

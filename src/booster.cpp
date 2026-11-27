@@ -22,7 +22,16 @@
 // sets +0x3EC = how strongly it burns, +0x3F0 = 1, +0x3F4 = 3 while it burns (0, 0 when not: it burns down); a vehicle
 // gone for kStaleMs, or dead, has its boosters deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the
 // last jet is gone). (H/M)
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "booster.h"
+#include "jet.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "exhaust_nozzles.h"
 #include "exhaust_pose.h"

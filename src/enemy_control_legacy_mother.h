@@ -4,6 +4,7 @@
 #include "pvp_controlled.h"
 #include <cstring>
 #include <cwchar>
+#include "mapcmd.h"
 namespace crew {
 // Startup-only native ownership bridge. Tokens belong to the authenticated controlled-PVP lease,
 // not to a network identity or arbitrary SGO caller. Adopt captures the already initialized real baseline.

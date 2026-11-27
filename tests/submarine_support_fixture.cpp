@@ -4,6 +4,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "../src/config.h"
+#include "../src/plugin_body.h"
+#include "../src/carrierlaser.h"
+#include "../src/heli.h"
+#include "../src/hud.h"
+#include "../src/jet.h"
+#include "../src/map.h"
+#include "../src/netprobe.h"
 
 namespace submarine_fixture {
 struct Object {

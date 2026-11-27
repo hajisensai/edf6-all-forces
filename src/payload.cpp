@@ -36,7 +36,21 @@
 //    seat's trigger. A weapon on the driver's keys is the driver's to fire: it rides his aim, and pulling it by itself
 //    whenever that aim crossed an enemy was no turret (the player, 2026-11-21: 「载具的某些副炮塔能自动开火真的对劲吗，
 //    怎么感觉怪怪的」; vcobjects Store.auto). Every one of them is pulled through FireSeat (ControlOf: who pulls it).
-#include "crew.h"
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "heli.h"
+#include "map.h"
+#include "netprobe.h"
+#include "vhud.h"
+#include "payload.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"

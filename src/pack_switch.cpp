@@ -17,7 +17,10 @@
 //     select opened by room_ui.cpp as at every HQ).
 // Online the pack is the room's (the room is made with it): this is the offline HQ only. Nothing is patched unless
 // every address checks out (REFUSED in the log: the HQ as it is).
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "campaign.h"
 #include "memory.h"
 #include "map.h"
 #include "armory.h"

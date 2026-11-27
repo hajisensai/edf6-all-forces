@@ -3,6 +3,11 @@
 // card's buttons (MapButtons), MapCommands, the legend, the support bar and its panels, the damage statistics' page
 // (hud_stats.inc), the marks of the command hint, the question marks and the support warnings, the order banners.
 #include "hud_internal.h"
+#include "config.h"
+#include "strikes.h"
+#include "damagestats.h"
+#include "mapcmd.h"
+#include "qmark.h"
 
 namespace crew {
 namespace hudi {

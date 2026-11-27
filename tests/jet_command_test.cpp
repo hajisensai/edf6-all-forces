@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/booster.h"
 
 // Flight code is linked as-is. Only Patrol/Level are exercised; other game services fail closed.
 namespace crew {

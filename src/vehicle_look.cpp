@@ -1,7 +1,21 @@
 // Vehicle input owns the observation angles; the final camera only reads them.
 // This precedes native input AND plugin flight/weapon controllers, so looking
 // round cannot become a command to the turret or the mouse-flight aim.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "highcam.h"
+#include "map.h"
+#include "playerjet.h"
+#include "sazabi.h"
+#include "seats.h"
+#include "turretcam_api.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "vehicle_look.h"
 #include "seat_switch_logic.h"
 #include "fp_view.h"

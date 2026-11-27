@@ -1,6 +1,15 @@
 // Exercise the production enemy visitor and pose consumers, without loading EDF.dll.
 #include "../src/sazabi.cpp"
 #include <cstdio>
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/scene.h"
+#include "../src/boarding.h"
+#include "../src/plugin_body.h"
+#include "../src/booster.h"
+#include "../src/netprobe.h"
+#include "../src/sazabi.h"
 
 namespace crew {
 bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }

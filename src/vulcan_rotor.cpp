@@ -1,7 +1,14 @@
 // M163 six-barrel pose (the quad Vulcan's four rotors) at V603's native final world-build boundary. No private
 // draw-palette write: 1100F10 copies ALL model bones in slot 3, including the
 // declared visual leaf. The original 40 physical bones and CAS stay native.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "vulcan_rotor.h"
 #include "barrel_recoil.h"
 #include "body506.h"

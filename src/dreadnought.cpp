@@ -43,6 +43,23 @@
 #include "hangar_recover.h"
 #include <cmath>
 #include <cstring>
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "dreadnought.h"
+#include "jet.h"
+#include "netprobe.h"
+#include "sidecar.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
+#include "march_pace.h"
+#include "bay_rounds.h"
+#include "boarding.h"
+#include "hud.h"
 
 namespace crew {
 namespace {

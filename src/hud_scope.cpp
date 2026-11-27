@@ -1,6 +1,8 @@
 // The vehicle HUD's on-foot sights (split from hud.cpp; the HUD's overview is hud.cpp's head): a magnified sight's
 // eyepiece and shade (scopeview.h), the soldier's open scope (InfantryScope) and the rescue cue's banner.
 #include "hud_internal.h"
+#include "edf_layout.h"
+#include "infantryscope.h"
 
 namespace crew {
 namespace hudi {

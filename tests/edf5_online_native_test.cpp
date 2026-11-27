@@ -7,7 +7,6 @@
 // guide 0x21F380, Factor_PlayerAreaIn's 0x207870, natives 0x3ED / 0x3EE / 0x3EF, 0x2252D0 / 0x2253A0, the first
 // player's 0x229040) run for real for six and forty players, EDF6Coop's four bounds in place as its hooks place them.
 // A failed write puts every site back and frees the page (`rollback`). Never starts the game.
-#include "../src/crew.h"
 #include "../src/memory.h"
 #include <cstdarg>
 #include <cstdio>

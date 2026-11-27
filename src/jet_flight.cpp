@@ -10,6 +10,10 @@
 #include "nacelle_reach.h"
 #include "support_entry.h"
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "booster.h"
+#include "mapbounds.h"
 
 namespace crew {
 namespace jet {

@@ -2,7 +2,8 @@
 // to it, by identity, with their health as last seen and when they were last hurt. Its own unit so every module that
 // fires for a unit (npcai.cpp, heli.cpp, jet.cpp, ground.cpp) links it without the map's whole command layer.
 #include <windows.h>
-#include "crew.h"
+#include "plugin_log.h"
+#include "npcai.h"
 #include "layout.h"
 #include "memory.h"
 #include "mapcmd.h"

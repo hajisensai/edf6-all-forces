@@ -2,7 +2,7 @@
 // body-local movement: Walking MoveTo first rotates goal-position by -yaw
 // (33E48E..33E4E7), then the native step rotates it back (53D893..53D89C).
 #include "enemy_control_native.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cmath>
 

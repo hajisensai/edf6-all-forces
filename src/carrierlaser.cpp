@@ -36,7 +36,16 @@
 // the carrier it is sent to as an ObjRef. The state machine steps once a game frame from a carrier's frame
 // (CarrierLaserFrame); with no carrier left, from a 508's AI (ShipAiHook), so it winds down (Interrupt: the sight
 // deleted) when the last carrier is gone, though nothing of the carriers runs any more.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "carrierlaser.h"
+#include "heli.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "preload_set.h"
 #include "edf/world_tables.h"
 #include "enemy_control_native.h"

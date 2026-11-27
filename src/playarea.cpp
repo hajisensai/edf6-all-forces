@@ -1,7 +1,10 @@
 // The map's real play area (playarea.h): measured once a mission off the map's ground with map rays.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "playarea.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "world.h"
 #include "heli.h"
 #include "memory.h"
 

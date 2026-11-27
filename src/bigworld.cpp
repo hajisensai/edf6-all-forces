@@ -9,7 +9,11 @@
 //    the next step copies around the map.
 // ini BigWorld (default off: with the bounds raised, a parked vehicle (the player jet waiting on the ground)
 // fell through the terrain and was put back by the game again and again, 2026-10-04 test range; under study). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "world.h"
+#include "mapbounds.h"
 #include "body506.h"
 #include "heli.h"
 #include "memory.h"

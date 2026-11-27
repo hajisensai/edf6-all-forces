@@ -1,5 +1,4 @@
 // Production seat-input transaction and camera ownership, with native-layout fixtures.
-#include "../src/crew.h"
 namespace {
 bool focused=true;
 DWORD TestWindowProcess(HWND,LPDWORD pid){*pid=focused ? 42 : 43;return 0;}

@@ -25,7 +25,15 @@
 // Per crawler the module keeps a Robo, keyed by its ObjRef (a new object at an old address is a new crawler),
 // dropped at a new mission (ResetGround) and reused only once its crawler has not been driven for kStaleMs:
 // a full table drives no new crawler rather than drop a live one.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "ground.h"
+#include "heli.h"
+#include "damagestats.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"

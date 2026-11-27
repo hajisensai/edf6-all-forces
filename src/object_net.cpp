@@ -4,7 +4,9 @@
 // docs/seat-net.md; docs/drill-re.md section 8.5 has the native reads.
 #define _CRT_RAND_S
 #include "object_net_transport.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 #include "memory.h"
 #include "edf/patch.h"
 #include <atomic>

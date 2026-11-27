@@ -34,7 +34,17 @@
 //    it is. Only the thrower's game: in an online game the others see the stock patroller (their copy's owner is no
 //    local player). Kills are the drone's (an NPC friend's), as a flown support's jets' are.
 // Without the plugin the thrown drones are plain Patrollers, the vehicle requests the stock requests of their vehicles.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "campaign.h"
+#include "heli.h"
+#include "jet.h"
+#include "strikes.h"
+#include "view.h"
+#include "npcai.h"
+#include "transport.h"
 #include "hudtext.h"
 #include "support_call.h"
 #include "support_aircraft.h"

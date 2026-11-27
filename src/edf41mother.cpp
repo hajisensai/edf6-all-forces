@@ -34,7 +34,13 @@
 // Online (edf41net, the block "online" at the end): the parts and the hatches' enemies get the game's child identity under the
 // hull (durability, damage, kills and targets travel natively); every machine runs the parts' machines from the same script
 // actions, a cannon's random charge timer is the host's.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "edf41.h"
+#include "hud.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "team_native_logic.h"
 #include "edf41_hitlayer.h"
 #include "edf41layer_live.h"

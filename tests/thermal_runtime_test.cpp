@@ -3,6 +3,7 @@
 #include "../src/thermal.cpp"
 #include "../src/native_pad.cpp"   // the game's pad read the night vision's chord is kept from (its ReadHook, real code)
 #include <cstdio>
+#include "../src/netprobe.h"
 
 namespace {
 ULONGLONG testFrame=1;
