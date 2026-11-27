@@ -12,6 +12,7 @@
 // the shooter moved under it). One hit that hurts clears it at once.
 #pragma once
 #include "edf/hash_index.h"
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -39,6 +40,35 @@ struct Book {
     // the latest holdUntil any pair has been given (never lowered): past it no pair is held, so Wasted
     // answers without the lookup (nearly every frame no hold runs at all)
     std::uint64_t latestHold=0;
+};
+
+// Upper bounds used by readers before taking the book's lock. A hash collision can only keep a reader on the
+// locked path. Note and Clear run under the same exclusive lock as the book. An early clear in the book leaves
+// the conservative bound until its deadline.
+class HoldFilter {
+public:
+    bool MayHold(const void* shooter,std::uint64_t ms) const noexcept {
+        return ms<latest_.load(std::memory_order_acquire) &&
+               ms<deadlines_[Slot(shooter)].load(std::memory_order_acquire);
+    }
+
+    void Note(const void* shooter,std::uint64_t until) noexcept {
+        auto& deadline=deadlines_[Slot(shooter)];
+        if(until>deadline.load(std::memory_order_relaxed))deadline.store(until,std::memory_order_release);
+        if(until>latest_.load(std::memory_order_relaxed))latest_.store(until,std::memory_order_release);
+    }
+
+    void Clear() noexcept {
+        for(auto& deadline:deadlines_)deadline.store(0,std::memory_order_relaxed);
+        latest_.store(0,std::memory_order_release);
+    }
+
+private:
+    static constexpr std::size_t kBuckets=256;
+    static std::size_t Slot(const void* shooter) noexcept { return edf::HashOf(shooter)&(kBuckets-1); }
+
+    std::atomic<std::uint64_t> latest_{0};
+    std::atomic<std::uint64_t> deadlines_[kBuckets]{};
 };
 
 // The pair's entry, nullptr when not there.

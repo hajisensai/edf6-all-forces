@@ -91,18 +91,20 @@ void EarlyOut() {
     std::uint32_t seed=12345;
     auto next=[&seed]{seed=seed*1103515245u+12345u;return seed>>8;};
     std::uint64_t ms=1000;
-    int mismatches=0,held=0,early=0;
+    HoldFilter filter;
+    int mismatches=0,held=0,early=0,filteredShooters=0;
     for(int i=0;i<50000;++i) {
         ms+=next()%40;
         const void* s=&shooters[next()%kShooters];
         const void* t=&targets[next()%kTargets];
-        Hit(b,s,t,next()%7==0,ms);
+        if(Hit(b,s,t,next()%7==0,ms))filter.Note(s,ms+kWastedHoldMs);
         for(int k=0;k<4;++k) {
             const void* qs=&shooters[next()%kShooters];
             const void* qt=&targets[next()%kTargets];
             const std::uint64_t at=ms+next()%(2*kWastedHoldMs);
             const bool want=Scanned(b,qs,qt,at);
-            if(Wasted(b,qs,qt,at)!=want)++mismatches;
+            if(Wasted(b,qs,qt,at)!=want || (want && !filter.MayHold(qs,at)))++mismatches;
+            if(at<b.latestHold && !filter.MayHold(qs,at))++filteredShooters;
             if(want)++held;
             if(at>=b.latestHold)++early;
         }
@@ -112,6 +114,12 @@ void EarlyOut() {
     }
     Check(mismatches==0,"early out: the same answer as the scan, latestHold never below a hold");
     Check(held>0 && early>0,"early out: both held pairs and early outs exercised");
+    Check(filteredShooters>0,"shooter filter: avoids queries while other shooters are held");
+    filter.Note(&shooters[0],ms+kWastedHoldMs);
+    filter.Note(&shooters[0],ms+1);
+    Check(filter.MayHold(&shooters[0],ms+1),"shooter filter: an earlier deadline preserves the later hold");
+    filter.Clear();
+    Check(!filter.MayHold(&shooters[0],0),"shooter filter: clear resets the published deadlines");
     // A long quiet spell after the last hold: everything answers no by the early out.
     ms=b.latestHold;
     Check(!Wasted(b,&shooters[0],&targets[0],ms) && !Scanned(b,&shooters[0],&targets[0],ms),"past the latest hold: not wasted");
