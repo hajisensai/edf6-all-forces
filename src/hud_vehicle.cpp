@@ -36,7 +36,7 @@ int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float
     most=most<0 ? 0 : most>kMaxShown ? kMaxShown : most;
     const int n=Nearest(snap,best,most);
     *shown=0;
-    for(int i=0;i<n && at<kMaxLines;++i) {
+    for(int i=0;i<n && LineSink{lines,&at}.Room(1,__func__);++i) {
         const Data& d=best[i];
         const float over[3]={d.pos[0],d.pos[1]+d.top,d.pos[2]};
         float sx,sy,depth;
@@ -70,7 +70,7 @@ int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float
 float Panel(void* drawer,void* ctx,Text* text,const CarrierPanel& p,int index,int count,float width,float top,float s,
             Line* lines,int* at) noexcept {
     const int first=*at;
-    if(first+2+p.parts>kMaxLines)return top;
+    if(!LineSink{lines,at}.Room(2+p.parts,__func__))return top;
     Line* const title=&lines[first];
     Line* const hull=&lines[first+1];
     if(count>1)Format(*title,Tr(Tx::carrierTitleN),index+1);
@@ -216,7 +216,7 @@ void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width
             Rect(drawer,ctx,x-r,y-r,x+r,y+r,kYellow);
         }
         float sx,sy;
-        if(ImpactCross(drawer,ctx,vp,width,height,s,l.impact,&sx,&sy) && *at<kMaxLines) {
+        if(ImpactCross(drawer,ctx,vp,width,height,s,l.impact,&sx,&sy) && LineSink{lines,at}.Room(1,__func__)) {
             Line& line=lines[(*at)++];
             Format(line,Tr(Tx::launcherLine),static_cast<int>(std::lround(l.range)),l.flight,static_cast<int>(std::lround(l.elevation)));
             line.scale=kLineScale;line.rgba=kYellow;line.w=line.h=0.0f;
@@ -225,7 +225,7 @@ void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width
             fuseX=sx;fuseY=line.y+line.h+4.0f*s;
         }
     }
-    if(!l.fuse || *at>=kMaxLines)return;
+    if(!l.fuse || !LineSink{lines,at}.Room(1,__func__))return;
     wchar_t key[32]=L"";
     if(l.keys)KeyName(Cfg().vehicleSecondarySwitchKey,key,32);else PadBitsName(Cfg().vehicleSecondarySwitchButton,key,32);
     Line& fuse=lines[(*at)++];
@@ -238,7 +238,7 @@ void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width
 // The artillery's high camera toggle (highcam.cpp, the user 2026-10-05): a line low on the screen naming its key,
 // green while the high view is on.
 void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,Line* lines,int* at) noexcept {
-    if(*at>=kMaxLines)return;
+    if(!LineSink{lines,at}.Room(1,__func__))return;
     wchar_t key[32]=L"R3";
     if(keys)KeyName(Cfg().highCamKey,key,32);
     else if(Cfg().highCamButton!=0x80)std::swprintf(key,32,Tr(Tx::padButton),Cfg().highCamButton);
@@ -271,7 +271,7 @@ void SeatKeys(Line& l,const SeatPrompt& p) noexcept {
 }
 
 void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
-    if(*at>=kMaxLines || p.seats<2)return;
+    if(!LineSink{lines,at}.Room(1,__func__) || p.seats<2)return;
     Line& l=lines[(*at)++];
     Format(l,L"%ls",Tr(Tx::seats));
     const wchar_t* const holders[]={L"-",Tr(Tx::holderYou),Tr(Tx::holderNpc),Tr(Tx::holderTaken)};
@@ -338,7 +338,7 @@ void ThermalControlText(Line& line,const thermal::Status& status) noexcept {
     if(reason[0] && !idle)Append(line,L" / %ls",reason);
 }
 void ThermalControlHint(Text* text,float width,float height,float s,const thermal::Status& status,Line* lines,int* at) noexcept {
-    if((!status.eligible && !status.rejected) || *at>=kMaxLines)return;
+    if((!status.eligible && !status.rejected) || !LineSink{lines,at}.Room(1,__func__))return;
     Line& line=lines[(*at)++];ThermalControlText(line,status);
     line.scale=kLineScale*0.65f;line.rgba=!status.eligible || status.reason==thermal::Reason::unsupportedSurface ||
         status.reason==thermal::Reason::hooksUnavailable ? kAmber : kCyan;line.w=line.h=0.0f;
@@ -562,7 +562,7 @@ void DrillLaunchHint(Line& line,const DrillCue& c) noexcept {
     Append(line,L"    ");Append(line,Tr(Tx::drillLaunchHint),binding);
 }
 void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const DrillCue& c,Line* lines,int* at) noexcept {
-    if(*at>=kMaxLines || !(c.maxRpm>0.0f))return;
+    if(!LineSink{lines,at}.Room(1,__func__) || !(c.maxRpm>0.0f))return;
     Line& l=lines[(*at)++];
     const float share=Unit(c.rpm/c.maxRpm),heat=Unit(c.heat);
     const bool top=share>=0.99f;
@@ -782,7 +782,7 @@ int SazabiTagsOf(const SazabiCue& c,Line* tags) noexcept {
     return n;
 }
 void SazabiPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const SazabiCue& c,Line* lines,int* at) noexcept {
-    if(*at+1+kSazabiRows+kSazabiTags>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(1+kSazabiRows+kSazabiTags,__func__))return;
     Line* const title=&lines[*at];
     Line* const rows=title+1;
     Line* const tags=rows+kSazabiRows;
@@ -837,7 +837,7 @@ void SazabiPanel(void* drawer,void* ctx,Text* text,float width,float height,floa
 // The special weapon's readout under right of C (see the top).
 void SazabiSpecial(void* drawer,void* ctx,Text* text,float width,float height,float s,const SazabiCue& c,Line* lines,int* at) noexcept {
     constexpr int kHints=3;
-    if(*at+1+kHints>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(1+kHints,__func__))return;
     Line& name=lines[*at];
     Line* const hints=&lines[*at+1];
     const int special=SazabiSpecialOf(c);
@@ -991,7 +991,7 @@ constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
 void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
                  Line* lines,int* at,ULONGLONG now) noexcept {
     float sx,sy,depth;
-    if(*at<kMaxLines && Project(vp,p.at,width,height,&sx,&sy,&depth)) {
+    if(LineSink{lines,at}.Room(1,__func__) && Project(vp,p.at,width,height,&sx,&sy,&depth)) {
         const float k=DepthScale(depth,kCarrierFar),ks=k*s;
         const float share=p.hullMax>0.0f ? Unit(p.hull/p.hullMax) : 0.0f;
         Line& l=lines[(*at)++];
@@ -1002,7 +1002,7 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Bar(drawer,ctx,sx-bw*0.5f,sy-bh,bw,bh,share,TrailOf(p.key,share,now),HullColour(share),ks);
         l.x=sx-l.w*0.5f;l.y=sy-bh-4.0f*ks-l.h;
     }
-    for(int k=0;k<p.parts && k<4 && *at<kMaxLines;++k) {
+    for(int k=0;k<p.parts && k<4 && LineSink{lines,at}.Room(1,__func__);++k) {
         const auto& part=p.part[k];
         if(!Project(vp,part.at,width,height,&sx,&sy,&depth))continue;
         const float f=DepthScale(depth,kPartFar),fs=f*s;
@@ -1596,7 +1596,7 @@ void DurabilityLine(Line& l,Tx what,const armorhud::Durability& d,Text* text) no
 const float* DurabilityFill(const armorhud::Durability& d,bool armor) noexcept { return armor ? (d.low ? kRed : kHud) : HpColour(d.share); }
 void ArmorPanel(void* drawer,void* ctx,Text* text,float s,const armorhud::Readout& r,Line* lines,int* at) noexcept {
     const int rows=r.hasHull ? 2 : 1;
-    if(*at+rows>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(rows,__func__))return;
     const float lineH=18.0f*s,gap=3.0f*s,barW=kDurabilityBarW*s,barH=kDurabilityBarH*s,x=kArmorPanelX*s;
     float y=kArmorPanelY*s;
     const armorhud::Durability* const d[2]={r.hasHull ? &r.hull : &r.armor,&r.armor};
@@ -1620,8 +1620,8 @@ void ArmorPanel(void* drawer,void* ctx,Text* text,float s,const armorhud::Readou
 // stockgauge.cpp, it is the vehicle's only readout).
 void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float s,const StockHudReadout& r,const StockExtras& x,
                 Line* lines,int* at,float bottom=-1.0f,bool compact=false) noexcept {
-    int room=kMaxLines-*at-3;   // the head's three lines first
-    if(room<0)return;
+    if(!LineSink{lines,at}.Room(3,__func__))return;   // the head's three lines first
+    int room=LineSink{lines,at}.Free()-3;
     const bool armorOn=x.armor && room>0;   // the hidden stock armor gauge's numbers: next after the head (ArmorRows)
     room-=armorOn ? 1 : 0;
     const int want=compact ? 0 : r.arms<kStockArms ? r.arms : kStockArms;
@@ -1836,7 +1836,7 @@ void StockDockHud(void* drawer,void* ctx,Text* text,const float* vp,float width,
     StockVehicleHud(drawer,ctx,text,vp,width,height,s,r,x,lines,at,&dock);
     HudRegionText region(text,s,dock.scale,lines,at);
     LoadoutStrip(drawer,ctx,region.text,width,dock.y,dock.scale,cells,n,lines,at);
-    if(controls.text[0] && *at<kMaxLines) {
+    if(controls.text[0] && LineSink{lines,at}.Room(1,__func__)) {
         Line& keys=lines[(*at)++];keys=controls;
         ControlRow(region.text,width,dock.footer,dock.scale,keys);
     }

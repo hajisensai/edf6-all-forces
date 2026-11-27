@@ -84,8 +84,9 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         const float r=12.0f*s,t=2.0f*s;
         Rect(drawer,ctx,sx-r,sy-t*0.5f,sx+r,sy+t*0.5f,kRed);Rect(drawer,ctx,sx-t*0.5f,sy-r,sx+t*0.5f,sy+r,kRed);
     }
-    if(*at>=kMaxLines)return;
-    Line& line=lines[(*at)++];
+    Line* const pushed=LineSink{lines,at}.Push(__func__);
+    if(!pushed)return;
+    Line& line=*pushed;
     wchar_t gun[64];
     const wchar_t* const names[]={Tr(Tx::gunnerShells),Tr(Tx::gunnerCannon),Tr(Tx::gunnerGatling)};
     static_assert(sizeof(names)/sizeof(names[0])==static_cast<std::size_t>(GunnerGun::count),"GunnerGun's names");
@@ -108,8 +109,9 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     line.x=sx-line.w*0.5f;line.y=sy+22.0f*s;
     // Its controls (the user, 2026-10-14: the gatling was there behind a key the HUD never named): the switch key while
     // there is another gun to go to, the secondary fire for the gatling.
-    if(*at>=kMaxLines)return;
-    Line& keys=lines[(*at)++];
+    Line* const pushedKeys=LineSink{lines,at}.Push(__func__);
+    if(!pushedKeys)return;
+    Line& keys=*pushedKeys;
     Format(keys,L"");
     wchar_t key[32];
     if(more) {
@@ -228,7 +230,7 @@ const float* CueColour(const PlayerJetReadout& j,bool rotate,const float* calm) 
 // pad's or the keyboard and mouse's, as the seat says it is flown).
 void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
              int* at) noexcept {
-    if(*at+5>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(5,__func__))return;
     Line& info=lines[(*at)++];
     Line& thr=lines[(*at)++];
     Line& arms=lines[(*at)++];
@@ -822,7 +824,7 @@ void Annunciator(void* drawer,void* ctx,Text* text,float width,float height,floa
     int lit[kWarnCount],n=0;
     bool warning=false;
     for(int k=0;k<kWarnCount;++k)if(w.on>>k&1u){lit[n++]=k;warning=warning || IsWarning(k);}
-    if(*at+n+1>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(n+1,__func__))return;
     Line* const tile=&lines[*at];
     Format(tile[0],L"%ls",Tr(warning ? Tx::masterWarn : Tx::masterCaution));
     tile[0].rgba=kInk;
@@ -880,7 +882,7 @@ void FighterHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 // `switched`: the picked one large over the line too, LoadoutBanner).
 void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,bool switched,Line* lines,
                   int* at) noexcept {
-    if(*at+2>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(2,__func__))return;
     LoadCell cells[kMostStores];
     const int n=JetCells(j,cells);
     const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,1);
@@ -902,7 +904,7 @@ void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,flo
     arms.x=(width-arms.w)*0.5f;arms.y=dock.top-armsH-8.0f*s;
     warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
     LoadoutStrip(drawer,ctx,text,width,dock.y,s,cells,n,lines,at);
-    if(*at<kMaxLines) {
+    if(LineSink{lines,at}.Room(1,__func__)) {
         Line& keys=lines[(*at)++];JetControls(keys,j);
         ControlRow(text,width,dock.footer,s,keys);
     }
@@ -990,7 +992,7 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
 // lines too, LoadoutBanner).
 void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,
                const wchar_t* stores,const LoadCell* cells,int n,int picked,bool switched,Line* lines,int* at,const Line* controls) noexcept {
-    if(*at+4>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(4,__func__))return;
     const int footers=(f.keys && f.aiming ? 1 : 0)+(controls && controls->text[0] ? 1 : 0);
     const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,footers);
     HudRegionText region(text,s,dock.scale,lines,at);text=region.text;s=dock.scale;
@@ -1032,7 +1034,7 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
     warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
     LoadoutStrip(drawer,ctx,text,width,dock.y,s,cells,n,lines,at);
     help.y=dock.footer;   // the keys under the loadout strip, not over it
-    if(controls && controls->text[0] && *at<kMaxLines) {
+    if(controls && controls->text[0] && LineSink{lines,at}.Room(1,__func__)) {
         Line& keys=lines[(*at)++];keys=*controls;
         ControlRow(text,width,help.y+(help.text[0] ? (help.h>0 ? help.h : 18.0f*s)+6.0f*s : 0.0f),s,keys);
     }
@@ -1046,7 +1048,7 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
 // (amber) an up command refused on the ground; with the annunciator up (`annunciated`) those are its tiles instead.
 void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,bool annunciated,Line* lines,int* at,ULONGLONG now) noexcept {
     GearHud g{};
-    if(!GearHudLatest(&g) || !stepfresh::Fresh(g.step) || *at+2>kMaxLines)return;
+    if(!GearHudLatest(&g) || !stepfresh::Fresh(g.step) || !LineSink{lines,at}.Room(2,__func__))return;
     bool down=true,up=true;
     for(int i=0;i<kGearLegs;++i){down=down && g.at[i]<=0.0f;up=up && g.at[i]>=1.0f;}
     // The lines first: the panel is as wide as they need (WEIGHT ON WHEELS, or a language's longer words, ran past it).
@@ -1091,7 +1093,7 @@ void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
 // The player's helicopter on the ground (HeliCue, the user 2026-10-05): its rotor spinning up to the speed whose lift
 // holds it, then 'LIFT OK: TAKE OFF' blinking: from there the collective lifts it off.
 void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliCue& c,Line* lines,int* at) noexcept {
-    if(*at>=kMaxLines || !(c.rotor>0.01f) || !(c.hover>0.0f))return;
+    if(!LineSink{lines,at}.Room(1,__func__) || !(c.rotor>0.01f) || !(c.hover>0.0f))return;
     Line& l=lines[(*at)++];
     const bool ok=c.rotor>=c.hover;
     const int pct=static_cast<int>(std::lround(100.0f*c.rotor/c.hover));

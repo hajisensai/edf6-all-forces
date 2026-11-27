@@ -452,7 +452,7 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
     const float x=40.0f*s,top=height*0.22f,row=28.0f*s;
     constexpr int kWindow=10;
     if(!c.open){DebugSpawnStatusLine(text,lines,at,width*0.5f,height*0.5f+254.0f*s,1,kLineScale,c);return;}
-    if(*at+kWindow+5>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(kWindow+5,__func__))return;
     using debugspawn::Category;
     const Category cat=static_cast<Category>(c.category>=0 && c.category<debugspawn::kCategoryCount ? c.category : 0);
     const Tx* const kNames=DebugSpawnCategoryWords();
@@ -499,7 +499,7 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
     using Phase=enemy_control::Phase;
     if(snapshot.phase!=Phase::active && snapshot.phase!=Phase::pending && snapshot.phase!=Phase::restoring)return;
     const bool active=snapshot.phase==Phase::active;
-    if(*at+6>kMaxLines)return;
+    if(!LineSink{lines,at}.Room(6,__func__))return;
     // --- Top left: who, its HP, its side ---
     const float x=kArmorPanelX*s,top=kArmorPanelY*s,right=x+std::fmin(380.0f*s,width*0.38f),barW=right-x-16.0f*s;
     const bool hp=active && enemyui::HealthAvailable(snapshot.healthKnown,snapshot.health,snapshot.maxHealth);
@@ -544,7 +544,7 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
     const float room=bottom-ceiling-(26.0f+22.0f+22.0f+8.0f)*s;
     const unsigned fit=room>0.0f ? static_cast<unsigned>(room/rowH) : 0u;
     if(shown>fit)shown=fit;
-    if(*at+3*static_cast<int>(shown)+4>kMaxLines)shown=static_cast<unsigned>((std::max)(0,(kMaxLines-*at-4)/3));
+    if(!LineSink{lines,at}.Room(3*static_cast<int>(shown)+4,__func__))shown=static_cast<unsigned>((std::max)(0,(LineSink{lines,at}.Free()-4)/3));
     const bool more=snapshot.abilityCount>shown;
     const float blockH=(26.0f+static_cast<float>(shown)*26.0f+(more || !shown ? 22.0f : 0.0f)+22.0f+8.0f)*s;
     float ry=bottom-blockH;

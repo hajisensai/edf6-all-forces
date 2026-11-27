@@ -441,7 +441,7 @@ float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool p
     const int foldedRows=mapcmd::SquadRowsShown(ranks,listed,false,16);
     const int total=c.squadTally.total>listed ? c.squadTally.total : listed;
     const bool fold=c.squadOpen ? foldedRows<total : rows<total;
-    if(*at+rows+2>kMaxLines){MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);return top;}
+    if(!LineSink{lines,at}.Room(rows+2,__func__)){MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);return top;}
     const int first=*at;
     Line& title=lines[(*at)++];Format(title,L"%ls",Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys));
     title.rgba=kMapOrder;
@@ -538,7 +538,7 @@ void MapTipSet(const MapCommandReadout& c,float x0,float y0,float x1,float y1,co
     mapTip.on=true;mapTip.x=c.px;mapTip.y=c.py;
 }
 void MapTipDraw(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
-    if(!mapTip.on || *at>=kMaxLines)return;
+    if(!mapTip.on || !LineSink{lines,at}.Room(1,__func__))return;
     Line& l=lines[*at];
     Format(l,L"%ls",mapTip.text);l.scale=kLineScale*0.7f;l.rgba=kWhite;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
@@ -1112,7 +1112,7 @@ const wchar_t* EnemyKeyLabel(unsigned index,bool pad,wchar_t* out,std::size_t si
 float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,
                     const MapCommandReadout& c,Line* lines,int* at) noexcept {
     MapEnemyControlReadout read{};
-    if(!ReadMapEnemyControl(&read) || !read.visible || *at+18>kMaxLines) {
+    if(!ReadMapEnemyControl(&read) || !read.visible || !LineSink{lines,at}.Room(18,__func__)) {
         MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);return top;
     }
     const auto& snapshot=read.snapshot;
@@ -1284,7 +1284,7 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     PvpStatus status{};ReadPvpStatus(&status);
     // The host's two rows full width, then the factions two to a row (the dock's panels below keep their room).
     constexpr int kButtons=pvpmenu::kItems,kFactionRows=(pvp_match::kFactionCount+1)/2,kRows=pvpmenu::kFaction0+kFactionRows;
-    if(*at+kButtons+4>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
+    if(!LineSink{lines,at}.Room(kButtons+4,__func__) || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
     const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),titleH=28.0f*s,rowH=24.0f*s,footH=19.0f*s;
     const float expandedBottom=top+titleH+static_cast<float>(kRows)*rowH+2.0f*footH+8.0f*s;
     const int padPick=pad ? MapPvpPadSelection() : -1;
@@ -1381,7 +1381,7 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
     constexpr int kCols=3,kRows=(kItems+kCols-1)/kCols;
     const MapDock dock=MapDockAt(width,s);
     const float titleH=28.0f*s,rowH=22.0f*s,y1=bottom,y0=y1-titleH;
-    if(y0<60.0f*s || *at+kItems+2>kMaxLines){MapCommandLegendButton(nullptr);return bottom;}
+    if(y0<60.0f*s || !LineSink{lines,at}.Room(kItems+2,__func__)){MapCommandLegendButton(nullptr);return bottom;}
     const bool open=MapLegendOpen();
     const float listW=std::fmin(540.0f*s,dock.x0-24.0f*s),lx1=dock.x0-8.0f*s,lx0=lx1-listW;
     const float listH=static_cast<float>(kRows)*rowH+10.0f*s;
@@ -1453,7 +1453,7 @@ float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bott
 // the page line between the arrows and one line of what to press. A pad uses its D-pad, A and B instead of the pointer.
 void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
                    Line* lines,int* at) noexcept {
-    if(!c.placeOn || *at+2*rangeplace::kWindow+16>kMaxLines){MapCommandPlaceButtons(nullptr,nullptr,0,0);return;}
+    if(!c.placeOn || !LineSink{lines,at}.Room(2*rangeplace::kWindow+16,__func__)){MapCommandPlaceButtons(nullptr,nullptr,0,0);return;}
     const MapDock dock=MapDockAt(width,s);
     const float x0=dock.x0,x1=dock.x1,rowH=30.0f*s,titleH=32.0f*s,tabH=32.0f*s,arrowH=30.0f*s,footH=22.0f*s,pad6=6.0f*s;
     float rects[kMapPlaceItems*4];int codes[kMapPlaceItems];int hits=0;
@@ -1723,7 +1723,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     // The formation button's menu over all of them (its box empties the text under it; its rows take the clicks first).
     if(m.pad)MapCommandFormationButtons(nullptr,nullptr,0);
     else MapFormationMenu(drawer,ctx,text,width,height,s,c,mapCardRects,mapCardIds,mapCardCount,lines,at);
-    // The band over the map's keys: what is selected and what to do with it (one line; the keys are in the tooltips).
+    // The band over the map's keys: what is selected and what to do with it (the mouse's keys take two rows: one HUD line holds 127 characters; the rest are in the tooltips).
     Rect(drawer,ctx,0.0f,height-104.0f*s,width,height-46.0f*s,kMapBand);
     const float y=height-75.0f*s;
     const int footerFirst=*at;
@@ -1739,7 +1739,8 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         wchar_t key[6][24];
         const mapkeys::Key shown[6]={mapkeys::attackMove,mapkeys::fastMove,mapkeys::reverse,mapkeys::stop,mapkeys::holdFire,mapkeys::subgroup};
         for(int i=0;i<6;++i)ControlKeyName(mapkeys::Of(Cfg()).vk[shown[i]],key[i],24);
-        Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(Tx::npcMouseKeys),sel,key[0],key[1],key[2],key[3],key[4],key[5]);
+        Label(text,lines,at,width*0.5f,y-11.0f*s,1,kLineScale*0.75f,kWhite,Tr(Tx::npcMouseKeys),sel);
+        Label(text,lines,at,width*0.5f,y+11.0f*s,1,kLineScale*0.75f,kWhite,Tr(Tx::npcMouseKeys2),key[0],key[1],key[2],key[3],key[4],key[5]);
     }
     if(c.noteFresh)Label(text,lines,at,width*0.5f,height-124.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
     for(int i=footerFirst;i<*at;++i) {

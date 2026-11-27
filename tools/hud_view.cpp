@@ -38,6 +38,7 @@
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
 #include <array>
+#include <cstdarg>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -235,7 +236,13 @@ void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
 }
 }  // namespace
 const Config& Cfg() noexcept { return config; }
-void Log(const char*,...) noexcept {}
+// The HUD losing text (LineSink: its lines full; TextWritten: a line cut at its characters): printed, a failure (lineLosses).
+static int lineLosses=0;
+void Log(const char* format,...) noexcept {
+    if(std::strncmp(format,"HUD lines full",14)!=0 && std::strncmp(format,"HUD a line's text cut",21)!=0)return;
+    va_list args;va_start(args,format);std::vprintf(format,args);va_end(args);
+    std::printf("\n");++lineLosses;
+}
 ULONGLONG GameMs() noexcept { return GetTickCount64(); }
 bool GamePaused() noexcept { return paused; }
 bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return hasJet; }
@@ -2885,6 +2892,8 @@ int wmain(int argc,wchar_t** argv) {
     std::printf(textFailed ? "text: %d FAILED\n" : "text: on the screen, inside its panels, no overlap English lacks, in every language\n",textFailed);
     std::printf("glyphs: at most %zu in one scene (%s)\n",mostGlyphs,mostGlyphsAt.c_str());
     failed+=textFailed;
+    std::printf(lineLosses ? "lines: %d lost (LineSink / TextWritten above)\n" : "lines: none lost\n",lineLosses);
+    failed+=lineLosses;
     config.hudLanguage=1;hudtext::Use(hudtext::Lang::en);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     // The HUD's scale (src/hudscale.h).

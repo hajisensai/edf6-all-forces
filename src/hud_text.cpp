@@ -85,14 +85,35 @@ float DepthScale(float depth,float readTo) noexcept {
 void Format(Line& l,const wchar_t* format,...) noexcept {
     l.world.on=false;
     va_list args;va_start(args,format);
-    _vsnwprintf_s(l.text,_countof(l.text),_TRUNCATE,format,args);
+    TextWritten(_vsnwprintf_s(l.text,_countof(l.text),_TRUNCATE,format,args),l.text);
     va_end(args);
 }
 void Append(Line& l,const wchar_t* format,...) noexcept {
     const std::size_t n=wcsnlen_s(l.text,_countof(l.text));
     va_list args;va_start(args,format);
-    _vsnwprintf_s(l.text+n,_countof(l.text)-n,_TRUNCATE,format,args);
+    TextWritten(_vsnwprintf_s(l.text+n,_countof(l.text)-n,_TRUNCATE,format,args),l.text);
     va_end(args);
+}
+void TextWritten(int written,const wchar_t* text) noexcept {
+    static bool logged=false;   // the draw thread's
+    if(written>=0 || logged)return;
+    logged=true;
+    Log("HUD a line's text cut at %d characters (later cuts not logged): \"%.48ls...\"",kLineChars-1,text);
+}
+bool LineSink::Room(int n,const char* who) const noexcept {
+    if(*at+n<=kMaxLines)return true;
+    static bool logged=false;   // the draw thread's
+    if(!logged) {
+        logged=true;
+        Log("HUD lines full: %s wanted %d more with %d of %d taken, left out (later overflows not logged)",who,n,*at,kMaxLines);
+    }
+    return false;
+}
+Line* LineSink::Push(const char* who) const noexcept {
+    if(!Room(1,who))return nullptr;
+    Line& l=lines[(*at)++];
+    l.text[0]=0;l.world.on=false;
+    return &l;
 }
 float TextScale(float scale) noexcept { return worldtext::Snap(scale,kTextScaleStep); }
 alignas(16) const float kOutline[4]={0.0f,0.0f,0.0f,1.0f};
@@ -343,10 +364,11 @@ void Arc(void* drawer,void* ctx,float cx,float cy,float r,float from,float span,
 }
 // A line of text at (x, y): `align` 0 its left there, 1 its middle, 2 its right; its height centred on y.
 void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const float* rgba,const wchar_t* format,...) noexcept {
-    if(*at>=kMaxLines)return;
-    Line& l=lines[(*at)++];
+    Line* const pushed=LineSink{lines,at}.Push(__func__);
+    if(!pushed)return;
+    Line& l=*pushed;
     va_list args;va_start(args,format);
-    _vsnwprintf_s(l.text,_countof(l.text),_TRUNCATE,format,args);
+    TextWritten(_vsnwprintf_s(l.text,_countof(l.text),_TRUNCATE,format,args),l.text);
     va_end(args);
     l.scale=scale;l.rgba=rgba;l.w=l.h=0.0f;l.world.on=false;
     if(text)MeasureAll(*text,&l,1);
@@ -410,10 +432,10 @@ void ScreenShifted(const float* vp,float width,float height,const float* anchor,
 void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float height,const float* anchor,std::uint64_t key,
                 float dx,float dy,int align,float scale,const float* rgba,const wchar_t* format,...) noexcept {
     float x,y,depth;
-    if(*at>=kMaxLines || !Project(vp,anchor,width,height,&x,&y,&depth))return;
-    Line& l=lines[(*at)++];
+    if(!LineSink{lines,at}.Room(1,__func__) || !Project(vp,anchor,width,height,&x,&y,&depth))return;
+    Line& l=*LineSink{lines,at}.Push(__func__);   // Room above
     va_list args;va_start(args,format);
-    _vsnwprintf_s(l.text,_countof(l.text),_TRUNCATE,format,args);
+    TextWritten(_vsnwprintf_s(l.text,_countof(l.text),_TRUNCATE,format,args),l.text);
     va_end(args);
     l.scale=scale;l.rgba=rgba;l.w=l.h=0.0f;l.world.on=false;
     worldtext::Frame f;

@@ -153,8 +153,22 @@ float DepthScale(float depth,float readTo) noexcept;
 struct WorldAt { bool on,back; worldtext::Standee plate; float at[3],w,h,mpp,fd,phase,depth; int align; std::uint64_t key; };
 // A line of text to draw once the quads are down: where, its size (measured; a world line's on the screen), its scale and
 // colour, and whether it stands in the world.
-struct Line { wchar_t text[128]; float x,y,w,h,scale; const float* rgba; WorldAt world; };
+constexpr int kLineChars=128;   // a line's text, its terminator counted (TextWritten logs a longer one cut)
+struct Line { wchar_t text[kLineChars]; float x,y,w,h,scale; const float* rgba; WorldAt world; };
 constexpr int kMaxLines=256;   // the map's panels, card, support bar (a name and a price a row), the test range's place panel and tooltip on top of its grid labels
+// The frame's lines (HudDraw's lines[kMaxLines], `*at` taken so far) as a panel takes them: Room before a panel lays its
+// lines out, Push for one line. Full: the panel (or the line) is left out and the overflow logged, once a run (which
+// panel, how many it wanted), never dropped in silence. `who`: the panel (__func__).
+struct LineSink {
+    Line* lines;
+    int* at;
+    int Free() const noexcept { return kMaxLines-*at; }
+    bool Room(int n,const char* who) const noexcept;
+    Line* Push(const char* who) const noexcept;   // the next line (its text empty, a 2D one); nullptr: full
+};
+// A line's text written by _vsnwprintf_s(..., _TRUNCATE): `written` its result (-1: cut at the line's 127 characters),
+// the cut logged once a run with the text's start.
+void TextWritten(int written,const wchar_t* text) noexcept;
 void Format(Line& l,const wchar_t* format,...) noexcept;
 void Append(Line& l,const wchar_t* format,...) noexcept;
 

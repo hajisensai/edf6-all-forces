@@ -54,7 +54,7 @@ void TipLine(StatsTip& t,const wchar_t* format,...) noexcept {
 }
 void TipAt(StatsTip& t,const StatsPointer& p) noexcept { t.on=true;t.n=0;t.x=p.x;t.y=p.y; }
 void StatsTipDraw(void* drawer,void* ctx,Text* text,float width,float height,float s,const StatsTip& t,Line* lines,int* at) noexcept {
-    if(!t.on || !t.n || *at+t.n>kMaxLines)return;
+    if(!t.on || !t.n || !LineSink{lines,at}.Room(t.n,__func__))return;
     const int first=*at;
     float w=0.0f,h=0.0f;
     for(int i=0;i<t.n;++i) {
