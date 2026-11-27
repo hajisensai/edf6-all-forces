@@ -233,6 +233,33 @@ class Dependencies(unittest.TestCase):
         self.assertIn('tools/calls.py', deps)
 
 
+class Includes(unittest.TestCase):
+    """static_includes: a source's #include closure, the headers of an object ninja has no records for."""
+
+    def test_the_closure_takes_every_branch_and_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            for sub in ('src', 'common/edf', 'tests'):
+                os.makedirs(os.path.join(d, sub))
+            write(d, 'src/a.h', '#pragma once\n#include "b.h"\n')
+            write(d, 'src/b.h', '#if 0\n#include "c.inc"\n#endif\n')
+            write(d, 'src/c.inc', '')
+            write(d, 'common/edf/m.h', '#include "near.h"\n#include "from_src.h"\n')   # the last: the includer's folder
+            write(d, 'common/edf/near.h', '')
+            write(d, 'src/from_src.h', '')
+            write(d, 'tests/t.cpp', '#include "a.h"\n#include <edf/m.h>\n#include <vector>\n#include "../src/c.inc"\n')
+            got = td.static_includes(os.path.join(d, 'tests', 't.cpp'), [os.path.join(d, 'src'), os.path.join(d, 'common')])
+            self.assertIsNotNone(got)
+            names = {os.path.relpath(p, os.path.normcase(d)).replace(os.sep, '/') for p in got}
+            self.assertEqual(names, {'tests/t.cpp', 'src/a.h', 'src/b.h', 'src/c.inc', 'common/edf/m.h',
+                                     'common/edf/near.h', 'src/from_src.h'})
+
+    def test_an_include_of_a_macro_is_not_known(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            write(d, 'h.h', '#define H "x.h"\n')
+            write(d, 't.cpp', '#include "h.h"\n#include H\n')
+            self.assertIsNone(td.static_includes(os.path.join(d, 't.cpp'), []))
+
+
 @unittest.skipUnless(os.path.isfile(os.path.join(BUILD, 'CTestTestfile.cmake')), 'no configured build')
 class OnTheBuild(unittest.TestCase):
     """select_files on this repository's own tests and build."""
@@ -264,6 +291,24 @@ class OnTheBuild(unittest.TestCase):
         built = [e for e in exes if e in self.repo.target_names]
         known = sum(1 for e in built if e in files)
         self.assertGreater(known, len(built) * 0.9, 'most built C++ tests have their sources known')
+
+    def test_the_include_closure_holds_what_ninja_recorded(self) -> None:
+        """The #include closure (an object ninja has no records for) takes every file the compiler took, object by
+        object of the targets the build has records of: never fewer tests than the records would select."""
+        files, links = self.cpp
+        if not links:
+            self.skipTest('not a ninja build')
+        closure, _ = td.cpp_files(BUILD, static=True)
+        self.assertIn('src/heli.cpp', closure['edf6vehiclecrew'])
+        for t, fs in files.items():
+            self.assertIn(t, closure)
+            self.assertLessEqual(fs, closure[t], t)
+
+    def test_a_cpp_test_is_labelled_by_what_it_compiles(self) -> None:
+        if not self.repo.compiles:
+            self.skipTest('not a ninja build')
+        self.assertIn('plugin-air', self.repo.domains_of({'#edf6vehiclecrew'}))
+        self.assertNotIn('plugin-air', self.repo.domains_of({'#edf6autoturret'}))
 
     def test_plugin_source_selects_the_cpp_tests_compiling_it_not_the_model_builds(self) -> None:
         r = td.select_files(['src/heli.cpp'], self.deps, self.cpp)

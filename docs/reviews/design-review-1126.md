@@ -188,6 +188,16 @@
 - 做法：先保留 crew.h 作为转发头（只含 include），然后一个子系统一个 PR 地改 include，最后删掉转发头。
 - 护栏：`/WX` 构建本身就是护栏；`test_domains.py --check`；对比拆分前后 `--select src/heli.cpp` 选中的测试数（应该从约 607 降下来）。
 - 规模：机械改动，跨 230 个文件，适合派 worker 批量做。风险低，主要成本是合并冲突，需要和在飞的 PR 错开。
+- 进展（2026-11-27，分支 `wave3-crewh`）：已做，一次做完，没有按子系统分多个 PR。
+  - 头文件拆分：crew.h 已删除，声明拆进 `edf_layout.h`、`config.h`、`plugin_log.h`、`scene.h`、`world.h`、`view.h`、`seats.h`、`jet.h`、`playerjet.h`、`sound.h`、`patches.h`、`edf41.h` 等 36 个新头；`objref.h` 是第 2 步就有的。反向 include 已去掉，每个文件只包含自己用到的头，`/WX` 构建通过。selftest 和守卫改读这些新头。
+  - `test_domains.py` 改动一：C++ 用例的依赖。原来只有 ninja 有记录的目标（101 / 435）能拿到依赖，其余目标退回整个 `plugin-native` 域。现在 build 里没有记录的目标，改用它源文件的静态 `#include` 闭包：用该对象自己的 `-I` 目录，各个 `#if` 分支都算进去，遇到宏 include 就当未知。给 labels 生成依赖时一律用静态闭包。在 ninja 有记录的 101 个目标上核对过，静态闭包与 ninja 记录完全一致（2321 个文件里缺 0、多 0）。
+  - `test_domains.py` 改动二：`plugin-native` 拆成 `plugin-enemy` / `plugin-ports` / `plugin-support` / `plugin-air` / `plugin-hud` / `plugin-net` / `plugin-sound` / `plugin-core` 八个子系统域。剩下的 `plugin-native` 只管 common、CMake、autoturret、third_party 和测试 / 工具的 C++。
+  - 改动前后 `--select` 选中的用例数（ctest + selftest）：
+    - `src/heli.cpp`：415 + 80 = 495 → 63 + 72 = 135
+    - `src/mapcmd.cpp`：409 + 75 = 484 → 57 + 67 = 124
+    - `src/hud_map.cpp`：410 + 75 = 485 → 60 + 66 = 126
+    - `src/objref.h`：420 + 75 = 495 → 199 + 67 = 266
+    - 改动前的数字是在 ninja 只记录了 101 个目标的 build 上测的。
 
 ### 第 6 步：拆 `hud.cpp`，统一文本限宽（解决 P10 前半、P11）
 - 范围：
