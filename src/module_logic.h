@@ -101,4 +101,27 @@ constexpr std::size_t FirstUnused(const Row (&)[N],const I (&installs)[A],const 
     for(std::size_t i=0;i<N;++i)if(!Has(installs,i) && !Has(resets,i) && !Has(ticks,i) && !Has(steps,i))return i;
     return N;
 }
+
+// The fault policy (docs/module-registry.md): a tick or vehicle step that faults in kFaultLimit game frames in a row
+// takes its module off for the rest of the mission (every entry of it skipped; its reset run once, so what the faults
+// left half written is dropped, not read on). A frame counts as faulted when the entry faulted in it at least once
+// (a vehicle step runs once per vehicle: one bad vehicle each frame is a fault each frame); a frame it ran in with no
+// fault breaks the streak; a frame it did not run in neither counts nor breaks. The mission's start puts every module
+// back on.
+constexpr unsigned kFaultLimit=3;
+struct FaultStreak {
+    std::uint64_t frame=0;   // the game frame of the last run seen
+    bool faulted=false;      // that frame had a fault (counted once)
+    unsigned streak=0;       // the faulted frames in a row, up to that frame
+    // One run of the entry in game frame `at`; true once: the limit reached by this fault (the module goes off now).
+    constexpr bool Run(std::uint64_t at,bool fault) noexcept {
+        if(at!=frame) {
+            if(!faulted)streak=0;   // the frame before ran clean throughout
+            frame=at;faulted=false;
+        }
+        if(!fault || faulted)return false;
+        faulted=true;
+        return ++streak==kFaultLimit;
+    }
+};
 }  // namespace crew::modules

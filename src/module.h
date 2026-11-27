@@ -27,7 +27,14 @@ struct TickEntry { TickPhase phase; Id id; void (*run)() noexcept; };
 struct VehicleEntry { VehiclePhase phase; Id id; void (*run)(unsigned char* v,int cls) noexcept; std::uint8_t flags; };
 
 void InstallAll(const LoadContext& context) noexcept;   // plugin.cpp EML6_Load, after the profile checks
-void ResetAll() noexcept;                                // mission.cpp MissionStart, before the mission's preloads
+void ResetAll() noexcept;                                // mission.cpp MissionStart, before the mission's preloads (then ClearFaults)
+// The fault policy (module_logic.h FaultStreak, docs/module-registry.md): a module taken off mid-mission has its reset
+// entries run at once, each under a guard (its state is what faulted): how many there were, how many faulted.
+struct ResetRun { int entries; int faulted; };
+ResetRun ResetModule(Id id) noexcept;
+void ClearFaults() noexcept;   // every module on again, no fault counted (ResetAll, the mission's start)
+// The HUD's notice of a module taken off this mission, shown a moment (hud.cpp ModuleBanner, the draw thread).
+bool ModuleNotice(wchar_t* out,std::size_t capacity) noexcept;
 void RunTicks() noexcept;                                // crew.cpp SharedFrameTick, once a game frame
 // crew.cpp InputHook, at the hook's seam `phase`: the phase's entries for vehicle `v` of class `cls`; with `enabled`
 // false (ini Enabled=0) only those marked kRunsWhenDisabled.

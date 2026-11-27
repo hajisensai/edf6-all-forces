@@ -3981,6 +3981,15 @@
    ],
    "scripts": []
   },
+  "module_registry_guard": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/module_registry_guard.py"
+   ]
+  },
   "native_bc7": {
    "labels": [
     "native-codec",

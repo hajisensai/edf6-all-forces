@@ -16,6 +16,10 @@ bool BoardingUnderway() noexcept { return false; }
 bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
+void FlushLog() noexcept {}
+namespace modules {   // the reset pass is modules_load.cpp's (not linked here): a module taken off has nothing to reset
+ResetRun ResetModule(Id) noexcept { return {}; }
+}  // namespace modules
 // map.cpp's wheel for the magnified sight: SceneOver lets it go (the scene-end case).
 int scopeWheelHeld=-1;
 int TakeScopeWheel(bool hold) noexcept { scopeWheelHeld=hold ? 1 : 0;return 0; }

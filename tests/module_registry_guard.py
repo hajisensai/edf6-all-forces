@@ -119,6 +119,24 @@ check(hook.index('VehiclePhase::kAfterSound,') < off < tick < hook.index('module
 shared = body(crew, 'void SharedFrameTick()')
 check(shared.count('modules::RunTicks();') == 1, 'the shared frame tick runs kTicks once')
 
+# The fault policy (module_logic.h FaultStreak, docs/module-registry.md): both frame passes skip a module taken off and
+# count each entry's runs; taking one off resets it, writes the log at once and tells the HUD; the mission's start puts
+# every module back on after the resets; the HUD draws the notice.
+passes = code(read('src', 'modules.cpp'))
+for name, streaks in (('void RunTicks()', 'tickStreaks[i].Run(frame,GuardedTick(e))'),
+                      ('void RunVehicle(', 'stepStreaks[i].Run(frame,GuardedVehicle(e,v,cls))')):
+    run = body(passes, name)
+    check('const ULONGLONG frame=GameFrame();' in run and 'off[m])continue;' in run and streaks in run and 'Disable(m,' in run,
+          f'modules.cpp {name}: off modules skipped, each run counted against the limit')
+disable = body(passes, 'void Disable(')
+check(all(s in disable for s in ('off[m]=true;', 'ResetModule(', 'FlushLog();', 'Tx::moduleOff', 'noticeAt=')),
+      'modules.cpp Disable: off, reset, the log flushed, the HUD notice')
+check(disable.index('ResetModule(') < disable.index('FlushLog();'), 'the off line (with what the reset did) flushed')
+reset_all = body(code(read('src', 'modules_load.cpp')), 'void ResetAll()')
+check(reset_all.index('e.run();') < reset_all.index('ClearFaults();'), 'the mission\'s start: the resets, then every module on')
+check('HUDTEXT(moduleOff,' in read('src', 'hudtext.inc'), 'the notice\'s text in the HUD\'s languages')
+check('ModuleBanner(t,width,height,s,lines,&at);' in code(read('src', 'hud.cpp')), 'the HUD draws the notice')
+
 cmake = read('CMakeLists.txt')
 check('add_test(NAME module_registry COMMAND module_registry_test)' in cmake, 'the rules\' own test is registered')
 print(f'module_registry_guard: {checks} checks, {len(rows)} modules')

@@ -879,6 +879,7 @@ struct ObjRef {
 void Log(const char* format,...) noexcept;
 // Preformatted crash diagnostics: direct append, without the ordinary logger's locks or CRT formatting.
 void CrashLog(const char* text,std::size_t size) noexcept;
+void FlushLog() noexcept;   // what is buffered written now (plugin.cpp; best-effort, not the crash path)
 void ReloadConfigIfChanged() noexcept;
 // The ini read again now (the loadout menu saved it: loadout_store.cpp), and its path (Mods/Plugins/EDF6VehicleCrew.ini).
 void ReloadConfigNow() noexcept;
