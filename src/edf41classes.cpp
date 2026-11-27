@@ -984,38 +984,14 @@ bool FarRender(void* object) noexcept {
     return (*reinterpret_cast<const std::uint32_t*>(node+0x20)&kFarBit)!=0;
 }
 
-void WeakSet(WeakRef& w,const void* object) noexcept {
-    WeakReset(w);
-    const char* o=static_cast<const char*>(object);
-    if(!object || !Rd(o+kWeakSelfAt,16,"weak self"))return;
-    void* obj=*reinterpret_cast<void* const*>(o+kWeakSelfAt);
-    void* ctrl=*reinterpret_cast<void* const*>(o+kWeakSelfAt+8);
-    if(!ctrl || !Rd(ctrl,16,"weak control block"))return;
-    reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(ctrl)+0xC)->fetch_add(1);
-    w.object=obj;
-    w.control=ctrl;
-}
-void WeakReset(WeakRef& w) noexcept {
-    if(w.control && Readable(w.control,16)) {
-        auto* weak=reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(w.control)+0xC);
-        if(weak->fetch_sub(1)==1) {   // the last reference of any kind: the block deletes itself (vtable slot 1)
-            void* const* vt=*reinterpret_cast<void* const* const*>(w.control);
-            if(vt && Readable(vt,16))reinterpret_cast<void(__fastcall*)(void*)>(vt[1])(w.control);
-        }
-    }
-    w=WeakRef{};
-}
-bool WeakAlive(const WeakRef& w) noexcept {
-    if(!w.control || !Readable(w.control,16) || *reinterpret_cast<const std::int32_t*>(static_cast<char*>(w.control)+8)<=0)return false;
-    return NotDeleted(w.object);
-}
 bool WeakOut(const void* object,void* out) noexcept {
-    WeakRef w;
-    WeakSet(w,object);
-    if(!w.control || !Rd(out,16,"weak out")) { WeakReset(w); return false; }
-    std::memcpy(out,&w.object,8);
-    std::memcpy(static_cast<char*>(out)+8,&w.control,8);
-    return true;   // the weak count WeakSet took goes with it
+    if(!object || !Rd(static_cast<const char*>(object)+kWeakSelfAt,16,"weak self") || !Rd(out,16,"weak out"))return false;
+    WeakRef w=ObjRef::Of(object);
+    if(!w.ctrl)return false;
+    const ObjRef given=w.Give();   // the weak count goes with it (the receiver releases it)
+    std::memcpy(out,&given.obj,8);
+    std::memcpy(static_cast<char*>(out)+8,&given.ctrl,8);
+    return true;
 }
 
 // ---- bullet hit sounds: FireSe (a 4.1 preset name in a data table: UfoRobo, UfoMother301), FireHit (a raw cue: the 401), FillSePreset ----
@@ -1173,10 +1149,7 @@ void StencilLight(const float* pos,const float* colour,float radius,int frames) 
     alignas(16) static const float identity[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     alignas(16) unsigned char out[16]={};
     reinterpret_cast<void(__fastcall*)(void*,void*,const float*,void*)>(image+0x84880)(mgr,out,identity,param);
-    WeakRef w;   // the creator hands back a weak pointer: let it go
-    std::memcpy(&w.object,out,8);
-    std::memcpy(&w.control,out+8,8);
-    WeakReset(w);
+    objref::Release(crew::At<const void*>(out,8));   // the creator hands back a weak pointer: let it go
 }
 
 namespace {
@@ -1257,11 +1230,8 @@ bool Particle(const float* pos,int life,float size,const float* colour,const wch
     alignas(16) static const float identity[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     alignas(16) void* weak[2]={nullptr,nullptr};
     At<void*(__fastcall*)(void*,void*,const float*,void*)>(kParticleCreate)(mgr,weak,identity,param);
-    WeakRef w;
-    w.object=weak[0];
-    w.control=weak[1];
-    const bool made=w.object!=nullptr;
-    WeakReset(w);
+    const bool made=weak[0]!=nullptr;
+    objref::Release(weak[1]);   // the creator's weak pointer, not kept
     At<void*(__fastcall*)(void*,unsigned)>(kParticleParamFree)(param,0);
     return made;
 }

@@ -27,10 +27,9 @@ inline const char* MadeText(Made m) noexcept {
     return "?";
 }
 
-// Whether `r` is still the object made: there, a FarEventObject, the same control block, not deleted.
+// Whether `r` is still the object made: there (objref.h Exists: a scene object, no death byte), a FarEventObject.
 inline bool Live(const ObjRef& r) noexcept {
-    const auto* o=static_cast<const unsigned char*>(r.obj);
-    return o && Readable(o,kTeam+4) && At<const void*>(o,0)==image+kVtable && r.Is(o) && !(o[scene::kObjFlags]&scene::kObjDeleted);
+    return objref::Exists(r) && Readable(r.obj,kTeam+4) && At<const void*>(r.obj,0)==image+kVtable;
 }
 // `sgo` (preloaded) at `matrix`; `why` (optional) what came of it. Empty when not made.
 inline ObjRef Make(const wchar_t* sgo,const float* matrix,Made* why=nullptr) noexcept {

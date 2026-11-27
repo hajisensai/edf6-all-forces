@@ -44,8 +44,7 @@ Life MemberLife(const ObjRef& ref) noexcept {
     if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;
     if(At<LONG>(ref.ctrl,8)<=0)return Life::gone;
     if(!Readable(ref.obj,kObjectFlags+4))return Life::invalid;
-    if(At<const void*>(ref.obj,kSelfCtrl)!=ref.ctrl || (At<unsigned char>(ref.obj,0x18)&4u))return Life::gone;
-    return Life::live;
+    return objref::Exists(ref) ? Life::live : Life::gone;
 }
 bool Live(const ObjRef& ref) noexcept {return MemberLife(ref)==Life::live;}
 bool CurrentIdentity(const ObjRef& ref) noexcept {

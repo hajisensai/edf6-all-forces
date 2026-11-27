@@ -24,11 +24,8 @@ constexpr unsigned kMarks=256;   // over every live support object the spawn pat
 Mark marks[kMarks]{};
 bool ready=false;
 
-bool Live(const ObjRef& r) noexcept {
-    __try {
-        return r.obj && r.ctrl && Readable(r.ctrl,0x10) && At<long>(r.ctrl,8)>0 && r.Is(r.obj);
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
-}
+// A mark lasts while its object is in the scene, dead or not (a wreck's later setups still read its multiplier).
+using objref::Exists;
 const Mark* Find(const unsigned char* v) noexcept {
     for(const auto& m:marks) {
         if(!m.ref || m.ref.obj!=v)continue;
@@ -64,7 +61,7 @@ void ResetSupportFirepower() noexcept {
 bool MarkSupportFirepower(unsigned char* v,supportlevel::Curve curve) noexcept {
     if(!ready || !v)return false;
     const ObjRef ref=ObjRef::Of(v);
-    if(!Live(ref))return false;
+    if(!Exists(ref))return false;
     std::int32_t difficulty=-1;float progress=0.0f;int level=-1;
     if(!LevelNow(difficulty,progress,level)) {
         Log("SUPPORT firepower: %p refused: difficulty %d progress %.3f has no level",v,difficulty,progress);return false;
@@ -72,7 +69,7 @@ bool MarkSupportFirepower(unsigned char* v,supportlevel::Curve curve) noexcept {
     Mark* slot=nullptr;
     for(auto& m:marks) {
         if(m.ref.obj==v){slot=&m;break;}   // the same address again: a new object there replaces the old mark
-        if(!slot && (!m.ref || !Live(m.ref)))slot=&m;
+        if(!slot && (!m.ref || !Exists(m.ref)))slot=&m;
     }
     if(!slot){Log("SUPPORT firepower: %u vehicles marked already: %p refused",kMarks,v);return false;}
     *slot=Mark{ref,curve,difficulty,progress,level,supportlevel::LevelDamage(curve,level)};

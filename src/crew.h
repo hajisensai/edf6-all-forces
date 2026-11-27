@@ -12,6 +12,7 @@
 #include "sightzoom.h"
 #include "stores.h"
 #include "edf/seat.h"
+#include "objref.h"
 #include "mission_packs.h"
 #include "step_fresh.h"   // handoff freshness by the scene step (GameFrame), any thread
 #include "sound_place.h"
@@ -864,16 +865,7 @@ bool MoveRider(unsigned char* vehicle,unsigned from,unsigned to) noexcept;
 constexpr unsigned kPromptFunctorVtable=0x17D09B8,kPromptVisit=0x5725A0;
 constexpr std::size_t kFunctorHuman=0x8,kFunctorResult=0x10;
 
-// A game object as the plugin remembers it: its address and its weak-this control block (+0x30). A new
-// object at the same address (the next mission, a respawn) has another control block, so it is not taken
-// for the old one. Read under the caller's __try (the object may be gone).
-struct ObjRef {
-    const void* obj=nullptr;
-    const void* ctrl=nullptr;
-    static ObjRef Of(const void* o) noexcept { return ObjRef{o,o ? At<const void*>(o,kSelfCtrl) : nullptr}; }
-    bool Is(const void* o) const noexcept { return o && o==obj && At<const void*>(o,kSelfCtrl)==ctrl; }
-    explicit operator bool() const noexcept { return obj!=nullptr; }
-};
+// ObjRef / WeakRef and the one liveness test (objref::Exists / Alive): src/objref.h, docs/objref-re.md.
 
 // The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;

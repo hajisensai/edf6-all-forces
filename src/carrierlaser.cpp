@@ -206,8 +206,7 @@ bool Target(const unsigned char* ship,const float* from,float* out,bool* atPlaye
 }
 
 bool ObjectLive(const unsigned char* o,const void* ctrl,unsigned vtable) noexcept {
-    return o && Readable(o,kTeam+4) && At<const void*>(o,0)==image+vtable && At<const void*>(o,kSelfCtrl)==ctrl &&
-           !(o[kObjFlags]&kObjDeleted);
+    return objref::Exists(ObjRef{o,ctrl}) && Readable(o,kTeam+4) && At<const void*>(o,0)==image+vtable;
 }
 
 // The live carriers (subcarrier.cpp), and the one `ref` is among them (nullptr: gone, dead).

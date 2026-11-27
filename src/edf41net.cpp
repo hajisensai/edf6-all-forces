@@ -78,9 +78,9 @@ Stats stats;
 struct Message { std::uint8_t kind; std::uint8_t size; unsigned char payload[kMostPayload]; };
 struct Record { const void* control=nullptr; Gate gate; std::vector<Message> queue; };
 std::unordered_map<const void*,Record> records;
-struct Pending { edf41c::WeakRef parent,child; std::uint16_t index,sub; bool sync; };
+struct Pending { WeakRef parent,child; std::uint16_t index,sub; bool sync; };
 std::vector<Pending> pending;
-struct Pair { edf41c::WeakRef from,to; };
+struct Pair { WeakRef from,to; };
 std::vector<Pair> loops;
 struct Key { const void* control; std::uint32_t id; };
 std::vector<Key> taken;      // (the parent's control block, index << 16 | sub) already given: never twice
@@ -89,7 +89,7 @@ const void* ControlOf(const void* object) noexcept {
     const char* o=static_cast<const char*>(object);
     return object && Readable(o+kSelfControl,8) ? *reinterpret_cast<const void* const*>(o+kSelfControl) : nullptr;
 }
-bool Same(const edf41c::WeakRef& w,const void* object) noexcept { return w.object==object && w.control && w.control==ControlOf(object); }
+bool Same(const WeakRef& w,const void* object) noexcept { return w.obj==object && w.ctrl && w.ctrl==ControlOf(object); }
 
 void Say(const char* what) noexcept {
     static std::mutex sayLock;
@@ -254,10 +254,7 @@ bool RegisterNow(void* parent,void* child,std::uint16_t index,std::uint16_t sub,
     alignas(16) unsigned char weakChild[16]{},weakParent[16]{};
     if(!edf41c::WeakOut(child,weakChild))return false;
     if(!edf41c::WeakOut(parent,weakParent)) {
-        edf41c::WeakRef w;
-        std::memcpy(&w.object,weakChild,8);
-        std::memcpy(&w.control,weakChild+8,8);
-        edf41c::WeakReset(w);
+        objref::Release(At<const void*>(weakChild,8));   // WeakOut's count for the child, not handed over
         return false;
     }
     const int r=CallRegister(manager,child,weakChild,weakParent,index,sub,remote);
@@ -280,13 +277,13 @@ void PumpFor(const void* parent) noexcept {
         std::lock_guard<std::mutex> hold(lock);
         for(auto it=pending.begin();it!=pending.end();) {
             Pending& p=*it;
-            if(!edf41c::WeakAlive(p.parent) || !edf41c::WeakAlive(p.child)) {
-                edf41c::WeakReset(p.parent);
-                edf41c::WeakReset(p.child);
+            if(!objref::Exists(p.parent) || !objref::Exists(p.child)) {
+                p.parent.Reset();
+                p.child.Reset();
                 it=pending.erase(it);
                 continue;
             }
-            if(p.parent.object==parent && Registered(p.parent.object)) {
+            if(p.parent.obj==parent && Registered(p.parent.Obj())) {
                 ready.push_back(p);
                 it=pending.erase(it);
                 continue;
@@ -296,9 +293,9 @@ void PumpFor(const void* parent) noexcept {
         stats.waiting=static_cast<std::uint32_t>(pending.size());
     }
     for(Pending& p:ready) {
-        RegisterNow(p.parent.object,p.child.object,p.index,p.sub,p.sync);
-        edf41c::WeakReset(p.parent);
-        edf41c::WeakReset(p.child);
+        RegisterNow(p.parent.Obj(),p.child.Obj(),p.index,p.sub,p.sync);
+        p.parent.Reset();
+        p.child.Reset();
     }
 }
 
@@ -370,7 +367,7 @@ bool Send(void* object,std::uint8_t kind,const void* payload,std::size_t size) n
     Header h;
     {
         std::lock_guard<std::mutex> hold(lock);
-        for(const Pair& p:loops)if(toCount<kMostLoops && Same(p.from,object) && edf41c::WeakAlive(p.to))to[toCount++]=p.to.object;
+        for(const Pair& p:loops)if(toCount<kMostLoops && Same(p.from,object) && objref::Exists(p.to))to[toCount++]=p.to.Obj();
     }
     const bool online=Online() && Registered(object) && !Guest(object);
     if(!online && !toCount)return false;
@@ -411,9 +408,9 @@ int Drain(const void* object,Visit visit,void* context) noexcept {
 void Child(void* parent,void* child,std::uint16_t index,std::uint16_t sub,bool targetSync) noexcept {
     if(!parent || !child || !Enabled() || !Online())return;
     Pending p{{},{},index,sub,targetSync};
-    edf41c::WeakSet(p.parent,parent);
-    edf41c::WeakSet(p.child,child);
-    if(!p.parent.control || !p.child.control) { edf41c::WeakReset(p.parent); edf41c::WeakReset(p.child); return; }
+    p.parent=ObjRef::Of(parent);
+    p.child=ObjRef::Of(child);
+    if(!p.parent.ctrl || !p.child.ctrl) { p.parent.Reset(); p.child.Reset(); return; }
     {
         std::lock_guard<std::mutex> hold(lock);
         pending.push_back(p);
@@ -437,8 +434,8 @@ void Loopback(void* from,void* to) noexcept {
     {
         std::lock_guard<std::mutex> hold(lock);
         Pair p;
-        edf41c::WeakSet(p.from,from);
-        edf41c::WeakSet(p.to,to);
+        p.from=ObjRef::Of(from);
+        p.to=ObjRef::Of(to);
         loops.push_back(p);
     }
     Log("EDF41NET development loopback: %p's events go through the game's stream writer and reader to %p, now a guest copy (ini Edf41NetMirror)",from,to);

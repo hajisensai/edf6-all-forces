@@ -241,10 +241,8 @@ void PullOnto(Mech& m,const float* at,float gain,float most,float dt) noexcept {
     m.aimPitch=Clamp(m.aimPitch+as::Pull(m.aimPitch,Clamp(wantPitch,-kAimMost,kAimMost),gain,most,dt),-kAimMost,kAimMost);
 }
 bool LiveLockTarget(const ObjRef& ref) noexcept {
-    const auto object=static_cast<const unsigned char*>(ref.obj);
-    // The held weak keeps this control readable after the enemy dies. Test uses before touching the old object.
-    return object && ref.ctrl && Readable(ref.ctrl,12) && At<std::int32_t>(ref.ctrl,8)>0 &&
-        Readable(object,kDead+1) && ref.Is(object) && !(object[0x18]&4) && !object[kDead];
+    // The held weak keeps this control readable after the enemy dies.
+    return objref::Alive(ref);
 }
 void LetGo(Arms& a,const unsigned char* v,const char* why) noexcept {
     if(a.lockOn)Log("SAZABI v=%p lock-on let go: %s",v,why);

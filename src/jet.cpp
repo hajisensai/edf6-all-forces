@@ -287,21 +287,11 @@ void Sweep(ULONGLONG ms) noexcept {
 
 // The weak reference an entry holds on its object's control block (MSVC _Ref_count_base: uses +8, weaks +0xC,
 // vtable slot 1 deletes the block; booster.cpp holds its boosters' the same way).
-void HoldRef(const ObjRef& r) noexcept {
-    _InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(const_cast<void*>(r.ctrl))+0xC));
-}
-void DropRef(const ObjRef& r) noexcept {
-    using CtrlDelete=void(*)(void*);
-    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(r.ctrl));
-    if(!ctrl)return;
-    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(ctrl+0xC),-1)==1)(*reinterpret_cast<CtrlDelete* const*>(ctrl))[1](ctrl);
-}
+void HoldRef(const ObjRef& r) noexcept { objref::Retain(r.ctrl); }
+void DropRef(const ObjRef& r) noexcept { objref::Release(r.ctrl); }
 
-bool Alive(const ObjRef& r) noexcept {
-    if(!r.obj || !r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return false;
-    const auto o=static_cast<const unsigned char*>(r.obj);
-    return Readable(o,kSeats+8) && At<const void*>(o,kSelfCtrl)==r.ctrl && !(o[kObjFlags]&kObjDeleted);
-}
+// Still in the scene (objref.h Exists); dead or not: a shot-down jet's wreck is still its entry's (Finished asks kDead).
+bool Alive(const ObjRef& r) noexcept { return objref::Exists(r) && Readable(r.obj,kSeats+8); }
 
 // Where the player `r` a follow order came from is (JetCommand's requester), while they are: their object not deleted,
 // not dead; else nullptr.

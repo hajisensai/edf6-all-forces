@@ -267,11 +267,7 @@ void DropShared(void* ctrl) noexcept {
         (*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
 }
 // A weak reference let go as the game's rows let theirs go (0x22B6D3: +0xC down, the block's vtbl[1] at the last).
-void DropWeak(void* ctrl) noexcept {
-    if(!ctrl)return;
-    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+0xC),-1)==1)
-        (*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
-}
+void DropWeak(void* ctrl) noexcept { objref::Release(ctrl); }
 // The vector let go as the game does (0x1B8DA4..0x1B8E1F): every element, then the storage; a big one's (0x1000 bytes
 // and over) real block 8 bytes before it.
 void FreeList(SharedVector& v) noexcept {
@@ -398,7 +394,7 @@ void __fastcall Edf5BvmStoreRow(const void* bvm,std::uint32_t index,std::int32_t
     }
     Row& r=t->row[index-kBvmPlayerSlots];
     void* const old=r.ctrl;
-    if(made->ctrl)_InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(made->ctrl)+0xC));
+    objref::Retain(made->ctrl);
     r.obj=made->ctrl ? made->obj : nullptr;
     r.ctrl=made->ctrl;
     r.index=listIndex;

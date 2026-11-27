@@ -11,11 +11,10 @@ constexpr unsigned kEnumAllTeams=0x5E0C80,kTeamManager=0x20B2978;
 constexpr unsigned char kEnumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,
     0x56,0x57,0x41,0x56,0x48,0x83};
 bool LiveSource(const unsigned char* object,ObjRef* out) noexcept {
-    if(!object || !Readable(object,kDead+1) || (object[0x18]&4) || object[kDead] ||
-       At<const void*>(object,kSelf)!=object)return false;
-    const auto* control=At<const unsigned char*>(object,kSelfCtrl);
-    if(!Readable(control,16) || At<LONG>(control,8)<=0)return false;
-    *out={object,control};return true;
+    if(!object || !Readable(object,kSelfCtrl+8))return false;
+    const ObjRef ref=ObjRef::Of(object);
+    if(!objref::Alive(ref))return false;
+    *out=ref;return true;
 }
 std::uint64_t KeyOf(const unsigned char* id) noexcept {
     unsigned any=0;

@@ -19,17 +19,17 @@ using WalkFn=void(__fastcall*)(void*,void*);
 
 // Its own weak reference live (still allocated as itself: dead or alive, scene-deleted or not). What it is called by.
 bool Named(const unsigned char* object,ObjRef* ref) noexcept {
-    if(!Readable(object,kDead+1))return false;
-    const auto ctrl=At<const unsigned char*>(object,kSelfCtrl);
-    if(!Readable(ctrl,16) || At<LONG>(ctrl,8)<=0 || At<const void*>(object,kSelf)!=object)return false;
-    *ref=ObjRef{object,ctrl};return true;
+    if(!Readable(object,kSelfCtrl+8))return false;
+    const ObjRef r=ObjRef::Of(object);
+    if(objref::Identity(r)<objref::Life::removed)return false;
+    *ref=r;return true;
 }
-// Named and not scene-deleted (+18 bit 2), dead or alive: what a reference finds.
+// Named and not scene-deleted (+18 bit 2), dead or alive: what a reference finds (objref.h Exists).
 bool Present(const unsigned char* object,ObjRef* ref) noexcept {
-    return Named(object,ref) && !(object[0x18]&4);
+    return Named(object,ref) && objref::Exists(*ref);
 }
 bool Live(const unsigned char* object,ObjRef* ref) noexcept {
-    return Present(object,ref) && !object[kDead];
+    return Named(object,ref) && objref::Alive(*ref);
 }
 bool Alive(const NetLife life,const unsigned char* object,ObjRef* ref) noexcept {
     return life==NetLife::live ? Live(object,ref) : Present(object,ref);

@@ -11,9 +11,8 @@ constexpr std::size_t kChildren=0x550,kChildCount=0x558,kDeletedFlags=0x18;
 constexpr std::size_t kNodeNext=0,kNodePrev=8,kNodeObject=0x10;
 inline bool LiveIdentity(const ObjRef& ref) noexcept {
     // Check the control before touching a possibly freed object. No Vehicle ABI is involved.
-    return ref.obj && ref.ctrl && Readable(ref.ctrl,16) && At<LONG>(ref.ctrl,8)>0 &&
-        Readable(ref.obj,kChildCount+sizeof(std::size_t)) && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl &&
-        !(At<unsigned char>(ref.obj,kDeletedFlags)&4u);
+    // (objref.h Exists: not the death byte, a dead parent's parts still move with it.)
+    return objref::Exists(ref) && Readable(ref.obj,kChildCount+sizeof(std::size_t));
 }
 }
 // Success contains root exactly once, then every descendant. Failure publishes count=0,

@@ -70,7 +70,7 @@ bool MissileKind(Kind kind) noexcept { return kind==Kind::cruise || kind==Kind::
 struct Show {
     bool on=false;
     Kind kind=Kind::katyusha;
-    edf41c::WeakRef caller{};
+    WeakRef caller{};
     const unsigned char* by=nullptr;   // the caller while it lives (the rounds' owner)
     float damage=0.0f;
     ULONGLONG start=0;                 // the game frame of the call
@@ -80,6 +80,7 @@ struct Show {
     bool refused=false;                // a round could not be fired: said once
 };
 Show shows[kMaxShows];
+void Clear(Show& s) noexcept { s=Show{}; }   // out of the __try functions (C2712: Show holds a WeakRef)
 // What each slot's mark stands for: the show and its round, and the game frame the round left.
 struct Slot { std::int16_t show=-1,round=-1; ULONGLONG launched=0; };
 Slot slots[kSlots];
@@ -101,7 +102,7 @@ void Finish(int i,const char* why) noexcept {
     if(!s.on)return;
     for(auto& sl:slots)if(sl.show==i)sl=Slot{};
     Log("BARRAGE %s done (%s): %d of %d rounds fired",barrage::kKindNames[static_cast<int>(s.kind)],why,s.next,s.n);
-    edf41c::WeakReset(s.caller);
+    s.caller.Reset();
     s.on=false;s.by=nullptr;
 }
 
@@ -170,7 +171,7 @@ void Fire(int i,int r) noexcept {
 
 void CheckCaller(Show& s) noexcept {
     bool live=false;
-    __try { live=edf41c::WeakAlive(s.caller); } __except(EXCEPTION_EXECUTE_HANDLER){live=false;}
+    __try { live=objref::Exists(s.caller); } __except(EXCEPTION_EXECUTE_HANDLER){live=false;}
     if(!live && s.by) {
         Log("BARRAGE %s: its caller is gone: no more rounds",barrage::kKindNames[static_cast<int>(s.kind)]);
         s.by=nullptr;
@@ -275,11 +276,11 @@ BarrageResult Start(int kind,const unsigned char* caller,std::int32_t team,const
         return BarrageResult::full;
     }
     Show& s=shows[i];
-    s=Show{};
+    Clear(s);
     s.kind=static_cast<Kind>(kind);
-    if(caller)edf41c::WeakSet(s.caller,caller);
-    if(caller && !edf41c::WeakAlive(s.caller)) {
-        edf41c::WeakReset(s.caller);
+    if(caller)s.caller=ObjRef::Of(caller);
+    if(caller && !objref::Exists(s.caller)) {
+        s.caller.Reset();
         Log("BARRAGE not started: its caller is gone");
         return BarrageResult::noCaller;
     }
@@ -312,7 +313,7 @@ BarrageResult Start(int kind,const unsigned char* caller,std::int32_t team,const
     s.end=barrage::EndFrame(s.rounds,s.n);
     s.start=GameFrame();
     s.on=s.n>0 && caller;
-    if(!s.on){if(caller)edf41c::WeakReset(s.caller);s.by=nullptr;}
+    if(!s.on){if(caller)s.caller.Reset();s.by=nullptr;}
     Log("BARRAGE %s at (%.0f, %.0f, %.0f): %d rounds over %.1f s, damage %.0f a round%s",barrage::kKindNames[kind],setup.target[0],
         setup.target[1],setup.target[2],s.n,static_cast<float>(s.end)/60.0f,s.damage,
         s.kind==Kind::guided ? (aims.n ? ", aimed at enemies" : ", no enemy near: round the mark") : "");
@@ -346,7 +347,7 @@ void BarrageTick() noexcept {
 }
 
 void ResetBarrages() noexcept {
-    for(auto& s:shows){if(s.on)edf41c::WeakReset(s.caller);s=Show{};}
+    for(auto& s:shows)s=Show{};   // its caller's weak goes with it
     for(auto& sl:slots)sl=Slot{};
     nextSlot=0;
     origin=plugin_net::NewOrigin();serial=0;heard.Clear();
