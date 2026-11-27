@@ -227,18 +227,18 @@ std::uint64_t worldDrawingKey=0;   // the key of the world line being drawn (for
 // the text mirrored along it so it reads left to right), begun once with its own font (the system constants written, the
 // depth test off), the renderer's view an identity and its projection the camera's viewProj, then its layers drawn from
 // the furthest to the face (no depth test: the nearer over the further), the ones behind darker and fainter with no
-// outline, the face in its own colour with the glow round it. `labels`: the world lines this frame (fewer layers with many).
+// outline, the face in its own colour with a thin dark edge round it. `labels`: the world lines this frame (fewer layers with many).
 void DrawWorld(Text& t,const Line& l,ULONGLONG now,int labels) noexcept {
     const WorldAt& w=l.world;
     if(!l.text[0] || !t.vp)return;
     const int layers=worldtext::LayersFor(w.depth,labels);
     worldtext::Plate p;
     worldtext::Lay(w.plate,w.at,w.w,w.h,w.align,w.mpp,layers,w.back,&p);
-    alignas(16) float m[16],rgba[4],glow[4],layer[4];
+    alignas(16) float m[16],rgba[4],edge[4],layer[4];
     std::memcpy(rgba,l.rgba,16);
     rgba[3]*=worldtext::Shimmer(now,w.phase);
-    worldtext::Glow(rgba,glow);
-    Font(t,w.fd,glow,worldtext::kGlowWidth,3);
+    worldtext::Edge(rgba,edge);
+    Font(t,w.fd,edge,worldtext::kEdgeWidth,3);
     worldDrawingKey=w.key;
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
     t.begun=true;
@@ -250,7 +250,7 @@ void DrawWorld(Text& t,const Line& l,ULONGLONG now,int labels) noexcept {
         for(int k=layers-1;k>=0;--k) {
             worldtext::LayerColour(rgba,k,layers,layer);
             if(k)Outline(t,kClear,0.0f);
-            else Outline(t,glow,worldtext::kGlowWidth);
+            else Outline(t,edge,worldtext::kEdgeWidth);
             worldtext::LayerMatrix(p,k,m);
             reinterpret_cast<TextDrawFn>(image+kTextDraw)(t.renderer,t.ctx,m,layer,l.text,-1);
         }
@@ -468,7 +468,7 @@ void ScreenShifted(const float* vp,float width,float height,const float* anchor,
 // `align` as Label's. With the world text on it stands in the world there as a hologram plate (world_text.h: square on to
 // the camera as it was when the label of `key` first showed in this view, kept so; or on the ground north up for
 // kGroundKey; its metres following the perspective while its height square on stays within world_text.h's bounds,
-// layered for its thickness, a glow round its face, drawn first and seen through walls); the offset becomes metres along
+// layered for its thickness, a dark edge round its face, drawn first and seen through walls); the offset becomes metres along
 // the plate at the anchor's depth (the 2D offset square on, not to the pixel at a slant). Else it is Label's flat line at
 // the anchor's projection. Nothing while the anchor is off the screen (as Project says).
 void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float height,const float* anchor,std::uint64_t key,
