@@ -148,7 +148,10 @@ struct Game {
     int supportTop=0;          // the first of its rows shown (the wheel over the bar; a click on a tab: its top)
     bool supportReveal=false;  // [ ] picked since the wheel last moved it: the bar shows the pick
     int marchPace=-1;           // the paced march (the card's PACE): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
-    bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
+    unsigned rosterOpen=mapcmd::kRosterAllOpen;   // the roster's groups unfolded (their headers' arrows; kept all mission)
+    // The selection's cards (hud.cpp MapSelectionCards): the last card clicked and when (a second click: centred on its
+    // units, `cardCentre` taken by MapCommandFrame).
+    std::uint64_t cardClickOf=0;ULONGLONG cardClickAt=0;bool cardCentre=false;float cardCentreAt[3]{};
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
     bool dismountMenu=false;    // the ALL OUT button's menu open (map_buttons.h kDismountMenu): one menu at a time
     bool rpressing=false,rOnUi=false;float rmoved=0.0f; // a right press (a click unless it moves kClickMove), begun on UI
@@ -163,7 +166,7 @@ struct Game {
     char subKind[24]{};
     // The pings shown (F1-F4 here, the room's heard: command protocol v11), oldest first.
     MapCommandReadout::Ping ping[MapCommandReadout::kPings]{};int pings=0;
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,loadout,stats,place,pvp,enemy,legend };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,roster,formation,compose,loadout,stats,place,pvp,enemy,legend,card };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; PvpStatus pvp{}; enemy_control::Snapshot enemy{}; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -227,7 +230,8 @@ struct View {
     int placeWindow=0;                                     // ...its list's rows drawn (0: shut / not drawn)
     bool legend=false;mapbtn::Rect legendRow{};            // the legend's title row
     ObjRef squadIdentity[kUiItems]{};
-    bool folds=false;mapbtn::Rect fold{};   // the squad panel's summary row
+    int rosters=0;mapbtn::Rect roster[2*mapcmd::kRosterGroups]{};int rosterCode[2*mapcmd::kRosterGroups]{};   // the roster's headers
+    int cards=0;mapbtn::Rect card[kMapCards]{};std::uint64_t cardOf[kMapCards]{};   // the selection's cards
     int menus=0;mapbtn::Rect menu[kMapFormationEntries]{};int menuEntry[kMapFormationEntries]{};   // the formation menu's rows
     std::uint64_t payloadToken=0;int payloadSeat=-1,payloadEntry[kUiItems]{};
 };
@@ -655,7 +659,10 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(i>=0){hit.kind=Game::UiKind::command;hit.id=v.id[i];return hit;}
     i=mapbtn::Hit(v.squad,v.squads,x,y);
     if(i>=0){hit.kind=Game::UiKind::squad;hit.identity=v.squadIdentity[i];return hit;}
-    if(v.folds && mapbtn::Hit(&v.fold,1,x,y)>=0){hit.kind=Game::UiKind::fold;return hit;}
+    i=mapbtn::Hit(v.roster,v.rosters,x,y);
+    if(i>=0){hit.kind=Game::UiKind::roster;hit.entry=v.rosterCode[i];return hit;}
+    i=mapbtn::Hit(v.card,v.cards,x,y);
+    if(i>=0){hit.kind=Game::UiKind::card;hit.token=v.cardOf[i];return hit;}
     i=mapbtn::Hit(v.payload,v.payloads,x,y);
     if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
     i=mapbtn::Hit(v.compose,v.composes,x,y);
@@ -786,6 +793,47 @@ void PickDismount(Game& g,int entry) noexcept {
     Log("MAPCMD ALL OUT menu: choice 0x%X, %d given, %d not (%s)",c.param,given,skipped,ReasonName(g.failure));
 }
 void CycleEnemy(Game& g,int direction) noexcept;
+// A roster header (hud.cpp MapSquadPanel): its arrow folds / unfolds its group; the rest of it selects every squad of
+// its class that may be selected (Picked; Shift: added to the selection).
+void RosterClick(Game& g,int code,bool shift) noexcept {
+    const int group=code&~mapcmd::kRosterFoldBit;
+    if(group<0 || group>=mapcmd::kRosterGroups)return;
+    if(code&mapcmd::kRosterFoldBit){g.rosterOpen^=1u<<group;return;}
+    if(!shift)g.sel.Clear();
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(e.owner==Owner::squad && Picked(e) && mapcmd::SquadClass(e.u.name)==group)g.sel.Add(e.u.v);
+    }
+    g.subKind[0]=0;
+}
+// The card owner a unit's is drawn under (Publish: CmdMark::owner).
+std::uint8_t CardOwner(Owner o) noexcept { return o==Owner::heli ? kCmdOwnerHeli : o==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround; }
+// A selection card (Broken Arrow's; the user, 2026-11-27: 「这个兵牌没办法点怎么，没意义了」): `of` its first unit. A click keeps
+// its kind of the selection only, Shift+click drops its kind, a second click within kDoubleTapMs also centres the map
+// on them. Its kind: the selected units of its owner alike by name (map_buttons.h GroupCards, as the card was drawn).
+void CardClick(Game& g,std::uint64_t of,bool shift) noexcept {
+    const Entry* card=nullptr;
+    for(int i=0;i<g.count && !card;++i)if(reinterpret_cast<std::uintptr_t>(g.list[i].id.obj)==of && g.sel.Has(g.list[i].u.v))card=&g.list[i];
+    if(!card)return;   // gone or no longer selected since it was drawn
+    const std::uint8_t owner=CardOwner(card->owner);
+    char kind[24];std::snprintf(kind,sizeof(kind),"%s",card->u.name ? card->u.name : "?");
+    const auto same=[&](const Entry& e){ return CardOwner(e.owner)==owner && mapcmd::SameKind(e.u.name ? e.u.name : "?",kind); };
+    const ULONGLONG at=GetTickCount64();
+    const bool twice=!shift && g.cardClickOf==of && at-g.cardClickAt<=mapcmd::kDoubleTapMs;
+    g.cardClickOf=twice || shift ? 0 : of;g.cardClickAt=at;
+    float sum[3]{};int n=0;
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(!g.sel.Has(e.u.v))continue;
+        if(same(e)==shift){g.sel.Remove(e.u.v);continue;}
+        if(!shift){for(int k=0;k<3;++k)sum[k]+=e.u.pos[k];++n;}
+    }
+    g.subKind[0]=0;
+    if(twice && n>0) {
+        for(int k=0;k<3;++k)g.cardCentreAt[k]=sum[k]/static_cast<float>(n);
+        g.cardCentre=true;
+    }
+}
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     if(hit.kind==Game::UiKind::enemy) {
         if(hit.entry==enemyui::kFold){g.enemyOpen=!g.enemyOpen;return;}
@@ -828,7 +876,8 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         return;
     }
     if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
-    if(hit.kind==Game::UiKind::fold){g.panelOpen=!g.panelOpen;return;}
+    if(hit.kind==Game::UiKind::roster){RosterClick(g,hit.entry,shift);return;}
+    if(hit.kind==Game::UiKind::card){CardClick(g,hit.token,shift);return;}
     if(hit.kind==Game::UiKind::formation){if(mapbtn::MenuDismount(hit.entry))PickDismount(g,hit.entry);else PickFormation(g,hit.entry);return;}
     if(hit.kind==Game::UiKind::loadout){PickLoadout(g,hit.entry);return;}
     if(hit.kind==Game::UiKind::compose) {   // a kind: one more aboard; a taken seat: emptied
@@ -1532,9 +1581,9 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         else if(shape==-1)menu.march=true;
     }
     menu.open=menu.guard || menu.march;
-    SquadRow rows[16]{};
+    SquadRow rows[kMapSquadRows]{};
     SquadTally tally{};
-    const int squads=SquadRows(rows,16,&tally);
+    const int squads=SquadRows(rows,kMapSquadRows,&tally);
     // The 「摆放」 rows' states, read before the lock as the rest (support readiness, files, sessions).
     static debugspawn::RowState placeState[debugspawn::kEntryCount];
     const bool placeOnline=g.placeOn && InSession();
@@ -1615,7 +1664,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
             for(unsigned w=0;w<hostWayCount[i] && w<mapcmd::kWaypointsMost;++w)std::memcpy(m.way[m.ways++],hostWays[i][w],12);
         }
     }
-    r.squads=squads;r.squadTally=tally;r.squadOpen=g.panelOpen;
+    r.squads=squads;r.squadTally=tally;r.rosterOpen=g.rosterOpen;
     r.links=linkCount;std::memcpy(r.link,links,sizeof(TransportLink)*static_cast<std::size_t>(linkCount));
     r.formationMenu=menu.open;r.formationGuard=menu.guard;r.formationGuardShape=menu.guardShape;r.formationMarch=menu.march;
     std::memcpy(r.squad,rows,sizeof(rows));
@@ -2103,6 +2152,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     RememberSelection(g);
     LoadoutRows(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
+    if(g.cardCentre){g.cardCentre=false;centred=true;std::memcpy(centreAt,g.cardCentreAt,12);}   // a card double-clicked
     if(centred){std::memcpy(centre,centreAt,12);return std::isfinite(centre[0]+centre[1]+centre[2]);}
     if(!picked)return false;
     const int selected=mapcmd::IndexOf(ids,g.count,g.sel.id[0]);
@@ -2131,7 +2181,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
+    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.rosters=view.cards=0;view.legend=false;view.pvpVisible=view.enemyVisible=false;}
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=stepfresh::Now();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -2264,10 +2314,16 @@ void MapCommandFormationButtons(const float* rects,const int* entries,int n) noe
     for(int i=0;i<n;++i){view.menu[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.menuEntry[i]=entries[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
-void MapCommandSquadFold(const float* rect) noexcept {
-    AcquireSRWLockExclusive(&viewLock);
-    view.folds=rect!=nullptr;
-    if(rect)view.fold={rect[0],rect[1],rect[2],rect[3]};
+void MapCommandRosterButtons(const float* rects,const int* codes,int n) noexcept {
+    n=rects && codes ? (std::max)(0,(std::min)(n,2*mapcmd::kRosterGroups)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.rosters=n;
+    for(int i=0;i<n;++i){view.roster[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.rosterCode[i]=codes[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
+void MapCommandCardButtons(const float* rects,const std::uint64_t* of,int n) noexcept {
+    n=rects && of ? (std::max)(0,(std::min)(n,kMapCards)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.cards=n;
+    for(int i=0;i<n;++i){view.card[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.cardOf[i]=of[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
 void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept {
@@ -2292,7 +2348,7 @@ void SuspendMapCommands() noexcept {
     g.frameAt=0;g.boxing=g.pressing=g.rpressing=g.rStartOk=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=g.rightLine=false;
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;g.dismountMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.loadouts=view.places=view.placeWindow=view.pvps=view.enemies=0;view.rosters=view.cards=0;view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
     g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);armedHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }

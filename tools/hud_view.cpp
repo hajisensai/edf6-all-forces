@@ -455,7 +455,8 @@ void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
 }
 float sceneUiPanels[kMapUiPanels][4]{};int sceneUiCount=0;
 float sceneSquadButtons[16][4]{};int sceneSquadButtonCount=0;
-float sceneSquadFold[4]{};bool sceneSquadFoldOn=false;
+int sceneRosterButtonCount=0,sceneRosterCode[2*mapcmd::kRosterGroups]{};
+float sceneCards[kMapCards][4]{};std::uint64_t sceneCardOf[kMapCards]{};int sceneCardCount=0;
 float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
 void MapCommandUiPanels(const float* r,int n) noexcept {
     sceneUiCount=n;for(int i=0;i<n;++i)std::memcpy(sceneUiPanels[i],r+i*4,16);
@@ -463,7 +464,12 @@ void MapCommandUiPanels(const float* r,int n) noexcept {
 void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
     sceneSquadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(sceneSquadButtons[i],r+i*4,16);
 }
-void MapCommandSquadFold(const float* r) noexcept { sceneSquadFoldOn=r!=nullptr;if(r)std::memcpy(sceneSquadFold,r,16); }
+void MapCommandRosterButtons(const float*,const int* codes,int n) noexcept {
+    sceneRosterButtonCount=n;for(int i=0;i<n;++i)sceneRosterCode[i]=codes[i];
+}
+void MapCommandCardButtons(const float* r,const std::uint64_t* of,int n) noexcept {
+    sceneCardCount=n;for(int i=0;i<n;++i){std::memcpy(sceneCards[i],r+i*4,16);sceneCardOf[i]=of[i];}
+}
 float sceneMenu[kMapFormationEntries][4]{};int sceneMenuEntry[kMapFormationEntries]{},sceneMenuCount=0;
 void MapCommandFormationButtons(const float* r,const int* entries,int n) noexcept {
     sceneMenuCount=n;for(int i=0;i<n;++i){std::memcpy(sceneMenu[i],r+i*4,16);sceneMenuEntry[i]=entries[i];}
@@ -733,6 +739,8 @@ void Dot(float x,float y,float z,std::uint8_t flags) {
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
 // `place`: the test range's 「摆放」 panel (mapcmd.h MapCommandReadout place*): 0 none (another mission), 1 shut (its tab),
 // 2 open on EDF4.1's enemies with a row armed and rows not installed / not preloaded, 3 the same online (every row dim).
+// The pointer of a hover scene (map_*_hover: the cards' and the roster's lit row), px at 1080 lines; x < 0: the scenes' own.
+float scenePointerAt[2]={-1.0f,-1.0f};
 void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false,bool online=false,int place=0) {
     const float previousScale=config.hudScale;config.hudScale=uiScale;
     hasMapPayload=payload;sceneMapPayload=PayloadReadout{};
@@ -772,8 +780,10 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.squadGroups[0]=0x5;sceneCmd.squadGroups[1]=0x100;   // groups 1 and 3, group 9 (the panel's [13], [9])
     sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
+    if(scenePointerAt[0]>=0.0f){sceneCmd.px=scenePointerAt[0];sceneCmd.py=scenePointerAt[1];sceneCmd.boxing=false;}   // a hover scene's pointer
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
         CmdMark& c=sceneCmd.unit[sceneCmd.count++];
+        c.of=0x10000u+static_cast<std::uint64_t>(sceneCmd.count);   // a unit's identity (the cards' buttons)
         std::memcpy(c.pos,pos,12);c.air=air;c.selected=selected;c.now.order=order;
         if(at)std::memcpy(c.now.at,at,12);
         std::snprintf(c.name,sizeof(c.name),"%s",name);
@@ -816,6 +826,9 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         SquadRow& r=sceneCmd.squad[sceneCmd.squads];
         std::snprintf(r.name,sizeof(r.name),"%s",name);std::snprintf(r.status,sizeof(r.status),"%s",status);
         r.alive=alive;r.now.order=order;r.locked=locked;r.rank=mapcmd::SquadRank(std::strcmp(status,"RECRUITED")==0,locked,false);
+        // Their health (the roster's bars): full, then lower each row (amber, red) to see the colours.
+        static const float kHealth[]={1.0f,0.75f,0.45f,0.2f,0.9f};
+        r.hpMax=1000.0f*static_cast<float>(alive);r.hp=r.hpMax*kHealth[sceneCmd.squads%5];
         sceneCmd.squadSelected[sceneCmd.squads++]=selected;
     };
     row("RANGER",4,"RECRUITED",Order::guard,false,true);
@@ -893,7 +906,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         row("RANGER",4,"FREE",Order::recruit,false,false);
         for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==sceneCmd.count-3;
         sceneCmd.selected=1;
-        sceneCmd.squadOpen=true;   // opened: every row, a script's too, and the row that folds it
+        sceneCmd.rosterOpen=mapcmd::kRosterAllOpen&~(1u<<3);   // the air raiders' group folded: its header only
         // The formation menu open over its button: the guarding squad's defences (perimeter in use) and the march.
         sceneCmd.formationMenu=sceneCmd.formationGuard=sceneCmd.formationMarch=true;
         sceneCmd.formationGuardShape=static_cast<int>(npc::formation::Shape::perimeter);
@@ -1089,28 +1102,41 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         if(sceneLegendOpen && !pad && words!=static_cast<int>(sizeof(kLegendWords)/sizeof(kLegendWords[0])))
             {++textFailed;std::printf("FAIL open legend: %d words drawn\n",words);}
     }
-    // The squad panel (the user, 2026-10-09: "小队太多了…看不过来"): folded, the rows on foot that take orders, the rest
-    // (a script's) in the summary row that opens it; open, every row and the row that folds it.
-    int ranks[16];
-    for(int i=0;i<sceneCmd.squads;++i)ranks[i]=sceneCmd.squad[i].rank;
-    const int listedRows=mapcmd::SquadRowsShown(ranks,sceneCmd.squads,sceneCmd.squadOpen,16);
-    const int foldedRows=mapcmd::SquadRowsShown(ranks,sceneCmd.squads,false,16);
-    const bool summary=sceneCmd.squadOpen ? foldedRows<sceneCmd.squads : listedRows<sceneCmd.squads;
-    for(int i=0;i<sceneCmd.squads;++i) {
-        const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
-        hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
-        wchar_t groups[16];MapGroupDigits(sceneCmd.squadGroups[i],groups,_countof(groups));   // its RTS groups ([13]), none: spaces
-        Line expected{};Format(expected,L"%ls  %ls x%d   %ls   %ls",groups,kind,r.alive,status,MapOrderWord(r.now.order));
-        if(i<listedRows)shown(expected.text);
-        else for(const Drew& d:drew)if(d.text==expected.text){++textFailed;std::printf("FAIL folded squad row shown: %s\n",Narrow(d.text).c_str());}
+    // The roster (the user, 2026-11-27: 「左上角的小队也可以重新设计吧」): a header a class, the rows of the open groups
+    // under theirs, a script's squads one dim count, never a row; the headers' and the rows' buttons as drawn.
+    {
+        int cls[kMapSquadRows];
+        const int n=MapRosterClasses(sceneCmd,cls);
+        mapcmd::RosterLine roster[mapcmd::kRosterLinesMost];int hidden=0;
+        const int listed=mapcmd::RosterLines(cls,n,sceneCmd.rosterOpen,mapcmd::kRosterLinesMost,roster,&hidden);
+        int heads=0,rows=0;
+        for(int k=0;k<listed;++k) {
+            wchar_t words[96];
+            if(roster[k].row==mapcmd::kRosterHead) {
+                float hp,hpMax;bool selected;MapRosterHead(sceneCmd,cls,n,roster[k].group,words,_countof(words),&hp,&hpMax,&selected);
+                shown(words);++heads;
+            } else if(roster[k].row>=0){MapRosterRow(sceneCmd,roster[k].row,words,_countof(words));shown(words);++rows;}
+        }
+        for(int i=0;i<n;++i)if(cls[i]<0) {   // not listed: no row of it
+            wchar_t words[96];MapRosterRow(sceneCmd,i,words,_countof(words));
+            for(const Drew& d:drew)if(d.text==words){++textFailed;std::printf("FAIL unlisted squad row shown: %s\n",Narrow(d.text).c_str());}
+        }
+        if(sceneCmd.squadTally.scripted>0) {
+            Line count{};Format(count,Tr(Tx::rosterScripted),sceneCmd.squadTally.scripted);shown(count.text);
+        }
+        if(sceneSquadButtonCount!=(pad ? 0 : rows) || sceneRosterButtonCount!=(pad ? 0 : 2*heads))
+            {++textFailed;std::printf("FAIL roster buttons: %d rows %d headers drawn, %d / %d published\n",rows,heads,sceneSquadButtonCount,sceneRosterButtonCount);}
+        if(squadCount==9 && heads!=4){++textFailed;std::printf("FAIL roster: %d groups, want 4\n",heads);}
     }
-    if(summary) {
-        Line more{};
-        if(sceneCmd.squadOpen)Format(more,L"%ls",Tr(Tx::squadFold));
-        else Format(more,Tr(Tx::squadMore),sceneCmd.squads-listedRows,sceneCmd.squadTally.riding,sceneCmd.squadTally.scripted);
-        shown(more.text);
+    // The selection's cards are buttons (mouse): one a card, by its first unit, inside the bottom band.
+    if(!pad && sceneCmd.selected>0) {
+        bool ok=sceneCardCount>0;
+        for(int i=0;i<sceneCardCount;++i) {
+            bool unit=false;for(int k=0;k<sceneCmd.count;++k)unit=unit || (sceneCmd.unit[k].of==sceneCardOf[i] && sceneCmd.unit[k].selected);
+            ok=ok && unit && sceneCards[i][2]>sceneCards[i][0] && sceneCards[i][1]>700.0f;
+        }
+        if(!ok){++textFailed;std::printf("FAIL selection cards not clickable (%d)\n",sceneCardCount);}
     }
-    if(sceneSquadFoldOn!=(summary && !pad)){++textFailed;std::puts("FAIL map squad summary row clickable");}
     if(online && !pad) {
         // net-6 (2026-11-24): every peer is of this build (the room protocol), so the squad tools are no longer hidden
         // online; only the basic boarding command is held here.
@@ -1123,7 +1149,6 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             ++textFailed;std::puts("FAIL unsupported vehicle order is clickable");
         }
     }
-    if(sceneSquadButtonCount!=(pad ? 0 : listedRows)) {++textFailed;std::puts("FAIL map squad clickable rows");}
     {   // The formation menu: a row a shape, on the screen, clear of the buttons, its own word in each row.
         bool formationShown=false;
         for(int i=0;i<sceneButtons;++i)formationShown=formationShown || sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation);
@@ -2861,6 +2886,10 @@ int Scenes(const std::wstring& dir) {
     sceneAirPick=true;
     MapScene(dir,L"map_air_altitude",700.0f,60.0f,20.0f,false);
     MapScene(dir,L"map_air_altitude_online",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,true);
+    // The selection's cards and the roster under the pointer (the user, 2026-11-27: 「这个兵牌没办法点怎么」): lit.
+    scenePointerAt[0]=100.0f;scenePointerAt[1]=890.0f;MapScene(dir,L"map_card_hover",700.0f,60.0f,20.0f,false);
+    scenePointerAt[0]=150.0f;scenePointerAt[1]=84.0f;MapScene(dir,L"map_roster_hover",700.0f,60.0f,20.0f,false);
+    scenePointerAt[0]=scenePointerAt[1]=-1.0f;
     sceneAirPick=false;
     // The armed support's loadout (the user, 2026-11-27: 「包括m里面装配东西」): installer menu 8's value switched here.
     sceneLoadout=true;
