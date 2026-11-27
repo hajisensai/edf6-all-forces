@@ -13,6 +13,7 @@
 //    with no selection, with no point (a point order) or online. Several units sent to one point stand round it in a
 //    formation (Formation), not on one spot.
 #pragma once
+#include "screen_view.h"
 #include <cmath>
 #include <cstdint>
 
@@ -297,9 +298,9 @@ inline bool Invert4(const float* m,float* out) noexcept {
 // the eye. Off the screen still projects (a box test wants it to fail on its own).
 inline bool Project(const float* vp,const float* p,float w,float h,float* sx,float* sy) noexcept {
     float c[4];
-    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
+    crew::screenview::Clip(vp,p,1.0f,c);
     if(!(c[3]>1e-3f))return false;
-    *sx=w*0.5f+w*0.5f*c[0]/c[3];*sy=h*0.5f-h*0.5f*c[1]/c[3];
+    crew::screenview::Pixel(c[0]/c[3],c[1]/c[3],w,h,sx,sy);
     return std::isfinite(*sx+*sy);
 }
 

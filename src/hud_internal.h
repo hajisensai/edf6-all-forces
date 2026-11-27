@@ -47,6 +47,7 @@
 #include "vecmath.h"
 #include "warn.h"
 #include "world_text.h"
+#include "screen_view.h"
 #include "drivegear.h"
 #include "drive_gear.h"
 #include "support_net.h"
@@ -210,7 +211,14 @@ void MeasureAll(Text& t,Line* lines,int n) noexcept;
 void FitLine(Text* text,Line& row,float left,float right,bool shrink=true) noexcept;
 void DrawAll(Text& t,const Line* lines,int n) noexcept;
 void FreeText(Text& t) noexcept;
+// A world point on the screen as this HUD pass shows it (screen_view.h): through `vp` (the frame's view), moved into the
+// scope's lens when the picture in the picture shows it there (worldLens); false off the screen, behind the camera or
+// behind the scope's tube. FrameProject: through `vp` alone (where the frame's view has it, the lens not asked).
 bool Project(const float* vp,const float* p,float width,float height,float* sx,float* sy,float* depth) noexcept;
+bool FrameProject(const float* vp,const float* p,float width,float height,float* sx,float* sy,float* depth) noexcept;
+// A segment of a world line between two points the frame's view puts at (x0, y0) and (x1, y1) (FrameProject's), drawn
+// as the screen shows it (screenview::Pieces: cut by the scope's lens and tube, its part in the lens magnified).
+void WorldSeg(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float t,const float* rgba) noexcept;
 const float* HpColour(float share) noexcept;
 int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int at,
              const Snapshot& snap,int* shown,ULONGLONG now) noexcept;
@@ -267,6 +275,9 @@ void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,
 inline float worldRef=worldtext::kViewRef;
 inline unsigned long long worldFrame=0;   // HudDraw's frames (the facings' least-recent order)
 inline bool worldMapView=false;           // this frame is the map's (MapScreen)
+// This HUD pass's scope lens (screen_view.h; HudDraw sets it from the infantry scope's picture in the picture, none
+// otherwise): Project, WorldSeg and the world lines show the world in it at the lens's power.
+inline screenview::Lens worldLens{};
 constexpr std::uint64_t kGroundKey=0;
 enum WorldKind : unsigned { kWorldQMark=1,kWorldWarning,kWorldEntrance,kWorldCommandHint,kWorldPing,kWorldMapMarker,kWorldMapTarget,
                             kWorldMapHover,kWorldMapUnit };
@@ -448,4 +459,5 @@ const Tx* DebugSpawnCategoryWords() noexcept;
 }  // namespace hudi
 void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,sightzoom::Mask mask,Line* lines,int* at) noexcept;
 void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
+screenview::Lens ScopeLensView(const float* vp,float width,float height) noexcept;
 }  // namespace crew

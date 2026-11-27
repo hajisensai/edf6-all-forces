@@ -304,14 +304,22 @@ void FreeText(Text& t) noexcept {
 
 // The world point `p` on the screen (viewport pixels, y down), as the gauge drawer 0x804300 projects it.
 // `depth`: its view depth (the clip w of a perspective projection: metres in front of the camera).
-bool Project(const float* vp,const float* p,float width,float height,float* sx,float* sy,float* depth) noexcept {
+bool FrameProject(const float* vp,const float* p,float width,float height,float* sx,float* sy,float* depth) noexcept {
     float c[4];
-    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
+    screenview::Clip(vp,p,1.0f,c);
     if(!(c[3]>1e-6f))return false;
     const float x=c[0]/c[3],y=c[1]/c[3],z=c[2]/c[3];
     if(!(std::fabs(x)<=1.0f && std::fabs(y)<=1.0f && z>=0.0f && z<=1.0f))return false;
-    *sx=width*0.5f*x+width*0.5f;*sy=height*0.5f-height*0.5f*y;*depth=c[3];
+    screenview::Pixel(x,y,width,height,sx,sy);*depth=c[3];
     return true;
+}
+bool Project(const float* vp,const float* p,float width,float height,float* sx,float* sy,float* depth) noexcept {
+    return FrameProject(vp,p,width,height,sx,sy,depth) && screenview::Show(worldLens,sx,sy)!=screenview::Shown::hidden;
+}
+void WorldSeg(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float t,const float* rgba) noexcept {
+    float pieces[screenview::kMostPieces][4];
+    const int n=screenview::Pieces(worldLens,x0,y0,x1,y1,pieces);
+    for(int i=0;i<n;++i)Seg(drawer,ctx,pieces[i][0],pieces[i][1],pieces[i][2],pieces[i][3],t,rgba);
 }
 
 // A key's actual binding on this keyboard, including mouse buttons and extended keys.
@@ -466,7 +474,11 @@ void ScreenShifted(const float* vp,float width,float height,const float* anchor,
 void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float height,const float* anchor,std::uint64_t key,
                 float dx,float dy,int align,float scale,const float* rgba,const wchar_t* format,...) noexcept {
     float x,y,depth;
-    if(!LineSink{lines,at}.Room(1,__func__) || !Project(vp,anchor,width,height,&x,&y,&depth))return;
+    if(!LineSink{lines,at}.Room(1,__func__) || !FrameProject(vp,anchor,width,height,&x,&y,&depth))return;
+    // In the scope's lens (screen_view.h) the anchor is where the lens shows it; a plate in the world would be laid
+    // through the frame's view (DrawWorld's projection), off the lens's picture: the flat line there instead.
+    const screenview::Shown shown=screenview::Show(worldLens,&x,&y);
+    if(shown==screenview::Shown::hidden)return;
     Line& l=*LineSink{lines,at}.Push(__func__);   // Room above
     va_list args;va_start(args,format);
     TextWritten(_vsnwprintf_s(l.text,_countof(l.text),_TRUNCATE,format,args),l.text);
@@ -476,7 +488,7 @@ void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float
     worldtext::Standee plate;
     float eye[3];
     bool behind=false;
-    if(text && WorldText() && worldtext::FrameAt(vp,width,height,anchor,&f) && worldtext::EyeOf(vp,eye) &&
+    if(text && WorldText() && shown==screenview::Shown::frame && worldtext::FrameAt(vp,width,height,anchor,&f) && worldtext::EyeOf(vp,eye) &&
        PlateOf(f,key,anchor,eye,&plate,&behind)) {
         const auto fit=worldtext::FontFor(hudscale::Font(scale,text->s),worldtext::SizeFactor(f.depth,worldRef),kTextScaleStep);
         WorldAt& w=l.world;
@@ -512,8 +524,8 @@ int WorldPolyline(void* drawer,void* ctx,const float* vp,float width,float heigh
     int shown=0;
     for(int i=0;i<n;++i) {
         float x,y,depth;
-        const bool on=Project(vp,pts[i],width,height,&x,&y,&depth);
-        if(on && had)Seg(drawer,ctx,px,py,x,y,t,rgba);
+        const bool on=FrameProject(vp,pts[i],width,height,&x,&y,&depth);
+        if(on && had)WorldSeg(drawer,ctx,px,py,x,y,t,rgba);
         shown+=on ? 1 : 0;
         had=on;px=x;py=y;
     }
@@ -541,7 +553,7 @@ void WorldRing(void* drawer,void* ctx,const float* vp,float width,float height,c
 //    last; a round that lands nowhere is left out.
 // The clip coordinates of `p` (Project's, before the divide).
 void Clip(const float* vp,const float* p,float* c) noexcept {
-    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
+    screenview::Clip(vp,p,1.0f,c);
 }
 }  // namespace hudi
 }  // namespace crew

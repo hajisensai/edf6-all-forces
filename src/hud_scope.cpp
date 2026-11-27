@@ -70,13 +70,32 @@ void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float
 
 // A soldier's open scope (infantryscope.h): for the HUD pass of the soldier looking through it, the eyepiece and the
 // weapon's optic etched across the field round the screen's centre (the camera looks along the weapon's line).
-void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
-    InfantryScopeCue c{};
-    if(!InfantryScopeNow(&c))return;
+namespace {
+// The open scope's cue, for this HUD pass only when its camera follows the soldier looking through it.
+bool ScopeCueHere(InfantryScopeCue* c) noexcept {
+    if(!InfantryScopeNow(c))return false;
     __try {
         if(passCamera && (!Readable(passCamera,0x368) ||
-           (At<const void*>(passCamera,0x350)!=c.human && At<const void*>(passCamera,0x360)!=c.human)))return;   // another player's view
-    } __except(EXCEPTION_EXECUTE_HANDLER){return;}
+           (At<const void*>(passCamera,0x350)!=c->human && At<const void*>(passCamera,0x360)!=c->human)))return false;   // another player's view
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    return true;
+}
+}  // namespace
+
+// This HUD pass's lens (screen_view.h): the picture in the picture drawing (cue.lens), the frame round it the camera's
+// view `vp`. Its power is the lens's shown focal (the reticle's: LensFocal of the FOV the lens view was rendered with,
+// infantryscope.cpp InfantryScopeLensCommand) over the frame's centre focal, so the world lines sit on the lens's
+// picture as the reticle does. None otherwise (the whole screen one view: mode 1 zooms the camera itself).
+screenview::Lens ScopeLensView(const float* vp,float width,float height) noexcept {
+    InfantryScopeCue c{};
+    if(!vp || !ScopeCueHere(&c) || !c.lens)return screenview::Lens{};
+    const float r=scopepip::LensRadius(width,height);
+    return screenview::LensOf(width,height,r,scopepip::RimOut(r),scopepip::LensFocal(height,c.lensFov),CentreFocal(vp,width,height));
+}
+
+void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    InfantryScopeCue c{};
+    if(!ScopeCueHere(&c))return;
     const float cx=width*0.5f,cy=height*0.5f;
     float r,focal;
     if(c.lens) {

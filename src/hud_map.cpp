@@ -51,10 +51,7 @@ constexpr float kMapNearW=1.0f;          // ...and to this clip w (m in front of
 // straight in a perspective view, and a line whose ends are both off the screen may still cross it.
 void MapLine(void* drawer,void* ctx,const float* vp,float width,float height,const float* a,const float* b,float t,const float* rgba) noexcept {
     float ca[4],cb[4];
-    for(int k=0;k<4;++k) {
-        ca[k]=a[0]*vp[k]+a[1]*vp[4+k]+a[2]*vp[8+k]+vp[12+k];
-        cb[k]=b[0]*vp[k]+b[1]*vp[4+k]+b[2]*vp[8+k]+vp[12+k];
-    }
+    screenview::Clip(vp,a,1.0f,ca);screenview::Clip(vp,b,1.0f,cb);
     // Each plane as d(c) >= 0, linear in the clip coordinates.
     const float da[5]={ca[3]-kMapNearW,kMapGuard*ca[3]+ca[0],kMapGuard*ca[3]-ca[0],kMapGuard*ca[3]+ca[1],kMapGuard*ca[3]-ca[1]};
     const float db[5]={cb[3]-kMapNearW,kMapGuard*cb[3]+cb[0],kMapGuard*cb[3]-cb[0],kMapGuard*cb[3]+cb[1],kMapGuard*cb[3]-cb[1]};
@@ -70,9 +67,9 @@ void MapLine(void* drawer,void* ctx,const float* vp,float width,float height,con
         const float f=e ? t1 : t0;
         float c[4];
         for(int k=0;k<4;++k)c[k]=ca[k]+(cb[k]-ca[k])*f;
-        p[e][0]=width*0.5f*(c[0]/c[3])+width*0.5f;p[e][1]=height*0.5f-height*0.5f*(c[1]/c[3]);
+        screenview::Pixel(c[0]/c[3],c[1]/c[3],width,height,&p[e][0],&p[e][1]);
     }
-    Seg(drawer,ctx,p[0][0],p[0][1],p[1][0],p[1][1],t,rgba);
+    WorldSeg(drawer,ctx,p[0][0],p[0][1],p[1][0],p[1][1],t,rgba);   // cut by the scope's lens as the screen shows it
 }
 
 // A distance on the map: "850 m" / "1.5 km".
@@ -1923,9 +1920,11 @@ void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float widt
         if(!v.closed && v.points>=2) {   // the route's arrow at its end (on the screen, along its last stretch)
             float ex,ey,ed,fx,fy,fd;
             const float* end=v.pt[v.points-1];const float* before=v.pt[v.points-2];
-            if(std::isfinite(before[0]) && Project(vp,end,width,height,&ex,&ey,&ed) && Project(vp,before,width,height,&fx,&fy,&fd)) {
+            // Its way from the frame's view (the lens scales it round the centre, its way the same), its place where the
+            // screen shows the end (screen_view.h).
+            if(std::isfinite(before[0]) && FrameProject(vp,end,width,height,&ex,&ey,&ed) && FrameProject(vp,before,width,height,&fx,&fy,&fd)) {
                 const float dx=ex-fx,dy=ey-fy,l=std::sqrt(dx*dx+dy*dy);
-                if(l>1.0f) {
+                if(l>1.0f && screenview::Show(worldLens,&ex,&ey)!=screenview::Shown::hidden) {
                     const float ux=dx/l,uy=dy/l,h=12.0f*s;
                     Seg(drawer,ctx,ex,ey,ex-ux*h-uy*h*0.6f,ey-uy*h+ux*h*0.6f,t,rgba);
                     Seg(drawer,ctx,ex,ey,ex-ux*h+uy*h*0.6f,ey-uy*h-ux*h*0.6f,t,rgba);

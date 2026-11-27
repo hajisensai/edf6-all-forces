@@ -17,6 +17,7 @@
 // Pure math (no EDF.dll): tools/heli_aim_check.cpp runs it against the stock heli's flight law (docs/aircraft-re.md) to
 // show the signs.
 #pragma once
+#include "screen_view.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -65,7 +66,7 @@ inline void EaseView(float* view,const float* target,float dt) noexcept {
 inline bool OnScreen(const float* vp,const float* pos,const float* aim,float mark,float limit) noexcept {
     const float p[3]={pos[0]+aim[0]*mark,pos[1]+aim[1]*mark,pos[2]+aim[2]*mark};
     float c[4];
-    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
+    screenview::Clip(vp,p,1.0f,c);
     return c[3]>1e-3f && std::fabs(c[0]/c[3])<=limit && std::fabs(c[1]/c[3])<=limit;
 }
 
