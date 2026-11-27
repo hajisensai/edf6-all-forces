@@ -8,6 +8,11 @@ namespace edf {
 constexpr DWORD kImageTimeDateStamp=0x678CCB46,kImageSize=0x22CE000;
 // The EDF.dll base when `handle` is that build (x64, its TimeDateStamp and SizeOfImage), else nullptr.
 unsigned char* IdentifyImage(HMODULE handle) noexcept;
+// [p, p+size) inside the image (mapped while the game runs, so readable): a vtable's slots, no Readable ask.
+inline bool InImage(const unsigned char* image,const void* p,std::size_t size) noexcept {
+    const auto* at=static_cast<const unsigned char*>(p);
+    return image && at>=image && size<=kImageSize && at<=image+kImageSize-size;
+}
 
 // An ini file watched for edits: Changed() looks at its write time at most once a second (game thread or
 // any one thread) and is true once per save.

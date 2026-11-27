@@ -29,6 +29,7 @@
 #include "heli.h"
 #include "memory.h"
 #include "edf/step_objects.h"
+#include "edf/host.h"
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -141,7 +142,7 @@ void Report(unsigned char* v,bool host) noexcept {
 }
 bool IsGround(const unsigned char* v) noexcept {
     const auto vt=At<void* const*>(v,0);
-    return Readable(vt,(kSlot51+1)*8) && vt[kSlot51]==image+kGroundSlot51;
+    return (edf::InImage(image,vt,(kSlot51+1)*8) || Readable(vt,(kSlot51+1)*8)) && vt[kSlot51]==image+kGroundSlot51;
 }
 
 float Off(const unsigned char* v,std::size_t at) noexcept {

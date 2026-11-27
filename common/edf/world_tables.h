@@ -5,6 +5,7 @@
 #include "edf/enemy_points.h"
 #include "edf/layout.h"
 #include "edf/memory.h"
+#include "edf/step_objects.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -17,9 +18,8 @@ constexpr std::size_t kTeamManager=0x20B2978,kTeamRows=0x38,kTeamStride=0x38,kTe
 // count, not a fixed cap a battle's lock points pass (tests/lock_registry_native_audit.py).
 constexpr std::size_t kLockRegistry=0x20B2AB0,kRegList=0x8,kRegSize=0x10;
 
-// The relation row of `team` (relation[other] == kEnemyRelation: enemies), or null.
-inline const std::int32_t* Relations(const unsigned char* image,std::int32_t team) noexcept {
-    if(!image || team<0 || team>=enemypoints::kMaxTeam)return nullptr;   // no image: the plugin refused the load
+// The relation row of `team`, read through the manager (each link asked Readable).
+inline const std::int32_t* ReadRelations(const unsigned char* image,std::int32_t team) noexcept {
     const auto manager=At<const unsigned char*>(image,kTeamManager);
     if(!Readable(manager,kTeamRows+8))return nullptr;
     const auto rows=At<const unsigned char*>(manager,kTeamRows);
@@ -27,14 +27,30 @@ inline const std::int32_t* Relations(const unsigned char* image,std::int32_t tea
     const auto relation=At<const std::int32_t*>(rows+team*kTeamStride,kTeamRelation);
     return Readable(relation,enemypoints::kMaxTeam*4) ? relation : nullptr;
 }
+// The relation row of `team` (relation[other] == kEnemyRelation: enemies), or null. Found once a period (stepobj,
+// edf/step_objects.h: the team table is made with the mission, not within a frame); its entries are read live.
+inline const std::int32_t* Relations(const unsigned char* image,std::int32_t team) noexcept {
+    if(!image || team<0 || team>=enemypoints::kMaxTeam)return nullptr;   // no image: the plugin refused the load
+    static stepobj::PerPeriod<const std::int32_t*> rows[enemypoints::kMaxTeam];
+    return stepobj::Once(rows[team],[image,team]() noexcept { return ReadRelations(image,team); });
+}
 
 // The registry's list head and node count, or false while it cannot be read.
+// The registry and its list's head node (made with the registry, never moved) asked Readable once a period (stepobj);
+// the head's links and the count are read live.
 inline bool LockList(const unsigned char* image,const unsigned char*& head,std::uint64_t& nodes) noexcept {
     if(!image)return false;
     const auto registry=At<const unsigned char*>(image,kLockRegistry);
-    if(!Readable(registry,kRegList+0x10))return false;
-    head=At<const unsigned char*>(registry,kRegList);
+    struct Seen { const unsigned char* registry; const unsigned char* head; };
+    static stepobj::PerPeriod<Seen> seen;
+    const Seen s=stepobj::Once(seen,[registry]() noexcept {
+        if(!Readable(registry,kRegList+0x10))return Seen{registry,nullptr};
+        const auto h=At<const unsigned char*>(registry,kRegList);
+        return Seen{registry,Readable(h,0x10) ? h : nullptr};
+    });
+    if(s.registry!=registry || !s.head || At<const unsigned char*>(registry,kRegList)!=s.head)return false;
+    head=s.head;
     nodes=At<std::uint64_t>(registry,kRegSize);
-    return Readable(head,0x10);
+    return true;
 }
 }  // namespace edf

@@ -29,7 +29,7 @@
 #include "hit_predict.h"
 #include "memo_epoch.h"
 #include "memory.h"
-#include "live_set.h"
+#include "edf/step_objects.h"
 #include "wasted_fire.h"
 #include "edf/hash_index.h"
 #include "edf/host.h"
@@ -97,7 +97,7 @@ Kind KindOfSlot(const unsigned char* const* vt) noexcept {
 }
 Kind KindOf(const unsigned char* o) noexcept {
     const auto vt=At<const unsigned char* const*>(o,0);
-    return Readable(vt,(kSlotAccept+1)*8) ? KindOfSlot(vt) : Kind::none;
+    return edf::InImage(image,vt,(kSlotAccept+1)*8) || Readable(vt,(kSlotAccept+1)*8) ? KindOfSlot(vt) : Kind::none;
 }
 // The same for an object the game's own walk handed over (live): its vtable taken as the image's when it points into
 // it, no Readable ask (WatchTarget runs on every enemy each frame).
@@ -118,14 +118,17 @@ std::size_t ReachOf(Kind k) noexcept {
 // Whether `o`'s slot 12 is the stock const false (what the anchor and fortress part overrides call).
 bool Slot12False(const unsigned char* o) noexcept {
     const auto vt=At<const unsigned char* const*>(o,0);
-    return Readable(vt,(kSlotFalse12+1)*8) && vt[kSlotFalse12]==image+kConstFalse;
+    return (edf::InImage(image,vt,(kSlotFalse12+1)*8) || Readable(vt,(kSlotFalse12+1)*8)) && vt[kSlotFalse12]==image+kConstFalse;
 }
 // The ship an anchor hangs from, alive (its weak reference's uses), else nullptr.
 const unsigned char* AnchorShip(const unsigned char* o) noexcept {
     const auto ctrl=At<const unsigned char*>(o,kAnchorShipCtrl);
-    if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)<=0)return nullptr;
+    if(!ctrl)return nullptr;
     const auto ship=At<const unsigned char*>(o,kAnchorShip);
-    return Readable(ship,kObjFlags+4) ? ship : nullptr;
+    const bool trusted=ship && stepobj::ControlOf(ship)==ctrl;   // this frame's ship, by this very reference
+    if(!trusted && !Readable(ctrl,0x10))return nullptr;
+    if(At<std::int32_t>(ctrl,8)<=0)return nullptr;
+    return trusted || Readable(ship,kObjFlags+4) ? ship : nullptr;
 }
 
 // --- The target's window now: open or not, and the time it stays open (ms, <0 not readable) ---
@@ -328,7 +331,7 @@ TargetPointCache targetPoints;
 // seen, its position, its window (hitpredict::Observe). The one writer of a Watched. Null when unreadable.
 const Watched* See(const void* target,Kind k,std::uint64_t frame) {
     auto o=static_cast<const unsigned char*>(target);
-    if(!Readable(o,ReachOf(k)))return nullptr;
+    if(!stepobj::Reads(o,ReachOf(k)))return nullptr;   // a Trusted object of kind k is that long (its class)
     Watched& w=Watch(target);
     if(w.frame==frame)return &w;
     w.frame=frame;
@@ -348,7 +351,7 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
     std::memcpy(p.from,from,12);p.speed=speed;p.gravity=gravity;
     auto o=static_cast<unsigned char*>(const_cast<void*>(target));
     const Kind k=KindOf(o);
-    if(!Readable(o,ReachOf(k)))return p;
+    if(!stepobj::Reads(o,ReachOf(k)))return p;
     const std::uint64_t ms=GameMs();
     const float* root=reinterpret_cast<const float*>(o+kPosition);
     const WindowNow now=WindowOf(o,k);
@@ -447,7 +450,7 @@ struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shoo
 const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
     TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
     if(m.target==target && m.frame==frame)return m;
-    m={target,frame,liveset::Has(target) || Readable(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
+    m={target,frame,stepobj::Reads(target,kObjFlags+4),Kind::none,hitpredict::Verdict::fire};
     if(!m.readable)return m;
     const auto o=static_cast<const unsigned char*>(target);
     m.kind=AcceptOk() ? KindOf(o) : Kind::none;
@@ -461,7 +464,7 @@ hitpredict::Verdict VerdictOf(const void* shooter,const void* target,const float
     if(!shooter || !target)return hitpredict::Verdict::fire;
     const ULONGLONG frame=memoClock.Epoch(GameFrame(),WallMs());
     if(shooterMemo.shooter!=shooter || shooterMemo.frame!=frame)
-        shooterMemo={shooter,frame,liveset::Has(shooter) || Readable(shooter,kPosition+12)};
+        shooterMemo={shooter,frame,stepobj::Reads(shooter,kPosition+12)};
     if(!shooterMemo.readable)return hitpredict::Verdict::fire;
     const TargetMemo& t=TargetThisFrame(target,frame);
     if(!t.readable)return hitpredict::Verdict::fire;
