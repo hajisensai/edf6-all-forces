@@ -243,6 +243,20 @@ void Picks() {
     for(const auto& g:kHitGroups)named=named && g.name && g.name[0];
     Expect(named,"hit groups named");
 }
+// A fist's reticle turns red only for a lock point inside its sphere, the nearest one, and never when the fist is off.
+void Reach() {
+    FistMark f{};
+    f.on=true;f.r=6.25f;f.at[0]=0.0f;f.at[1]=5.0f;f.at[2]=25.0f;
+    float best=1e30f;
+    const float behind[3]={0.0f,5.0f,60.0f},edge[3]={6.2f,5.0f,25.0f},near_[3]={1.0f,5.0f,25.0f},out[3]={0.0f,5.0f,31.3f};
+    Expect(!InReach(f,behind,&best),"an enemy behind the reach, on the same line of sight, is not in it");
+    Expect(!InReach(f,out,&best),"just past the sphere is not in it");
+    Expect(InReach(f,edge,&best),"inside at the rim");
+    Expect(InReach(f,near_,&best),"a nearer one replaces it");
+    Expect(!InReach(f,edge,&best),"a farther one does not");
+    f.on=false;best=1e30f;
+    Expect(!InReach(f,near_,&best),"an off fist marks nothing");
+}
 }  // namespace
 
 int main() {
@@ -253,6 +267,7 @@ int main() {
     Fists();
     Edges();
     Picks();
+    Reach();
     std::printf("%d/%d checks passed\n",checks-failures,checks);
     return failures ? 1 : 0;
 }

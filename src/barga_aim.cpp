@@ -205,6 +205,17 @@ void ReadFists(const unsigned char* v,const bargaaim::Variant& variant,unsigned 
         bargaaim::ModelToWorld(rows,attack.reach,a.at);
         a.r=attack.radius;
     }
+    // The enemies already in a fist's reach: the reticle turns red only then.
+    struct Ctx { bargaaim::Readout* r; float best[2]; } ctx{&r,{1e30f,1e30f}};
+    VisitEnemies(v,[](void* p,const void*,const float* aim) {
+        auto& c=*static_cast<Ctx*>(p);
+        for(int side=0;side<2;++side) {
+            auto& f=c.r->fist[side];
+            if(!bargaaim::InReach(f,aim,&c.best[side]))continue;
+            f.target=true;
+            for(int k=0;k<3;++k)f.targetAt[k]=aim[k];
+        }
+    },&ctx);
 }
 
 bargaaim::SweepState SweepStateOf(const unsigned char* w) noexcept {
@@ -285,7 +296,7 @@ void BargaAimFrame(unsigned char* v) noexcept {
     LitLog lit{};
     ReadSpheres(v,r,log ? &lit : nullptr);
     if(r.spheres)SphereContacts(v,r);
-    ReadFists(v,variant,flags,r);   // mid-attack too: the ring is where the combo's next blow of that button lands
+    ReadFists(v,variant,flags,r);   // mid-attack too: the reticle is where the combo's next blow of that button lands
     float frozen[3]={},pos[3]={},nativeDir[3]={};
     const unsigned char* w=nullptr;
     if(variant.cannon>=0 && (w=SwingShoot(seat))!=nullptr) {

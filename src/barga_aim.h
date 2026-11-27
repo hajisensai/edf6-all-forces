@@ -171,14 +171,23 @@ inline int SampleRounds(int toCome,int most,int* left) noexcept {
 constexpr int kMostSpheres=16,kMostRounds=20;
 // Every how many sampled rounds a blast ring is drawn (the last one always): a ring each would bury the line.
 constexpr int kRingEvery=4;
-// A fist's mark: a ring as wide as its hit sphere at the reach of the attack its button would start now. No sweep line:
-// the tables hold each attack's farthest point only, not the path to it (a hook's sideways travel is not measured).
+// A fist's mark: a small reticle at the reach of the attack its button would start now, red with a bracket on the enemy
+// when an enemy's lock point is inside that attack's hit sphere there. Not a ring as wide as the sphere: on the screen
+// it took in everything behind it too, so it read as "all of this gets hit" (2026-11-27). No sweep line: the tables
+// hold each attack's farthest point only, not the path to it (a hook's sideways travel is not measured).
 struct FistMark {
     bool on,next;              // next: an attack of this fist may start now (drawn bright), else its opening one dim
     int attack;                // its index in the variant's table
     float at[3];               // the sphere's centre at its reach (world)
     float r;                   // the sphere's radius (m)
+    bool target; float targetAt[3];   // the nearest enemy lock point within r of `at`
 };
+// Whether `p` is inside the fist's sphere, and nearer than `best` (squared distance, updated).
+inline bool InReach(const FistMark& f,const float* p,float* best) noexcept {
+    const float dx=p[0]-f.at[0],dy=p[1]-f.at[1],dz=p[2]-f.at[2],d=dx*dx+dy*dy+dz*dz;
+    if(!f.on || d>=f.r*f.r || d>=*best)return false;
+    *best=d;return true;
+}
 struct Sphere {
     float c[3],prev[3],r;      // now, where its last test was (point +0x10), the radius
     int limb;                  // from its group's name (kHitGroups), -1 another
