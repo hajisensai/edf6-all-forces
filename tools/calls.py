@@ -958,53 +958,46 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                               'back. Their gunners aim at hurt friends (you included) on their own and never at enemies.'),
     },
     'sortie_heli_strafe': {
-        'SC': ('Eros 506 直升机（扫射型）', '出击：两架 Eros 直升机并排低空掠过标记点，沿途用机炮和导弹一路扫射，飞过后直接离场。'),
-        'CN': ('Eros 506 直升機（掃射型）', '出擊：兩架 Eros 直升機並排低空掠過標記點，沿途用機砲和飛彈一路掃射，飛過後直接離場。'),
-        'JA': ('エロス 506（掃射型）', '出撃。エロス 2 機が並んで指示地点の上を低空で通過し、機関砲とミサイルで一直線に掃射して、そのまま離脱する。'),
-        'EN': ('Eros 506 (Gunship Variant)', 'Sortie: two Eros helicopters sweep low side by side over the mark, raking it with guns '
-                                 'and missiles on the way, and fly straight off.'),
+        'SC': ('直升机扫射（Eros 506）', '出击：两架 Eros 直升机并排低空掠过标记点，沿途用机炮和导弹一路扫射，飞过后直接离场。'),
+        'CN': ('直升機掃射（Eros 506）', '出擊：兩架 Eros 直升機並排低空掠過標記點，沿途用機砲和飛彈一路掃射，飛過後直接離場。'),
+        'JA': ('ヘリ機銃掃射（エロス 506）', '出撃。エロス 2 機が並んで指示地点の上を低空で通過し、機関砲とミサイルで一直線に掃射して、そのまま離脱する。'),
+        'EN': ('Heli Strafing Pass (Eros 506)', 'Sortie: two Eros helicopters sweep low side by side over the mark, raking it with guns and missiles on the way, and fly straight off.'),
     },
     'sortie_heli_hunter': {
-        'SC': ('Eros 506 直升机（导弹型）', '出击：一架 Eros 直升机在标记点外约 300 米处悬停，导弹逐发锁定附近不同的敌人连射，打完或 40 秒后离场。'),
-        'CN': ('Eros 506 直升機（飛彈型）', '出擊：一架 Eros 直升機在標記點外約 300 公尺處懸停，飛彈逐發鎖定附近不同的敵人連射，打完或 40 秒後離場。'),
-        'JA': ('エロス 506（ミサイル型）', '出撃。エロス 1 機が指示地点から約 300m の位置でホバリングし、近くの別々の敵を 1 発ずつロックして'
-                          'ミサイルを連射する。撃ち尽くすか 40 秒で離脱する。'),
-        'EN': ('Eros 506 (Missile Variant)', 'Sortie: an Eros hovers some 300 m off the mark and fires its missiles one by one, each at a '
-                             'different enemy near it, then leaves (empty or after 40 s).'),
+        'SC': ('导弹猎手（Eros 506）', '出击：一架 Eros 直升机在标记点外约 300 米处悬停，导弹逐发锁定附近不同的敌人连射，打完或 40 秒后离场。'),
+        'CN': ('飛彈獵手（Eros 506）', '出擊：一架 Eros 直升機在標記點外約 300 公尺處懸停，飛彈逐發鎖定附近不同的敵人連射，打完或 40 秒後離場。'),
+        'JA': ('ミサイルハンター（エロス 506）', '出撃。エロス 1 機が指示地点から約 300m の位置でホバリングし、近くの別々の敵を 1 発ずつロックしてミサイルを連射する。撃ち尽くすか 40 秒で離脱する。'),
+        'EN': ('Missile Hunter (Eros 506)', 'Sortie: an Eros hovers some 300 m off the mark and fires its missiles one by one, each at a different enemy near it, then leaves (empty or after 40 s).'),
     },
     'sortie_heli_circle': {
-        'SC': ('Brute 410 直升机（舱门炮型）', '出击：一架布鲁特直升机绕标记点低空飞一整圈，舱门机枪一直朝着圆心扫射，转完离场。'),
-        'CN': ('Brute 410 直升機（艙門砲型）', '出擊：一架布魯特直升機繞標記點低空飛一整圈，艙門機槍一直朝著圓心掃射，轉完離場。'),
-        'JA': ('ブルート 410（ドアガン型）', '出撃。ブルート 1 機が指示地点の周りを低空で一周し、ドアガンで円の中心を撃ち続け、一周したら離脱する。'),
-        'EN': ('Brute 410 (Door Gun Variant)', 'Sortie: a Brute flies one low circle round the mark, its door guns firing into the middle all '
-                           'the way round, then leaves.'),
+        'SC': ('死亡回旋（Brute 410）', '出击：一架布鲁特直升机绕标记点低空飞一整圈，舱门机枪一直朝着圆心扫射，转完离场。'),
+        'CN': ('死亡迴旋（Brute 410）', '出擊：一架布魯特直升機繞標記點低空飛一整圈，艙門機槍一直朝著圓心掃射，轉完離場。'),
+        'JA': ('デスサークル（ブルート 410）', '出撃。ブルート 1 機が指示地点の周りを低空で一周し、ドアガンで円の中心を撃ち続け、一周したら離脱する。'),
+        'EN': ('Death Circle (Brute 410)', 'Sortie: a Brute flies one low circle round the mark, its door guns firing into the middle all the way round, then leaves.'),
     },
     'sortie_dive': {
-        'SC': ('DN 轰炸机（火箭挂载）', '出击：两架对地攻击机浅角度俯冲，先打火箭，再用机炮拉出直线弹着带，然后爬升离场。'),
-        'CN': ('DN 轟炸機（火箭掛載）', '出擊：兩架對地攻擊機淺角度俯衝，先打火箭，再用機砲拉出直線彈著帶，然後爬升離場。'),
-        'JA': ('DN 爆撃機（ロケット型）', '出撃。攻撃機 2 機が浅い角度で急降下し、ロケットを撃ってから機関砲で直線の着弾帯を引き、上昇して離脱する。'),
-        'EN': ('DN Bomber (Rocket Loadout)', 'Sortie: two strike jets dive in at a shallow angle, rockets first, then a straight line '
-                                  'of cannon fire, and climb away.'),
+        'SC': ('俯冲扫射（DN 轰炸机）', '出击：两架 DN 轰炸机沿地图上拉出的攻击线浅角度俯冲，火箭、对地导弹、炸弹和机炮沿线打完后爬升离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('俯衝掃射（DN 轟炸機）', '出擊：兩架 DN 轟炸機沿地圖上拉出的攻擊線淺角度俯衝，火箭、對地飛彈、炸彈和機砲沿線打完後爬升離場。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('急降下掃射（DN 爆撃機）', '出撃。DN 爆撃機 2 機がマップで引いた攻撃線に沿って浅い角度で急降下し、ロケット・対地ミサイル・爆弾・機関砲を線上に撃ち込んで上昇離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('Diving Strafing Run (DN Bomber)', 'Sortie: two DN Bombers dive in at a shallow angle along the attack line drawn on the map, emptying rockets, air-to-ground missiles, bombs and cannon along it, and climb away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_missile_pass': {
-        'SC': ('DN 防御者战斗机（对地导弹型）', '出击：两架多用途机高速掠过标记点，各自把空对地导弹分别打向不同的目标，不减速飞走。'),
-        'CN': ('DN 防禦者戰鬥機（對地飛彈型）', '出擊：兩架多用途機高速掠過標記點，各自把空對地飛彈分別打向不同的目標，不減速飛走。'),
-        'JA': ('DN ディフェンダー（対地ミサイル型）', '出撃。マルチロール機 2 機が高速で指示地点の上を航過し、空対地ミサイルを別々の目標へ撃ち分け、減速せずに飛び去る。'),
-        'EN': ('DN Defender (Air-to-Ground Variant)', 'Sortie: two multirole jets sweep fast over the mark, each putting its air-to-ground missiles on '
-                           'different targets, and fly on without slowing.'),
+        'SC': ('导弹掠过（DN 防御者战斗机）', '出击：两架 DN 防御者战斗机高速掠过标记点，各自把空对地导弹分别打向不同的目标，不减速飞走。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('飛彈掠過（DN 防禦者戰鬥機）', '出擊：兩架 DN 防禦者戰鬥機高速掠過標記點，各自把空對地飛彈分別打向不同的目標，不減速飛走。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('ミサイル航過（DN ディフェンダー）', '出撃。DN ディフェンダー 2 機が高速で指示地点の上を航過し、空対地ミサイルを別々の目標へ撃ち分け、減速せずに飛び去る。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('Missile Pass (DN Defender)', 'Sortie: two DN Defenders sweep fast over the mark, each putting its air-to-ground missiles on different targets, and fly on without slowing. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_carpet': {
-        'SC': ('DN 轰炸机（广域挂载）', '出击：三架对地攻击机编队平飞过标记点，炸弹沿航线铺出约 300 米长的爆炸带后离场。'),
-        'CN': ('DN 轟炸機（廣域掛載）', '出擊：三架對地攻擊機編隊平飛過標記點，炸彈沿航線鋪出約 300 公尺長的爆炸帶後離場。'),
-        'JA': ('DN 爆撃機（広域型）', '出撃。攻撃機 3 機が編隊で指示地点の上を水平飛行し、爆弾で航路沿いに約 300m の爆発の帯を敷いて離脱する。'),
-        'EN': ('DN Bomber (Area Bomb Loadout)', 'Sortie: three strike jets fly level in formation over the mark and lay a band of bombs about '
-                             '300 m long along their track, then leave.'),
+        'SC': ('地毯轰炸（DN 轰炸机）', '出击：三架 DN 轰炸机编队沿地图上拉出的攻击线平飞，把炸弹均匀铺满整条线后离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('地毯轟炸（DN 轟炸機）', '出擊：三架 DN 轟炸機編隊沿地圖上拉出的攻擊線平飛，把炸彈均勻鋪滿整條線後離場。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('絨毯爆撃（DN 爆撃機）', '出撃。DN 爆撃機 3 機が編隊でマップに引いた攻撃線に沿って水平飛行し、線全体に爆弾を均等に敷いて離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('Carpet Bombing (DN Bomber)', 'Sortie: three DN Bombers fly level in formation along the attack line drawn on the map and spread their bombs evenly down all of it, then leave. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_popup': {
-        'SC': ('DN 轰炸机（低空挂载）', '出击：一架对地攻击机低空进场，在标记点扔下两颗炸弹后急跃升离开。'),
-        'CN': ('DN 轟炸機（低空掛載）', '出擊：一架對地攻擊機低空進場，在標記點扔下兩顆炸彈後急躍升離開。'),
-        'JA': ('DN 爆撃機（低空型）', '出撃。攻撃機 1 機が低空で進入し、指示地点に爆弾を 2 発落としてから急上昇で離脱する。'),
-        'EN': ('DN Bomber (Low Altitude Loadout)', 'Sortie: a strike jet comes in low, drops two bombs on the mark and climbs steeply away.'),
+        'SC': ('打了就跑（DN 轰炸机）', '出击：一架 DN 轰炸机低空进场，在标记点扔下两颗炸弹后急跃升离开。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('打了就跑（DN 轟炸機）', '出擊：一架 DN 轟炸機低空進場，在標記點扔下兩顆炸彈後急躍升離開。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('ヒット＆アウェイ（DN 爆撃機）', '出撃。DN 爆撃機 1 機が低空で進入し、指示地点に爆弾を 2 発落としてから急上昇で離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('Hit and Run (DN Bomber)', 'Sortie: a DN Bomber comes in low, drops two bombs on the mark and climbs steeply away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_missile_rain': {
         'SC': ('天顶截击机', '四具发光挂架可一次齐射 256 枚子母弹，每枚释放 4 枚追踪子弹。锁定框内每个敌人先分一枚，余弹均分，打完后飞出地图边界。'),
@@ -1013,28 +1006,22 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Zenith Interceptor', 'Fires up to 256 cluster missiles from four lit pods. Each launches four guided submunitions. Enemies in the lock box receive one lock each before repeats. The interceptor then flies out of the mission area.'),
     },
     'sortie_hammer': {
-        'SC': ('Eros 506／DN 轰炸机', '出击组合：两架 Eros 直升机先低空扫射压制，25 秒后再呼叫一架对地攻击机低空投弹收尾（相当于「直升机扫射」接「打了就跑」）。'),
-        'CN': ('Eros 506／DN 轟炸機', '出擊組合：兩架 Eros 直升機先低空掃射壓制，25 秒後再呼叫一架對地攻擊機低空投彈收尾（相當於「直升機掃射」接「打了就跑」）。'),
-        'JA': ('エロス 506／DN 爆撃機', '出撃の組み合わせ。エロス 2 機がまず低空掃射で制圧し、25 秒後に攻撃機 1 機が低空爆撃で仕上げる'
-                            '（「ヘリ機銃掃射」のあとに「ヒット＆アウェイ」）。'),
-        'EN': ('Eros 506 / DN Bomber', 'Combined sortie: two Eros helicopters suppress the mark with a strafing pass, and 25 s later '
-                               'a strike jet finishes it with a low bombing run (Heli Strafing Pass, then Hit and Run).'),
+        'SC': ('锤与砧（Eros 506／DN 轰炸机）', '出击组合：两架 Eros 直升机先低空扫射压制，25 秒后再呼叫一架 DN 轰炸机低空投弹收尾（相当于「直升机扫射」接「打了就跑」）。'),
+        'CN': ('錘與砧（Eros 506／DN 轟炸機）', '出擊組合：兩架 Eros 直升機先低空掃射壓制，25 秒後再呼叫一架 DN 轟炸機低空投彈收尾（相當於「直升機掃射」接「打了就跑」）。'),
+        'JA': ('ハンマー＆アンヴィル（エロス 506／DN 爆撃機）', '出撃の組み合わせ。エロス 2 機がまず低空掃射で制圧し、25 秒後に DN 爆撃機 1 機が低空爆撃で仕上げる（「ヘリ機銃掃射」のあとに「ヒット＆アウェイ」）。'),
+        'EN': ('Hammer and Anvil (Eros 506 / DN Bomber)', 'Combined sortie: two Eros helicopters suppress the mark with a strafing pass, and 25 s later a DN Bomber finishes it with a low bombing run (Heli Strafing Pass, then Hit and Run).'),
     },
     'sortie_wolfpack': {
-        'SC': ('DN 战斗机（俯冲挂载）', '出击：四架制空战斗机从远处扑来，各自俯冲扫射一轮后散开离场。'),
-        'CN': ('DN 戰鬥機（俯衝掛載）', '出擊：四架制空戰鬥機從遠處撲來，各自俯衝掃射一輪後散開離場。'),
-        'JA': ('DN 戦闘機（急降下型）', '出撃。制空戦闘機 4 機が遠方から襲いかかり、それぞれ急降下掃射を 1 回行ってから散開して離脱する。'),
-        'EN': ('DN Fighter (Strike Loadout)', 'Sortie: four fighters pounce from afar, each makes one diving strafing run and they scatter away.'),
+        'SC': ('狼群（DN 战斗机）', '出击：四架 DN 战斗机从远处扑来，沿地图上拉出的攻击线各自俯冲扫射一轮后散开离场。挂载用出击前为该机型配置的（安装器菜单 7、军械库或房间菜单）。'),
+        'CN': ('狼群（DN 戰鬥機）', '出擊：四架 DN 戰鬥機從遠處撲來，沿地圖上拉出的攻擊線各自俯衝掃射一輪後散開離場。掛載用出擊前為該機型配置的（安裝器選單 7、軍械庫或房間選單）。'),
+        'JA': ('ウルフパック（DN 戦闘機）', '出撃。DN 戦闘機 4 機が遠方から襲いかかり、マップに引いた攻撃線に沿ってそれぞれ急降下掃射を 1 回行ってから散開して離脱する。搭載は出撃前にその機種へ設定したもの（インストーラーのメニュー 7・武器庫・ルームメニュー）。'),
+        'EN': ('Wolf Pack (DN Fighter)', 'Sortie: four DN Fighters pounce from afar, each makes one diving strafing run along the attack line drawn on the map, and they scatter away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_guided': {
-        'SC': ('C-130／DN 轰炸机', '出击组合：炮艇机在标记点上空盘旋一圈并开火标定，25 秒后再呼叫两架对地攻击机俯冲扫射，然后各自撤离'
-                      '（相当于炮艇机一圈接「俯冲扫射」）。'),
-        'CN': ('C-130／DN 轟炸機', '出擊組合：砲艇機在標記點上空盤旋一圈並開火標定，25 秒後再呼叫兩架對地攻擊機俯衝掃射，然後各自撤離'
-                      '（相當於砲艇機一圈接「俯衝掃射」）。'),
-        'JA': ('C-130／DN 爆撃機', '出撃の組み合わせ。ガンシップが指示地点の上空を一周しながら射撃で目標を示し、25 秒後に攻撃機 2 機が急降下'
-                      '掃射を行って、それぞれ離脱する（ガンシップ一周のあとに「急降下掃射」）。'),
-        'EN': ('C-130 / DN Bomber', 'Combined sortie: a gunship circles the mark once, firing to mark it, and 25 s later two strike '
-                            'jets make their diving strafing runs; then all leave (a gunship lap, then Diving Strafing Run).'),
+        'SC': ('引导打击（C-130／DN 轰炸机）', '出击组合：炮艇机在标记点上空盘旋一圈并开火标定，25 秒后再呼叫两架 DN 轰炸机俯冲扫射，然后各自撤离（相当于炮艇机一圈接「俯冲扫射」）。'),
+        'CN': ('引導打擊（C-130／DN 轟炸機）', '出擊組合：砲艇機在標記點上空盤旋一圈並開火標定，25 秒後再呼叫兩架 DN 轟炸機俯衝掃射，然後各自撤離（相當於砲艇機一圈接「俯衝掃射」）。'),
+        'JA': ('誘導打撃（C-130／DN 爆撃機）', '出撃の組み合わせ。ガンシップが指示地点の上空を一周しながら射撃で目標を示し、25 秒後に DN 爆撃機 2 機が急降下掃射を行って、それぞれ離脱する（ガンシップ一周のあとに「急降下掃射」）。'),
+        'EN': ('Guided Strike (C-130 / DN Bomber)', 'Combined sortie: a gunship circles the mark once, firing to mark it, and 25 s later two DN Bombers make their diving strafing runs; then all leave (a gunship lap, then Diving Strafing Run).'),
     },
     'barrage_katyusha': {
         'SC': ('火箭齐射', '远程炮击：标记一点后，约 2.4 公里外的火箭炮连续齐射 40 发，火箭从远处划过头顶，'

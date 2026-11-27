@@ -53,6 +53,11 @@ support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* tar
 float SupportPassTurn(const SupportAircraft&) noexcept;
 // Whether its hull can be made this mission (its SGO installed and preloaded: jet_spawn.cpp PreloadJets).
 bool SupportAircraftReady(const SupportAircraft&) noexcept;
+// What one of its jets lets go along a ground run's line (sortie_plan.h RunLoad) and the speed it flies it at (its kind's
+// attack, m/s): its stock stores (stores.inc kJetWeapons of its body's mark), or `pylons` where the player's configured
+// ones fly (support_loadout.h VehicleLoadout; nullptr or off: stock). False for a spec that is no jet.
+struct VehicleLoadout;
+bool SupportRunLoad(const SupportAircraft&,const VehicleLoadout* pylons,sortie::RunLoad* load,float* speed) noexcept;
 // Its body's SGO file name (jet_internal.h kBodies `file`), for the log; L"" for an invalid spec.
 const wchar_t* SupportAircraftFile(const SupportAircraft&) noexcept;
 // Creates the hull at `matrix` (in the air, or a legacy plan's runway) with empty seats. Activation never creates a rider.

@@ -211,6 +211,13 @@ SupportVariant SupportCallVariant(int index) noexcept;
 enum class SupportTab : std::uint8_t { sortie, strike, ground, count };
 inline constexpr int kSupportTabs=static_cast<int>(SupportTab::count);
 SupportTab SupportCallTab(int index) noexcept;
+// The catalog entry whose SupportVehicle_<key> pylons entry `index`'s aircraft fly (support_dispatch.cpp HullOf: its own,
+// a jet sortie's the guarding call of its jet role), -1 none.
+int SupportHullCatalog(int index) noexcept;
+// m: the shortest line entry `index`'s ground run (SupportGroundRun) may be drawn (sortie_plan.h RunLeast: every ground
+// store its jets fly let go down it, this machine's configured pylons where the room would fly them, else stock); 0 for
+// an entry that flies none. The host plans the line that long at least (support_dispatch.cpp Plan).
+float SupportRunLeast(int index) noexcept;
 enum class SupportReady : std::uint8_t { ready, planning, cooldown, off };
 struct SupportReadiness { SupportReady state; int seconds; };   // seconds: the cooldown left
 SupportReadiness SupportCallReadiness() noexcept;
