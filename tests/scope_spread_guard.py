@@ -13,6 +13,9 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+import gen_config  # noqa: E402
+
 checks = 0
 
 
@@ -25,7 +28,8 @@ def ok(cond: bool, what: str) -> None:
 
 
 def read(rel: str) -> str:
-    return (ROOT / rel).read_text(encoding='utf-8-sig')
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    return gen_config.expand((ROOT / rel).read_text(encoding='utf-8-sig'))
 
 
 logic = read('src/scope_spread_logic.h')

@@ -12,8 +12,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(ROOT, 'src', 'room_ui.cpp'), encoding='utf-8').read()
 logic = open(os.path.join(ROOT, 'src', 'room_ui_logic.h'), encoding='utf-8').read()
-plugin = open(os.path.join(ROOT, 'src', 'plugin.cpp'), encoding='utf-8').read()
-crew = open(os.path.join(ROOT, 'src', 'crew.h'), encoding='utf-8').read()
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import gen_config  # noqa: E402
+
+# with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+plugin = gen_config.read_expanded('src/plugin.cpp')
+crew = gen_config.read_expanded('src/crew.h')
 ini = open(os.path.join(ROOT, 'EDF6VehicleCrew.ini'), encoding='utf-8-sig').read()
 checks = 0
 

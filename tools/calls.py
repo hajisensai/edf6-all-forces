@@ -131,10 +131,12 @@ def mark_bits(call: 'Call') -> int:
     return struct.unpack('<I', struct.pack('<f', call.mark))[0]
 
 
-# The sorties' passes, in src/crew.h SortiePass's order after its `none` (1 + the index here).
+# The sorties' passes: src/crew.h SortiePass after its `none` (1 + the index here; tools/gen_calls.py writes the enum,
+# src/sortie_pass.inc).
 SORTIE_PASSES = ('gunRun', 'missilePass', 'carpet', 'popUp', 'missileRain', 'gunshipLap', 'heliStrafe', 'heliHunter',
                  'heliCircle')
-# The barrage kinds, in src/barrage_plan.h Kind's order (kKindNames).
+# The barrage kinds: src/barrage_plan.h Kind and kKindNames in this order (tools/gen_calls.py writes them,
+# src/barrage_kind.inc).
 BARRAGE_KINDS = ('katyusha', 'guided', 'thermobaric', 'cluster', 'creeping', 'mrsi', 'heavy', 'cruise', 'ballistic')
 
 
