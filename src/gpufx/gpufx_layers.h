@@ -182,11 +182,13 @@ inline BlastCounts CountBlast(const BlastEvent& e,float lod) noexcept {
     return c;
 }
 
-// The blast layers' size units. The short-lived ones near the burst (fireball, dirt, black column, debris) are linear
-// in the radius like the stock effect (1-40 m). Only the long-lived low ones (residual smoke, the heavy blast's dust
-// cloud: 15-30 s, growing 3.5-4x) use BlastScale: the radius up to 6 m, then its square root's growth (a 15 m rocket's
-// puffs 9.5, an artillery shell's 40 m 15.5); linear, a heavy blast's 4x-grown dust puffs were 60 m walls the camera
-// stood inside of for half a minute (the range A/B, 2026-11-26).
+// The blast layers' size units. The short-lived ones near the burst (fireball, dirt, debris: gone in under 3 s) are
+// linear in the radius like the stock effect (1-40 m). The long-lived smoke (the black column: 10-18 s, growing 4.5x;
+// residual smoke, the heavy blast's dust cloud: 15-30 s, growing 3.5-4x) uses BlastScale: the radius up to 6 m, then its
+// square root's growth (a 15 m rocket's puffs 9.5, an artillery shell's 40 m 15.5); linear, a heavy blast's 4x-grown dust
+// puffs were 60 m walls the camera stood inside of for half a minute (the range A/B, 2026-11-26), and the black column's
+// were the same walls in black: 14-20 m puffs grown to 63-90 m over 18 s, a 25 m howitzer shell's 39-56 m (the user,
+// 2026-11-27: 「这个烟雾和爆炸感觉怪怪的」).
 inline float BlastNearScale(float r) noexcept { return std::clamp(r,1.0f,40.0f); }
 inline float BlastScale(float r) noexcept { return r<=6.0f ? (std::max)(r,1.0f) : 6.0f*std::sqrt(r/6.0f); }
 
@@ -252,7 +254,7 @@ int SpawnBlast(Pool<N>& pool,const LayerDescs& l,Rng& rng,const BlastEvent& e,fl
     const float g=LodGrow(lod);
     const float r=e.radius;
     const float s=BlastNearScale(r);              // the short-lived layers' unit sizes are per metre of this
-    const float sLow=BlastScale(r);               // the long-lived low layers' (residual, bigDust)
+    const float sLow=BlastScale(r);               // the long-lived smoke's (black column, residual, bigDust)
     const float up=std::clamp(std::sqrt(r/6.0f),0.5f,2.2f);   // throw speeds grow slower than the radius
     int made=0;
     auto at=[&](float spread,float lift,float* p){
@@ -272,9 +274,9 @@ int SpawnBlast(Pool<N>& pool,const LayerDescs& l,Rng& rng,const BlastEvent& e,fl
         made+=pool.Spawn(l.dirt,p,v,rng,g*s)>=0;
     }
     for(int i=0;i<c.black;++i) {
-        at(0.2f*s,0.3f*s*static_cast<float>(i)/static_cast<float>(c.black),p);
+        at(0.2f*sLow,0.3f*sLow*static_cast<float>(i)/static_cast<float>(c.black),p);
         const float v[3]{rng.Range(-1.5f,1.5f),rng.Range(4.0f,10.0f)*up,rng.Range(-1.5f,1.5f)};
-        made+=pool.Spawn(l.black,p,v,rng,g*s)>=0;
+        made+=pool.Spawn(l.black,p,v,rng,g*sLow)>=0;
     }
     for(int i=0;i<c.debris;++i) {
         at(0.1f*s,0.1f*s,p);
