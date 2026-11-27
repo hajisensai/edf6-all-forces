@@ -2624,6 +2624,8 @@ target_link_libraries(step_objects_test PRIVATE edf6common)
 target_compile_options(step_objects_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks step_objects_test)
 add_test(NAME step_objects COMMAND step_objects_test)
+# The session, the pause and the host read once a frame; the release / teardown hooks keep stepobj's period order (tests/step_objects_guard.py).
+add_test(NAME step_objects_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/step_objects_guard.py")
 # edf::Readable (common/memory.cpp) on this process's own memory: protections, guard pages, spans, trimmed pages.
 add_executable(memory_readable_test EXCLUDE_FROM_ALL tests/memory_readable_test.cpp)
 target_link_libraries(memory_readable_test PRIVATE edf6common)
