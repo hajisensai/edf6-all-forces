@@ -924,7 +924,7 @@ def calls_table_consistent() -> None:
         assert sum(map(bool, (c.jet, c.ground, c.heli))) <= 1 and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
         assert not c.heli or (c.heli in xm_units.UNITS and xm_units.UNITS[c.heli].family == 'heli'), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
-        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings in ('ultimate', 'barrage')), c.id
+        assert (c.count > 0) == (c.flown or thrown or bool(c.retired)) and bool(c.log) == (c.flown or thrown or bool(c.retired) or c.brings in ('ultimate', 'barrage')), c.id
         assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
@@ -1338,7 +1338,7 @@ def supports_on_map_pt() -> None:
     for c in on_map:
         if c.flown:
             assert c.pt == round(cw.star_value([float(c.reload), *_STOCK_PT[1:]], 0)) == round(2 * c.reload), (c.id, c.pt)
-            assert f'L"{c.id}",' in inc and f'u,{c.pt}u}},' in inc, (c.id, 'kCalls row without its pt')
+            assert f'L"{c.id}",{1 + calls.SORTIE_PASSES.index(c.sortie) if c.sortie else 0},{c.pt}u}},' in inc, (c.id, 'kCalls row without its pt')
         else:
             assert c.pt == round(c.reload), (c.id, c.pt)
             key = c.id[len(calls.ID_PREFIX):]
