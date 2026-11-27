@@ -424,6 +424,12 @@ struct Engine {
     alignas(64) volatile std::uint32_t pending=0;   // 已登记未提交的任务数（cave 的快速路径读）
     std::atomic<bool> active{false},stop{false};
     HANDLE wake=nullptr;
+    // 窗口内没活的工作线程：自旋 kSpin 次后睡在 nap 上（不空转抢核：实机 stress:100 里 8 个线程空转各吃 26% 核，
+    // 把 ai::World / Havok / 游戏线程的超线程兄弟拖慢，2026-11-27）。sleepers 是睡着且还没人叫的个数；叫醒方
+    // CAS 减一后 ReleaseSemaphore，线程醒来不再减。登记时积压到 kWakeBatch 才叫一个；Flush 和关窗叫醒全部。
+    static constexpr unsigned kSpin=512,kWakeBatch=16;
+    HANDLE nap=nullptr;
+    alignas(64) std::atomic<int> sleepers{0};
     HANDLE threads[kMaxThreads]{};
     unsigned threadCount=0;
     DWORD gameThread=0;
@@ -448,7 +454,8 @@ struct Engine {
         shadowArena.base=arena.base+kArenaBytes;shadowArena.size=kShadowArenaBytes;
         pendingSet=new(shadowArena.base+kShadowArenaBytes) PendingSet();
         wake=CreateEventW(nullptr,TRUE,FALSE,nullptr);
-        if(!wake)return false;
+        nap=CreateSemaphoreW(nullptr,0,kMaxThreads,nullptr);
+        if(!wake || !nap)return false;
         if(workers>kMaxThreads)workers=kMaxThreads;
         for(unsigned i=0;i<workers;++i) {
             threads[threadCount]=CreateThread(nullptr,256*1024,&Worker,this,0,nullptr);
@@ -459,6 +466,7 @@ struct Engine {
     void Shutdown() noexcept {   // 只给测试用：游戏里线程随进程走
         stop.store(true);
         if(wake)SetEvent(wake);
+        WakeAll();
         for(unsigned i=0;i<threadCount;++i){WaitForSingleObject(threads[i],INFINITE);CloseHandle(threads[i]);}
         threadCount=0;
     }
@@ -494,6 +502,32 @@ struct Engine {
         }
         return false;
     }
+    bool Backlog() const noexcept {
+        const std::uint64_t q=queue.load(std::memory_order_seq_cst);
+        return Claimed(q)<Published(q);
+    }
+    // 叫醒一个睡着的工作线程（有的话）。
+    void WakeOne() noexcept {
+        int s=sleepers.load(std::memory_order_seq_cst);
+        while(s>0) {
+            if(sleepers.compare_exchange_weak(s,s-1,std::memory_order_seq_cst)){ReleaseSemaphore(nap,1,nullptr);return;}
+        }
+    }
+    void WakeAll() noexcept {
+        const int s=sleepers.exchange(0,std::memory_order_seq_cst);
+        if(s>0 && nap)ReleaseSemaphore(nap,s,nullptr);
+    }
+    // 睡在 nap 上，直到被叫醒；登记成睡眠者之后再看一次积压 / 关窗 / 停止，有就撤回（撤回不成说明已有人
+    // 替它减过一，吃掉那次 Release）。
+    void Nap() noexcept {
+        sleepers.fetch_add(1,std::memory_order_seq_cst);
+        if(Backlog() || !active.load(std::memory_order_seq_cst) || stop.load(std::memory_order_seq_cst)) {
+            int s=sleepers.load(std::memory_order_seq_cst);
+            while(s>0 && !sleepers.compare_exchange_weak(s,s-1,std::memory_order_seq_cst)) {}
+            if(s>0)return;
+        }
+        WaitForSingleObject(nap,INFINITE);
+    }
     static DWORD WINAPI Worker(void* self) noexcept {
         auto* const e=static_cast<Engine*>(self);
         unsigned idle=0;
@@ -501,8 +535,9 @@ struct Engine {
             unsigned index;
             if(e->TryClaim(index)){e->Run(index);idle=0;continue;}
             if(e->active.load(std::memory_order_acquire)) {
-                if(++idle<256)_mm_pause();
-                else SwitchToThread();
+                if(++idle<kSpin){_mm_pause();continue;}
+                idle=0;
+                e->Nap();
                 continue;
             }
             WaitForSingleObject(e->wake,INFINITE);
@@ -516,6 +551,7 @@ struct Engine {
         Flush(Reason::kWindowEnd);
         open=false;
         if(active.exchange(false,std::memory_order_acq_rel))ResetEvent(wake);
+        WakeAll();   // 睡在 nap 上的回到 wake 事件上等下一个窗口
     }
     bool OnGameThread() const noexcept {return GetCurrentThreadId()==gameThread;}
     bool IsPending(const void* c) const noexcept {return pending && pendingSet->Contains(c);}
@@ -535,8 +571,9 @@ struct Engine {
         pendingSet->Insert(c);
         pending=index+1;
         ++stats.registered;
-        queue.fetch_add(std::uint64_t{1}<<24,std::memory_order_release);
-        if(!active.load(std::memory_order_relaxed)){active.store(true,std::memory_order_release);SetEvent(wake);}
+        const std::uint64_t q=queue.fetch_add(std::uint64_t{1}<<24,std::memory_order_seq_cst)+(std::uint64_t{1}<<24);
+        if(!active.load(std::memory_order_relaxed)){active.store(true,std::memory_order_seq_cst);SetEvent(wake);}
+        else if(Published(q)-Claimed(q)>=kWakeBatch)WakeOne();
     }
 
     void Flush(Reason why) noexcept {
@@ -546,6 +583,7 @@ struct Engine {
         LARGE_INTEGER t0,t1,t2;
         long long wait=0,commit=0;
         const unsigned n=pending;
+        if(Backlog())WakeAll();   // 没人领的这批：叫上睡着的一起做
         for(unsigned i=0;i<n;++i) {
             Task& t=tasks[i];
             if(!t.done.load(std::memory_order_acquire)) {
