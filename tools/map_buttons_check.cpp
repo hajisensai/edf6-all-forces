@@ -108,7 +108,8 @@ void Card() {
     Check(ShownCount(none)==1 && Shown(Id::sweep,none) && Available(Id::sweep,none),"nothing selected: the sweep alone",ShownCount(none));
     // The usual selection, squads on foot: one row of 12 at the most.
     const std::uint32_t foot=Bits({Order::none,Order::guard,Order::follow,Order::engage,Order::focus,Order::board,Order::move,
-                                   Order::attackMove,Order::hold,Order::formation,Order::holdFire,Order::sprint,Order::dismiss});
+                                   Order::attackMove,Order::hold,Order::formation,Order::holdFire,Order::sprint,Order::dismiss,
+                                   Order::reverseMove});   // on foot: a move walked backing off (R alone, no button)
     CardSelection squads{2,2,2,0,0,0,0,0,4,foot};
     Check(ShownCount(squads)==kCardMostUsual && kCardMostUsual<=12,"squads on foot: one row of 12",ShownCount(squads));
     Check(Available(Id::board,squads) && Available(Id::withdraw,squads) && Available(Id::follow,squads) && Available(Id::sprint,squads) &&
@@ -149,6 +150,7 @@ void Card() {
           OrderState(Order::unloadAt,tank)==Why::none && OrderState(Order::dismountAll,squads)==Why::noneRiding &&
           OrderState(Order::board,full)==Why::none && OrderState(Order::board,riding)==Why::allRiding,
           "the keys: G, U, Shift+N, BOARD by the state");
+    Check(OrderState(Order::reverseMove,squads)==Why::none,"squads on foot: R reverses without its button");
     for(int o=0;o<=static_cast<int>(mapcmd::kLastOrder);++o)
         Check(OrderState(static_cast<Order>(o),none)!=Why::hidden && OrderState(static_cast<Order>(o),squads)!=Why::hidden,
               "a key's state is never hidden",o);

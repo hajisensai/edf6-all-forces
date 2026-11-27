@@ -93,7 +93,10 @@ inline Why StateOf(Id b,const CardSelection& c) noexcept {
     const bool allScripted=c.scripted>=c.units;
     const Why refused=allScripted ? Why::scripted : Why::cannot;
     switch(b) {
-    case Id::reverseMove: return TakesAny(c,Order::reverseMove) ? Why::none : Why::hidden;   // the tanks', the transports'
+    // The tanks', the transports' (a ground vehicle selected, or squads riding: their transport's driver). Squads on foot
+    // take it too (a move walked backing off) but by R alone: its button would push their usual card past one row.
+    case Id::reverseMove:
+        return (c.vehicles>c.aircraft || c.riding>0) && TakesAny(c,Order::reverseMove) ? Why::none : Why::hidden;
     case Id::board:
         if(c.squads<=0)return Why::hidden;
         if(allScripted)return Why::scripted;
