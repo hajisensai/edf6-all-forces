@@ -106,6 +106,9 @@ struct Game {
     // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
     bool armedOrder=false;Order armed=Order::none;
     int armedSupport=-1;
+    // An armed ground run's (SupportGroundRun) left press on the map (the user, 2026-11-27: the way first, then the
+    // length; Broken Arrow's order drag): its line's start (`runStarted`: the press had a ground point); the drag from it
+    // its way and length (sortie_plan.h RunFromDrag), let go: called.
     bool runStarted=false;
     float runStart[3]{};
     // The armed flown call's way in (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」): from the player toward its
@@ -727,9 +730,10 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         Arm(g,false,Order::none,again ? -1 : hit.entry);
         if(!again) {
             g.supportPick=hit.entry;
-            Note(g,hudtext::Tr(SupportGroundRun(hit.entry) ? hudtext::Tx::cmdRunStart :
-                               SupportCatalogFlown(hit.entry) ? hudtext::Tx::cmdSupportArmedFlown : hudtext::Tx::cmdSupportArmed),
-                 SupportCallName(hit.entry));
+            if(SupportGroundRun(hit.entry))
+                Note(g,hudtext::Tr(hudtext::Tx::cmdRunStart),SupportCallName(hit.entry),SupportRunLeast(hit.entry));
+            else Note(g,hudtext::Tr(SupportCatalogFlown(hit.entry) ? hudtext::Tx::cmdSupportArmedFlown : hudtext::Tx::cmdSupportArmed),
+                      SupportCallName(hit.entry));
         }
         return;
     }
@@ -802,7 +806,10 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
         g.uiPress=UiAt(*v,g.pointer.x,g.pointer.y);g.uiLeft=g.uiPress.kind!=Game::UiKind::none;g.moved=0;
         if(g.uiLeft)g.boxing=g.pressing=false;
         else if(k.ctrl || !armed){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
-        else g.pressing=true;
+        else {
+            g.pressing=true;
+            if(!g.armedOrder && g.armedSupport>=0 && SupportGroundRun(g.armedSupport))g.runStarted=TargetPoint(g,in,v,g.runStart);
+        }
     }
     pointerCaptured.store(g.uiLeft || g.uiRight || (g.suppressLeft && k.left) || (g.suppressRight && k.right));
     if(k.left || !g.was.left)return;
@@ -812,7 +819,10 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     }
     mapcmd::Mark marks[kCmdUnits];const int n=Marks(g,*v,marks);
     const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
-    const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
+    // An armed ground run's press is its click however far it was dragged (the drag its line).
+    const bool runDrag=g.pressing && g.runStarted && !g.armedOrder && g.armedSupport>=0 && SupportGroundRun(g.armedSupport);
+    const bool click=(g.boxing && !box) || (g.pressing && (g.moved<kClickMove || runDrag));
+    if(!click || g.boxing || UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none)g.runStarted=false;   // no line called
     if(click && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none){} // release over UI never selects what is underneath
     else if(click && armed && !g.boxing)g.armedClick=true;
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
@@ -1746,7 +1756,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // Shift with any point order: after the points before it (mapcmd_logic.h Waypoints).
     const bool queue=k.shift;
     // G turns the armed flown call's way in by 45 deg (Shift+G back), kept for its click (which disarms it).
-    if(k.entryTurn && !g.was.entryTurn && g.armedSupport>=0 && SupportCatalogFlown(g.armedSupport) && !SupportGroundRun(g.armedSupport)) {
+    if(k.entryTurn && !g.was.entryTurn && g.armedSupport>=0 && SupportCatalogFlown(g.armedSupport)) {
         g.entryTurn=(g.entryTurn+(k.shift ? 7 : 1))%8;
         Note(g,hudtext::Tr(hudtext::Tx::cmdEntryTurn),g.entryTurn*45);
         Log("MAPCMD the armed call's way in turned %d deg from the player's toward its point",g.entryTurn*45);
@@ -1847,18 +1857,28 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     for(MapPingHeard heard{};TakeMapPing(&heard);)AddPing(g,heard.at,heard.kind,false);
     const bool allowed=Cfg().enabled;
+    // A ground run's line (sortie_plan.h RunFromDrag): from its press's point (the pad's A, or a press with no ground
+    // point: the pointer's) toward where the pointer is, at least as long as its jets need (SupportRunLeast); a plain
+    // click: from the player toward its start, turned by G, that least long.
+    const auto groundLine=[&](int catalog,bool held,sortie::RunSpec* line,float* centre,float* end,float* least) noexcept {
+        if(catalog<0 || !SupportGroundRun(catalog) || (!pointOk && !(held && g.runStarted)))return false;
+        const float* const start=held && g.runStarted ? g.runStart : point;
+        float way[3];SupportStrikeHeading(start,way);
+        const float a=static_cast<float>(catalog==turnedEntry ? entryTurn : 0)*0.785398163f,c=std::cos(a),s=std::sin(a);
+        *least=SupportRunLeast(catalog);
+        return sortie::RunFromDrag(start,pointOk ? point : start,*least,way[0]*c-way[2]*s,way[0]*s+way[2]*c,line,centre,end);
+    };
     sortie::RunSpec run;
     float runCentre[3]{};
     if(runClick>=0) {
         using hudtext::Tx;
-        if(!pointOk)Note(g,L"%ls",hudtext::Tr(Tx::cmdSupportNoPoint));
-        else if(!g.runStarted) {
-            std::memcpy(g.runStart,point,sizeof(g.runStart));
-            g.runStarted=true;
-            Note(g,L"%ls",hudtext::Tr(Tx::cmdRunEnd));
-        } else if(!sortie::RunFromPoints(g.runStart,point,&run,runCentre)) {
+        float end[3],least=0.0f;
+        if(!pointOk && !g.runStarted)Note(g,L"%ls",hudtext::Tr(Tx::cmdSupportNoPoint));
+        else if(!groundLine(runClick,true,&run,runCentre,end,&least)) {
+            g.runStarted=false;
             Note(g,L"%ls",hudtext::Tr(Tx::cmdRunLength));
         } else {
+            Log("MAPCMD ground run %d: its line %.0f m (at least %.0f m) heading (%.2f,%.2f)",runClick,2.0f*run.half,least,run.x,run.z);
             supportAt=runClick;
             if(g.composeEntry==supportAt)load=g.compose;
             Arm(g,false,Order::none,-1);
@@ -1883,9 +1903,14 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     };
     float previewEntry[3];
     const float* const previewHeading=entryHeading(g.armedSupport,previewEntry) ? previewEntry : aimedHeading(g.armedSupport);
-    // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route.
-    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point,previewHeading,
-                g.runStarted ? g.runStart : nullptr);
+    // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route; a ground
+    // run's line as it would be called now (held: the drag's; else a click's here), its length said while dragged.
+    sortie::RunSpec previewLine;float previewCentre[3],previewEnd[3],previewLeast=0.0f;
+    const bool held=g.pressing && k.left;
+    if(groundLine(g.armedSupport,held,&previewLine,previewCentre,previewEnd,&previewLeast)) {
+        WarnPreview(g.armedSupport,previewEnd,nullptr,held && g.runStarted ? g.runStart : point);
+        if(held && g.runStarted)Note(g,hudtext::Tr(hudtext::Tx::cmdRunDrag),2.0f*previewLine.half,previewLeast);
+    } else WarnPreview(g.armedSupport>=0 && pointOk && !SupportGroundRun(g.armedSupport) ? g.armedSupport : -1,point,previewHeading);
     if(supportAt>=0) {
         if(pointOk) {
             if(float way[3];run.half<=0.0f && entryHeading(supportAt,way))run=sortie::HeadingRun(way[0],way[2]);

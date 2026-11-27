@@ -189,12 +189,55 @@ void Strafe() {
     Check(CaptureDistance(200.0f,-0.3f,r)<CaptureDistance(200.0f,0.3f,r),"closing on it takes less than drifting off it");
 }
 
+// A ground run's least line (the user, 2026-11-27: as long as it takes to let every ground store go) and the map's drag.
+void Drag() {
+    const auto nearly=[](float a,float b){return std::fabs(a-b)<0.5f;};
+    // 12 bombs 150 ms apart at 200 m/s: 330 m; 38 rockets in ripples of 4 a 600 ms: 9 gaps, 1080 m; 6 missiles: a 700 ms
+    // lock and 5 gaps, 4.2 s, 840 m; the slowest store sets it.
+    Check(nearly(RunLeast(RunLoad{12,0,0},200.0f,false),330.0f),"bombs: their gaps at its speed");
+    Check(nearly(RunLeast(RunLoad{0,38,0},200.0f,false),1080.0f),"rockets: a ripple of four every 600 ms");
+    Check(nearly(RunLeast(RunLoad{0,0,6},200.0f,false),840.0f),"missiles: the lock, then one a gap");
+    Check(nearly(RunLeast(RunLoad{12,38,6},200.0f,false),1080.0f),"several stores: the slowest to empty");
+    Check(nearly(RunLeast(RunLoad{12,38,6},200.0f,true),330.0f),"a carpet lets go its bombs only");
+    Check(nearly(RunLeast(RunLoad{},215.0f,false),kRunMin) && nearly(RunLeast(RunLoad{1,4,0},215.0f,false),kRunMin),
+          "nothing to space out: the shortest line");
+    Check(nearly(RunLeast(RunLoad{200,0,0},300.0f,false),kRunMax),"never past the longest line");
+    Check(nearly(RunLeast(RunLoad{12,0,0},-1.0f,false),kRunMin) && nearly(RunLeast(RunLoad{12,0,0},NAN,false),kRunMin),
+          "no speed: the shortest");
+    // The drag: its way from the press toward the pointer, as long as dragged within least..kRunMax.
+    const float a[3]={100.0f,5.0f,200.0f};
+    RunSpec r;float c[3],e[3];
+    const float b[3]={100.0f,7.0f,800.0f};
+    Check(RunFromDrag(a,b,330.0f,1.0f,0.0f,&r,c,e) && nearly(r.z,1.0f) && nearly(r.x,0.0f) && nearly(r.half,300.0f) &&
+          nearly(c[2],500.0f) && nearly(e[2],800.0f) && nearly(e[0],100.0f) && RunValid(r),"a long drag: its way, its length");
+    const float shortDrag[3]={160.0f,5.0f,200.0f};
+    Check(RunFromDrag(a,shortDrag,330.0f,0.0f,1.0f,&r,c,e) && nearly(r.x,1.0f) && nearly(r.half,165.0f) && nearly(e[0],430.0f) &&
+          nearly(c[0],265.0f),"a drag short of the least: its way, the least long");
+    const float distant[3]={100.0f,5.0f,5000.0f};
+    Check(RunFromDrag(a,distant,330.0f,1.0f,0.0f,&r,c,e) && nearly(r.half,kRunMax*0.5f) && RunValid(r),"never past the longest");
+    const float click[3]={110.0f,5.0f,205.0f};
+    Check(RunFromDrag(a,click,330.0f,0.0f,-2.0f,&r,c,e) && nearly(r.z,-1.0f) && nearly(r.half,165.0f) && nearly(e[2],-130.0f),
+          "a click: the given way (normalised), the least long");
+    Check(!RunFromDrag(a,a,330.0f,0.0f,0.0f,&r,c,e),"a click with no way: none");
+    Check(RunFromDrag(a,a,10.0f,1.0f,0.0f,&r,c,e) && nearly(r.half,kRunMin*0.5f),"a least under the shortest line: the shortest");
+    // The host lengthens a shorter line from the same start.
+    RunSpec line{1.0f,0.0f,60.0f};float centre[3]={0.0f,0.0f,0.0f};
+    RunLengthen(line,centre,330.0f);
+    Check(nearly(line.half,165.0f) && nearly(centre[0],105.0f) && nearly(centre[2],0.0f),"lengthened: the start kept");
+    RunLengthen(line,centre,200.0f);
+    Check(nearly(line.half,165.0f) && nearly(centre[0],105.0f),"a line long enough stays");
+    RunSpec heading=HeadingRun(1.0f,0.0f);float none[3]={0.0f,0.0f,0.0f};
+    RunLengthen(heading,none,330.0f);
+    Check(heading.half==0.0f && none[0]==0.0f,"a heading-only way is no line");
+}
+
 int main() {
     Lines();
     Strafe();
     Carpet();
     Laps();
     Circle();
+    Drag();
     Check(SalvoLocked(256,1) && SalvoLocked(256,64) && SalvoLocked(256,256) && !SalvoLocked(256,0) && !SalvoLocked(0,256),
           "missile rain fires on its first lock");
     Volleys();
