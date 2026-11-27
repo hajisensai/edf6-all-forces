@@ -380,8 +380,13 @@ struct Motion {
     float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
     ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it or off its track
     std::int8_t obstSide;    // ...too steep to climb: the side it turns off to (+1 / -1, picked once; 0 none)
-    bool edgeBack;           // past its soft edge: flying back in first (airbound.h KeepIn), its targets out there let be
+    bool edgeBack;           // past its soft edge (its arrival box, arriving): flying back in first (airbound.h KeepIn),
+                             // its targets out there let be
     signed char edgeTurn;    // ...turning back from it: the side it turns on (KeepIn: +1 left, -1 right, 0 none)
+    // Its arrival (airbound.h ArriveBox / Arrive): made past its soft edge (a call's, off the map), it keeps inside
+    // `arrive`, drawn in after it as it flies in, until that is its soft box; `edgeSeen` once SoftEdge first saw it.
+    bool edgeSeen,arriving;
+    airbound::Box arrive;
 };
 // What it goes for (Pick, Lead) and its guns' and missiles' state (Fire, Missile).
 struct Aim {
@@ -574,7 +579,8 @@ struct Jet {
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     // The map's Broken Arrow orders (JetCommand): DECOY a pair of its flares dropped next frame (NpcFlares), ALTITUDE high
     // (kind.alt times mapcmd::kJetHighShare), SPRINT its afterburner until burnUntil (game ms; mapcmd::kAfterburnerSpeed).
-    bool flareNow=false,high=false;
+    // `heightOrdered` once an ALTITUDE order came: arriving (Entering) it flies that, not the height it came at.
+    bool flareNow=false,high=false,heightOrdered=false;
     ULONGLONG burnUntil=0;
     PrimerState primer;
     bool cmdMoving=false;       // reach a new map order before taking another target
@@ -757,6 +763,8 @@ void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcep
 // The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (world.h PlayEdge) less its band (ini
 // AirSoftEdge / AirSoftTurns: at least that many of its full-speed turn diameters); `band` gets the band's width.
 airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
+// The box its edge holds it in now: its arrival box while it is arriving (Motion::arriving), else its soft box.
+inline airbound::Box JetHeldBox(const Jet& j) noexcept { return j.m.arriving ? j.m.arrive : JetSoftBox(j); }
 // m/s: the most a wing of kind `k` flies inside a play area of half size `half` (turns that fit it; jet_flight.cpp).
 float TightSpeed(const Kind& k,float half) noexcept;
 // m: its turn's radius at `speed` with its stores' `mass` (the g its thrust holds, kTurnWide).

@@ -8,11 +8,14 @@
 //  - the circle's velocity: round the centre at its speed on the radius, back onto it from inside and outside;
 //  - the missile rain's hold: it fires only over the target area with its nose settled for kRainHoldMs (RainHoldStep);
 //  - the missile rain's clearance: its 256 rounds (src/salvo_flight.h) fired level from kRainAlt come down on the target,
-//    not on the ground short of it, on flat ground and over a ridge; the old dive at the target wasted a third of them.
+//    not on the ground short of it, on flat ground and over a ridge; the old dive at the target wasted a third of them;
+//  - the missile rain of the 2026-11-27 log (「这个天顶根本没开火」) flown again: spawned off the map past two soft sides, its
+//    target 570 m off the mark and 117 m inside the third, at 110 m/s; it must fire on its way in (RainLogReplay).
 //
 //   cmake --build build --target sortie_check && build\sortie_check.exe        exit code 0: every check passed
 #include "../src/sortie_plan.h"
 #include "../src/salvo_flight.h"
+#include "../src/airbound.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -277,6 +280,110 @@ void RainClearance() {
     Check(old.wasted*4>old.Rounds(),"rain: the old dive at the target wasted over a quarter (the report)");
 }
 
+// The salvo's trigger (RainTrigger) level over a ground target: open from where RainSteep opens in to the burst's run
+// short of it, and every first volley it lets go there brings its rounds down on the target; at the 2026-11-27 log's own
+// open-fire point (15:35:01.861: the jet at (-544,668,-294) heading (-0.40,-0.92) at 110 m/s, its target at
+// (-630,164,-560), 280 m ahead and 504 m under it: 1.07 rad off the nose, past the 0.8 rad cone it had then).
+void RainTriggerCheck() {
+    namespace sf=crew::salvo_flight;
+    const float nose[3]={0.0f,0.0f,1.0f},flat[3]={0.0f,0.0f,0.0f};
+    bool down=true,room=true;
+    int worst=0;
+    for(const float h:{250.0f,300.0f,350.0f,400.0f,450.0f,504.0f,600.0f}) {
+        // Every first volley it lets go from where it turns steep (RainSteep) in, the rest as Rain flies them on.
+        float nearest=0.0f;
+        for(float d=h/kRainSlope;d>0.0f;d-=25.0f) {
+            const float pos[3]={0.0f,h,-d};
+            if(!RainTrigger(pos,nose,kRainSpeed,flat))continue;
+            nearest=d;
+            const sf::Tally t=Rain(h,d,false,Flat);
+            if(t.wasted>worst)worst=t.wasted;
+            down=down && t.wasted*100<=t.Rounds();
+        }
+        const float window=h/kRainSlope-nearest;
+        std::printf("      trigger %.0f m up: open from %.0f m out to %.0f m%s",h,h/kRainSlope,nearest,"\n");
+        room=room && nearest>0.0f && window>=kRainSpeed*static_cast<float>(kLockMs)/1000.0f;
+    }
+    std::printf("      from any first volley the trigger lets go: at most %d of %d wasted%s",worst,
+                crew::salvo::kRounds*pyconst::kSalvoChildren,"\n");
+    Check(down,"rain: from any first volley its trigger lets go (steep, in the cone, room for the burst) at most 1% come down off the target");
+    Check(room,"rain: from 250 to 600 m up the trigger is open for the lock's dwell (kLockMs at kRainSpeed) past where it turns steep");
+    const float pos[3]={-544.0f,668.0f,-294.0f},aim[3]={-630.0f,164.0f,-560.0f};
+    float n[3]={-0.40f,0.0f,-0.92f};crew::vec::Normalize(n);
+    const float to[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
+    const float off=std::acos(crew::vec::Dot(to,n)/crew::vec::Len(to));
+    std::printf("      the log's open-fire point: the target %.2f rad off the level nose%s",off,"\n");
+    Check(off>0.8f && RainTrigger(pos,n,110.0f,aim),"rain: the log's open-fire point fires (past the 0.8 rad cone it had)");
+    const float air[3]={-544.0f,900.0f,-294.0f},above[3]={-0.40f*0.6f,0.8f,-0.92f*0.6f};
+    Check(RainTrigger(pos,above,110.0f,air),"rain: a flier above it, its nose on it, close in: fires");
+}
+
+// The 2026-11-27 log's missile rain flown again (vc.log.1 15:34:28.670 - vc.log 15:35:08.134): a wing at 110 m/s (its
+// real speed) turning at 3.6 g (its ~340 m circles) held level at mark + kRainAlt, its nose toward its target as
+// RainWant's, the stock map's soft box (x -747..750, z -1250..250), spawned at (-1575,1200) on its line to the mark
+// (-182,264,-962), its target at (-630,164,-560). `arriving`: the soft edge holds it in its arrival box (airbound.h
+// ArriveBox / Arrive: drawn in after it) till that is the soft box, else KeepIn's `back` from its spawn as before; `trigger` RainTrigger, else the 0.8 rad cone it
+// had. The ms after it came its salvo goes, 0 if its window ended first.
+unsigned long long RainLogReplay(bool arriving,bool trigger) {
+    namespace ab=crew::airbound;
+    const ab::Box soft{{-747.0f,-1250.0f},{750.0f,250.0f}};
+    const float mark[3]={-182.0f,264.0f,-962.0f},aim[3]={-630.0f,164.0f,-560.0f};
+    const float speed=110.0f,g=3.6f,react=1.0f+0.5f*3.14159265f*0.5f/1.4f,r=ab::TurnRadius(speed,g),dt=1.0f/60.0f;
+    float pos[3]={-1575.0f,mark[1]+kRainAlt,1200.0f},head[3]={0.54f,0.0f,-0.84f};
+    crew::vec::Normalize(head);
+    float vel[3]={head[0]*speed,0.0f,head[2]*speed};
+    const Line line=LineThrough(mark,pos,head);
+    bool back=false,coming=arriving && !ab::Inside(soft,pos);
+    ab::Box held=coming ? ab::ArriveBox(soft,pos) : soft;
+    signed char turn=0;
+    float asked=0.0f;
+    int phase=0;
+    unsigned long long since=0,lockAt=0;
+    for(unsigned long long ms=0;ms<2*kSearchMs;ms+=16) {
+        const float off[3]={pos[0]-mark[0],0.0f,pos[2]-mark[2]};
+        const float dist=crew::vec::Len(off);
+        if(dist<kRainTo || Along(line,pos)>kRainTo)return 0;
+        float want[3]={aim[0]-pos[0],0.0f,aim[2]-pos[2]};
+        crew::vec::Normalize(want);
+        float nose[3]={vel[0],0.0f,vel[2]};
+        crew::vec::Normalize(nose);
+        const float c=crew::vec::Dot(nose,want);
+        const float noseOff=std::acos(c>1.0f ? 1.0f : c<-1.0f ? -1.0f : c);
+        if(RainHoldStep(phase,since,dist,noseOff,RainSteep(pos,aim,mark[1]),ms)) {
+            const float to[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
+            const bool in=trigger ? RainTrigger(pos,nose,speed,aim) : crew::vec::Dot(to,nose)>=std::cos(0.8f)*crew::vec::Len(to);
+            if(!in)lockAt=0;
+            else if(!lockAt)lockAt=ms;
+            if(lockAt && ms-lockAt>=kLockMs)return ms;
+        }
+        float steer[3]={want[0],0.0f,want[2]};
+        if(coming && ab::Arrive(soft,held,pos)){coming=false;back=false;turn=0;}
+        ab::KeepIn(coming ? held : soft,pos,vel,r,react,steer,&back,&turn);
+        // The wing (airbound_check's): its heading turned toward `steer` at g, after `react` s of asking.
+        const float have=std::atan2(vel[2],vel[0]),to=std::atan2(steer[2],steer[0]);
+        float d=to-have;
+        while(d>3.14159265f)d-=6.2831853f;
+        while(d<-3.14159265f)d+=6.2831853f;
+        asked=std::fabs(d)>0.02f ? asked+dt : 0.0f;
+        const float step=(asked>react ? g*ab::kGrav/speed : 0.0f)*dt;
+        const float h=have+(d>step ? step : d<-step ? -step : d);
+        vel[0]=std::cos(h)*speed;vel[2]=std::sin(h)*speed;
+        pos[0]+=vel[0]*dt;pos[2]+=vel[2]*dt;
+    }
+    return 0;
+}
+
+void RainLog() {
+    const unsigned long long was=RainLogReplay(false,false),now=RainLogReplay(true,true);
+    const unsigned long long edgeOnly=RainLogReplay(true,false),coneOnly=RainLogReplay(false,true);
+    std::printf("      the log's rain: as it flew %llu ms (0: never); now %llu ms; the edge fixed alone %llu, the cone alone %llu\n",was,
+                now,edgeOnly,coneOnly);
+    // `was` is no longer the log's flight: it flies today's KeepIn, whose `back` past a corner asks kBackIn / sqrt 2 of
+    // each side (airbound.h) -- the old kBackIn on each, more than any heading has there, held it round the target 29 s.
+    Check(edgeOnly>0 && edgeOnly<20000,"the log's rain, its arrival held by its arrival box: its salvo goes on its way in");
+    Check(now>0 && now<20000,"the log's rain now: its salvo goes on its way in, inside 20 s of its coming");
+}
+
 // A ground run's least line (the user, 2026-11-27: as long as it takes to let every ground store go) and the map's drag.
 void Drag() {
     const auto nearly=[](float a,float b){return std::fabs(a-b)<0.5f;};
@@ -332,6 +439,8 @@ int main() {
     RainHold();
     StraightIn();
     RainClearance();
+    RainTriggerCheck();
+    RainLog();
     const unsigned long long burst=static_cast<unsigned long long>(crew::salvo::VolleyFrames(crew::salvo::kRounds))*1000/60;
     Check(SalvoDraining(1000+burst,1000) && !SalvoDraining(1000+kRainBurstMs+1,1000) && !SalvoDraining(1000,0),
           "the jet stays on its pass until the volleys are out");

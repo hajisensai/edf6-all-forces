@@ -143,6 +143,36 @@ int main() {
         KeepIn(soft,corner,up,1000.0f,1.0f,want4,&b2,&t2);
         Check(want4[0]<-0.9f,"into a corner: turned out of it");
     }
+    // Back in past two sides (a corner), heading in along the diagonal: that points in over both (kBackIn / sqrt 2 on
+    // each), kept as it is, not turned round (it circled there, 2026-11-27 log).
+    {
+        bool back=false;
+        signed char turn=0;
+        const float pos[3]={3000.0f,0.0f,3000.0f},vel[3]={-141.4f,0.0f,-141.4f};
+        float want[3]={-0.7071f,0.0f,-0.7071f};
+        KeepIn(soft,pos,vel,1000.0f,1.0f,want,&back,&turn);
+        Check(back && turn==0 && Near(want[0],-0.7071f,1e-3f) && Near(want[2],-0.7071f,1e-3f),
+              "back past a corner heading in along its diagonal: kept, not turned round");
+    }
+    // A jet made past its soft edge (a call's, off the map) arrives: its box is soft grown kArriveRoom past where it was
+    // made, each side drawn in after it as it flies in, never out again nor inside soft, the arrival over once it is soft.
+    {
+        const float made[3]={-4000.0f,600.0f,3500.0f};
+        Box held=ArriveBox(soft,made);
+        Check(Near(held.lo[0],-4000.0f-kArriveRoom,0.1f) && Near(held.hi[1],3500.0f+kArriveRoom,0.1f) &&
+              held.hi[0]==soft.hi[0] && held.lo[1]==soft.lo[1] && Inside(held,made),"arrival box: soft grown to where it was made");
+        const float in1[3]={-3000.0f,600.0f,3300.0f};
+        Check(!Arrive(soft,held,in1) && Near(held.lo[0],-3000.0f-kArriveRoom,0.1f) && Near(held.hi[1],3300.0f+kArriveRoom,0.1f),
+              "arrival box drawn in after it");
+        const float outAgain[3]={-3500.0f,600.0f,3300.0f};
+        Check(!Arrive(soft,held,outAgain) && Near(held.lo[0],-3000.0f-kArriveRoom,0.1f),"arrival box never out again");
+        const float edge[3]={-2750.0f,600.0f,2750.0f},inside[3]={-2700.0f,600.0f,2700.0f};   // 50 m in, then kArriveRoom in
+        Check(!Arrive(soft,held,edge),"arrival on until kArriveRoom inside");
+        Check(Arrive(soft,held,inside) && held.lo[0]==soft.lo[0] && held.hi[1]==soft.hi[1],"arrival over at its soft box");
+        const float wayIn[3]={0.0f,600.0f,0.0f};
+        Box h2=ArriveBox(soft,made);
+        Check(Arrive(soft,h2,wayIn) && h2.lo[0]==soft.lo[0] && h2.hi[1]==soft.hi[1],"arrival box never inside soft");
+    }
     // A climb at the soft ceiling: pushed over once its push-over would reach it.
     {
         float want[3]={0.0f,0.8f,0.6f};

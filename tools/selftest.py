@@ -2175,9 +2175,10 @@ def sortie_copies_agree() -> None:
     import math
     salvo = vc.STORES['SALVO'].weapon
     assert salvo.lock_cone == vc.SALVO_LOCK_CONE >= 1.2, salvo.lock_cone
-    cone = float(re.search(r'constexpr float kRainFireCone=([0-9.]+)f;', plan).group(1))
+    # Its fire cone the lock's own (the player, 2026-11-27: 「这个天顶根本没开火」; flown level its target sits atan(h / d)
+    # off the nose, past the old 0.8 rad all its hold; tools/sortie_check.cpp RainTriggerCheck / RainLog).
+    assert srcscan.takes(plan, 'kRainFireCone', 'pyconst::kSalvoLockCone')   # the value: src/py_consts.inc (tools/gen_py_consts.py --check)
     rain = float(re.search(r'kRainSpeed=([0-9.]+)f;', plan).group(1)) / 60.0
-    assert 0.6 <= cone < vc.SALVO_LOCK_CONE, cone
     lit = vc.SALVO_DROP[1] ** vc.SALVO_DROP[0]   # what is left of the launcher's speed when it lights
     for n in range(1, int(vc.SALVO_SPLIT_AFTER) + 1):
         own = min(vc.SALVO_EJECT + vc.SALVO_ACCEL * n, vc.SALVO_TOP)
@@ -2186,7 +2187,7 @@ def sortie_copies_agree() -> None:
     assert abs(at_split * 60.0 - vc.SALVO_CHILD_SPEED * 60.0) < 30.0 and at_split <= vc.SALVO_TOP, at_split
     assert vc.SALVO_CHILD_SPEED < vc.SALVO_CHILD_TOP, 'the children still accelerate'
     assert srcscan.takes(plan, 'kRainRoundSpeed', 'pyconst::kSalvoChildSpeed'), 'HoldFire flies the children'   # the value: src/py_consts.inc (tools/gen_py_consts.py --check)
-    assert srcscan.has(combat, 'off>(salvo ? sortie::kRainFireCone : kMissileCone)')
+    assert srcscan.has(combat, '!(salvo ? sortie::RainTrigger(pos,nose,level,t.aim) : off<=kMissileCone))t.lockAt=0;')
     # The glow declaration's mark and the classes' first free indices agree with the plugin's reader (gpufx_glow.h).
     glow = src('src/gpufx/gpufx_glow.h')
     assert srcscan.takes(glow, 'kMark', 'pyconst::kGlowMark') and vc.GLOW_MARK not in (vc.MISSILE_MARK, vc.SALVO_MARK)
@@ -7721,10 +7722,10 @@ def soft_edge_wired() -> None:
     tests; a blocked jet logs what it hit (src/impact.cpp, built)."""
     flight, jet, combat, heli = src('src/jet_flight.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/heli.cpp')
     guard = flight[flight.index('void Guard(Jet& j,'):flight.index('void ResetWalls()')]
-    assert 'SoftEdge(j,pos,want);' in guard and 'WorldWalls' not in flight, 'Guard: the soft edge, not the world walls'
+    assert 'SoftEdge(j,pos,want,ms);' in guard and 'WorldWalls' not in flight, 'Guard: the soft edge, not the world walls'
     # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
     # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
-    soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
     # And the paratroop plane on its pass line (ferry_line.h, 2026-10-10): its line's ends stand off the map with room to
     # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made.
@@ -7750,6 +7751,16 @@ def soft_edge_wired() -> None:
     cm = src('CMakeLists.txt')
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)' in cm
     assert 'add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite' in cm and 'airbound_check)' in cm
+    # A call's jet made off the map arrives in a box drawn in after it, not turned back at the edge (--entry-suite).
+    assert 'j.m.arriving=!airbound::Inside(own,pos);' in soft_edge and 'airbound::Arrive(own,j.m.arrive,pos)' in soft_edge
+    assert 'add_test(NAME jet_entry_suite COMMAND jet_obstacle_sim --entry-suite' in cm
+    # ALTITUDE reaches a jet on its way in (the user, 2026-11-27: 「入场的时候高度和速度应该都可以随意调整」): an arriving
+    # strike flies the ordered height, a sortie's run in takes mapcmd::JetOver (the missile rain's kRainAlt not yet).
+    assert 'Level(pos,to,entering && !j.heightOrdered ? pos[1] : height,want);' in combat and 'j->heightOrdered=true;' in jet
+    sortie = src('src/jet_sortie.cpp')
+    for alt in ('kMissilePassAlt', 'kCarpetAlt', 'kPopAlt'):
+        assert f'mark+sortie::{alt}' not in sortie and f'mark+mapcmd::JetOver(sortie::{alt},j.high)' in sortie, alt
+    assert 'mark+mapcmd::JetOver(sortie::StrafeHeight(run,preferred),j.high)' in sortie
     assert '#include "../src/airbound.h"' in src('tools/airbound_check.cpp')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):

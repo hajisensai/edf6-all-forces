@@ -88,7 +88,7 @@ void MarkedRun(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const f
     const float settle=kind.attack*sortie::kStrafeSettleS,run=half+settle*0.5f;   // the line and its settling, halved
     const float least=kind.gunClose*2.6f,reach=GunReach(kind,arms);
     const float preferred=std::fmax(least,reach*0.9f);
-    const float inHeight=mark+sortie::StrafeHeight(run,preferred);
+    const float inHeight=mark+mapcmd::JetOver(sortie::StrafeHeight(run,preferred),j.high);   // its lead from the height it is at
     // Its turns: onto the line at its hardest (maxG, a short S), round the teardrop at the g it holds (TurnRadiusOf).
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f,hard=kind.maxG/mass;
     const float sharp=airbound::TurnRadius(kind.attack,std::sqrt(hard*hard>1.0f ? hard*hard-1.0f : 0.25f));
@@ -234,7 +234,7 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
         if((s.fired>0 && arms.missiles<=0) ||
            along>sortie::kPassBeyond || (along<0.0f && ms-s.begun>2*sortie::kSearchMs)) {
             Done(j,s.fired ? "sortie: its pass made" : "sortie: nothing to strike",ms);
-            Run(j,pos,mark+sortie::kMissilePassAlt,600.0f,want);
+            Run(j,pos,mark+mapcmd::JetOver(sortie::kMissilePassAlt,j.high),600.0f,want);
             return true;
         }
         const float toward=ground ? sortie::Along(s.line,j.t.aim)-along : 0.0f;
@@ -243,20 +243,20 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
         if(ground && toward>200.0f && arms.missiles>0) {
             NoseOn(pos,j.t.aim,mark+120.0f,want);
             *missileOk=MissileReach(kind,arms)>0.0f;
-        } else Run(j,pos,mark+sortie::kMissilePassAlt,600.0f,want);
+        } else Run(j,pos,mark+mapcmd::JetOver(sortie::kMissilePassAlt,j.high),600.0f,want);
         return true;
     }
     case SortiePass::carpet:
         *speed=kind.attack;
         if(along>(s.runHalf>0.0f ? s.runHalf : sortie::kCarpetHalf)+sortie::kPassBeyond ||
            ms-s.begun>2*sortie::kSearchMs)Done(j,s.fired ? "sortie: its bombs laid" : "sortie: no bombs to lay",ms);
-        Run(j,pos,mark+sortie::kCarpetAlt,600.0f,want);
+        Run(j,pos,mark+mapcmd::JetOver(sortie::kCarpetAlt,j.high),600.0f,want);
         return true;
     case SortiePass::popUp:
         *speed=kind.attack;
         if(s.phase==0) {
             if(along>300.0f){s.phase=1;s.phaseAt=ms;}   // past the mark with nothing let go: away all the same
-            Run(j,pos,mark+sortie::kPopAlt,400.0f,want);
+            Run(j,pos,mark+mapcmd::JetOver(sortie::kPopAlt,j.high),400.0f,want);
             return true;
         }
         want[0]=s.line.dir[0];want[1]=sortie::kPopClimb;want[2]=s.line.dir[2];Normalize(want);

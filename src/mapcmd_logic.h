@@ -99,6 +99,10 @@ inline bool AirOrder(Order o) noexcept { return VehicleOrder(o) || o==Order::foc
 // ALTITUDE's param, and the heights it sets: an aircraft's own height times the share (heli.cpp HeliHeightOf, jet.cpp).
 inline constexpr std::uint32_t kAltitudeLow=0,kAltitudeHigh=1;
 inline constexpr float kHeliHighShare=2.5f,kJetHighShare=2.0f;
+// A jet's height `over` its point (its kind's, a sortie pass's run in) as ALTITUDE has it: high, kJetHighShare of it. Every
+// height a jet flies its own way at takes it, its arrival and a sortie's run in as well (the user, 2026-11-27: 「入场的时候
+// 高度和速度应该都可以随意调整」): only its kind's cruise took it, and a called jet held its height or its pass's.
+inline constexpr float JetOver(float over,bool high) noexcept { return high ? over*kJetHighShare : over; }
 // SPRINT: how long it lasts; the soldiers' dash rest share meanwhile (npcai.cpp WingDash / FencerMove), the jets' speed.
 inline constexpr unsigned long long kSprintMs=12000;
 inline constexpr float kSprintRestShare=0.2f,kAfterburnerSpeed=1.5f;

@@ -573,6 +573,7 @@ int main() {
               "HOLD FIRE: silent unless hurt within kReturnFireMs");
         Check(kHeliHighShare>1.0f && kJetHighShare>1.0f && kSprintRestShare<1.0f && kSprintRestShare>0.0f && kAfterburnerSpeed>1.0f &&
               kSprintMs>0,"ALTITUDE raises, SPRINT shortens the rests and speeds the jets");
+        Check(JetOver(300.0f,false)==300.0f && JetOver(300.0f,true)==300.0f*kJetHighShare,"ALTITUDE: a jet's height high or low");
         // The params (command_protocol.cpp ValidRequest).
         Check(OrderParamValid(Order::holdFire,0) && OrderParamValid(Order::holdFire,1) && !OrderParamValid(Order::holdFire,2) &&
               OrderParamValid(Order::altitude,kAltitudeHigh) && !OrderParamValid(Order::altitude,7) &&

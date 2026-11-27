@@ -30,6 +30,7 @@ inline constexpr float kSalvoEject=0.15f;   // pylib/vcobjects.py SALVO_EJECT: A
 inline constexpr int kSalvoDropFrames=24;   // pylib/vcobjects.py SALVO_DROP[0]: CP[7][0]
 inline constexpr float kSalvoDropKeep=1.0f;   // pylib/vcobjects.py SALVO_DROP[1]: CP[7][1]
 inline constexpr float kSalvoDropGravity=4.0f;   // pylib/vcobjects.py SALVO_DROP_GRAVITY
+inline constexpr float kSalvoLockCone=1.4f;   // pylib/vcobjects.py SALVO_LOCK_CONE: LockonAngle, rad off the nose
 inline constexpr float kSalvoFan=0.3f;   // pylib/vcobjects.py SALVO_FAN: FireAccuracy
 inline constexpr float kSalvoAccel=0.27f;   // pylib/vcobjects.py SALVO_ACCEL: CP[4]
 inline constexpr float kSalvoTurn=0.1f;   // pylib/vcobjects.py SALVO_TURN: CP[5]

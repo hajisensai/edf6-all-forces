@@ -626,7 +626,7 @@ bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus,const O
         // The Broken Arrow states (mapcmd_logic.h): each its own, the order it works round kept.
         if(c.order==Order::altitude) {
             if(c.param>mapcmd::kAltitudeHigh)return false;
-            j->high=c.param==mapcmd::kAltitudeHigh;
+            j->high=c.param==mapcmd::kAltitudeHigh;j->heightOrdered=true;
             Log("JET v=%p map command: altitude %s",vehicle,j->high ? "high" : "low");
             return true;
         }
@@ -778,7 +778,7 @@ void JetFrame(unsigned char* v) noexcept {
     // Guidance, then the flight its kind flies.
     const float clear=GroundClearance(pos);
     const float base=j->t.target && !j->t.flyer ? j->t.aim[1] : anchor[1];
-    const float height=base+(j->phase==jetphase::Phase::ferry ? kFerryAlt : kind.alt*(j->high ? mapcmd::kJetHighShare : 1.0f));
+    const float height=base+(j->phase==jetphase::Phase::ferry ? kFerryAlt : mapcmd::JetOver(kind.alt,j->high));
     float want[3]={nose[0],0,nose[2]},speed=kind.cruise;
     bool gunsOk=false,missileOk=false;
     Guide(*j,kind,arms,mother,pos,nose,anchor,viewer,lead,height,clear,walled,ms,want,&speed,&gunsOk,&missileOk);
