@@ -817,6 +817,7 @@ EdgeOut EdgeRun(const EdgeCase& c) {
     unsigned char* v=mem.data();
     Jet& j=jets[0];
     j=Jet{};
+    j.m.edgeSeen=true;   // one that has flown out past its edge (start past the line), not one arriving (--entry-suite)
     j.ref=ObjRef{v,ctrl.data()};j.role=c.role;j.mode=Mode::chase;j.drone.slot=-1;
     nowMs=1000;j.bornAt=j.modeAt=j.seen=nowMs;
     float band=0.0f;
@@ -1198,6 +1199,122 @@ int EdgeSuite() {
     return fails ? 1 : 0;
 }
 
+// --entry-suite (CTest jet_entry_suite; the user, 2026-11-27: 「他怎么入场一直在边缘晃悠」): a called jet made off the map
+// (support_entry.h AirRoute: past the ground's edge, inside the physical square) and flown at its mark by the production
+// Wing (Ahead, Guard: SoftEdge, JetSteer), on a big map's ground as the 2026-11-27 log has it (walls +-5100 m, the soft box
+// some 2200-2500 m inside them). Before jet_internal.h Motion::arriving the soft edge took such a jet as one that had
+// flown out past it: "past the soft edge ... back in first" on its first frame, its way held in by 0.7 on every side it
+// was past and its climb levelled; made past two sides (the log's missile rain: x 2573 m, z 918 m past them) no heading
+// met both and it flew round in 5 s circles at the edge for a minute (vc2.log 15:38:54-15:39:47). Each case here flies in
+// from the log's entries (a corner, one side, a shallow one along a side) toward a mark inside: it must be inside its soft
+// box within a straight run's time (and a margin), its heading turned by no more than kEntryTurn on the way, never "back".
+// One more chases a target straight back out from its entry: it is held where it came in (arriving, its arrival box:
+// airbound::Arrive), never further out than kEntryOut past where it was made, and never past the play edge by more than
+// its entry was.
+namespace {
+constexpr float kEntryTurn=0.5f;    // rad (29 deg) its heading may turn in all on its way in (the log's: circles)
+constexpr float kEntryOut=150.0f;   // m past where it was made a jet chasing back out may go
+struct EntryCase { Role role; float x,z,markX,markZ; bool out; };   // role: replaced by each kind in turn
+int EntrySuite() {
+    static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
+    image=fakeImage.data();
+    Put<unsigned char*>(image,0x20B2998,fakeArea);
+    Put<float>(fakeArea,0x3C,1200.0f);
+    config=Config{};config.debug=true;config.bigWorld=6000.0f;
+    groundHalf=5100.0f+area::kVoidMargin;   // the log's walls +-5100 m (soft +-2877 for the interceptor, band 2223)
+    logFile=std::fopen("entry_suite.log","w");
+    boxes.clear();
+    ResetWalls();
+    // The log's entries (vc2.log 15:38:54 the missile rain, 15:40:41 the gun run) and a shallow one; the marks theirs.
+    const EntryCase shapes[]={
+        {Role::interceptor,-5450.0f,3792.0f,3735.0f,-2509.0f,false},
+        {Role::fighter,-5450.0f,1639.0f,1006.0f,-118.0f,false},
+        {Role::strike,-5450.0f,3000.0f,2000.0f,2200.0f,false},
+        {Role::strike,-5450.0f,1639.0f,-9000.0f,1639.0f,true},
+    };
+    int cases=0,fails=0;
+    for(const EntryCase& shape:shapes)for(const Role role:{Role::fighter,Role::interceptor,Role::strike}) {
+        EntryCase c=shape;c.role=role;
+        const Kind& kind=KindOf(c.role);
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+        unsigned char* v=mem.data();
+        Jet& j=jets[0];
+        j=Jet{};
+        j.ref=ObjRef{v,ctrl.data()};j.role=c.role;j.mode=Mode::patrol;j.drone.slot=-1;j.launched=true;
+        nowMs=1000;j.bornAt=j.modeAt=j.seen=nowMs;
+        float band=0.0f;
+        const airbound::Box soft=JetSoftBox(j,&band),hard=PlayBox();
+        const float start[3]={c.x,600.0f,c.z},mark[3]={c.markX,600.0f,c.markZ};
+        float heading[3]={mark[0]-start[0],0.0f,mark[2]-start[2]};
+        Normalize(heading);
+        if(c.out){heading[0]=1.0f;heading[2]=0.0f;}   // made heading in, its target behind it
+        const float right[3]={heading[2],0.0f,-heading[0]};
+        const float mat[16]={right[0],0,right[2],0, 0,1,0,0, heading[0],0,heading[2],0, start[0],start[1],start[2],1};
+        std::memcpy(v+kMatrix,mat,64);
+        std::memcpy(v+kPosition,start,12);
+        Put<float>(v,kHpMax,1000.0f);Put<float>(v,kHp,1000.0f);
+        Put<long>(ctrl.data(),8,1);
+        Put<const void*>(v,kSelfCtrl,ctrl.data());
+        const float s0=kind.attack;
+        for(int i=0;i<3;++i)j.m.vel[i]=heading[i]*s0;
+        const float toBox=-airbound::Depth(soft,start);
+        // A straight run's time to the soft box along its heading (the farther side's), and some for its speed's settling.
+        float run=0.0f;
+        for(int i=0;i<4;++i) {
+            const float g=-airbound::Gap(soft,start,i),in=-(heading[0]*airbound::kNormal[i][0]+heading[2]*airbound::kNormal[i][1]);
+            if(g>0.0f && in>1e-3f)run=std::fmax(run,g/in);
+        }
+        const float allowed=c.out ? 40.0f : run/(s0*0.8f)+5.0f;
+        bool back=false,inside=false;
+        float turned=0.0f,inAt=-1.0f,mostOut=-1e9f,mostHard=-1e9f;
+        float was=std::atan2(heading[2],heading[0]);
+        double clock=1.0;
+        const int frames=static_cast<int>(allowed*60.0f);
+        for(int f=0;f<frames;++f) {
+            clock+=1.0/60.0;
+            nowMs=static_cast<ULONGLONG>(clock*1000.0+0.5);
+            const float* pos=reinterpret_cast<const float*>(v+kPosition);
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            float nose[3]={m[8],m[9],m[10]};
+            if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+            j.seen=nowMs;
+            Sense(j,pos,nowMs);
+            const float clear=GroundClearance(pos);
+            float want[3];
+            Toward(pos,mark,want);
+            Level(pos,want,start[1],want);
+            Wing(j,kind,v,pos,clear,nose,want,kind.attack,kDt,nowMs);
+            HoldOffGround(j,pos,clear,kDt,nowMs);
+            j.m.ready=true;
+            Move(j,v);
+            if(!inside && j.m.edgeBack)back=true;
+            const float now=std::atan2(j.m.vel[2],j.m.vel[0]);
+            float d=now-was;
+            while(d>kPi)d-=2.0f*kPi;
+            while(d< -kPi)d+=2.0f*kPi;
+            if(!inside)turned+=std::fabs(d);
+            was=now;
+            if(!inside && airbound::Inside(soft,pos)){inside=true;inAt=static_cast<float>(clock-1.0);}
+            mostOut=std::fmax(mostOut,start[0]-pos[0]);
+            mostHard=std::fmax(mostHard,-airbound::Depth(hard,pos));
+        }
+        bool ok;
+        if(c.out)ok=mostOut<=kEntryOut && mostHard<=-airbound::Depth(hard,start)+kEntryOut;
+        else ok=inside && turned<=kEntryTurn && !back;
+        fails+=!ok;++cases;
+        std::printf("entry %-11s from (%5.0f,%5.0f) %s (%5.0f,%5.0f): band %4.0f, %5.0f m past its soft box | %s %5.1f s"
+                    " (allowed %4.1f), turned %5.1f deg, %s, most out %6.0f m, past the walls %6.0f m | %s\n",kind.name,c.x,c.z,
+                    c.out ? "chasing out from" : "at the mark",c.markX,c.markZ,band,toBox,inside ? "inside after" : "never inside",
+                    inAt,allowed,turned*180.0f/kPi,back ? "BACK" : "never back",mostOut,mostHard,ok ? "ok" : "FAIL");
+    }
+    std::printf("entry suite: %d cases, %d failed\n",cases,fails);
+    if(logFile)std::fclose(logFile);
+    logFile=nullptr;
+    groundHalf=0.0f;
+    return fails ? 1 : 0;
+}
+}  // namespace
+
 // --withdraw-suite (CTest jet_withdraw_suite): a withdrawing NPC jet (the user, 2026-10-26: 「空中支援不会退场」) flown by the
 // production Away (its way out and its reap) through Wing (a wing) or Hover (a rotor, its goal as jet.cpp Rotor puts it:
 // kHoverLeave on along Away's want), the player (`viewer`) on the ground in the middle of the map or off it, on a stock
@@ -1494,6 +1611,7 @@ int main(int argc,char** argv) {
     bool selftest=false,playerRotors=false,strikeRoom=false,extendFlip=false,wobble=false;
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--withdraw-suite"))return WithdrawSuite();
+    for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--entry-suite"))return EntrySuite();
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--scenario") && a+1<argc)scenario=argv[++a];
         else if(!std::strcmp(argv[a],"--kind") && a+1<argc)kindName=argv[++a];

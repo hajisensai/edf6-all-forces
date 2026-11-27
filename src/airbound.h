@@ -97,6 +97,40 @@ inline bool ClampIn(const Box& b,float* p,float in) noexcept {
     return p[0]!=was[0] || p[2]!=was[1];
 }
 
+// An arrival (the user, 2026-11-27: 「他怎么入场一直在边缘晃悠」): a flyer made past its soft edge (a call's, off the map:
+// support_entry.h AirRoute) has never been inside it, and flying in is its way back in already. Taken as one that flew
+// out past it, it was held in by kBackIn on every side it was past, nearly level, from its first frame: past two sides no
+// heading met both and it flew round in circles at the edge (2026-11-27 log, jet_obstacle_sim --entry-suite). It keeps
+// inside its arrival box instead: `soft` grown to where it was made, kArriveRoom beyond it on each side it was past
+// (ArriveBox), each side drawn in after it as it comes in, never out again (Arrive): it flies in at its own heading,
+// climbing as it likes, and no further out than it came from. Once the box is drawn in to `soft` (it is kArriveRoom
+// inside every side it came over) its arrival is over and the soft edge holds it as any.
+constexpr float kArriveRoom=(kEase+1.0f)*kSlack;   // past KeepIn's easing of a way along the line (kEase kSlack)
+inline Box ArriveBox(const Box& soft,const float* p) noexcept {
+    Box b=soft;
+    for(int i=0;i<2;++i) {
+        const float x=p[i==0 ? 0 : 2];
+        if(x-kArriveRoom<b.lo[i])b.lo[i]=x-kArriveRoom;
+        if(x+kArriveRoom>b.hi[i])b.hi[i]=x+kArriveRoom;
+    }
+    return b;
+}
+// `held` (an arrival box) drawn in after `p`: each side to kArriveRoom past it, never out again nor inside `soft`. True
+// once it is `soft` (the arrival over).
+inline bool Arrive(const Box& soft,Box& held,const float* p) noexcept {
+    bool done=true;
+    for(int i=0;i<2;++i) {
+        const float x=p[i==0 ? 0 : 2];
+        const float lo=x-kArriveRoom,hi=x+kArriveRoom;
+        if(lo>held.lo[i])held.lo[i]=lo;
+        if(held.lo[i]>soft.lo[i])held.lo[i]=soft.lo[i];
+        if(hi<held.hi[i])held.hi[i]=hi;
+        if(held.hi[i]<soft.hi[i])held.hi[i]=soft.hi[i];
+        done=done && held.lo[i]==soft.lo[i] && held.hi[i]==soft.hi[i];
+    }
+    return done;
+}
+
 // m it still goes out (across a line) turning back at radius `radius`, flying at `speed` (horizontal) with `out` of it
 // across the line, after `react` s before the turn bites (the roll into it): the arc's reach r (1 - cos a), a its
 // heading's angle off along the line.
@@ -159,12 +193,18 @@ inline int KeepIn(const Box& soft,const float* pos,const float* vel,float radius
     const float s=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
     bool hard[4]{},outward=false,nearSide=false;
     float least[4]{};
+    // Back in past two sides (a corner) it points in over both, kBackIn of its way in all (along the corner's diagonal
+    // kBackIn / sqrt 2 on each): kBackIn on each was more than any heading has (sin 45 deg = 0.707 against 0.7, a heading
+    // within 1.4 deg of the diagonal), and it turned on round and round there (2026-11-27 log, a jet made past two sides).
+    int backSides=0;
+    for(int i=0;i<4;++i)backSides+=*back && Gap(soft,pos,i)<kBackDepth;
+    const float backIn=backSides>1 ? kBackIn/std::sqrt(static_cast<float>(backSides)) : kBackIn;
     for(int i=0;i<4;++i) {
         const float* n=kNormal[i];
         const float g=Gap(soft,pos,i),out=vel[0]*n[0]+vel[2]*n[1];
         const bool backSide=*back && g<kBackDepth;
         hard[i]=backSide || g<=Excursion(s,out,radius,react)+kSlack;
-        least[i]=backSide ? -kBackIn : -kTurnIn;
+        least[i]=backSide ? -backIn : -kTurnIn;
         // Turning back already, it keeps turning until it points in (kTurnIn) wherever its turn could still take it
         // out: dropping the turn as the reach shrank (heading along the line, it is nothing) and picking it up again
         // the next frame flipped the bank each frame, and the lift between the two banks looped the jet up over the

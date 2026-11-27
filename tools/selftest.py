@@ -7750,6 +7750,9 @@ def soft_edge_wired() -> None:
     cm = src('CMakeLists.txt')
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)' in cm
     assert 'add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite' in cm and 'airbound_check)' in cm
+    # A call's jet made off the map arrives in a box drawn in after it, not turned back at the edge (--entry-suite).
+    assert 'j.m.arriving=!airbound::Inside(own,pos);' in soft_edge and 'airbound::Arrive(own,j.m.arrive,pos)' in soft_edge
+    assert 'add_test(NAME jet_entry_suite COMMAND jet_obstacle_sim --entry-suite' in cm
     assert '#include "../src/airbound.h"' in src('tools/airbound_check.cpp')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):

@@ -1434,6 +1434,10 @@ add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE
 # The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
 # edge (jet_obstacle_sim --edge-suite).
 add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# A called jet made past that soft edge (off the map) arrives: it flies in at its own heading, held by an arrival box drawn
+# in after it, not turned "back in first" round and round at the edge (jet_obstacle_sim --entry-suite; the user,
+# 2026-11-27: 「他怎么入场一直在边缘晃悠」).
+add_test(NAME jet_entry_suite COMMAND jet_obstacle_sim --entry-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
 # A withdrawing jet (fuel, ammo, damage, a sortie's pass made) is not held by that soft edge: it leaves the map and is
 # reaped out of sight (jet_obstacle_sim --withdraw-suite; the user, 2026-10-26: 「空中支援不会退场」).
 add_test(NAME jet_withdraw_suite COMMAND jet_obstacle_sim --withdraw-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")

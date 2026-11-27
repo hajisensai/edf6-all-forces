@@ -4357,6 +4357,18 @@
    ],
    "scripts": []
   },
+  "jet_entry_suite": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "jet_escort_check": {
    "labels": [
     "plugin-air",

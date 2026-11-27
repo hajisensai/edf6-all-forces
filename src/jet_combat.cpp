@@ -126,7 +126,7 @@ bool Charges(const Jet& j) noexcept {
 // anything out past that (the one it chased out there too, the user 2026-10-06: "过了这个小边界会往回走"); else anything out
 // past the play area's walls (mapbounds.h PlayBox: the ground's edge), where it never goes.
 bool PastEdge(const Jet& j,const float* p) noexcept {
-    return !airbound::Inside(j.m.edgeBack ? JetSoftBox(j) : PlayBox(),p);
+    return !airbound::Inside(j.m.edgeBack ? JetHeldBox(j) : PlayBox(),p);
 }
 
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
@@ -627,7 +627,7 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
         std::acos(Clamp(At<float>(v,kMatrix+0x14)/std::sqrt(1.0f-At<float>(v,kMatrix+0x24)*At<float>(v,kMatrix+0x24)+1e-6f),-1.0f,1.0f))*180.0f/kPi,
         j.t.target,j.t.flyer ? "(air)" : "",d,j.t.target ? aim[1] : 0.0f,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile],pos[0],pos[2],
-        airbound::Depth(JetSoftBox(j),pos),j.m.edgeBack ? " back" : "");
+        airbound::Depth(JetSoftBox(j),pos),j.m.arriving ? j.m.edgeBack ? " arriving back" : " arriving" : j.m.edgeBack ? " back" : "");
 }
 
 // Each weapon's barrel against the nose (the guns must point where the nose does): true once there were weapons to log.
