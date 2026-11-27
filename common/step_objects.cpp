@@ -132,6 +132,7 @@ std::uint64_t Period() noexcept {
     return period.load(std::memory_order_acquire);
 }
 bool Trusted(const void* object) noexcept { return Lookup(object)!=nullptr; }
+const void* ControlOf(const void* object) noexcept { return Lookup(object); }
 bool Has(const void* object) noexcept {
     const void* ctrl=Lookup(object);
     bool yes=false;

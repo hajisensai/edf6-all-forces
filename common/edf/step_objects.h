@@ -22,6 +22,7 @@
 // (Close, crew::SceneOver), the System pointer or its scene (+0x68) differs from the copy's, or the list shrank below
 // the copy's count (a teardown that bypassed the release). Game thread only.
 #pragma once
+#include "edf/memory.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -50,6 +51,13 @@ std::uint64_t Period() noexcept;
 bool Trusted(const void* object) noexcept;
 // Trusted, its control block's use count > 0 and not Deleted (+0x18 bit 2): the object is in the scene.
 bool Has(const void* object) noexcept;
+// The control block the System's list holds `object` by, when Trusted, else null: a weak reference to it (a seat's
+// rider, a self pointer) is to this object when its control block is this one (an object since freed at the address
+// is not), and that block is readable until the period ends (the list's strong reference keeps it).
+const void* ControlOf(const void* object) noexcept;
+// Trusted, else edf::Readable(object, size) as before. A Trusted object is allocated, not `size` bytes long: the
+// caller reads members its class has (or under __try).
+inline bool Reads(const void* object,std::size_t size) noexcept { return Trusted(object) || edf::Readable(object,size); }
 // Game-thread counts since the last take (then zeroed): asks found in / missing from the copy, copies, objects copied.
 struct Stats { unsigned long long yes,no,copies,copied; };
 Stats TakeStats() noexcept;
