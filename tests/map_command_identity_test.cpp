@@ -91,7 +91,6 @@ bool MapCommandNetworkReady() noexcept {return true;}
 void SyncMapCommandWays(const MapCommandWays*,unsigned) noexcept {}
 unsigned ReadMapCommandWays(const ObjRef&,Command*,float (*)[3],unsigned) noexcept {return 0;}
 bool SendMapPing(const ObjRef&,const float*,unsigned) noexcept {return false;}
-bool TakeMapPing(MapPingHeard*) noexcept {return false;}
 bool SupportWithdrawVehicle(const void*) noexcept {return false;}
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}

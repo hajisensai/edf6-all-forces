@@ -418,6 +418,7 @@ HUDTEXT(cmdSubAll,L"SUB-SELECTION: ALL SELECTED",L"子选择：全部选中单�
 HUDTEXT(cmdSubKind,L"SUB-SELECTION: %hs (%d)",L"子选择：%hs（%d）",L"子選擇：%hs（%d）",L"サブ選択：%hs（%d）")
 HUDTEXT(cmdSubShown,L"ORDERS TO: %ls",L"指令对象：%ls",L"指令對象：%ls",L"命令対象：%ls")
 HUDTEXT(cmdPing,L"PING %d",L"信号 %d",L"信號 %d",L"ピン %d")
+HUDTEXT(cmdPingRange,L"PING %d  %.0f m",L"信号 %d  %.0f m",L"信號 %d  %.0f m",L"ピン %d  %.0f m")
 HUDTEXT(legendPaths,L"ORDER PATHS:",L"指令路线：",L"指令路線：",L"命令の経路：")
 // The transports (transport.cpp; mapcmd_logic.h Order::withdraw).
 HUDTEXT(orderWithdraw,L"SEND TRANSPORT AWAY",L"载具撤离",L"載具撤離",L"輸送車両撤収")

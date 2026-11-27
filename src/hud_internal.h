@@ -280,7 +280,7 @@ inline bool worldMapView=false;           // this frame is the map's (MapScreen)
 inline screenview::Lens worldLens{};
 constexpr std::uint64_t kGroundKey=0;
 enum WorldKind : unsigned { kWorldQMark=1,kWorldWarning,kWorldEntrance,kWorldCommandHint,kWorldPing,kWorldMapMarker,kWorldMapTarget,
-                            kWorldMapHover,kWorldMapUnit };
+                            kWorldMapHover,kWorldMapUnit,kWorldMapSignal };
 std::uint64_t WorldKey(WorldKind kind,std::uint64_t of) noexcept;
 void ScreenShifted(const float* vp,float width,float height,const float* anchor,float dx,float dy,float* out) noexcept;
 void WorldLabel(Text* text,Line* lines,int* at,const float* vp,float width,float height,const float* anchor,std::uint64_t key,
@@ -450,6 +450,8 @@ const wchar_t* EnemyHealthText(const enemy_control::Snapshot& snapshot,wchar_t* 
 const wchar_t* EnemyKeyLabel(unsigned index,bool pad,wchar_t* out,std::size_t size) noexcept;
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
 void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
+// The M map's signals (F1-F4, map_signal.h) in the player's view, the map shut (hud_map.cpp).
+void MapSignalHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
 void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
 void FormationBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept;
 void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept;

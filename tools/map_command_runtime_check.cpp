@@ -133,13 +133,11 @@ unsigned ReadMapCommandWays(const ObjRef& unit,Command* current,float (*at)[3],u
     for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=hostWaysAt[i][c];
     return n;
 }
-// Kind::ping (command_net.cpp, F1-F4): what this machine sent; one heard from the room to hand the map.
+// Kind::ping (command_net.cpp, F1-F4): what this machine sent.
 unsigned pingsSent=0,pingKind=99;float pingAt[3]{};
 bool SendMapPing(const ObjRef&,const float* at,unsigned kind) noexcept {
     ++pingsSent;pingKind=kind;for(int c=0;c<3;++c)pingAt[c]=at[c];return true;
 }
-bool pingWaiting=false;MapPingHeard pingHeard{};
-bool TakeMapPing(MapPingHeard* out) noexcept { if(!pingWaiting)return false;*out=pingHeard;pingWaiting=false;return true; }
 // support_dispatch.cpp: WITHDRAW of an aircraft a call brought.
 const void* withdrawn=nullptr;
 bool SupportWithdrawVehicle(const void* v) noexcept { withdrawn=v;return true; }

@@ -73,7 +73,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/live_set.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h); HOLD FIRE's table every firing module asks
 # (src/unit_hold_fire.cpp: the tests of those modules link it as they are).
-target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp src/unit_hold_fire.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp src/unit_hold_fire.cpp src/map_signal.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
 # The map's support pt (src/support_points.cpp, rules in src/support_points_logic.h; tests/support_points_test.cpp) and the
 # supports' warnings on the ground (src/support_warning.cpp, src/support_warning_logic.h; tests/support_warning_test.cpp).
@@ -1607,8 +1607,8 @@ foreach(check IN ITEMS heli_command_test jet_command_test bullet_pass_test rocke
     add_test(NAME ${check} COMMAND ${check})
 endforeach()
 target_sources(jet_command_test PRIVATE src/jet_flight.cpp)
-target_sources(map_command_runtime_check PRIVATE src/command_unit.cpp)
-target_sources(map_command_identity_test PRIVATE src/command_unit.cpp)
+target_sources(map_command_runtime_check PRIVATE src/command_unit.cpp src/map_signal.cpp)
+target_sources(map_command_identity_test PRIVATE src/command_unit.cpp src/map_signal.cpp)
 target_sources(npc_post_test PRIVATE src/command_unit.cpp)
 add_executable(npc_core_check EXCLUDE_FROM_ALL tools/npc_core_check.cpp src/ground_navigation.cpp src/live_set.cpp)
 target_include_directories(npc_core_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
@@ -2171,7 +2171,8 @@ target_link_options(payload_snapshot_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks payload_snapshot_test)
 add_test(NAME payload_snapshot COMMAND payload_snapshot_test)
 add_executable(command_native_dispatch_test tests/command_native_dispatch_test.cpp tests/command_native_id_reader.cpp
-    src/command_net.cpp src/command_identity.cpp src/net_object_resolve.cpp src/command_protocol.cpp src/ground_navigation.cpp src/live_set.cpp)
+    src/command_net.cpp src/command_identity.cpp src/net_object_resolve.cpp src/command_protocol.cpp src/ground_navigation.cpp src/live_set.cpp
+    src/map_signal.cpp)
 target_link_libraries(command_native_dispatch_test PRIVATE edf6common user32)
 target_include_directories(command_native_dispatch_test PRIVATE src common third_party/EDFModLoader)
 target_compile_options(command_native_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
@@ -2562,6 +2563,12 @@ add_executable(march_pace_test EXCLUDE_FROM_ALL tests/march_pace_test.cpp)
 target_compile_options(march_pace_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks march_pace_test)
 add_test(NAME march_pace COMMAND march_pace_test)
+# The M map's signals kept for the map and the view (src/map_signal.h): their order, their time, their fade.
+add_executable(map_signal_test EXCLUDE_FROM_ALL tests/map_signal_test.cpp src/map_signal.cpp)
+target_include_directories(map_signal_test PRIVATE src)
+target_compile_options(map_signal_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks map_signal_test)
+add_test(NAME map_signal COMMAND map_signal_test)
 add_executable(drive_gear_test EXCLUDE_FROM_ALL tests/drive_gear_test.cpp)
 target_compile_options(drive_gear_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks drive_gear_test)

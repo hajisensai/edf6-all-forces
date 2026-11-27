@@ -793,6 +793,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // The hidden stock armor gauge's numbers for a vehicle whose HUD is no StockBlock (that one has them in it).
         if(fresh && snap.armor && !stockHud && !screensOn)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
         QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        MapSignalHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         SupportWarnHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);

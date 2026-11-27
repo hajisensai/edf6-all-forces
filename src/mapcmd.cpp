@@ -161,8 +161,6 @@ struct Game {
     bool rightLine=false;float lineFrom[3]{},lineTo[3]{};
     // Tab's sub-selection (mapcmd_logic.h NextSub): the kind the orders go to, "" every selected unit (Active).
     char subKind[24]{};
-    // The pings shown (F1-F4 here, the room's heard: command protocol v11), oldest first.
-    MapCommandReadout::Ping ping[MapCommandReadout::kPings]{};int pings=0;
     enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,loadout,stats,place,pvp,enemy,legend };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; PvpStatus pvp{}; enemy_control::Snapshot enemy{}; };
     UiHit uiPress{};
@@ -1382,11 +1380,6 @@ void StepSub(Game& g) noexcept {
     }
     Log("MAPCMD Tab: the orders to %s (%d kinds selected)",g.subKind[0] ? g.subKind : "every selected unit",kindCount);
 }
-// A ping on the map (F1-F4; this machine's or the room's): kept kPingMs, the oldest giving way.
-void AddPing(Game& g,const float* at,unsigned kind,bool mine) noexcept {
-    if(g.pings==MapCommandReadout::kPings){std::memmove(g.ping,g.ping+1,sizeof(g.ping[0])*(MapCommandReadout::kPings-1));--g.pings;}
-    auto& p=g.ping[g.pings++];std::memcpy(p.at,at,12);p.kind=kind;p.at_ms=GetTickCount64();p.mine=mine;
-}
 
 // A group's members now (mapcmd_logic.h GroupKey): each unit by its UnitRef, a squad whose top died found again under
 // the top of any member alive (Resolve: on a guest too); a unit with nothing of it alive is dropped; one only out of the
@@ -1647,8 +1640,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.dragLine=pointer && pointOk && g.rpressing && g.rStartOk && g.rmoved>=kClickMove;
     std::memcpy(r.lineFrom,g.rStart,12);std::memcpy(r.lineTo,point,12);
     r.paced=g.marchPace==1;
-    r.pings=0;
-    for(int i=0;i<g.pings;++i)if(GetTickCount64()-g.ping[i].at_ms<MapCommandReadout::kPingMs)r.ping[r.pings++]=g.ping[i];
+    r.pings=MapSignalViews(r.ping,MapCommandReadout::kPings);   // this machine's and the room's (map_signal.h)
     enemyReadout=g.enemy;
     readoutAt=stepfresh::Now();
     ReleaseSRWLockExclusive(&lock);
@@ -1971,13 +1963,13 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     g.was=rawKeys;
     float point[3]{};
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
-    // F1-F4: a ping at the pointer's ground point, on this map and (online) every member's.
+    // F1-F4: a ping at the pointer's ground point, on this map and the view (map_signal.h) and (online) every member's;
+    // theirs come in as they are received (command_net.cpp ReceiveCommandNetwork), the map open or not.
     for(unsigned i=0;i<4;++i)if(pingKey[i] && pointOk) {
-        AddPing(g,point,i,true);
+        AddMapSignal(point,i,true);
         const bool sent=SendMapPing(g.requester,point,i);
         Log("MAPCMD ping %u at (%.0f,%.0f,%.0f)%s",i+1,point[0],point[1],point[2],sent ? ", sent to the room" : "");
     }
-    for(MapPingHeard heard{};TakeMapPing(&heard);)AddPing(g,heard.at,heard.kind,false);
     const bool allowed=Cfg().enabled;
     // A ground run's line (sortie_plan.h RunFromDrag): from its press's point (the pad's A, or a press with no ground
     // point: the pointer's) toward where the pointer is, at least as long as its jets need (SupportRunLeast); a plain
@@ -2119,6 +2111,7 @@ void ResetMapCommands() noexcept {
     npcmark::Assign(game.enemyCandidate,{});
     static const Game kFresh{};   // the state is large (its UnitRefs): copied from here, no temporary on the stack
     game=kFresh;
+    ResetMapSignals();
     boxingNow.store(false);pointerCaptured.store(false);placeHoldsPad.store(false);armedHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);enemyHoldsPad.store(false);
     AcquireSRWLockExclusive(&lock);
     readoutAt=0;

@@ -1824,6 +1824,15 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
     MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,window);
 }
 
+// A map signal's colour (F1-F4: amber, white, green, red) at `now`, faded as it runs out
+// (map_signal.h Alpha), into `out`.
+const float* SignalColour(const mapsignal::Signal& p,std::uint64_t now,float* out) noexcept {
+    static const float* const kSignalColour[mapsignal::kKinds]={kAmber,kWhite,kGreen,kRed};
+    const float* base=kSignalColour[p.kind%mapsignal::kKinds];
+    const float a=mapsignal::Alpha(now-p.at_ms);
+    out[0]=base[0];out[1]=base[1];out[2]=base[2];out[3]=base[3]*a;
+    return out;
+}
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c)){
@@ -1868,15 +1877,16 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             }
         }
     }
-    // The pings (F1-F4, this machine's and the room's): rings opening out on the point while they last, its number.
+    // The pings (F1-F4, this machine's and the room's): rings opening out on the point while they last (fading over
+    // their last part, map_signal.h Alpha, as the view's MapSignalHud), its number.
     {
-        static const float* const kPingColour[4]={kAmber,kWhite,kGreen,kRed};
         const std::uint64_t now=GetTickCount64();
+        static float faded[MapCommandReadout::kPings][4];   // a Line keeps a pointer to its colour until DrawAll
         for(int i=0;i<c.pings && i<MapCommandReadout::kPings;++i) {
             const auto& p=c.ping[i];
             float px,py,pd;
             if(!Project(vp,p.at,width,height,&px,&py,&pd))continue;
-            const float* colour=kPingColour[p.kind&3u];
+            const float* colour=SignalColour(p,now,faded[i]);
             const float phase=static_cast<float>((now-p.at_ms)%1000u)/1000.0f;
             Arc(drawer,ctx,px,py,(8.0f+22.0f*phase)*s,0.0f,kTurn,2.5f*s,20,colour);
             Arc(drawer,ctx,px,py,6.0f*s,0.0f,kTurn,2.0f*s,14,colour);
@@ -2143,6 +2153,60 @@ void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
         else if(m.name[0])WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,L"%ls %.0f m",m.name,d>=0.0f ? d : 0.0f);
         else if(m.slot>=0)WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkPlayer),m.slot+1,d>=0.0f ? d : 0.0f);
         else WorldLabel(text,lines,at,vp,width,height,m.at,key,0.0f,ly,1,kLineScale*0.7f,tint,Tr(Tx::qmarkAlly),d>=0.0f ? d : 0.0f);
+    }
+}
+
+// The M map's signals in the view (the user, 2026-11-27: 「m里面的新号在世界里面应该也能看见」): every one this machine
+// and the room made (map_signal.h, F1-F4) where it was made, the map shut, in its F-key's colour and fading as it runs
+// out: rings opening out on its ground point, PING n and its distance over it; one off the screen (or behind the
+// camera) an arrow at the screen's edge toward it with its number and distance, so a teammate's call is found at once.
+void MapSignalHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    mapsignal::Signal v[mapsignal::kKept];
+    const int n=MapSignalViews(v,mapsignal::kKept);
+    if(n<=0)return;
+    float eye[3],dir[3];
+    const bool cam=CameraRay(eye,dir);
+    const std::uint64_t now=GetTickCount64();
+    static float colours[mapsignal::kKept][4];   // a Line keeps a pointer to its colour until DrawAll
+    for(int i=0;i<n;++i) {
+        const mapsignal::Signal& p=v[i];
+        const float* colour=SignalColour(p,now,colours[i]);
+        if(!(colour[3]>0.0f))continue;
+        const float d=cam ? vec::Dist(eye,p.at) : 0.0f;
+        const int number=static_cast<int>(p.kind)+1;
+        float x,y,depth;
+        if(Project(vp,p.at,width,height,&x,&y,&depth)) {
+            const float phase=static_cast<float>((now-p.at_ms)%1000u)/1000.0f;
+            Arc(drawer,ctx,x,y,(10.0f+26.0f*phase)*s,0.0f,kTurn,2.5f*s,24,colour);
+            Arc(drawer,ctx,x,y,7.0f*s,0.0f,kTurn,2.5f*s,16,colour);
+            // A pin over the point: a stem up from the inner ring to a downward arrow its words sit on.
+            Seg(drawer,ctx,x,y-7.0f*s,x,y-30.0f*s,2.0f*s,colour);
+            Tri(drawer,ctx,x,y-40.0f*s,x,y-30.0f*s,6.0f*s,colour);
+            WorldLabel(text,lines,at,vp,width,height,p.at,WorldKey(kWorldMapSignal,p.at_ms*4u+p.kind),0.0f,-54.0f*s,1,
+                       kLineScale*0.7f,colour,Tr(Tx::cmdPingRange),number,d);
+            continue;
+        }
+        if(FrameProject(vp,p.at,width,height,&x,&y,&depth))continue;   // on the screen but outside a scope's lens: not ours to point at
+        // Off the screen: its way from the screen's centre (in front: as projected; behind: the other way), the
+        // arrow where that way meets the screen's edge less a margin.
+        float c[4];
+        screenview::Clip(vp,p.at,1.0f,c);
+        const float w=std::fabs(c[3])>1e-6f ? c[3] : 1e-6f;
+        float nx=c[0]/w,ny=c[1]/w;
+        if(c[3]<0.0f){nx=-nx;ny=-ny;}
+        const float most=(std::max)(std::fabs(nx),std::fabs(ny));
+        if(!(most>1e-6f) || !std::isfinite(most))continue;
+        constexpr float kEdge=0.9f;
+        nx*=kEdge/most;ny*=kEdge/most;
+        float tx,ty,bx,by;
+        screenview::Pixel(nx,ny,width,height,&tx,&ty);
+        screenview::Pixel(nx*0.94f,ny*0.94f,width,height,&bx,&by);
+        const float dx=tx-bx,dy=ty-by,l=std::sqrt(dx*dx+dy*dy);
+        if(!(l>1e-3f))continue;
+        const float ux=dx/l,uy=dy/l;
+        Tri(drawer,ctx,tx-ux*16.0f*s,ty-uy*16.0f*s,tx,ty,9.0f*s,colour);
+        // Its words inward of the arrow (away from the edge it points past).
+        Label(text,lines,at,tx-ux*40.0f*s,ty-uy*40.0f*s-8.0f*s,1,kLineScale*0.65f,colour,Tr(Tx::cmdPingRange),number,d);
     }
 }
 

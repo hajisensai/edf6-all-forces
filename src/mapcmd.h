@@ -9,6 +9,7 @@
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "map_signal.h"
 #include "mapcmd_cue.h"
 #include "npc_command.h"
 #include "range_place.h"
@@ -259,10 +260,11 @@ struct MapCommandReadout {
     // The selection's switches as the card lights them: HOLD FIRE on, flying high (any of the active units), the paced march.
     bool holdFireOn=false,highOn=false,paced=false;
     mapcue::Altitudes altitudes{};   // the active selection's aircraft by altitude (the ALTITUDE button's word and tip)
-    // The pings (F1-F4; command protocol v11 Kind::ping): this machine's and the room's, each shown kPingMs.
-    struct Ping { float at[3]; unsigned kind; std::uint64_t at_ms; bool mine; };
-    static constexpr int kPings=8;
-    static constexpr std::uint64_t kPingMs=6000;
+    // The pings (F1-F4; command protocol v11 Kind::ping): this machine's and the room's, each shown kPingMs
+    // (map_signal.h: the one list the view shows too).
+    using Ping=mapsignal::Signal;
+    static constexpr int kPings=mapsignal::kKept;
+    static constexpr std::uint64_t kPingMs=mapsignal::kShowMs;
     int pings=0;
     Ping ping[kPings]{};
 };
