@@ -13,6 +13,7 @@ std::atomic<const void* const*> global{nullptr};
 std::atomic<std::uint64_t> period{0};      // 0: no period yet
 std::atomic<bool> open{false};             // a frame's release seen and no Close since
 std::atomic<DWORD> gameThread{0};
+std::atomic<int> releasing{0};           // inside a release or a teardown: its objects are going
 
 // The copy (game thread only): made for `copiedFor`, of the System `system` with its scene `scene`, `count` objects.
 edf::PtrIndex index;
@@ -105,10 +106,16 @@ const void* Lookup(const void* object) noexcept {
 
 void Install(const void* const* systemGlobal) noexcept {
     open.store(false);
+    releasing.store(0);
     global.store(systemGlobal,std::memory_order_release);
     period.fetch_add(1);
 }
+void Releasing() noexcept {
+    releasing.fetch_add(1);
+    period.fetch_add(1);
+}
 void Released(bool frame) noexcept {
+    if(releasing.load()>0)releasing.fetch_sub(1);
     if(frame) {
         gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
         open.store(true);
@@ -120,7 +127,7 @@ void Close() noexcept {
     period.fetch_add(1);
 }
 std::uint64_t Period() noexcept {
-    if(!global.load(std::memory_order_acquire) || !open.load(std::memory_order_acquire) ||
+    if(!global.load(std::memory_order_acquire) || !open.load(std::memory_order_acquire) || releasing.load()>0 ||
        GetCurrentThreadId()!=gameThread.load(std::memory_order_relaxed))return 0;
     return period.load(std::memory_order_acquire);
 }

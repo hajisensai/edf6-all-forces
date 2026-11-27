@@ -9,10 +9,11 @@
 //     Each list is changed under the System's CRITICAL_SECTION at +0x308.
 //   - The strong references of +0x3D0 / +0x3C0 are dropped only by 0x1197680 (the release, called at 0x1198F71 once a
 //     frame before the tick loop, and by the flush 0x11959E0 at 0x11959F8 and 0x1196A0D) and by the scene teardown
-//     0x11956C0 (clears the lists). Not by the table cleaning 0x1195F20 (it only Deletes and syncs raw tables).
+//     0x11956C0 (clears the lists; 25 call sites, the scene's state changes). Not by the table cleaning 0x1195F20 (it only Deletes and syncs raw tables).
 //   - So from one release to the next, an object found in the list is allocated: its control block's use count > 0 and its
 //     memory reads. It may be Deleted meanwhile (+0x18 bit 2, 0x118A273): Trusted still says yes (readable), Has says no.
-// A period starts when the release returns (VehicleCrew hooks its three calls: src/step_objects_hook.cpp). The list is
+// A period starts when the release returns (VehicleCrew hooks its three calls: src/step_objects_hook.cpp); nothing is
+// trusted while a release or a teardown runs, and a teardown closes (the next frame's release reopens). The list is
 // copied the first time it is asked in the period (TryEnterCriticalSection: never waits on another thread's hold; a
 // held lock leaves the period without a copy, every answer false). Objects added after the copy are not in it.
 //
@@ -34,6 +35,9 @@ constexpr std::size_t kCtrlUses=0x8;
 
 // Where the System pointer is (EDF+0x20B2958). Before any period. Null uninstalls (every answer false).
 void Install(const void* const* systemGlobal) noexcept;
+// The release (0x1197680) or the teardown (0x11956C0) starts: its objects are freed meanwhile (their destructors may run
+// plugin code), nothing is trusted until Released.
+void Releasing() noexcept;
 // The release (0x1197680) returned: a new period. `frame`: the frame's own call (0x1198F71), whose thread becomes the
 // game thread; the others (the flush) only end the period.
 void Released(bool frame) noexcept;

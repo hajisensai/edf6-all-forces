@@ -2483,6 +2483,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/sight_contacts.cpp src/pvp.cpp src/pv
 target_sources(EDF6VehicleCrew PRIVATE src/havok_props.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/havok_mt.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/aiworld_capacity.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/step_objects_hook.cpp)
 add_executable(debug_spawn_net_test EXCLUDE_FROM_ALL tests/debug_spawn_net_test.cpp src/support_protocol.cpp)
 target_include_directories(debug_spawn_net_test PRIVATE src)
 target_compile_options(debug_spawn_net_test PRIVATE /W4 /WX /utf-8 /permissive-)

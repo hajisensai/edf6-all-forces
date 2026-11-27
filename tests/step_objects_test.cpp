@@ -113,6 +113,16 @@ int main() {
     Frame();
     Check(stepobj::Has(a.bytes),"the next frame's release reopens");
 
+    // While a release or a teardown runs: nothing (its objects' destructors may ask).
+    stepobj::Releasing();
+    Check(!stepobj::Has(a.bytes) && !stepobj::Period(),"inside a release: nothing");
+    Frame();
+    Check(stepobj::Has(a.bytes),"after it: yes");
+    stepobj::Releasing();stepobj::Released(false);stepobj::Close();   // the teardown hook's order
+    Check(!stepobj::Has(a.bytes),"after a teardown: nothing");
+    Frame();
+    Check(stepobj::Has(a.bytes),"the next frame's release reopens after a teardown");
+
     // A flush's release ends the period too.
     const auto p2=stepobj::Period();
     stepobj::Released(false);

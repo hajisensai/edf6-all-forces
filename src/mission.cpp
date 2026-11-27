@@ -21,6 +21,7 @@
 #include "floatgun.h"
 #include "firstperson.h"
 #include "frame_rate_objects.h"
+#include "edf/step_objects.h"
 #include "mission_watch.h"
 #include "transport.h"
 #include "turretaim.h"
@@ -120,6 +121,7 @@ std::uintptr_t __fastcall ReleaseGroupHook(std::uintptr_t manager,std::uintptr_t
     if(static_cast<std::uint32_t>(group)==kSceneGroup) {
         SceneOver();
         frameobjects::SceneOver();   // the unlimited frame rate's weak counts on the scene's objects (frame_rate_objects.h)
+        stepobj::Close();            // nothing of the scene's object lists trusted until the next frame's release
     }
     return reinterpret_cast<ReleaseGroupFn>(image+kReleaseGroup)(manager,group);
 }
