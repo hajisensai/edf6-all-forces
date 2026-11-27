@@ -76,8 +76,10 @@ jobs:
         run: |
           python tools/gen_calls.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          git diff --exit-code -- src/calls.inc
-          if ($LASTEXITCODE) { Write-Error 'src/calls.inc is stale: run python tools/gen_calls.py and commit it'; exit 1 }
+          git diff --exit-code -- src/calls.inc src/sortie_pass.inc src/barrage_kind.inc
+          if ($LASTEXITCODE) { Write-Error 'src/calls.inc / sortie_pass.inc / barrage_kind.inc is stale: run python tools/gen_calls.py and commit it'; exit 1 }
+          python tools/gen_config.py --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python tools/gen_stores.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           git diff --exit-code -- src/stores.inc

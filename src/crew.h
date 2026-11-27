@@ -451,8 +451,7 @@ bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
 // once; the sea rescue too (support_call.h SupportRescueAt). Nothing makes one with an empty or dummy seat.
 // A sortie call's pass (docs/plan-2026-10-25-strikes.md §1.2; tools/calls.py SORTIE_PASSES after `none`): its aircraft make
 // one pass at the mark and leave the map (jets: jet_sortie.cpp; helicopters: heli.cpp HeliSortie).
-enum class SortiePass : std::uint8_t { none, gunRun, missilePass, carpet, popUp, missileRain, gunshipLap, heliStrafe, heliHunter,
-                                       heliCircle };
+#include "sortie_pass.inc"   // enum class SortiePass (tools/gen_calls.py)
 enum class HeliBody { brute410, eros506, medic410, transport410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic); transport410:
                                                                       // EDF6VC_HELI_TRANSPORT (transport.cpp)
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb

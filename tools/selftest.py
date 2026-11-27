@@ -2013,11 +2013,8 @@ def barrage_copies_agree() -> None:
     hook at load) and the install chain carries its files (ledger, build cache, installer, release); the offline check is
     built. With the game: make_barrage builds and passes its checks."""
     import make_barrage
-    plan = src('src/barrage_plan.h')
-    m = re.search(r'enum class Kind : std::uint8_t \{ ([a-z, ]+), count \};', plan)
-    assert m and tuple(x.strip() for x in m.group(1).split(',')) == calls.BARRAGE_KINDS, m and m.group(1)
-    names = re.search(r'kKindNames\[kKinds\]=\{([^}]*)\}', plan, re.S)
-    assert names and tuple(re.findall(r'"([a-z]+)"', names.group(1))) == calls.BARRAGE_KINDS, names
+    # The kinds' enum and names are tools/gen_calls.py's (src/barrage_kind.inc; gen --check keeps it current).
+    assert '#include "barrage_kind.inc"' in src('src/barrage_plan.h')
     barrages = [c for c in calls.CALLS if c.brings == 'barrage']
     assert sorted(c.barrage for c in barrages) == sorted(calls.BARRAGE_KINDS), 'a call for each barrage kind'
     assert all(cw.template_of(c) == cw.TEMPLATE for c in barrages)
@@ -2056,8 +2053,8 @@ def sortie_copies_agree() -> None:
     and label (tools/support_config.py), the plugin wired through (the spec, the activation of jets and helis, the guidance, the
     bombs, the second waves' queue, tick and reset), the offline check built."""
     crew_h = src('src/crew.h')
-    m = re.search(r'enum class SortiePass : std::uint8_t \{ ([A-Za-z, \n]+) \};', crew_h)
-    assert m and tuple(x.strip() for x in m.group(1).split(',')) == ('none',) + calls.SORTIE_PASSES, m and m.group(1)
+    # The enum is tools/gen_calls.py's (src/sortie_pass.inc; gen --check keeps it current).
+    assert '#include "sortie_pass.inc"' in crew_h
     plan = src('src/sortie_plan.h')
     assert 'struct Line' in plan and 'struct Lap' in plan
     import support_config

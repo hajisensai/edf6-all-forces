@@ -58,7 +58,8 @@ BUSY = 3   # exit code: this worktree's check is already queued or running
 
 # (a generator's command line, the files it rewrites that must then be unchanged in git; None: it checks itself)
 GENERATED = [
-    (['tools/gen_calls.py'], ['src/calls.inc']),
+    (['tools/gen_calls.py'], ['src/calls.inc', 'src/sortie_pass.inc', 'src/barrage_kind.inc']),
+    (['tools/gen_config.py', '--check'], None),
     (['tools/gen_stores.py'], ['src/stores.inc']),
     (['tools/gen_cockpit_fields.py', '--check'], None),
     (['tools/gen_spawn_catalog.py', '--check'], None),
