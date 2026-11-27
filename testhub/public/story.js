@@ -230,9 +230,9 @@ function stepZone(book, step, mine, draftHere) {
   const zone = h('div', { class: 'stStep' + (mine.length || draftHere ? '' : ' empty') },
     step ? h('div', { class: 'stStepHead' }, h('span', { class: 'stStepN' }, stepOf.get(`${book}/${step.id}`)?.n ?? ''), h('b', {}, step.title),
       step.tag ? h('span', { class: 'olTag' }, step.tag) : null, h('span', { class: 'muted' }, mine.length ? `${mine.length} 关` : '还没有关卡'),
-      h('a', { class: 'small', href: `/outline.html?group=${encodeURIComponent(group ?? '')}&book=${book}#step-${step.id}` }, '看大纲')) : null,
-    list,
-    state.editable && step ? h('button', { type: 'button', class: 'btn ghost small stAddHere', disabled: busy, onclick: () => openNew({ book, step: step.id }) }, '＋ 写这一步的关卡') : null);
+      h('a', { class: 'small', href: `/outline.html?group=${encodeURIComponent(group ?? '')}&book=${book}#step-${step.id}` }, '看大纲'),
+      state.editable ? h('button', { type: 'button', class: 'linkish small', disabled: busy, onclick: () => openNew({ book, step: step.id }) }, '＋ 写关卡') : null) : null,
+    list);
   if (state.editable) {
     zone.addEventListener('dragover', (e) => { if (dragId != null) { e.preventDefault(); zone.classList.add('dropInto'); } });
     zone.addEventListener('dragleave', (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('dropInto'); });

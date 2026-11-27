@@ -171,3 +171,17 @@ test('story: migration 0008 adds the new fields to a database made before them',
   const r = e.DB.raw.prepare('SELECT * FROM story_missions').get();
   assert.deepEqual([r.title, r.goal, r.book, r.version, r.updated_by], ['旧关卡', '', null, 1, 'alice']);
 });
+
+test('story/outline pages: text only (no HTML parsing), no inline code, and the shared ui.js is public', async () => {
+  for (const f of ['story.js', 'outline.js', 'ui.js']) {
+    assert.doesNotMatch(readFileSync(new URL('../public/' + f, import.meta.url), 'utf8'), /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, f);
+  }
+  for (const f of ['story.html', 'outline.html']) {
+    const html = readFileSync(new URL('../public/' + f, import.meta.url), 'utf8');
+    assert.doesNotMatch(html, /\son[a-z]+=|style=|<script>(?!<)/, f);
+    assert.match(html, /<script src="\/ui\.js"><\/script>/, f);
+  }
+  const e = env();
+  e.ASSETS = { fetch: async () => new Response('asset') };
+  assert.equal(await (await worker.fetch(new Request('https://edf6.test/ui.js'), e)).text(), 'asset');
+});

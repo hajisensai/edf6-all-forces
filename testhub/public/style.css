@@ -55,7 +55,7 @@ textarea { min-height: 110px; resize: vertical; }
 progress { width: 100%; }
 .login { max-width: 360px; margin: 12vh auto; }
 .err { color: var(--bad); }
-.hide { display: none; }
+.hide { display: none !important; }
 .hash, .files a, .report .muted { overflow-wrap: anywhere; word-break: break-all; }
 header.top nav { font-size: 14px; }
 label.inline { display: inline; margin: 0; }
@@ -106,7 +106,6 @@ main.wide { max-width: 1200px; }
 .olLane[data-tone="hazard"] { --tone: var(--warn); }
 .olLane[data-tone="violet"] { --tone: #7c5cc4; }
 .olName { margin: 0; font-size: 17px; }
-.olRate { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 4px; font-size: 13px; color: var(--warn); }
 .olNote { white-space: pre-wrap; margin: 4px 0 0; }
 .olSteps { list-style: none; margin: 10px 0 0; padding: 0; }
 .olStep { position: relative; padding: 0 0 14px 32px; min-width: 0; }
@@ -129,10 +128,7 @@ main.wide { max-width: 1200px; }
 .olMerge svg { width: min(520px, 100%); height: 40px; display: block; }
 .olMerge path { stroke: var(--muted); fill: none; stroke-width: 2; }
 .olMerge polygon { fill: var(--muted); }
-dialog.outlineDlg { width: min(560px, calc(100vw - 32px)); }
-dialog.outlineDlg h2 { margin: 0; font-size: 17px; }
 .danger { color: var(--bad) !important; }
-#copyBox { min-height: 200px; margin: 8px 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olLane[data-tone="violet"], :root:not([data-theme="light"]) .olStep[data-tone="violet"] { --tone: #a98ee8; } }
 [hidden] { display: none !important; }
 .bar { margin: 1em 0; }
@@ -228,7 +224,7 @@ body.busy { cursor: progress; }
 .stStep.dropInto { background: color-mix(in srgb, var(--accent) 8%, transparent); border-left-color: var(--accent); }
 .stStepHead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 6px; }
 .stStepN { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 50%; background: var(--tone); color: var(--panel); font-size: 11px; font-weight: 700; }
-.stAddHere { margin-top: 6px; }
+.stStep .stList:empty { display: none; }
 body.dragActive .stStep { outline: 1px dashed var(--line); outline-offset: 2px; }
 @media (max-width: 720px) {
   .stGrid { grid-template-columns: minmax(0, 1fr); }
@@ -239,3 +235,55 @@ body.dragActive .stStep { outline: 1px dashed var(--line); outline-offset: 2px; 
   section { padding: 12px; }
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .stLane[data-tone="violet"] { --tone: #a98ee8; } }
+
+/* ---- 剧情大纲 ---- */
+.olTitle { margin: 0; font-size: 18px; }
+.olTitleInput { flex: 1 1 260px; width: auto; font-size: 17px; font-weight: 600; }
+.olActs { flex-wrap: wrap; }
+.olMapBox { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.olMapTitle { margin: 0; font-size: 15px; }
+.olMapScroll { overflow-x: auto; padding: 6px 0; }
+.olMap { display: block; max-width: none; font: 14px system-ui, "Microsoft YaHei", sans-serif; }
+.olEdge { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+.olArrow { fill: var(--muted); }
+.olNode { --tone: var(--ok); cursor: pointer; outline: none; }
+.olNode[data-tone="hazard"] { --tone: var(--warn); } .olNode[data-tone="violet"] { --tone: #7c5cc4; }
+.olNode rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+.olNode .olNodeBar { fill: var(--tone); stroke: none; }
+.olNode:hover rect:first-of-type, .olNode:focus-visible rect:first-of-type { stroke: var(--tone); stroke-width: 2.4; }
+.olNodeName { fill: var(--ink); font-weight: 700; font-size: 15px; }
+.olNodeInfo { fill: var(--muted); font-size: 12.5px; }
+.olPip { fill: none; stroke: var(--tone); stroke-width: 1.4; }
+.olPip.on { fill: var(--tone); }
+.olLane { scroll-margin-top: 12px; }
+.olLane.flash, .olStep.flash { animation: olFlash 1.4s ease-out; }
+@keyframes olFlash { from { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
+.olLaneHead { gap: 4px; flex-wrap: nowrap; }
+.olNameInput { flex: 1 1 auto; min-width: 0; font-size: 16px !important; font-weight: 700; padding: 5px 8px !important; }
+.olMore { margin: 6px 0 2px; font-size: 13px; }
+.olMore summary { cursor: pointer; color: var(--muted); }
+.olMore .stField { margin: 8px 0; }
+.olMore textarea { min-height: 0; overflow: hidden; }
+.olMore .choices label { font-size: 13px; padding: 3px 9px; }
+.seg .tone-edf[aria-checked="true"] { background: var(--ok); } .seg .tone-hazard[aria-checked="true"] { background: var(--warn); }
+.seg .tone-violet[aria-checked="true"] { background: #7c5cc4; color: #fff; }
+.olGrip { cursor: grab; color: var(--muted); margin-right: 2px; user-select: none; }
+.olStep.dragging { opacity: .4; }
+.olStep.dropBefore { box-shadow: 0 -3px 0 var(--accent); }
+.olStep.dropAfter { box-shadow: 0 3px 0 var(--accent); }
+.olSteps.dropInto { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 6px; min-height: 40px; }
+body.dragActive .olSteps { min-height: 40px; }
+.olForm { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 8px; padding: 10px; background: var(--bg); }
+.olFormGrid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 0 10px; }
+.olForm textarea { min-height: 0; overflow: hidden; }
+.olFormBar { gap: 6px; }
+.olFormBar select { width: auto; padding: 2px 6px; font-size: 13px; max-width: 12em; }
+.olMissions { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.olMissions li { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.olMissions a { text-decoration: none; overflow-wrap: anywhere; }
+.olMissions a:hover { text-decoration: underline; }
+.olMNo { color: var(--muted); margin-right: 4px; font-variant-numeric: tabular-nums; }
+.olMissions .badge { font-size: 11px; padding: 0 6px; }
+.olWrite { font-weight: 600; }
+@media (max-width: 720px) { .olFormGrid { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olNode[data-tone="violet"] { --tone: #a98ee8; } }
