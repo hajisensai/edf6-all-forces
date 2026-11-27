@@ -263,10 +263,10 @@ reset = source_function("void ResetStream(")
 require("std::memset(&s,0,sizeof(s));s.next=1;" in reset, "Stream reset must use in-place zeroing")
 bind = source_function("Stream* Bind(")
 before = source_function("bool Before(")
-require("ResetStream(s);" in bind and "ResetStream(*old);" in before,
+require("ResetStream(*s);" in bind and "ResetStream(*old);" in before,
         "Bind and retired Before must use in-place reset")
-require("!s.held&&!s.executing&&!s.beamDepth" in bind and
-        bind.index("!s.executing") < bind.index("ResetStream(s)"),
+require("!row.held&&!row.executing&&!row.beamDepth" in bind and
+        bind.index("!row.executing") < bind.index("ResetStream(*s)"),
         "Bind must not reset a slot during a native beam callback")
 require("if(old->executing||old->beamDepth)returnfalse;ResetStream(*old);" in before,
         "retired Before must not reset a stream during its native callback")

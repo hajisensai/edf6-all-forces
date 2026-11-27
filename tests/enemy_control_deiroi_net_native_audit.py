@@ -515,8 +515,10 @@ def run(path: Path) -> None:
     check("__finally{if(sample->expected&&!sample->entity)for(unsignedi=0;i<6;++i)"
           "Put<std::uint32_t>(actual,actualOffsets[i],prior[i]);}" in invoke_compact,
           "ordinary guest bullet words are restored; entity writes only modify the borrowed Raw clone")
-    check("std::memcpy(rawDescriptor,descriptor,sizeof(rawDescriptors[0]));input=rawDescriptor;actual=rawDescriptor+0x80;" in invoke_compact,
-          "entity replay passes a complete synchronous Raw clone with its embedded BulletIP")
+    check("kRawDescriptorBytes=0x260;" in compact_module and "rawDescriptorStorage[kRawDescriptorBytes+15]" in compact_module
+          and "(address+15)&~std::uintptr_t{15}" in invoke_compact
+          and "std::memcpy(raw,descriptor,Stream::kRawDescriptorBytes);input=raw;actual=raw+0x80;" in invoke_compact,
+          "entity replay passes a complete aligned Raw clone with its embedded BulletIP")
     check("Put<void*>(input,0x50,target->object);Put<constvoid*>(input,0x58,target->control);" in invoke_compact
           and "Put<std::uint32_t>(input,0x38,sample->entityTeam);" in invoke_compact,
           "entity constructor receives the proved target lock weak and outer native team")

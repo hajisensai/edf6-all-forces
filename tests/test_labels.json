@@ -5220,6 +5220,21 @@
     "tests/test_native_bc7.py"
    ]
   },
+  "native_body_math": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "native_bone_update": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "native_cmpl": {
    "labels": [
     "native-codec",
@@ -6684,6 +6699,14 @@
     "plugin-sound",
     "plugin-support",
     "test-data"
+   ],
+   "scripts": []
+  },
+  "render_pose": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },

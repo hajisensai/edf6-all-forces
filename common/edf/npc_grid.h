@@ -81,6 +81,17 @@ public:
             where[static_cast<std::size_t>(i)]=c;++start[static_cast<std::size_t>(c)+1];
         }
         for(std::size_t c=0;c<cells;++c)start[c+1]+=start[c];
+        int occupiedRows=0;
+        nextOccupiedRow.resize(static_cast<std::size_t>(nz)+1);
+        nextOccupiedRow[static_cast<std::size_t>(nz)]=nz;
+        for(int row=nz-1;row>=0;--row) {
+            const auto first=static_cast<std::size_t>(row)*static_cast<std::size_t>(nx);
+            const auto after=first+static_cast<std::size_t>(nx);
+            const bool occupied=start[first]!=start[after];
+            occupiedRows+=occupied;
+            nextOccupiedRow[static_cast<std::size_t>(row)]=occupied ? row : NextRow(row+1);
+        }
+        hasEmptyRows=occupiedRows!=nz;
         if(item.size()<static_cast<std::size_t>(count))item.resize(static_cast<std::size_t>(count));
         fill.assign(start.begin(),start.end()-1);
         for(int i=0;i<count;++i)   // in index order: each cell's points ascending
@@ -97,42 +108,56 @@ public:
     // f(i) for every point that can lie within [x0, x1] x [z0, z1] (padded for rounding), and every one apart. A bound
     // that is not a number: every point.
     template<class F> void Box(float x0,float z0,float x1,float z1,F&& f) const {
-        for(int i:apart)f(i);
-        if(!nx)return;
-        if(std::isnan(x0) || std::isnan(x1) || std::isnan(z0) || std::isnan(z1)){Cells(0,nx-1,0,nz-1,f);return;}
-        const float px=Pad(x0,x1),pz=Pad(z0,z1);
-        Cells(ClampX(x0-px),ClampX(x1+px),ClampZ(z0-pz),ClampZ(z1+pz),f);
+        AnyInBox(x0,z0,x1,z1,[&](int i){ f(i);return false; });
     }
     // Every point within `r` of (x, z) on either axis (the box round it).
     template<class F> void Around(const float* c,float r,F&& f) const { Box(c[0]-r,c[2]-r,c[0]+r,c[2]+r,static_cast<F&&>(f)); }
-    // f(i) for every point that can lie within `margin` of segment a-b over the ground (its capsule), and every one apart.
-    // Row by row: the stretch of the segment whose z can reach the row, its x range widened by the margin.
-    template<class F> void Capsule(const float* a,const float* b,float margin,F&& f) const {
-        if(!nx){for(int i:apart)f(i);return;}
-        if(!std::isfinite(a[0]+a[2]+b[0]+b[2]+margin)) {   // not a number or infinite: the box (every point at worst)
-            Box((std::min)(a[0],b[0])-margin,(std::min)(a[2],b[2])-margin,(std::max)(a[0],b[0])+margin,(std::max)(a[2],b[2])+margin,f);
-            return;
+    template<class Match> bool AnyAround(const float* c,float r,Match&& match) const {
+        return AnyInBox(c[0]-r,c[2]-r,c[0]+r,c[2]+r,match);
+    }
+
+    // The lowest point indices accepted by keep(), in scan order. Each cell and the apart list are already ordered.
+    template<class Keep> void FirstAround(const float* c,float r,int most,Keep keep,std::vector<int>& out) const {
+        out.clear();
+        if(most<=0)return;
+        if(most<count && nx && FirstInOrder(c,r,most,keep,out))return;
+        Around(c,r,[&](int i){ if(keep(i))out.push_back(i); });
+        if(out.size()>static_cast<std::size_t>(most)) {
+            std::nth_element(out.begin(),out.begin()+most,out.end());
+            out.resize(static_cast<std::size_t>(most));
         }
-        for(int i:apart)f(i);
+        std::sort(out.begin(),out.end());
+    }
+    // Visit the capsule's candidate points in row order and stop as soon as one matches. Each row uses the
+    // stretch of the segment whose z can reach it, widened by the margin.
+    template<class Match> bool AnyInCapsule(const float* a,const float* b,float margin,Match&& match) const {
+        for(int i:apart)if(match(i))return true;
+        if(!nx)return false;
+        if(!std::isfinite(a[0]+a[2]+b[0]+b[2]+margin))return AnyInSpan(0,nx*nz-1,match);
         const float m=margin+Pad((std::min)(a[0],b[0])-margin,(std::max)(a[0],b[0])+margin)+
                       Pad((std::min)(a[2],b[2])-margin,(std::max)(a[2],b[2])+margin);
         const int r0=ClampZ((std::min)(a[2],b[2])-m),r1=ClampZ((std::max)(a[2],b[2])+m);
         const double dz=static_cast<double>(b[2])-a[2],dx=static_cast<double>(b[0])-a[0];
-        for(int row=r0;row<=r1;++row) {
+        const bool variesZ=std::fabs(dz)>1e-9;
+        const double invZ=variesZ ? 1.0/dz : 0.0;
+        return AnyInRows(r0,r1,[&](int row) {
             // The row's z band (a point in it may sit a rounding off it: m has the pad), the segment's t that reaches it.
             const double lo=static_cast<double>(minZ)+static_cast<double>(row)*cell-m,hi=static_cast<double>(minZ)+(row+1.0)*cell+m;
             double t0=0.0,t1=1.0;
-            if(std::fabs(dz)>1e-9) {
-                double u0=(lo-a[2])/dz,u1=(hi-a[2])/dz;
+            if(variesZ) {
+                double u0=(lo-a[2])*invZ,u1=(hi-a[2])*invZ;
                 if(u0>u1)std::swap(u0,u1);
                 t0=(std::max)(t0,u0);t1=(std::min)(t1,u1);
-                if(t0>t1)continue;
-            } else if(a[2]<lo || a[2]>hi) continue;
+                if(t0>t1)return false;
+            } else if(a[2]<lo || a[2]>hi) return false;
             const double xa=a[0]+dx*t0,xb=a[0]+dx*t1;
             const float xl=static_cast<float>((std::min)(xa,xb)-m),xr=static_cast<float>((std::max)(xa,xb)+m);
             const int c0=ClampX(xl),c1=ClampX(xr);
-            for(int c=c0;c<=c1;++c)Run(row*nx+c,f);
-        }
+            return AnyInSpan(row*nx+c0,row*nx+c1,match);
+        });
+    }
+    template<class F> void Capsule(const float* a,const float* b,float margin,F&& f) const {
+        AnyInCapsule(a,b,margin,[&](int i){ f(i);return false; });
     }
     // The cells round (x, z) nearest first, as rings of cells; within `clip` (cells, the inclusive [cx0, cx1] x [cz0,
     // cz1], already within the grid). Before each ring past the first: stop(lb) with lb a bound no point of that ring or
@@ -160,11 +185,20 @@ public:
             }
             const int x0=(std::max)(cx-r,clip.cx0),x1=(std::min)(cx+r,clip.cx1),z0=(std::max)(cz-r,clip.cz0),z1=(std::min)(cz+r,clip.cz1);
             if(x0>x1 || z0>z1)continue;
-            for(int row=z0;row<=z1;++row) {
-                if(row==cz-r || row==cz+r){for(int c=x0;c<=x1;++c)Run(row*nx+c,f);continue;}
-                if(cx-r>=clip.cx0)Run(row*nx+cx-r,f);   // the ring's sides
-                if(r>0 && cx+r<=clip.cx1)Run(row*nx+cx+r,f);
+            const int top=cz-r,bottom=cz+r,left=cx-r,right=cx+r;
+            if(z0==top) {
+                RunSpan(top*nx+x0,top*nx+x1,f);
+                if(top==bottom)continue;
             }
+            const bool leftInClip=left>=clip.cx0,rightInClip=right<=clip.cx1;
+            if(leftInClip || rightInClip) {
+                const int sideStart=(std::max)(z0,top+1),sideEnd=(std::min)(z1,bottom-1);
+                for(int row=NextRow(sideStart);row<=sideEnd;row=NextRow(row+1)) {
+                    if(leftInClip)RunSpan(row*nx+left,row*nx+left,f);
+                    if(rightInClip)RunSpan(row*nx+right,row*nx+right,f);
+                }
+            }
+            if(z1==bottom)RunSpan(bottom*nx+x0,bottom*nx+x1,f);
         }
     }
 
@@ -175,6 +209,9 @@ private:
     float minX=0.0f,minZ=0.0f,cell=16.0f,inv=1.0f/16.0f;
     int oddCount=0;
     std::vector<int> start,item,where,fill,apart;
+    // First occupied row at or after this row, or nz. Rebuilt with the offsets.
+    std::vector<int> nextOccupiedRow;
+    bool hasEmptyRows=false;
     std::vector<float> xs,zs;   // Build's scratch
 
     // The main body of the points' values `v` (finite, within kFar) on one axis, [lo, hi]: the values between the
@@ -185,10 +222,22 @@ private:
         const std::size_t m=v.size();
         if(m<16){lo=*std::min_element(v.begin(),v.end());hi=*std::max_element(v.begin(),v.end());return;}
         const std::size_t k=m/64>0 ? m/64 : 1;
-        std::nth_element(v.begin(),v.begin()+static_cast<std::ptrdiff_t>(k),v.end());
-        const float q0=v[k];
-        std::nth_element(v.begin(),v.begin()+static_cast<std::ptrdiff_t>(m-1-k),v.end());
-        const float q1=v[m-1-k];
+        const auto first=v.begin(),last=v.end();
+        const float pivot=v[m/2];
+        const bool allEqual=v.front()==pivot && v.back()==pivot &&
+            std::all_of(first,last,[pivot](float x){return x==pivot;});
+        float q0=pivot,q1=pivot;
+        if(!allEqual) {
+            // Each rank only needs to search the side that contains it. Small arrays use the original selection.
+            const auto split=m>=256 ? std::partition(first,last,[pivot](float x){return x<pivot;}) : first;
+            const auto select=[first,split,last](auto rank) {
+                const bool below=rank<split;
+                std::nth_element(below ? first : split,rank,below ? split : last);
+                return *rank;
+            };
+            q0=select(first+static_cast<std::ptrdiff_t>(k));
+            q1=select(first+static_cast<std::ptrdiff_t>(m-1-k));
+        }
         const float pad=(q1-q0)*0.25f+2.0f*cell;
         lo=q0-pad;hi=q1+pad;
     }
@@ -210,39 +259,82 @@ private:
         const float m=(std::max)({std::fabs(a),std::fabs(b),std::fabs(minX),std::fabs(minZ)});
         return std::isfinite(m) ? 1e-3f+m*4e-6f : 0.0f;
     }
-    template<class F> void Run(int c,F& f) const {
-        const int e=start[static_cast<std::size_t>(c)+1];
-        for(int k=start[static_cast<std::size_t>(c)];k<e;++k)f(item[static_cast<std::size_t>(k)]);
+    int NextRow(int row) const noexcept { return nextOccupiedRow[static_cast<std::size_t>(row)]; }
+
+    template<class Keep> bool FirstInOrder(const float* c,float r,int most,Keep& keep,std::vector<int>& out) const {
+        if(std::isnan(c[0]-r) || std::isnan(c[2]-r) || std::isnan(c[0]+r) || std::isnan(c[2]+r))return false;
+        const Clip clip=Within(c[0],c[2],r);
+        constexpr int kMaxCells=64;
+        const int width=clip.cx1-clip.cx0+1,height=clip.cz1-clip.cz0+1;
+        if(width<=0 || height<=0 || width>kMaxCells/height)return false;
+
+        struct Run { const int* next; const int* end; };
+        Run runs[kMaxCells+1];
+        int nr=0,candidates=0;
+        const auto add=[&](const int* next,int size) {
+            runs[nr++]={next,next+size};
+            candidates+=size;
+        };
+        if(!apart.empty())add(apart.data(),static_cast<int>(apart.size()));
+        for(int z=NextRow(clip.cz0);z<=clip.cz1;z=NextRow(z+1)) {
+            for(int x=clip.cx0;x<=clip.cx1;++x) {
+                const auto cellIndex=static_cast<std::size_t>(z*nx+x);
+                const int begin=start[cellIndex],size=start[cellIndex+1]-begin;
+                if(size)add(item.data()+begin,size);
+            }
+        }
+        if(nr==0)return true;
+        const auto accept=[&](int i) { if(keep(i))out.push_back(i); };
+        const auto needMore=[&]() { return out.size()<static_cast<std::size_t>(most); };
+        if(nr==1) {
+            for(const int* i=runs[0].next;i!=runs[0].end && needMore();++i)accept(*i);
+            return true;
+        }
+        // Sparse or wide queries are cheaper to select in one pass. Dense local queries can stop the merge early.
+        if(candidates/4<most)return false;
+        const auto later=[](const Run& a,const Run& b){ return *a.next>*b.next; };
+        std::make_heap(runs,runs+nr,later);
+        while(nr && needMore()) {
+            std::pop_heap(runs,runs+nr,later);
+            Run& smallest=runs[nr-1];
+            accept(*smallest.next++);
+            if(smallest.next==smallest.end)--nr;
+            else std::push_heap(runs,runs+nr,later);
+        }
+        return true;
     }
-    template<class F> void Cells(int x0,int x1,int z0,int z1,F& f) const {
-        for(int row=z0;row<=z1;++row)for(int c=x0;c<=x1;++c)Run(row*nx+c,f);
+
+    template<class MatchRow> bool AnyInRows(int first,int last,MatchRow&& match) const {
+        if(hasEmptyRows) {
+            for(int row=NextRow(first);row<=last;row=NextRow(row+1))
+                if(match(row))return true;
+        } else {
+            for(int row=first;row<=last;++row)
+                if(match(row))return true;
+        }
+        return false;
+    }
+    template<class F> void RunSpan(int first,int last,F& f) const {
+        const int end=start[static_cast<std::size_t>(last)+1];
+        for(int k=start[static_cast<std::size_t>(first)];k<end;++k)f(item[static_cast<std::size_t>(k)]);
+    }
+    // The items for adjacent cells are already contiguous. Two offsets cover a whole row span.
+    template<class Match> bool AnyInSpan(int first,int last,Match& match) const {
+        const int end=start[static_cast<std::size_t>(last)+1];
+        for(int k=start[static_cast<std::size_t>(first)];k<end;++k)
+            if(match(item[static_cast<std::size_t>(k)]))return true;
+        return false;
+    }
+    template<class Match> bool AnyInBox(float x0,float z0,float x1,float z1,Match&& match) const {
+        for(int i:apart)if(match(i))return true;
+        if(!nx)return false;
+        if(std::isnan(x0) || std::isnan(x1) || std::isnan(z0) || std::isnan(z1))return AnyInSpan(0,nx*nz-1,match);
+        const float px=Pad(x0,x1),pz=Pad(z0,z1);
+        const int c0=ClampX(x0-px),c1=ClampX(x1+px);
+        if(c0>c1)return false;
+        const int r0=ClampZ(z0-pz),r1=ClampZ(z1+pz);
+        return AnyInRows(r0,r1,[&](int row){ return AnyInSpan(row*nx+c0,row*nx+c1,match); });
     }
 };
 
-// The scan `for(i=0; i<n && got<most; ++i) if(keep(i)) out[got++]=i` through `g`: the first `most` points in index
-// order for which keep(i) holds, ascending, into `out`, keep asked only of the points Around(c, r) visits (it must hold
-// of none outside that box: the caller's own test of "within r"). Those it holds of are gathered in the cells' order,
-// then the `most` lowest indices taken by a partial selection (nth_element, linear in what was gathered) and only they
-// sorted: a dense crowd round `c` (hundreds in reach) costs O(k + most log most), not O(k log k).
-template<class Keep> void FirstAround(const Grid& g,const float* c,float r,int most,Keep keep,std::vector<int>& out) {
-    out.clear();
-    if(most<=0)return;
-    g.Around(c,r,[&](int i){ if(keep(i))out.push_back(i); });
-    if(out.size()>static_cast<std::size_t>(most)) {
-        std::nth_element(out.begin(),out.begin()+most,out.end());
-        out.resize(static_cast<std::size_t>(most));
-    }
-    std::sort(out.begin(),out.end());
-}
-
-// The friends a shot from `from` to `to` can touch (ShotClear's two tests: within `line` of its line, within `blast` of
-// where it lands; `line` and `blast` with the largest radius among them already added), ascending and once each, into
-// `out`; ShotClear over them is ShotClear over all.
-inline void ShotCandidates(const Grid& g,const float* from,const float* to,float line,float blast,std::vector<int>& out) {
-    out.clear();
-    g.Capsule(from,to,line,[&](int i){ out.push_back(i); });
-    if(blast>0.0f)g.Around(to,blast,[&](int i){ out.push_back(i); });
-    std::sort(out.begin(),out.end());
-    out.erase(std::unique(out.begin(),out.end()),out.end());
-}
 }  // namespace npc::grid

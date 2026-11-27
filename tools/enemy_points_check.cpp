@@ -76,9 +76,9 @@ std::vector<Seen> Live(const Registry& r,const void* self) {
     Walk(r.head,r.relation,self,[&](const void* o,const float* a){Seen s{o,{}};std::memcpy(s.aim,a,12);out.push_back(s);});
     return out;
 }
-std::vector<Seen> FromCopy(const std::vector<Point>& points,const void* self) {
+std::vector<Seen> FromCopy(const std::vector<Point>& points,const void* self,TeamMask enemies=kAllTeams) {
     std::vector<Seen> out;
-    Visit(points,self,[&](const void* o,const float* a){Seen s{o,{}};std::memcpy(s.aim,a,12);out.push_back(s);});
+    Visit(points,self,[&](const void* o,const float* a){Seen s{o,{}};std::memcpy(s.aim,a,12);out.push_back(s);},enemies);
     return out;
 }
 }  // namespace
@@ -86,30 +86,54 @@ std::vector<Seen> FromCopy(const std::vector<Point>& points,const void* self) {
 int main() {
     std::mt19937 rng(1107);
     int bad=0,badAfterDeaths=0,visits=0,selfSkipped=0,runs=0;
+    std::uint64_t sideWalks=0,sharedWalks=0;
     for(int run=0;run<300;++run) {
         Registry r;
         Make(r,rng,1+static_cast<int>(rng()%200),static_cast<int>(rng()%1500));
-        std::vector<Point> copy;
-        Collect(r.head,r.relation,copy);
+        std::vector<Point> registry;
+        sharedWalks+=Collect(r.head,nullptr,registry);
+        const TeamMask enemies=EnemyTeams(r.relation);
         // Every object as the vehicle asking, none, and one not in the registry at all.
         unsigned char stranger[0x400]{};
         std::vector<const void*> selves{nullptr,stranger};
         for(auto& o:r.objects)selves.push_back(o.get());
         for(const void* self:selves) {
-            const auto live=Live(r,self),got=FromCopy(copy,self);
+            const auto live=Live(r,self),got=FromCopy(registry,self,enemies);
             bad+=!Same(live,got);
             visits+=static_cast<int>(live.size());
             selfSkipped+=self && Live(r,nullptr).size()!=live.size();
         }
+        // Another side sees its own relation row over the same ordered registry copy.
+        std::int32_t otherRelation[kMaxTeam]{};
+        for(int team=0;team<kMaxTeam;++team)
+            if(r.relation[team]!=kEnemyRelation)otherRelation[team]=kEnemyRelation;
+        for(const auto* relation:{r.relation,otherRelation}) {
+            std::vector<Seen> direct;
+            sideWalks+=Walk(r.head,relation,nullptr,[&](const void* o,const float* a) {
+                Seen row{o,{}};std::memcpy(row.aim,a,12);direct.push_back(row);
+            });
+            bad+=!Same(direct,FromCopy(registry,nullptr,EnemyTeams(relation)));
+        }
         // Some die after the copy was taken: the copy still visits what the walk would now.
         for(auto& o:r.objects)if(rng()%5==0)o[edf::kDead]=1;
-        for(const void* self:selves)badAfterDeaths+=!Same(Live(r,self),FromCopy(copy,self));
+        for(const void* self:selves)badAfterDeaths+=!Same(Live(r,self),FromCopy(registry,self,enemies));
         ++runs;
     }
     std::printf("  %d registries: %d visits compared, %d asks that left their own vehicle out\n",runs,visits,selfSkipped);
     Check(bad==0,"the copy's visits equal the live walk's for every vehicle",bad);
     Check(badAfterDeaths==0,"and after some died since the copy",badAfterDeaths);
     Check(visits>10000 && selfSkipped>1000,"the registries exercise the filter and the vehicle's own points",visits,selfSkipped);
+    std::printf("  Two sides: %llu live nodes read separately, %llu in the shared capture\n",sideWalks,sharedWalks);
+    Check(sharedWalks>0 && sideWalks==2*sharedWalks,"both sides are derived from one native list traversal");
+    {
+        unsigned char object[0x400]{};
+        constexpr std::int32_t capturedTeam=3;
+        edf::Put<std::int32_t>(object,edf::kTeam,capturedTeam);
+        const std::vector<Point> copy{{object,capturedTeam,{5,0,0}}};
+        Check(FromCopy(copy,nullptr).size()==1,"the sampled object is still on its original team");
+        edf::Put<std::int32_t>(object,edf::kTeam,capturedTeam+1);
+        Check(FromCopy(copy,nullptr).empty(),"a mid-step team switch invalidates the old side's point");
+    }
     // Nearest (the gunner seats' pick): the object, its distance and every usable() asked, as the nearest-within-reach
     // visitor over the live walk; also after some died since the copy. usable() refuses some objects (WastedFire).
     {
@@ -121,7 +145,8 @@ int main() {
             Registry r;
             Make(r,rng,1+static_cast<int>(rng()%200),static_cast<int>(rng()%1500));
             std::vector<Point> copy;
-            Collect(r.head,r.relation,copy);
+            Collect(r.head,nullptr,copy);
+            const TeamMask enemies=EnemyTeams(r.relation);
             if(run%2)for(auto& o:r.objects)if(rng()%6==0)o[edf::kDead]=1;
             std::uniform_real_distribution<float> pos(-500.0f,500.0f),reachOf(0.0f,700.0f);
             for(int k=0;k<20;++k) {
@@ -140,7 +165,7 @@ int main() {
                 });
                 const Pick got=Nearest(copy,self,from,reach,dist,[&](const void* o){
                     askedCopy.push_back(o);return (reinterpret_cast<std::uintptr_t>(o)>>4)%5!=refuse;
-                });
+                },enemies);
                 badPick+=got.object!=liveBest || std::memcmp(&got.dist,&liveD,4)!=0 || askedLive!=askedCopy;
                 picked+=got.object!=nullptr;asked+=static_cast<int>(askedCopy.size());
             }

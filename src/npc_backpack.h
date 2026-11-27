@@ -15,6 +15,7 @@
 #pragma once
 #include "npc_logic.h"
 #include "npc_pack_table.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -32,6 +33,7 @@ constexpr float kDirectConeLeast=0.05f;
 constexpr std::uint64_t kThrowGapMs=4000,kDirectGapMs=700,kReloadGapMs=15000;   // kReloadGapMs: an empty one asked again
 constexpr int kHoldFrames=45;              // 0.75 s
 constexpr float kArcStep=3.0f,kArcTimeStep=0.1f; // the whole flight: no more than 3 m / 0.1 s between map rays
+constexpr int kArcBatch=8;                 // amortize the grid walk over nearby chords
 
 // The elevation (rad, up positive) a round of `speed` (m/s) falling at `gravity` (m/s^2) leaves at to land `rise` m above
 // where it leaves, `horiz` m away: the low arc; `flight` its time (s). False when it cannot get there. No gravity: the
@@ -57,7 +59,7 @@ inline bool LobPitch(float horiz,float rise,float speed,float gravity,float* pit
 // +0x8E0 gravity factor, +0xBE8 rounds; the table's use, lift and area).
 struct Weapon { PackUse use; float reach,blast,area,speed,gravity,lift; bool ready; };
 // The target as seen from the soldier's eye.
-struct Target { float dist,horiz,rise; int group; bool large; };
+struct Target { float dist,horiz,rise; bool large; };
 inline float Radius(const Weapon& w) noexcept { return w.blast>w.area ? w.blast : w.area; }
 // Its own round keeps off it: no nearer than its radius allows (npc_logic.h MinRange's margin).
 inline float Nearest(const Weapon& w) noexcept { const float r=Radius(w);return r>0.0f ? r*1.5f+2.0f : 0.0f; }
@@ -71,11 +73,12 @@ inline float ThrowReach(const Weapon& w) noexcept {
 inline float GroupRadius(const Weapon& w) noexcept { const float r=Radius(w);return r>kGroup ? r : kGroup; }
 
 // Whether `w` is for `t` now (its look aside: AimOn), and for a throw the elevation it leaves at (`pitch`).
-inline bool Fits(const Weapon& w,const Target& t,float* pitch) noexcept {
+template<class HasGroup>
+inline bool Fits(const Weapon& w,const Target& t,float* pitch,HasGroup hasGroup) noexcept {
     if(!w.ready || !(t.dist>0.0f))return false;
     if(w.use==PackUse::direct)return w.reach>0.0f && t.dist<=w.reach*kDirectShare;
     if(t.rise>kAirAbove || t.horiz<Nearest(w) || t.dist>ThrowReach(w))return false;
-    if(t.group<kGroupLeast && !t.large)return false;
+    if(!t.large && !hasGroup())return false;
     float flight=0.0f;
     return LobPitch(t.horiz,t.rise,w.speed,w.gravity,pitch,&flight) && flight<=kFlightMost;
 }
@@ -97,19 +100,13 @@ inline bool AimOn(PackUse use,float viewPitch,float viewYaw,const float* dir,flo
     }
     return npc::AimError(viewPitch,viewYaw,dir)<=cone;
 }
-// No friend within `radius` (and its own) of where the round lands, kept 1.25 times as the stock blast test is.
-inline bool LandingClear(const float* at,float radius,const npc::Friend* friends,int n) noexcept {
-    if(!(radius>0.0f))return true;
-    for(int i=0;i<n;++i)if(npc::Dist(at,friends[i].pos)<radius*1.25f+friends[i].radius)return false;
-    return true;
-}
 // The actual round's full low arc, not the soldier's look (ThrowLook removes the weapon's FireVector lift from that
 // look). Any friend or terrain collision along it rules the throw out: a contact grenade would explode there, not at
 // the intended target; a timed / bouncing grenade's eventual landing cannot be predicted after that collision.
-// `blocked(a,b)` tests the map segment. At most 0.1 s per chord also bounds the gravity sag between its ends.
-template<class Blocked>
+// Friend tests may share a spatial query across chords. Terrain rays still follow the exact original path in order.
+template<class FriendsClear,class LandingClear,class Blocked>
 inline bool ArcClear(const Weapon& w,const float* from,const float* to,float pitch,float spread,
-                     const npc::Friend* friends,int n,Blocked blocked) noexcept {
+                     FriendsClear friendsClear,LandingClear landingClear,Blocked blocked) noexcept {
     const float horiz=npc::Horiz(from,to),c=std::cos(pitch);
     if(!(horiz>0.01f) || !(w.speed>0.0f) || !(c>1e-4f))return false;
     const float flight=horiz/(w.speed*c);
@@ -119,14 +116,21 @@ inline bool ArcClear(const Weapon& w,const float* from,const float* to,float pit
     if(!std::isfinite(segments) || segments>256.0f)return false;
     const int steps=segments>1.0f ? static_cast<int>(segments) : 1;
     const float vx=(to[0]-from[0])/flight,vz=(to[2]-from[2])/flight,vy=w.speed*std::sin(pitch);
-    float previous[3]={from[0],from[1],from[2]};
-    for(int i=1;i<=steps;++i) {
-        const float t=flight*static_cast<float>(i)/static_cast<float>(steps);
-        const float point[3]={from[0]+vx*t,from[1]+vy*t-0.5f*w.gravity*t*t,from[2]+vz*t};
-        if(!npc::ShotClear(previous,point,spread,0.0f,friends,n) || blocked(previous,point))return false;
-        for(int k=0;k<3;++k)previous[k]=point[k];
+    float points[kArcBatch+1][3]={{from[0],from[1],from[2]}};
+    for(int first=0;first<steps;first+=kArcBatch) {
+        const int count=(std::min)(steps-first,kArcBatch);
+        npc::Shot chords[kArcBatch];
+        for(int i=0;i<count;++i) {
+            const float t=flight*static_cast<float>(first+i+1)/static_cast<float>(steps);
+            auto& p=points[i+1];
+            p[0]=from[0]+vx*t;p[1]=from[1]+vy*t-0.5f*w.gravity*t*t;p[2]=from[2]+vz*t;
+            chords[i]=npc::Shot(points[i],p,spread,0.0f);
+        }
+        if(!friendsClear(chords,count))return false;
+        for(int i=0;i<count;++i)if(blocked(points[i],points[i+1]))return false;
+        for(int axis=0;axis<3;++axis)points[0][axis]=points[count][axis];
     }
-    return LandingClear(to,Radius(w),friends,n);
+    return landingClear(to,Radius(w));
 }
 // Whether it has rested since its last use (`sinceMs`; a first use any time).
 inline bool Rested(PackUse use,bool used,std::uint64_t sinceMs) noexcept {

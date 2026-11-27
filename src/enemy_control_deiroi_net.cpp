@@ -53,9 +53,10 @@ struct Stream {
     TargetPin targets[deiroi_wire::kMaxBatch]{};
     std::uint64_t next=1,applied=0;unsigned head=0,count=0,reserved=0,nativeInFlight=0;
     deiroi_wire::Event queue[kQueued]{};
+    static constexpr std::size_t kRawDescriptorBytes=0x260;
+    unsigned char rawDescriptorStorage[kRawDescriptorBytes+15]{};
 };
-LazyRows<Stream,kBindings> streams;
-alignas(16) unsigned char rawDescriptors[kBindings][0x260]{};
+IncrementalRows<Stream,kBindings> streams;
 unsigned char* installedImage=nullptr;bool ready=false,redirected[18]{};
 
 template<class T>T Fn(unsigned rva) noexcept {
@@ -156,18 +157,17 @@ Stream* Bind(const NativeLease& lease,bool authority) noexcept {
     Ref ref{lease.object,static_cast<unsigned char*>(const_cast<void*>(lease.control))};
     if(!Current(ref,false))return nullptr;
     if(auto* stream=Find(lease))return stream->authority==authority ? stream : nullptr;
-    if(!streams.Allocate("deiroi net streams"))return nullptr;
-    for(auto& stream:streams) {
+    auto* chosen=streams.FindOrAppend("deiroi net streams",[](Stream& stream){
         if(stream.root.object && !stream.rootStrong && !stream.releaseUncertain && !stream.count &&
            Readable(stream.root.control,16) && At<LONG>(stream.root.control,8)==0) {
             bool retained=false;for(const auto& part:stream.parts)retained=retained || part.strong;
-            if(retained || !Drop(stream.root))continue;stream={};
+            if(retained || !Drop(stream.root))return false;
+            stream={};
         }
-        if(!stream.root.object && Keep(ref)) {
-            stream.root=ref;stream.profile=lease.profile;stream.authority=authority;return &stream;
-        }
-    }
-    return nullptr;
+        return !stream.root.object;
+    });
+    if(!chosen || !Keep(ref))return nullptr;
+    chosen->root=ref;chosen->profile=lease.profile;chosen->authority=authority;return chosen;
 }
 void Fault(Stream* stream) noexcept {if(stream)stream->faulted=true;}
 // NativeActionRole supplies authenticated root ownership; the bridge independently
@@ -251,8 +251,12 @@ void* InvokeUnit(void* manager,const float* matrix,void* factory,void* descripto
     if(!Readable(actual,0x1A8,true)){Fault(stream);return nullptr;}
     void* input=descriptor;std::uint32_t prior[6]{};for(unsigned i=0;i<6;++i)prior[i]=At<std::uint32_t>(actual,actualOffsets[i]);
     if(sample->entity) {
-        if(!Readable(descriptor,sizeof(rawDescriptors[0]))){Fault(stream);return nullptr;}
-        auto* rawDescriptor=rawDescriptors[stream-streams.begin()];std::memcpy(rawDescriptor,descriptor,sizeof(rawDescriptors[0]));input=rawDescriptor;actual=rawDescriptor+0x80;
+        if(!Readable(descriptor,Stream::kRawDescriptorBytes)){Fault(stream);return nullptr;}
+        // The native setter takes a 16-byte aligned descriptor.
+        const auto address=reinterpret_cast<std::uintptr_t>(stream->rawDescriptorStorage);
+        auto* raw=reinterpret_cast<unsigned char*>((address+15)&~std::uintptr_t{15});
+        std::memcpy(raw,descriptor,Stream::kRawDescriptorBytes);
+        input=raw;actual=raw+0x80;
         TargetPin* target=sample->target;
         if(!sample->expected) {
             int lock=-1;

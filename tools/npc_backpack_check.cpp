@@ -120,26 +120,33 @@ void When() {
     using namespace npcpack;
     const Weapon mg11{PackUse::thrown,360.0f,5.0f,0.0f,36.0f,14.7f,0.125f,true};   // MG11: 0.6 m/frame, 600 frames
     float pitch=0.0f;
-    Check(Fits(mg11,Target{25.0f,25.0f,0.0f,3,false},&pitch) && pitch>0.0f,"a group at 25 m: thrown, up",pitch);
-    Check(!Fits(mg11,Target{25.0f,25.0f,0.0f,1,false},&pitch),"one small one: not worth a grenade");
-    Check(Fits(mg11,Target{25.0f,25.0f,0.0f,1,true},&pitch),"one large one: worth it");
-    Check(!Fits(mg11,Target{40.0f,20.0f,34.0f,4,false},&pitch),"a flyer overhead: never thrown at");
-    Check(!Fits(mg11,Target{8.0f,8.0f,0.0f,4,false},&pitch),"inside its own blast's margin: not thrown",Nearest(mg11));
+    int groupQueries=0;
+    const auto fits=[&](const Weapon& w,const Target& t,int present) {
+        return Fits(w,t,&pitch,[&]() noexcept { ++groupQueries;return present>=kGroupLeast; });
+    };
+    Check(fits(mg11,{25.0f,25.0f,0.0f,false},3) && pitch>0.0f,"a group at 25 m: thrown, up",pitch);
+    Check(!fits(mg11,{25.0f,25.0f,0.0f,false},1),"one small one: not worth a grenade");
+    Check(fits(mg11,{25.0f,25.0f,0.0f,true},1),"one large one: worth it");
+    Check(!fits(mg11,{40.0f,20.0f,34.0f,false},4),"a flyer overhead: never thrown at");
+    Check(!fits(mg11,{8.0f,8.0f,0.0f,false},4),"inside its own blast's margin: not thrown",Nearest(mg11));
+    Check(groupQueries==2,"large, airborne and unsafe targets did not query any group");
     Check(Nearest(mg11)==9.5f && ThrowReach(mg11)==90.0f,"MG11: from 9.5 m, to 2.5 s of flight (90 m)",Nearest(mg11),ThrowReach(mg11));
-    Check(!Fits(mg11,Target{95.0f,95.0f,0.0f,4,false},&pitch),"past its flight's reach: not thrown");
-    Check(!Fits(mg11,Target{80.0f,80.0f,0.0f,4,false},&pitch),"in reach but 2.6 s of flight (33 deg at 80 m): not thrown");
+    Check(!fits(mg11,{95.0f,95.0f,0.0f,false},4),"past its flight's reach: not thrown");
+    Check(!fits(mg11,{80.0f,80.0f,0.0f,false},4),"in reach but 2.6 s of flight (33 deg at 80 m): not thrown");
     Weapon empty=mg11;empty.ready=false;
-    Check(!Fits(empty,Target{25.0f,25.0f,0.0f,3,false},&pitch),"no round: nothing");
+    Check(!fits(empty,{25.0f,25.0f,0.0f,false},3),"no round: nothing");
     const Weapon blink{PackUse::thrown,60.0f,7.0f,0.0f,60.0f,1.8375f,0.0f,true};   // Blink Ball: 1 m/frame, 60 frames
-    Check(Fits(blink,Target{40.0f,40.0f,-3.0f,2,false},&pitch) && ThrowReach(blink)==60.0f,"a Blink Ball at 40 m",pitch);
-    Check(!Fits(blink,Target{65.0f,65.0f,0.0f,5,false},&pitch),"past a Blink Ball's 60 m");
+    Check(fits(blink,{40.0f,40.0f,-3.0f,false},2) && ThrowReach(blink)==60.0f,"a Blink Ball at 40 m",pitch);
+    Check(!fits(blink,{65.0f,65.0f,0.0f,false},5),"past a Blink Ball's 60 m");
     const Weapon thermite{PackUse::thrown,360.0f,0.0f,8.0f,36.0f,14.7f,0.125f,true};
-    Check(Nearest(thermite)==14.0f && !Fits(thermite,Target{12.0f,12.0f,0.0f,3,false},&pitch),"a thermite round keeps its fire off itself");
+    Check(Nearest(thermite)==14.0f && !fits(thermite,{12.0f,12.0f,0.0f,false},3),"a thermite round keeps its fire off itself");
     Check(GroupRadius(thermite)==8.0f && GroupRadius(Weapon{PackUse::thrown,0,15.0f,0,1,1,0,true})==15.0f,"the group's radius");
     const Weapon saber{PackUse::direct,23.1f,0.0f,0.0f,198.0f,0.0f,0.0f,true};   // Handy Saber: 3.3 m/frame, 7 frames
-    Check(Fits(saber,Target{20.0f,20.0f,0.0f,1,false},&pitch),"a saber at 20 m (its reach 23 m)");
-    Check(!Fits(saber,Target{21.5f,21.5f,0.0f,1,false},&pitch),"past 0.9 of its reach");
-    Check(Fits(saber,Target{15.0f,5.0f,14.0f,1,false},&pitch),"a saber at a flyer within reach");
+    const int beforeDirect=groupQueries;
+    Check(fits(saber,{20.0f,20.0f,0.0f,false},1),"a saber at 20 m (its reach 23 m)");
+    Check(!fits(saber,{21.5f,21.5f,0.0f,false},1),"past 0.9 of its reach");
+    Check(fits(saber,{15.0f,5.0f,14.0f,false},1),"a saber at a flyer within reach");
+    Check(groupQueries==beforeDirect,"direct-fire weapons do not query groups");
 }
 
 void Looks() {
@@ -158,6 +165,12 @@ void Looks() {
     Check(dir[1]==1.0f,"no way to it: straight up (never aimed at: Fits refused it)");
 }
 
+bool LandingClear(const float* at,float radius,const npc::Friend* friends,int n) noexcept {
+    const npc::Shot blast(at,at,0.0f,radius);
+    for(int i=0;i<n;++i)if(blast.BlocksBlast(friends[i]))return false;
+    return true;
+}
+
 void Friends() {
     using namespace npcpack;
     const float at[3]={0.0f,0.0f,30.0f};
@@ -174,32 +187,39 @@ void WholeFlight() {
     const float from[3]={0.0f,1.5f,0.0f},to[3]={0.0f,1.5f,40.0f};
     float pitch=0.0f,flight=0.0f;
     Check(LobPitch(40.0f,0.0f,grenade.speed,grenade.gravity,&pitch,&flight),"a forty metre throw has an arc");
+    const auto trace=[&](const npc::Friend* friends,int n,auto blocked) {
+        return ArcClear(grenade,from,to,pitch,0.1f,[&](const npc::Shot* chords,int count) noexcept {
+            for(int chord=0;chord<count;++chord)
+                for(int i=0;i<n;++i)if(chords[chord].BlocksLine(friends[i]))return false;
+            return true;
+        },[&](const float* at,float radius) noexcept { return LandingClear(at,radius,friends,n); },blocked);
+    };
     int rays=0;float last[3]{},longest=0.0f;
     const auto open=[&](const float* a,const float* b) noexcept {
         ++rays;const float length=npc::Dist(a,b);if(length>longest)longest=length;
         for(int k=0;k<3;++k)last[k]=b[k];return false;
     };
-    Check(ArcClear(grenade,from,to,pitch,0.1f,nullptr,0,open) && rays>10 && longest<=kArcStep+0.001f && npc::Dist(last,to)<0.01f,
+    Check(trace(nullptr,0,open) && rays>10 && longest<=kArcStep+0.001f && npc::Dist(last,to)<0.01f,
           "the map is traced all the way to the landing, in bounded segments",rays,longest);
     const auto wall=[](const float* a,const float* b) noexcept {return a[2]<12.0f && b[2]>=12.0f;};
-    Check(!ArcClear(grenade,from,to,pitch,0.1f,nullptr,0,wall),"a wall twelve metres away stops the throw (past the old six metre test)");
+    Check(!trace(nullptr,0,wall),"a wall twelve metres away stops the throw (past the old six metre test)");
     // A low wall the real arc clears is safe; a straight eye-to-target ray would incorrectly forbid this throw.
     const auto lowWall=[](const float* a,const float* b) noexcept {
         if(a[2]>=20.0f || b[2]<20.0f)return false;
         const float t=(20.0f-a[2])/(b[2]-a[2]);return a[1]+(b[1]-a[1])*t<2.0f;
     };
-    Check(ArcClear(grenade,from,to,pitch,0.1f,nullptr,0,lowWall),"the real arc clears a low wall on the straight sight line");
+    Check(trace(nullptr,0,lowWall),"the real arc clears a low wall on the straight sight line");
     const float t=flight*0.5f;
     npc::Friend middle{{0.0f,from[1]+grenade.speed*std::sin(pitch)*t-0.5f*grenade.gravity*t*t,20.0f},0.1f};
     float look[3];ThrowLook(from,to,pitch,grenade.lift,look);
     const float oldEnd[3]={from[0]+look[0]*6.0f,from[1]+look[1]*6.0f,from[2]+look[2]*6.0f};
     Check(LandingClear(to,grenade.blast,&middle,1) && npc::ShotClear(from,oldEnd,0.1f,0.0f,&middle,1),
           "a friend midway along the real arc escapes the old near / landing tests");
-    Check(!ArcClear(grenade,from,to,pitch,0.1f,&middle,1,open),"the whole actual arc protects a friend midway along it (FireVector lift restored)");
+    Check(!trace(&middle,1,open),"the whole actual arc protects a friend midway along it (FireVector lift restored)");
     npc::Friend beside=middle;beside.pos[0]=3.0f;
-    Check(ArcClear(grenade,from,to,pitch,0.1f,&beside,1,open),"a friend safely beside the arc does not prevent a throw");
+    Check(trace(&beside,1,open),"a friend safely beside the arc does not prevent a throw");
     npc::Friend landing{{0.0f,1.5f,35.0f},0.8f};
-    Check(!ArcClear(grenade,from,to,pitch,0.1f,&landing,1,open),"the landing blast is checked as well as the arc");
+    Check(!trace(&landing,1,open),"the landing blast is checked as well as the arc");
 }
 }  // namespace
 

@@ -151,7 +151,7 @@ void* InvokeOriginalNativeUnitFactory(void*,const float*,void*,void* descriptor)
     }
     const bool entity=sample&&sample->entity;auto* actual=static_cast<unsigned char*>(descriptor)+(entity ? 0x80 : 0);
     for(unsigned i=0;i<6;++i)lastActual[i]=At<unsigned>(actual,actualOffsets[i]);
-    if(entity){lastEntityTeam=At<unsigned>(descriptor,0x38);lastEntityTarget=At<void*>(descriptor,0x50);CHECK(descriptor!=sample->descriptor);}
+    if(entity){lastEntityTeam=At<unsigned>(descriptor,0x38);lastEntityTarget=At<void*>(descriptor,0x50);CHECK(descriptor!=sample->descriptor && (reinterpret_cast<std::uintptr_t>(descriptor)&15u)==0);}
     // Nested constructors use a DIFFERENT descriptor even if a shot scope is
     // active. It must not be mistaken for a second creation by this provider.
     CHECK(!registeredUnit.Owns(nullptr,foreign.parameter));

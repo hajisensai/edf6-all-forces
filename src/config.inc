@@ -4,7 +4,7 @@
 #undef EDF6_CONFIG_FIELDS
     bool enabled=true;
     bool debug=true;
-    bool perfProbe=false;           // with debug: the frame split, Present and draw counts (perf_probe.h; tools/perfrun.py sets it)
+    int perfProbe=0;                // with debug: 1 frame and graph probes, 2 also samples collision tasks
     int preloadMode=0;              // a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)
     bool syncLoadProbe=true;        // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
     bool autoCrew=true;             // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
@@ -82,6 +82,8 @@
     bool havokMultithread=true;     // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
     int frameRateCap=0;             // ini FrameRateCap (frame_rate_logic.h FixCap): 0 the game's 59.94 Hz (shipped), 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool frameRateFlip=false;       // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
+    bool renderRecordThread=false;  // developer option, latched at plugin load
+    bool renderPoseSnapshots=false; // developer option, latched at plugin load
     int maxFrameLatency=0;          // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
     bool splitMissileSurface=true;  // split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
     bool supportUnitOnAllies=true;  // support units (life vendors, power posts...) stick to allies, not through them (supportunit.cpp)
@@ -596,7 +598,7 @@
 #undef EDF6_CONFIG_LOAD
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
-    n.perfProbe=ReadBool(L"PerfProbe",n.perfProbe);
+    n.perfProbe=ReadInt(L"PerfProbe",static_cast<DWORD>(n.perfProbe));
     n.preloadMode=ReadInt(L"PreloadMode",static_cast<DWORD>(n.preloadMode));
     n.syncLoadProbe=ReadBool(L"SyncLoadProbe",n.syncLoadProbe);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
@@ -667,6 +669,8 @@
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
     n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
+    n.renderRecordThread=ReadBool(L"RenderRecordThread",n.renderRecordThread);
+    n.renderPoseSnapshots=ReadBool(L"RenderPoseSnapshots",n.renderPoseSnapshots);
     n.maxFrameLatency=ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency));
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);
@@ -1103,6 +1107,7 @@
     n.auraParkSpeed=ReadFloat(L"AuraParkSpeed",n.auraParkSpeed);
 #elif defined(EDF6_CONFIG_VALIDATE)
 #undef EDF6_CONFIG_VALIDATE
+    n.perfProbe=static_cast<int>(FixInt("PerfProbe",n.perfProbe,0,2));
     n.preloadMode=static_cast<int>(FixInt("PreloadMode",n.preloadMode,0,2));
     n.crewDelayMs=FixInt("CrewDelayMs",static_cast<int>(n.crewDelayMs),0,600000);
     Fix("CrewRange",n.crewRange,0.0f,10000.0f);

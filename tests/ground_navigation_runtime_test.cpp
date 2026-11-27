@@ -3,16 +3,17 @@
 #include "../src/scene.h"
 #include "../src/heli.h"
 #include "../src/ground_navigation.h"
+#include "ground_ray_batch_fixture.h"
 #include <cstdio>
 #include <array>
 #include <cmath>
 #include <memory>
 #include <vector>
 namespace {
-ULONGLONG frame=100;int queries=0,floors=0,waters=0,walls=0,cases=0,failures=0;
+ULONGLONG frame=100;int queries=0,floors=0,waters=0,walls=0,mapRays=0,cases=0,failures=0;
 float floorHeight=0,surface=0;crew::Sea sea=crew::Sea::land;bool cornerWall=false;
 void Check(bool yes,const char* what){++cases;if(!yes){++failures;std::printf("FAIL %s\n",what);}}
-void Scene(float floor,crew::Sea water,float waterAt=0){++frame;queries=floors=waters=walls=0;floorHeight=floor;sea=water;surface=waterAt;cornerWall=false;}
+void Scene(float floor,crew::Sea water,float waterAt=0){++frame;queries=floors=waters=walls=mapRays=0;floorHeight=floor;sea=water;surface=waterAt;cornerWall=false;}
 void Next(){++frame;queries=0;}
 }
 namespace crew {
@@ -23,7 +24,7 @@ float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
     hit[0]=a[0];hit[1]=floorHeight;hit[2]=a[2];return a[1]-floorHeight;
 }
 float MapRay(const float* a,const float* b,float*) noexcept {
-    ++queries;
+    ++queries;++mapRays;
     if(cornerWall)for(int i=0;i<=32;++i){
         const float t=static_cast<float>(i)/32.0f,x=a[0]+(b[0]-a[0])*t,z=a[2]+(b[2]-a[2])*t;
         if(x>3.3f && x<3.9f && z>1.0f && z<2.0f){++walls;return 0.5f;}
@@ -57,6 +58,82 @@ void Water() {
     Check(Advance(*s,from,to,next)==Result::moving,"deferred water probe recovers without dropping route");
     Scene(-30,crew::Sea::water,0);*s={};
     Check(Advance(*s,from,from,next)==Result::blocked,"arrival check cannot certify a deep-water spawn point");
+}
+void GroundBatchScope() {
+    auto s=std::make_unique<State>();
+    Scene(0,crew::Sea::land);
+    crew::TakeGroundProbeStats();
+    const float from[3]={0,0,0},goal[3]={24,0,20};float next[3]{};
+    Check(Advance(*s,from,goal,next)==Result::moving,"multi-edge route keeps its result with a shared world view");
+    const auto stats=crew::TakeGroundProbeStats();
+    Check(stats.batches>0 && stats.floor==static_cast<unsigned>(floors) &&
+          stats.water==static_cast<unsigned>(waters) && floors==waters,
+          "one world view per active batch preserves the logical floor and water queries");
+
+    *s={};Scene(0,crew::Sea::land);
+    Check(crew::GroundNavigate(*s,from,from,0.1f,frame*16,next)==Result::arrived,"live ground supports arrival");
+    const int first=floors;
+    floorHeight=-3; // Same frame and coordinates, changed world before another invocation.
+    Check(crew::GroundNavigate(*s,from,from,0.1f,frame*16,next)==Result::blocked && floors>first,
+          "a new invocation checks current geometry even in the same frame");
+}
+void BodyClearanceScope() {
+    struct Outcome { Result result;crew::GroundProbeStats stats;int worldRays; };
+    const float from[3]={0,0,0},goal[3]={2,0,0};
+    const auto run=[&](bool available,bool clear) {
+        auto s=std::make_unique<State>();
+        Scene(0,crew::Sea::land);
+        crew::TakeGroundProbeStats();
+        ground_ray_fixture::bodyAvailable=available;
+        ground_ray_fixture::bodyClear=clear;
+        float next[3]{};
+        const auto result=Advance(*s,from,goal,next);
+        ground_ray_fixture::bodyAvailable=false;
+        return Outcome{result,crew::TakeGroundProbeStats(),mapRays};
+    };
+    const auto old=run(false,false),fast=run(true,true),hit=run(true,false);
+    Check(old.result==Result::moving && fast.result==old.result && hit.result==old.result,
+          "ground-body clearance retains the same route result");
+    Check(fast.stats.bodyLists>0 && fast.stats.bodyRays==fast.stats.bodyClear &&
+          old.stats.clearance==fast.stats.clearance &&
+          old.worldRays-fast.worldRays==static_cast<int>(fast.stats.bodyClear) && fast.worldRays>0,
+          "a cached clear body skips only horizontal world rays and retains their logical budget");
+    Check(hit.stats.bodyRays>0 && hit.stats.bodyClear==0 && hit.worldRays==old.worldRays,
+          "a cached body hit still reaches the original world ray");
+    Check(!old.stats.bodyFloor && fast.stats.bodyFloor>0 && fast.stats.bodyFloor<fast.stats.floor &&
+          fast.stats.floor==old.stats.floor && hit.stats.bodyFloor==fast.stats.bodyFloor,
+          "later covered floor rays reuse the body while the edge keeps its logical floor budget");
+
+}
+void SharedBodyView() {
+    struct Outcome { crew::GroundProbeStats stats;std::array<float,3> waypoint; };
+    const float from[3]={0,0,0},goal[3]={11,0,4};
+    const auto run=[&](bool available,float maxWidth) {
+        auto s=std::make_unique<State>();
+        Scene(0,crew::Sea::land);
+        crew::TakeGroundProbeStats();
+        ground_ray_fixture::bodyAvailable=available;
+        ground_ray_fixture::bodyClear=true;
+        ground_ray_fixture::bodyMaxWidth=maxWidth;
+        float next[3]{};
+        Check(Advance(*s,from,goal,next)==Result::moving,"body query reuse preserves route admission");
+        ground_ray_fixture::bodyAvailable=false;
+        ground_ray_fixture::bodyMaxWidth=0;
+        return Outcome{crew::TakeGroundProbeStats(),{next[0],next[1],next[2]}};
+    };
+    const auto worldRun=run(false,0),sharedRun=run(true,0),limitedRun=run(true,3.2f);
+    const auto& world=worldRun.stats;
+    const auto& shared=sharedRun.stats;
+    const auto& limited=limitedRun.stats;
+    Check(worldRun.waypoint==sharedRun.waypoint && worldRun.waypoint==limitedRun.waypoint,
+          "single-body regions and world queries pick the same waypoint");
+    Check(shared.bodyListReused>0 && shared.bodyListQueries<world.bodyListQueries,
+          "nearby short edges reuse the captured fixed body");
+    Check(limited.bodyListQueries>limited.bodyLists && limited.bodyLists>0,
+          "a rejected wider box still allows a smaller body query");
+    Check(world.floor==shared.floor && world.clearance==shared.clearance && world.water==shared.water &&
+          world.floor==limited.floor && world.clearance==limited.clearance && world.water==limited.water,
+          "shared body views preserve the original logical probes");
 }
 void Corners() {
     auto s=std::make_unique<State>();Profile vehicle{};vehicle.cell=4;vehicle.waypointRadius=1.5f;
@@ -345,4 +422,4 @@ void VehicleRoute() {
     Check(blind>0 && seeing*100>=blind*50,"the vehicles' unspent rays given back to the frame's shared budget");
 }
 }
-int main(){Water();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+int main(){Water();GroundBatchScope();BodyClearanceScope();SharedBodyView();Corners();LongSearch();Fairness();SupportBeforeNpcs();DeferredTurn();HullRoute();VehicleRoute();SquadAhead();CoastHull();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

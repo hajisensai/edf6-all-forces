@@ -463,6 +463,18 @@ int main() {
         Current().ride.seat=0;Current().instrumentsReady=true;
     }
     check(std::memcmp(pose,originals,sizeof(pose))==0,"the native draw pose is restored byte for byte");
+    {
+        Publish();DrawSnap snapshot{};TakeSnapshot(&snapshot);SnapScope taken(&snapshot);
+        alignas(16) float frozen[32],privatePose[32]{};
+        std::memcpy(frozen,originals,sizeof(frozen));
+        frozen[28]=3.0f;
+        pose[28]=99.0f;  // the writer has since advanced this same native instance
+        PoseRestore captured{};
+        check(InstrumentPose(inst,privatePose,&captured,frozen) && privatePose[0]==0 && privatePose[28]==3.0f &&
+              pose[0]==1 && pose[28]==99.0f && !captured.pose,
+              "a covered instrument edits the draw-owned matrices without modifying the live world");
+        pose[28]=0.0f;
+    }
     Put<const wchar_t*>(bones,0,L"vc_i_0_0_l_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_0_0_l_1_0");
     Current().instruments.language=1;drawInstruments();
@@ -926,8 +938,7 @@ int main() {
                    snap.instruments.value[0]==v && snap.probeAnchor[0].m[12]==v && snap.probeAnchor[1].m[12]==v &&
                    snap.probeAnchored[0]==odd && snap.probeAnchored[1]==odd;
         };
-        // SeqTake may retain a reader's last whole copy while the writer is busy. Seed this scene's
-        // markers and view history before racing, rather than inheriting another scenario's valid cache.
+        // Seed this scene's committed state before racing so it cannot inherit another scenario's cache.
         publishFrame(0);
         DrawSnap initial{};ViewHistory initialViews{};
         check(TakeSnapshot(&initial) && markersMatch(initial) && TakeViews(0,&initialViews),
@@ -935,9 +946,13 @@ int main() {
         publishFrame(1);
         DrawSnap fallback{};bool fallbackOk=false;
         Published& p=published[0];
-        SeqPublish(&p.seq,&p.snap,[&](DrawSnap&){fallbackOk=TakeSnapshot(&fallback);});
-        check(fallbackOk && markersMatch(fallback) && fallback.view[0].m[12]==initial.view[0].m[12],
-              "a busy writer legally retains the reader's previous whole frame after a newer frame was published");
+        p.snap.Publish([&](DrawSnap& staged){
+            staged.handOf[0]=7;
+            fallbackOk=TakeSnapshot(&fallback);
+            staged.handOf[0]=1;
+        });
+        check(fallbackOk && markersMatch(fallback) && fallback.view[0].m[12]==1.0f,
+              "while the producer builds a new value, even a stale reader can take the latest committed frame");
         std::atomic<bool> stop{false};
         std::atomic<int> rounds{0};   // the reader starts once the writer has published and submitted (never vacuous)
         std::thread writer([&]{
@@ -1001,7 +1016,7 @@ int main() {
         check(refreshed==first && refreshed->reloadLeft==8,"once no draw reads it, the cached copy takes the newer publish");
         bool busyOk=false;
         Published& p=published[0];
-        SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){d.reloadLeft=9;const DrawSnap* const busy=SnapshotOf(0,&scratch);busyOk=busy && busy->reloadLeft==8;});
+        p.snap.Publish([&](DrawSnap& d){d.reloadLeft=9;const DrawSnap* const busy=SnapshotOf(0,&scratch);busyOk=busy && busy->reloadLeft==8;});
         const DrawSnap* const after=SnapshotOf(0,&scratch);
         check(busyOk && after && after->reloadLeft==9,"a busy writer's fallback (the last whole copy) is not cached as the newer count's");
         for(auto& state:states)state=State{};

@@ -77,6 +77,8 @@
 #include "turretcam_api.h"
 #include "view.h"
 #include "vhud.h"
+#include "render_snapshot.h"
+#include "render_pose.h"
 #include "firstperson.h"
 #include "edf/weapon.h"
 #include "fp_view.h"
@@ -353,39 +355,15 @@ State states[kLocalViews]{};
 struct LocalSeen { unsigned char* human; ULONGLONG at; };
 LocalSeen localSeen[kLocalViews]{};
 constexpr ULONGLONG kLocalSeenMs=1000;
-// What the camera step and the camera submit leave for the draws (docs/fp-render-re.md §17.5), each published whole
-// under a sequence count (odd while it is written: SeqPublish) and read as a whole copy (SeqTake). The draws run on a
-// render thread, up to three update steps behind the game thread, so nothing on their path reads a State field.
-// The camera's submitted views (CaptureRenderCamera), the last kViewHistory of them: a draw is made with the view of the
-// update it renders, which may be a few submits older than the newest (§17.2: 0-3 steps), and matching only the newest
-// left a lagging draw of a turning camera unowned (L1 error past 0.1: the stock body and gun for that draw).
+// Draws may lag the camera step by several submits. Publish values for the render thread
+// to read independently of the camera's live State, and retain its eight most recent views.
 constexpr int kViewHistory=8;
-// ok: submitted in first person; sent: submitted (any view), by the local player `who` the camera followed then.
 struct ViewHistory { M4 view[kViewHistory]; bool ok[kViewHistory]; bool sent[kViewHistory]; const void* who[kViewHistory]; int next; };
-// The draws' copies, beside the states (a State is reset by assigning it whole: never under a reader's feet). last /
-// lastViews: the render thread's own (the last whole copy, while a writer keeps the count odd).
-struct Published { DrawSnap snap; volatile LONG seq; DrawSnap last; bool lastOk;
-                   ViewHistory views; volatile LONG viewSeq; ViewHistory lastViews; bool lastViewsOk; };
+struct Published {
+    RenderSnapshot<DrawSnap> snap;
+    RenderSnapshot<ViewHistory> views;
+};
 Published published[kLocalViews]{};
-template<class T,class Write> void SeqPublish(volatile LONG* seq,T* value,Write write) noexcept {
-    InterlockedIncrement(seq);   // odd: being written (a full barrier)
-    write(*value);
-    InterlockedIncrement(seq);   // even: whole
-}
-// A copy torn by a writer meanwhile is taken again; while a writer keeps it busy the last whole copy stands. False: none.
-// taken (optional): the even count the copy was whole under; left as it was when the copy is the last whole one instead.
-template<class T> bool SeqTake(volatile LONG* seq,const T* value,T* out,T* last,bool* lastOk,LONG* taken=nullptr) noexcept {
-    for(int tries=0;tries<64;++tries) {
-        const LONG before=InterlockedCompareExchange(seq,0,0);
-        if(before&1){YieldProcessor();continue;}
-        std::memcpy(out,value,sizeof(*out));
-        MemoryBarrier();
-        if(InterlockedCompareExchange(seq,0,0)==before){*last=*out;*lastOk=true;if(taken)*taken=before;return true;}
-    }
-    if(!*lastOk)return false;
-    *out=*last;
-    return true;
-}
 thread_local const DrawSnap* drawSnap=nullptr;   // the draw in progress's copy (render thread)
 const DrawSnap& Snap() noexcept { static const DrawSnap none{};return drawSnap ? *drawSnap : none; }
 struct SnapScope {
@@ -406,24 +384,18 @@ int SnapHand(const DrawSnap& d,const void* model) noexcept {
 }
 void Publish() noexcept;
 void ResetToggleGestures() noexcept;
-// Each thread's whole copy of each published snapshot, kept while the count stays at the even value it was whole under:
-// the snapshot is written only under SeqPublish and its count only grows, so an unchanged even count is unchanged
-// content, and the many draws of one camera step (every model of the frame asks) share one copy instead of each
-// copying it twice. users: the draws on this thread still reading it (DrawSnapScope), never rewritten under them.
-struct SnapCache { LONG seq; bool valid; int users; DrawSnap snap; };
+// Keep one committed copy per reader and revision. Nested draws can hold the
+// outer draw's copy even after a new camera step publishes.
+struct SnapCache { std::uint64_t revision; int users; DrawSnap snap; };
 thread_local SnapCache snapCache[kLocalViews]{};
-// The published snapshot of `index` as SeqTake would copy it: the thread's cached copy, or `scratch` when a draw on
-// this thread still reads the cached one (a nested draw). Null: none yet.
 const DrawSnap* SnapshotOf(int index,DrawSnap* scratch) noexcept {
     Published& p=published[index];
     SnapCache& c=snapCache[index];
-    const LONG now=InterlockedCompareExchange(&p.seq,0,0);
-    if(c.valid && !(now&1) && c.seq==now)return &c.snap;
+    if(c.revision && c.revision==p.snap.Revision())return &c.snap;
     DrawSnap* const out=c.users ? scratch : &c.snap;
-    if(out==&c.snap)c.valid=false;
-    LONG taken=-1;   // odd: no count the copy was whole under (the last whole copy, a busy writer's): taken again next time
-    if(!SeqTake(&p.seq,&p.snap,out,&p.last,&p.lastOk,&taken))return nullptr;
-    if(out==&c.snap && !(taken&1)){c.seq=taken;c.valid=true;}
+    std::uint64_t revision=0;
+    if(!p.snap.TryRead(*out,revision))return c.revision ? &c.snap : nullptr;
+    if(out==&c.snap)c.revision=revision;
     return out;
 }
 bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
@@ -433,8 +405,13 @@ bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
     return true;
 }
 bool TakeViews(int index,ViewHistory* out) noexcept {
-    Published& p=published[index];
-    return SeqTake(&p.viewSeq,&p.views,out,&p.lastViews,&p.lastViewsOk);
+    struct ViewCache { ViewHistory views; std::uint64_t revision; };
+    thread_local ViewCache cache[kLocalViews]{};
+    auto& view=cache[index];
+    published[index].views.TryRead(view.views,view.revision);
+    if(!view.revision)return false;
+    *out=view.views;
+    return true;
 }
 // Each thread its own selection: the camera step (game thread) and the draws (render thread) select states at once.
 thread_local State* selected=&states[0];
@@ -483,7 +460,7 @@ State* AcquireCamera(void* camera) noexcept {
 // A state's submitted views retired (game thread): it left first person, or the mission's cameras are gone.
 void ClearViews(int index) noexcept {
     Published& p=published[index];
-    SeqPublish(&p.viewSeq,&p.views,[](ViewHistory& v){v=ViewHistory{};});
+    p.views.Publish([](ViewHistory& v){v=ViewHistory{};});
 }
 // Mission reset is published from preload; only the game/render thread drops its camera objects and GPU cache.
 std::atomic<unsigned> session{0};
@@ -530,7 +507,7 @@ void CaptureRenderCamera(void* camera,const float* world) noexcept {
     const bool ok=sent && state->on && !state->overridden;
     const void* const who=CameraPlayer(static_cast<const unsigned char*>(camera));
     Published& p=published[state-states];
-    SeqPublish(&p.viewSeq,&p.views,[&](ViewHistory& v){
+    p.views.Publish([&](ViewHistory& v){
         const int at=v.next>=0 && v.next<kViewHistory ? v.next : 0;
         v.view[at]=native;v.ok[at]=ok;v.sent[at]=sent && who;v.who[at]=who;v.next=(at+1)%kViewHistory;
     });
@@ -586,14 +563,17 @@ State* ViewState(const void* view) noexcept {
     M4 native;std::memcpy(native.m,static_cast<const unsigned char*>(view)+0x20,64);
     // The draws' own cache (render thread): the owner holds while no camera submitted, or retired, a view since.
     thread_local M4 cached{};
-    thread_local LONG cachedSeq[kLocalViews]{};
+    thread_local std::uint64_t cachedRevision[kLocalViews]{};
     thread_local bool cachedOk=false;
     thread_local State* owner=nullptr;
-    LONG seq[kLocalViews];bool settled=true;
-    for(int k=0;k<kLocalViews;++k){seq[k]=InterlockedCompareExchange(&published[k].viewSeq,0,0);settled=settled && !(seq[k]&1);}
-    if(cachedOk && settled && std::memcmp(cachedSeq,seq,sizeof(seq))==0 && std::memcmp(cached.m,native.m,64)==0)return owner;
+    std::uint64_t revision[kLocalViews];
+    bool settled=true;
+    for(int k=0;k<kLocalViews;++k){revision[k]=published[k].views.Revision();settled=settled && !(revision[k]&1);}
+    if(cachedOk && settled && std::memcmp(cachedRevision,revision,sizeof(revision))==0 && std::memcmp(cached.m,native.m,64)==0)return owner;
     bool live=false;
-    owner=MatchView(native,&live);cached=native;std::memcpy(cachedSeq,seq,sizeof(seq));cachedOk=settled;
+    owner=MatchView(native,&live);
+    for(int k=0;settled && k<kLocalViews;++k)settled=revision[k]==published[k].views.Revision();
+    cached=native;std::memcpy(cachedRevision,revision,sizeof(revision));cachedOk=settled;
     if(Cfg().debug && At<int>(view,4)==0) {
         thread_local ULONGLONG logged=0;thread_local unsigned matched=0,unmatched=0;
         if(owner)++matched;else if(live)++unmatched;
@@ -1882,7 +1862,7 @@ void __fastcall PassEndHook(void* system,int pass) {
 void Publish() noexcept {
     Published& p=published[selected-states];
     const State& c=Current();
-    SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){
+    p.snap.Publish([&](DrawSnap& d){
         d.on=c.on && !c.overridden;d.riding=c.riding;d.body=c.body;d.bodyCtrl=c.bodyCtrl;d.rideCtrl=c.rideCtrl;
         d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
         std::memcpy(d.weapons,c.weapons,sizeof(d.weapons));std::memcpy(d.weaponCtrls,c.weaponCtrls,sizeof(d.weaponCtrls));d.weaponCount=c.weaponCount;
@@ -2113,16 +2093,20 @@ struct PoseRestore {
 // Arm/weapon poses through T, restored after the draw. Non-arm body bones stay native: fp_skin_gpu submits only
 // triangles owned by one visible arm, excluding mixed torso/shoulder and opposite-arm faces instead of stretching
 // their skinning weights. `t` is each hand's transform (a weapon uses its own hand's twice).
-void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpview::Frustum& frustum,const M4* otherBox,float* backup,PoseRestore* captured=nullptr) noexcept {
+bool Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpview::Frustum& frustum,const M4* otherBox,
+          float* buffer,PoseRestore* captured=nullptr,const float* frozen=nullptr) noexcept {
     const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
-    if(!pose || !bones || n<=0 || n>kMostBones)return;
-    std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
-    if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
+    if(!pose || !bones || n<=0 || n>kMostBones)return false;
+    const auto bytes=static_cast<std::size_t>(n)*64;
+    std::memcpy(buffer,frozen ? frozen : pose,bytes);
+    const float* original=frozen ? frozen : buffer;
+    if(frozen)pose=buffer;
+    else if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     ArmFit fit[2]{};
-    if(body && Cfg().fpArmIk && !d.riding && !d.nativeArms)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand,camera,frustum,otherBox);
+    if(body && Cfg().fpArmIk && !d.riding && !d.nativeArms)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,original,t[hand],hand,camera,frustum,otherBox);
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
@@ -2140,6 +2124,7 @@ void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpvie
                                     : std::wcsncmp(name,L"kawan",5)==0 ? fit[hand].fore : fit[hand].hand);
         std::memcpy(p,moved.m,64);
     }
+    return true;
 }
 
 void Unpose(unsigned char* inst,const float* backup,const PoseRestore* captured=nullptr) noexcept {
@@ -2200,14 +2185,15 @@ void AttitudeProbe(const wchar_t* name,const M4& original,const M4& moved,const 
         name,ready,r.flight,r.value[instruments::pitch],r.value[instruments::roll],turned,drop,sx,sy,len(original.m+8));
 }
 
-void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=nullptr) noexcept {
+bool InstrumentPose(unsigned char* inst,float* buffer,PoseRestore* captured=nullptr,const float* frozen=nullptr) noexcept {
     const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
-    if(!pose || !bones || n<=0 || n>kMostBones)return;
-    std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
-    if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
+    if(!pose || !bones || n<=0 || n>kMostBones)return false;
+    std::memcpy(buffer,frozen ? frozen : pose,static_cast<std::size_t>(n)*64);
+    if(frozen)pose=buffer;
+    else if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     for(int i=0;i<n;++i) {
         const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
         // A panoramic seat: the vehicle's own bones (its hull, its shell regions) folded; the kit rides vc_pan_.
@@ -2259,6 +2245,7 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         std::memcpy(pose+i*16,moved.m,64);
         if(mode==L'g' && Cfg().debug)AttitudeProbe(name,original,moved,d,ready);
     }
+    return true;
 }
 
 void LogPass(Part part,int pass) noexcept {
@@ -2322,9 +2309,9 @@ fpview::Frustum DrawFrustum(const void* view,const M4& camera) noexcept {
 // frame, seen from this draw's camera: T = anchor_now^-1 * L * C_draw. So the hold neither follows the update steps the
 // game took after the camera step (the walk's and the jump's twitch) nor a camera the draw does not use. False: no
 // placement (the camera step's T is used).
-bool DrawTransforms(const unsigned char* inst,Part part,int hand,const M4& camera,M4* t) noexcept {
+bool DrawTransforms(const unsigned char* inst,Part part,int hand,const M4& camera,M4* t,const float* frozen=nullptr) noexcept {
     const DrawSnap& d=Snap();
-    const auto pose=At<const float*>(inst,kInstPose);
+    const auto pose=frozen ? frozen : At<const float*>(inst,kInstPose);
     if(!pose)return false;
     if(part==Part::inHand) {
         M4 inv;
@@ -2386,6 +2373,7 @@ __declspec(noinline) void DrawOwnedModel(void* model,void* ctx,int pass,void* vi
     // pose belongs to this invocation until it is returned; a global/thread-global scratch array cannot own it.
     alignas(16) float saved[kMostInsts][kMostBones*16];
     PoseRestore captured[kMostInsts]{};
+    renderpose::Override overrides[kMostInsts]{};
     int n=0;
     __try {
         const DrawSnap& d=Snap();
@@ -2403,18 +2391,32 @@ __declspec(noinline) void DrawOwnedModel(void* model,void* ctx,int pass,void* vi
             }
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
             for(int i=0;i<n;++i) {
-                if(part==Part::instruments){InstrumentPose(insts[i],saved[i],&captured[i]);continue;}
-                M4 t[2];
-                const bool drawn=!d.riding && DrawTransforms(insts[i],part,hand,camera,t);
-                if(!drawn){t[0]=stepT[0];t[1]=stepT[1];}
-                Pose(insts[i],t,part==Part::body,camera,frustum,otherBox,saved[i],&captured[i]);
+                auto* const inst=insts[i];
+                const auto* const parent=renderpose::OverrideOf(inst);
+                const auto* const frozen=parent ? parent->matrices :
+                    (renderpose::frozenPose ? renderpose::frozenPose(inst) : nullptr);
+                bool prepared=false;
+                if(part==Part::instruments)prepared=InstrumentPose(inst,saved[i],&captured[i],frozen);
+                else {
+                    M4 t[2];
+                    const bool drawn=!d.riding && DrawTransforms(inst,part,hand,camera,t,frozen);
+                    if(!drawn){t[0]=stepT[0];t[1]=stepT[1];}
+                    prepared=Pose(inst,t,part==Part::body,camera,frustum,otherBox,saved[i],&captured[i],frozen);
+                }
+                if(prepared)overrides[i]={inst,frozen ? saved[i] : nullptr};
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){RestoreCapturedPoses(insts,saved,captured,n);n=0;}
+    const renderpose::DrawOverrides overrideScope{overrides,n,renderpose::drawOverrides};
+    if(n)renderpose::drawOverrides=&overrideScope;
     if(part==Part::body)fpskin::Begin(fpskin::Mask{}); // the mesh draw selects its actual LOD palette
-    next(model,ctx,pass,view);
-    if(part==Part::body)fpskin::End();
-    RestoreCapturedPoses(insts,saved,captured,n);
+    __try {
+        next(model,ctx,pass,view);
+    } __finally {
+        if(part==Part::body)fpskin::End();
+        renderpose::drawOverrides=overrideScope.parent;
+        RestoreCapturedPoses(insts,saved,captured,n);
+    }
 }
 
 void DrawSelected(void* model,void* ctx,int pass,void* view) {
@@ -2618,13 +2620,8 @@ void* nextLaserRay=nullptr;     // slot 2 as it was (ChainVtableSlot writes it b
 LaserCastFn nextLaserCast=nullptr;
 thread_local const unsigned char* castLaser=nullptr;   // the attachment whose slot 2 runs on this thread
 
-// The published views (the update may run off the camera step's thread): this thread's own last whole copies.
-bool TakeRayView(int index,DrawSnap* out) noexcept {
-    thread_local DrawSnap last[kLocalViews]{};
-    thread_local bool lastOk[kLocalViews]{};
-    Published& p=published[index];
-    return SeqTake(&p.seq,&p.snap,out,&last[index],&lastOk[index]);
-}
+// Laser updates may run off the camera step's thread and use the same committed handoff as draws.
+bool TakeRayView(int index,DrawSnap* out) noexcept {return TakeSnapshotOf(index,out);}
 
 // The viewmodel's muzzle of `weapon` in the world, from the shot's own muzzle (its bone record, what the native ray
 // started from) through the placement the gun is drawn with: one local view's weapon in hand in first person (two views

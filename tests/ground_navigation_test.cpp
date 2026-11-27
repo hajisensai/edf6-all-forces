@@ -1,6 +1,7 @@
 #include "../src/ground_navigation.h"
 #include <cstdio>
 #include <memory>
+#include <vector>
 using namespace npc::navigation;
 namespace {
 int failures=0,cases=0;
@@ -34,6 +35,46 @@ Result Plan(State& s,World& w,Point from,Point to,Point& next,std::uint64_t& ms,
     Result result=Result::pending;
     for(int i=0;i<max && result==Result::pending;++i) {ms+=16;result=Navigate(s,from,to,0.2f,ms,next,[&](Point a,Point b,Point& c){return w(a,b,c);});}
     return result;
+}
+void CellIndex() {
+    auto s=std::make_unique<State>();
+    Begin(*s,{1,2,3},{5,2,7},{},1);
+    Check(s->FindCell(0,0,2.0f)==0,"search origin is indexed");
+    s->AddNode({{10,0.0f,-20},1.0f,4.0f,10,-20,0,false});
+    s->AddNode({{10,0.375f,-20},2.0f,4.0f,10,-20,0,false});
+    Check(s->FindCell(10,-20,0.1875f)==1,"an ambiguous floor keeps insertion order");
+    Check(s->FindCell(10,-20,0.25f)==2,"the floor match is strictly within a quarter metre");
+    Check(s->FindCell(10,-20,0.625f)==-1,"separate floors in the same cell remain separate");
+    constexpr int collidingZ=-134;
+    Check(State::Bucket(10,-20)==State::Bucket(-90,collidingZ),"fixture coordinates share a hash bucket");
+    s->AddNode({{-90,0.0f,static_cast<float>(collidingZ)},3.0f,4.0f,-90,collidingZ,0,false});
+    Check(s->FindCell(-90,collidingZ,0.0f)==3 && s->FindCell(10,-20,0.0f)==1,"hash collisions keep both coordinates");
+    s->length=1;
+    s->path[0]={2,9,3};
+    BeginAhead(*s,{13,9,12},{});
+    Check(s->FindCell(10,-20,0.0f)==-1 && s->FindCell(0,0,9.0f)==0 && s->count==1,
+          "the next leg starts a fresh index at the end of the path");
+}
+void CentreGroundProbe() {
+    Point out{};
+    int floors=0,clearance=0,hulls=0;
+    Check(WalkEdge({0,0,0},{2,0,0},out,{},[&](Point,float,float& height) {
+        ++floors;height=0;return true;
+    },[&](Point,Point) { ++clearance;return true; },[&](Point,Point) { ++hulls;return true; }) &&
+          floors==12 && clearance==48 && hulls==16 && out.x==2.0f,
+          "on level ground only three floor probes per segment; terrain and hull sweeps stay the same");
+
+    const Profile p{};
+    bool reprobed=false;
+    const bool open=WalkEdge({0,0,0},{0.5f,0,0},out,p,[&](Point at,float step,float& height) {
+        const bool upper=at.z==0.0f && at.y>0.0f;
+        reprobed|=upper;
+        height=step*(upper ? 1.25f : 0.5f);
+        return true;
+    },[&](Point a,Point b) {
+        return !(a.z==0.0f && a.x==b.x && a.y>p.step);
+    });
+    Check(!open && reprobed,"a changed floor raises the centre probe window and can reveal blocked headroom");
 }
 void Routing() {
     auto s=std::make_unique<State>();World w;Point from{},to{12,0,0},next{};std::uint64_t ms=1;
@@ -422,5 +463,55 @@ void Ahead() {
         Check(FinalLeft(s,{27,0,0})<0.0f,"FinalLeft: a leg's end is a corner, no ease");
     }
 }
+void GroupedClearance() {
+    const auto ground=[](Point,float,float& y) noexcept {y=0;return true;};
+    const auto hull=[](Point,Point) noexcept {return true;};
+    int vertical=0,horizontal=0,spans=0;
+    const auto clear=[&](Point from,Point to) noexcept {
+        ++vertical;
+        return from.x==to.x && from.z==to.z;
+    };
+    const auto sweep=[&](Point,Point,float,float) noexcept {
+        ++spans;
+        return [&](Point,Point) noexcept {++horizontal;return true;};
+    };
+    Point out;
+    Check(WalkEdge(Point{},Point{2,0,0},out,Profile{},ground,clear,hull,sweep) &&
+          spans==4 && vertical==12 && horizontal==36,
+          "one horizontal sweep context per half metre, independent of vertical headroom");
+    horizontal=0;
+    const auto blocker=[&](Point,Point,float,float) noexcept {
+        return [&](Point,Point) noexcept {return ++horizontal<5;};
+    };
+    Check(!WalkEdge(Point{},Point{2,0,0},out,Profile{},ground,clear,hull,blocker) && horizontal==5,
+          "a blocked horizontal probe still stops the edge in its original order");
 }
-int main(){Routing();LongRoutes();Horizon();BoardFarSide();Ahead();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+
+
+void IndexedFrontier() {
+    auto route=std::make_unique<RouteState>();
+    route->ResetNodes({{},0,0,0,0,-1,true});
+    const auto visit=[&] {
+        std::vector<int> out;
+        route->VisitOpen([&](int i){out.push_back(i);});
+        return out;
+    };
+    const int pivot=RouteState::kIndexedFrontier;
+    for(int i=1;i<pivot-1;++i)
+        route->AddNode({{static_cast<float>(i),0,0},0,0,i,0,-1,i!=63 && i!=64});
+    Check(visit()==std::vector<int>{63,64},"a short frontier retains insertion order");
+    route->AddNode({{static_cast<float>(pivot-1),0,0},0,0,pivot-1,0,-1,false});
+    route->AddNode({{static_cast<float>(pivot),0,0},0,0,pivot,0,-1,true});
+    Check(visit()==std::vector<int>{63,64,pivot-1},"frontier index builds from the current open slots");
+    route->SetClosed(64,true);
+    route->SetClosed(62,false);
+    route->SetClosed(pivot,false);
+    Check(visit()==std::vector<int>{62,63,pivot-1,pivot},"closing and reopening indexed slots retains insertion order");
+    route->ResetNodes({{},0,0,0,0,-1,false});
+    for(int i=1;i<pivot;++i)
+        route->AddNode({{static_cast<float>(i),0,0},0,0,i,0,-1,true});
+    Check(visit()==std::vector<int>{0},"a new indexed search drops the previous frontier");
+}
+
+}
+int main(){CellIndex();IndexedFrontier();CentreGroundProbe();GroupedClearance();Routing();LongRoutes();Horizon();BoardFarSide();Ahead();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

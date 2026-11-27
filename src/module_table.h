@@ -8,6 +8,11 @@
 
 #include "module.h"
 #include "plugin_log.h"
+#include "config.h"
+#include "native_bone_update.h"
+#include "native_body_math.h"
+#include "render_pose.h"
+#include "render_record.h"
 #include "scene.h"
 #include "boarding.h"
 #include "plugin_body.h"
@@ -127,6 +132,8 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kRenderFence,"render fence",kLoadOnly) \
     M(kFrameLatency,"frame latency",kLoadOnly) \
     M(kFrameRate,"frame rate",kLoadOnly) \
+    M(kNativePerformance,"native performance",kLoadOnly) \
+    M(kRenderOwner,"render ownership",kLoadOnly) \
     M(kFsBudget,"fs budget",kLoadOnly) \
     M(kTeamCapacity,"team capacity",kLoadOnly) \
     M(kHavokProps,"havok props",kLoadOnly) \
@@ -326,6 +333,23 @@ constexpr InstallEntry kInstalls[]={
     // ticks, drawn with the camera and the player's root interpolated (the game's blt swap chain with sync interval 1;
     // the flip model only behind the developer switch FrameRateFlip). Not with EDF6VR (it paces frames itself).
     {IP::kBeforeAppInit,Id::kFrameRate,&Install<&InstallFrameRate>},
+    {IP::kBeforeAppInit,Id::kNativePerformance,[](const LoadContext&) noexcept {
+        if(!Cfg().enabled)return;
+        Log("BONES subtree composition: %u/3 native callers redirected",InstallNativeBoneUpdate());
+        Log("PHYSICS attachment and collision: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
+        const bool nearestReady=InstallNativeTargetScore();
+        Log("AI native target scoring: %s",nearestReady ? "optimized" : "stock");
+        const bool hostileVisitReady=InstallNativeHostileVisit();
+        Log("AI native hostile visitor: %s",hostileVisitReady ? "direct" : "stock");
+        Log("AI native hostile roster: %s",InstallNativeHostileRoster(nearestReady && hostileVisitReady) ? "cached" : "stock");
+        Log("AI native soldier scoring: %s",InstallNativeSoldierScore() ? "optimized" : "stock");
+    }},
+    {IP::kBeforeAppInit,Id::kRenderOwner,[](const LoadContext&) noexcept {
+        if(Cfg().renderPoseSnapshots || Cfg().renderRecordThread)
+            Log("RENDER pose snapshots installed=%d",renderpose::Install());
+        if(Cfg().enabled && Cfg().renderRecordThread)
+            Log("RENDER native recording thread installed=%d",renderrecord::InstallThread());
+    }},
     {IP::kBeforeAppInit,Id::kFsBudget,&Install<&InstallFsLoaderBudget>},   // before the application's init starts CRI File System (fsbudget.cpp)
     {IP::kBeforeAppInit,Id::kTeamCapacity,&Install<&InstallTeamCapacity>}, // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     {IP::kBeforeAppInit,Id::kHavokProps,&Install<&InstallHavokProps>},     // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes

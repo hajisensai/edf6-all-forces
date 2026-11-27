@@ -16,6 +16,7 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include "npc_mobility.h"   // the soldiers' own dashes (Wing Diver dash, Fencer dash / boost / dash-jump)
 
 namespace npc {
@@ -24,10 +25,11 @@ constexpr float kPi=3.14159265f;
 // --- Vectors (x, y, z; y up) ---
 inline float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 inline float Len(const float* a) noexcept { return std::sqrt(Dot(a,a)); }
-inline float Dist(const float* a,const float* b) noexcept {
+inline float DistSquared(const float* a,const float* b) noexcept {
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
-    return Len(d);
+    return Dot(d,d);
 }
+inline float Dist(const float* a,const float* b) noexcept { return std::sqrt(DistSquared(a,b)); }
 inline float Horiz(const float* a,const float* b) noexcept {
     const float dx=b[0]-a[0],dz=b[2]-a[2];
     return std::sqrt(dx*dx+dz*dz);
@@ -60,20 +62,36 @@ inline float SegmentDist(const float* a,const float* b,const float* p,float* alo
 // The look a soldier is given towards world direction `dir` as the stock AI gives it (0x5A2B50 at 0x5A2FFB): 0x4E100
 // turns the direction into (pitch = -atan2(dy, horizontal), yaw = atan2(dx, dz)); d60 = wrap(pitch - cur pitch) x gain,
 // d64 = wrap(yaw - cur yaw) x gain, each clamped to `most` rad a frame. False for a zero direction.
-inline bool AimDelta(float curPitch,float curYaw,const float* dir,float gain,float most,float* out) noexcept {
+struct AimAngles { float pitch,yaw; };
+
+inline bool AimDelta(float curPitch,float curYaw,const float* dir,float gain,float most,float* out,
+                     std::optional<AimAngles>* shared=nullptr) noexcept {
+    if(shared)shared->reset();
     const float h=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
-    if(!(h>1e-6f) && !(std::fabs(dir[1])>1e-6f))return false;
-    const float pitch=-std::atan2(dir[1],h),yaw=h>1e-6f ? std::atan2(dir[0],dir[2]) : curYaw;
+    const bool turnsYaw=h>1e-6f;
+    if(!turnsYaw && !(std::fabs(dir[1])>1e-6f))return false;
+    const float pitch=-std::atan2(dir[1],h),yaw=turnsYaw ? std::atan2(dir[0],dir[2]) : curYaw;
+    // A vertical turn holds the previous yaw. The fire check still needs the direction's actual yaw.
+    if(shared && turnsYaw)*shared=AimAngles{pitch,yaw};
     out[0]=Clamp(Wrap(pitch-curPitch)*gain,-most,most);
     out[1]=Clamp(Wrap(yaw-curYaw)*gain,-most,most);
     return true;
 }
-// The aim's error (rad) between the soldier's look (pitch, yaw) and world direction `dir`.
+// The aim's error (rad) between the view as it is and a direction's world angles.
+inline float AimError(float curPitch,float curYaw,AimAngles target) noexcept {
+    const float dp=Wrap(target.pitch-curPitch),dy=Wrap(target.yaw-curYaw)*std::cos(target.pitch);
+    return std::sqrt(dp*dp+dy*dy);
+}
 inline float AimError(float curPitch,float curYaw,const float* dir) noexcept {
     const float h=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
-    const float pitch=-std::atan2(dir[1],h),yaw=std::atan2(dir[0],dir[2]);
-    const float dp=Wrap(pitch-curPitch),dy=Wrap(yaw-curYaw)*std::cos(pitch);
-    return std::sqrt(dp*dp+dy*dy);
+    return AimError(curPitch,curYaw,AimAngles{-std::atan2(dir[1],h),std::atan2(dir[0],dir[2])});
+}
+inline float FireCone(float distance,float radius,float minimum) noexcept {
+    const float ratio=radius/(distance>1.0f ? distance : 1.0f);
+    // For a nonnegative ratio atan(ratio) cannot increase the angle past this lower bound.
+    if(ratio>=0.0f && ratio<=minimum)return minimum;
+    const float cone=std::atan(ratio);
+    return cone>minimum ? cone : minimum;
 }
 // The local move stick (d50.x, d50.z) for world horizontal direction `dir` at `magnitude` (0..1), the soldier's yaw
 // `yaw`: the inverse of 0x56D350's world = x (cos, 0, -sin) + z (sin, 0, cos).
@@ -157,14 +175,33 @@ inline bool LaneEscape(const Lane& lane,const float* p,float* out) noexcept {
 }
 // A friend (or the player) the shot must not touch: where they are and how wide they stand.
 struct Friend { float pos[3],radius; };
-// A shot from `from` to `to` with a round of blast radius `blast` is clear: no friend within its line (their radius plus
-// `spread`) and none within the blast round the point it lands on (plus a margin, the round may fall short).
-inline bool ShotClear(const float* from,const float* to,float spread,float blast,const Friend* friends,int n) noexcept {
-    for(int i=0;i<n;++i) {
-        float t;
-        if(SegmentDist(from,to,friends[i].pos,&t)<friends[i].radius+spread && t>0.0f)return false;
-        if(blast>0.0f && Dist(to,friends[i].pos)<blast*1.25f+friends[i].radius)return false;
+// Precompute the shot geometry once, then test the line and landing area independently against each candidate.
+struct Shot {
+    Shot() noexcept=default;
+    Shot(const float* start,const float* end,float spreadRadius,float blastRadius) noexcept:
+        from(start),to(end),direction{end[0]-start[0],end[1]-start[1],end[2]-start[2]},
+        lengthSquared(Dot(direction,direction)),spread(spreadRadius),blast(blastRadius) {}
+    bool BlocksLine(const Friend& f) const noexcept {
+        if(!(lengthSquared>1e-6f))return false;
+        const float q[3]={f.pos[0]-from[0],f.pos[1]-from[1],f.pos[2]-from[2]};
+        const float t=Clamp(Dot(q,direction)/lengthSquared,0.0f,1.0f);
+        if(!(t>0.0f))return false;
+        const float offset[3]={q[0]-direction[0]*t,q[1]-direction[1]*t,q[2]-direction[2]*t};
+        return Len(offset)<f.radius+spread;
     }
+    bool BlocksBlast(const Friend& f) const noexcept {
+        return blast>0.0f && Dist(to,f.pos)<BlastMargin(f.radius);
+    }
+    float BlastMargin(float radius) const noexcept { return blast*1.25f+radius; }
+    const float* from=nullptr;
+    const float* to=nullptr;
+    float direction[3]{},lengthSquared=0,spread=0,blast=0;
+};
+
+inline bool ShotClear(const float* from,const float* to,float spread,float blast,const Friend* friends,int n) noexcept {
+    const Shot shot(from,to,spread,blast);
+    for(int i=0;i<n;++i)
+        if(shot.BlocksLine(friends[i]) || shot.BlocksBlast(friends[i]))return false;
     return true;
 }
 

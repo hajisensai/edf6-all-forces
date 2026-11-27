@@ -315,6 +315,14 @@ def probe_parsing() -> None:
         log = os.path.join(d, 'vehiclecrew.log')
         perf = c_format('src/crew.cpp', 'PERF %u frames, %u steps')
         frame = c_format('src/perf_probe.cpp', 'PERF FRAME')
+        havok = c_format('src/perf_probe.cpp', 'PERF HAVOK %sbuild')
+        collide = c_format('src/perf_probe.cpp', 'PERF COLLIDE construct')
+        nav_rays = c_format('src/perf_probe.cpp', 'PERF NAV RAYS')
+        graph = c_format('src/perf_probe.cpp', 'PERF COLLIDE GRAPH %u')
+        node = c_format('src/perf_probe.cpp', 'PERF COLLIDE NODE')
+        contact = c_format('src/perf_probe.cpp', 'PERF COLLIDE CONTACT')
+        command = c_format('src/perf_probe.cpp', 'PERF COLLIDE COMMAND')
+        listener = c_format('src/perf_probe.cpp', 'PERF COLLIDE LISTENER')
         render = c_format('src/perf_probe.cpp', 'PERF RENDER %u presents')
         net = c_format('src/perf_probe.cpp', 'PERF NET CHANNELS')
         gpu = c_format('src/perf_probe.cpp', 'PERF GPU a frame')
@@ -325,6 +333,31 @@ def probe_parsing() -> None:
             f.write('[13:00:20.000] ' + perf % (100, 300, 50.0, 20, 80.0, 100, 20, 40, 33, 16.6, 60, 30.0) + '\n')
             f.write('[13:00:15.000] ' + frame % (300, 10, 0.1, 1.0, 4.0, 0.5, 8.0, 4.0, 0.5, 0.01, 3.0, 5.6) + '\n')
             f.write('[13:00:20.000] ' + frame % (100, 0, 0.1, 1.0, 6.0, 0.7, 40.0, 13.3, 1.5, 0.01, 1.0, 8.6) + '\n')
+            f.write('[13:00:15.000] ' + havok % ('', 100, 200.0, 5.0, 100, 100.0, 3.0) + '\n')
+            f.write('[13:00:20.000] ' + havok % ('', 200, 600.0, 6.0, 200, 200.0, 4.0) + '\n')
+            f.write('[13:00:20.000] ' + havok % ('before ', 100, 100.0, 2.0, 100, 50.0, 1.0) + '\n')
+            f.write('[13:00:20.000] ' + havok % ('after ', 100, 500.0, 6.0, 100, 150.0, 4.0) + '\n')
+            f.write('[13:00:15.000] ' + collide % (100, 50.0, 60, 60.0, 60, 20, 10.0) + '\n')
+            f.write('[13:00:20.000] ' + collide % (150, 80.0, 150, 150.0, 120, 0, 0.0) + '\n')
+            f.write('[13:00:40.000] ' + collide % (9, 9.0, 9, 9.0, 9, 9, 9.0) + '\n')
+            f.write('[13:00:15.000] ' + nav_rays % (4, 400, 1150, 390, 350) + '\n')
+            f.write('[13:00:20.000] ' + nav_rays % (6, 600, 1850, 590, 550) + '\n')
+            f.write('[13:00:40.000] ' + nav_rays % (9, 100, 300, 100, 0) + '\n')
+            f.write('[13:00:20.000] ' + graph % (1, 2, 2, 0, 1, 3.0) + '\n')
+            f.write('[13:00:20.000] ' + graph % (2, 1, 2, 0, 0, 1.0) + '\n')
+            f.write('[13:00:40.000] ' + graph % (3, 1, 1, 0, 0, 9.0) + '\n')
+            f.write('[13:00:20.000] ' + node % (1, 0, 'Grid', 2, 2, 4.0, 2.5, 0.1, 2.9, -1) + '\n')
+            f.write('[13:00:20.000] ' + node % (1, 1, 'PostCollide', 1, 0, 0.5, 0.0, 3.0, 3.5, 0) + '\n')
+            f.write('[13:00:20.000] ' + node % (2, 0, 'Grid', 1, 1, 2.0, 1.0, 0.0, 2.0, -1) + '\n')
+            f.write('[13:00:40.000] ' + node % (3, 0, 'Grid', 1, 1, 9.0, 9.0, 0.0, 9.0, -1) + '\n')
+            f.write('[13:00:15.000] ' + contact % (1, 1, 4.0, 0.2, 0) + '\n')
+            f.write('[13:00:20.000] ' + contact % (2, 1, 5.0, 0.3, 3) + '\n')
+            f.write('[13:00:40.000] ' + contact % (3, 1, 20.0, 1.0, 1) + '\n')
+            f.write('[13:00:20.000] ' + command % (1, 2, 30) + '\n')
+            f.write('[13:00:20.000] ' + command % (2, 2, 35) + '\n')
+            f.write('[13:00:20.000] ' + listener % (1, 4, 0x6DACC8, 10, 2.0) + '\n')
+            f.write('[13:00:20.000] ' + listener % (2, 4, 0x6DACC8, 12, 3.0) + '\n')
+            f.write('[13:00:40.000] ' + listener % (3, 4, 0x6DACC8, 40, 19.0) + '\n')
             f.write('[13:00:20.000] ' + render % (400, 0.2, 3.0, 12.5, 40.0, 20.0, 45.0, 90.0, 2,
                                                   1200, 300, 0, 0, 0, 7, 2500) + '\n')
             f.write('[13:00:15.000] ' + gpu % (40.0, 12.0, 0.0, 0.25, 0.0, 1.5, 300.0, 0.8) + '\n')
@@ -345,6 +378,27 @@ def probe_parsing() -> None:
         check(abs(sp['a step'] - (300 * 8 + 100 * 40) / (300 * 8 / 4 + 100 * 40 / 13.3)) < 1e-6,
               "a step: the steps' time over their count, not a mean of the rows' means")
         check(abs(sp['without steps'] - (300 * 5.6 + 100 * 8.6) / 400) < 1e-9, 'the n = 0 floor (cpu-11) read')
+        h = perf_report.read_havok(log, w)
+        check(h['build'] == (300, 800.0 / 300, 6.0) and h['finish'] == (300, 1.0, 4.0),
+              'Havok timings weight each graph by its call count')
+        check(h['before objects build'] == (100, 1.0, 2.0) and h['after objects build'] == (100, 5.0, 6.0)
+              and h['before objects finish'] == (100, 0.5, 1.0) and h['after objects finish'] == (100, 1.5, 4.0),
+              'Havok reports the two steps separately without double counting the legacy totals')
+        check(perf_report.read_nav_rays(log, w) ==
+              {'batches': 10, 'floor': 1000, 'clearance': 3000, 'water': 980, 'dry': 900},
+              'navigation query batches use the clean window')
+        c = perf_report.read_collide(log, w)
+        check(c == {'construct': (250, 130.0), 'dispatch': (210, 210.0), 'sleep': (20, 10.0), 'mode0': 180},
+              'collision timing keeps empty graphs, non-mode-0 dispatches and waits distinct')
+        trace = perf_report.read_collide_tasks(log, w)
+        check(trace['graphs'] == 2 and trace['complete'] == 1 and trace['wait_ms'] == 4.0
+              and trace['chains'] == {('Grid', 'PostCollide'): 1} and trace['tasks']['Grid'] == [3, 3, 6., 3.5],
+              'collision task report weights callback spans and excludes partial graphs from tail chains')
+        events = perf_report.read_post_collide(log, w)
+        check(events['graphs'] == 2 and events['dispatch_ms'] == 9.0 and events['signal_ms'] == 0.5
+              and events['dropped'] == 3 and events['commands'] == {2: 65}
+              and events['listeners'] == {(4, 0x6DACC8): [22, 5.0]},
+              'PostCollide joins command and listener rows only to sampled graphs in the window')
         r = perf_report.read_render(log, w)
         check(r['presents'] == 400 and r['stepped_worst'] == 90.0 and r['unpaired'] == 2 and r['submits'][0] == 1200
               and r['meshes'] == 2500, 'PERF RENDER: presents, input to present, submits by pass (gpu-2, latency-2)')
@@ -825,6 +879,30 @@ def legs_logs() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def wave_ready() -> None:
+    import drive
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as d:
+        log = os.path.join(d, 'vehiclecrew.log')
+        with open(log, 'wb') as f:
+            f.write(b'[00:00:00.000] PERF OBJECTS enemies 30, player team 1, friends 19\n')
+        during = iter((b'[00:00:10.000] PERF OBJECTS enemies 0, player team 1, friends 4\n',
+                       b'[00:00:15.000] PERF OBJECTS enemies 10, player team 1, friends 19\n'))
+        polls = []
+
+        def advance(_):
+            polls.append(1)
+            with open(log, 'ab') as f:
+                f.write(next(during))
+
+        with patch.object(drive, 'game_pids', return_value=[1]), patch.object(perfrun.time, 'sleep', side_effect=advance):
+            ready = perfrun.wait_population(d, log, 60.0)
+        check(ready is None and len(polls) == 2, 'wave readiness ignores old counts and waits for a live enemy')
+        with patch.object(drive, 'game_pids', return_value=[]):
+            check('exited' in perfrun.wait_population(d, log, 60.0), 'game exit stops a wait for the wave')
+
+
 def legs_run() -> None:
     """One launch of three legs with drive.run faked: the range written once before the launch and rewritten for the
     later range leg, the `next` commands, the keys timed from the leg's entry, each leg's slice of the log and its
@@ -837,6 +915,7 @@ def legs_run() -> None:
     gsaved = {k: getattr(gen, k) for k in ('installed', 'check_scenario', 'write_scenario', 'rewrite_scenario',
                                            'restore_scenario')}
     sample_saved = perfrun._sample
+    population_saved = perfrun.wait_population
     d = tempfile.mkdtemp()
     try:
         game = os.path.join(d, 'game')
@@ -896,7 +975,7 @@ def legs_run() -> None:
         def fake_sample(out, warm, cpu_s, stacks_s, interval, marks, presentmon=None):
             calls.append(('sample', os.path.basename(out), warm))
             now = time.time()
-            n = enemies['range']
+            n = 0 if enter[0] == 'ended' else enemies['range']
             stamp('PERF 300 frames, 300 steps: mean 20.0 ms (50 fps), worst 30.0 ms, 3 over 20 ms, 0 over 33 ms')
             stamp(f'PERF OBJECTS enemies {n}, player team 4, friends 9')
             with open(os.path.join(out, 'cpu.txt'), 'w') as f:
@@ -927,6 +1006,12 @@ def legs_run() -> None:
         gen.rewrite_scenario = rewrite
         gen.restore_scenario = lambda game_: calls.append(('restore',)) or True
         perfrun._sample = fake_sample
+
+        def fake_population(game_, log_, timeout, gate):
+            calls.append(('population',))
+            return 'no live enemy wave' if enter[0] == 'empty' else None
+
+        perfrun.wait_population = fake_population
         _, opts = perfrun.options(['stress:1', 'M001,key=4d@0.1,diff=3', 'stress:10,warm=7', '--dll', 'installed',
                                    '--warm', '5'])
         out = os.path.join(d, 'out')
@@ -935,8 +1020,8 @@ def legs_run() -> None:
         check(rc == 0, 'three legs: the run passes')
         order = [c for c in calls if c[0] != 'key']
         check(order == [('check', 160), ('check', 1600), ('write', 160), ('run', 'range', 1, ('running',), True),
-                        ('sample', 'stress_1', 5.0), ('command', 'next M001 3'), ('sample', 'M001', 5.0),
-                        ('rewrite', 1600), ('command', 'next range 1'), ('sample', 'stress_10', 7.0),
+                        ('population',), ('sample', 'stress_1', 5.0), ('command', 'next M001 3'), ('sample', 'M001', 5.0),
+                        ('rewrite', 1600), ('command', 'next range 1'), ('population',), ('sample', 'stress_10', 7.0),
                         ('restore',), ('placed',)],
               'every range leg checked before the launch, written once, rewritten for the later range leg, `next` '
               'for each later leg, put back once at the end')
@@ -952,7 +1037,9 @@ def legs_run() -> None:
               "each leg's run.json: its scenario, difficulty, windows, when its `next` was handed")
         check(runs[1]['keys_held'][0][:3] == ['4d', 0.1, 300], "the leg's key held, timed from its entry")
         check(runs[0]['entered'] >= running_at[0],
-              "the first leg's warm-up from its RUNNING row (the mission runs), not from before its loading")
+              "the first leg clocks entry from the RUNNING row")
+        check(runs[0]['population_ready'] >= runs[0]['entered'] and 'population_ready' not in runs[1],
+              'only a wave leg waits for population before warm-up')
         with open(os.path.join(dirs[0], 'run.json'), encoding='utf-8') as f:
             first = json.load(f)
         with open(os.path.join(dirs[0], 'run.json'), 'w', encoding='utf-8') as f:
@@ -980,6 +1067,21 @@ def legs_run() -> None:
         with open(os.path.join(dirs[0], 'report.md'), 'w', encoding='utf-8') as f:
             f.write("the plugin's own work (not the game's own under a hook that only calls through): 4.2%, 0.8 ms/frame\n")
         check('| 4.2% |' in perfrun.legs_table(dirs).splitlines()[2], "summary.md: the plugin's own work from report.md")
+        calls.clear()
+        enter[0] = 'empty'
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.multi_run(game, opts['legs'], os.path.join(d, 'out-empty'), None, opts)
+        check(rc == 1 and ('population',) in calls and not any(c[0] == 'sample' for c in calls)
+              and ('restore',) in calls, 'an empty wave leg never samples and restores the range')
+        calls.clear()
+        enter[0] = 'ended'
+        out = os.path.join(d, 'out-ended')
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.multi_run(game, opts['legs'][:1], out, None, opts)
+        with open(os.path.join(out, 'stress_1', 'run.json'), encoding='utf-8') as f:
+            bad = json.load(f)
+        check(rc == 1 and 'cpu' in bad['windows'] and 'no live enemies' in bad['error'] and ('restore',) in calls,
+              'an initially populated battle that empties before measurement is not a valid sample')
         # a leg that never comes in: the run ends there, failed, everything still put back
         calls.clear()
         auto.clear()
@@ -1016,6 +1118,7 @@ def legs_run() -> None:
         for k, v in gsaved.items():
             setattr(gen, k, v)
         perfrun._sample = sample_saved
+        perfrun.wait_population = population_saved
         import shutil
         shutil.rmtree(d, ignore_errors=True)
 
@@ -1034,6 +1137,7 @@ drive_during()
 rewrite_files()
 legs_options()
 legs_logs()
+wave_ready()
 legs_run()
 print(f'{len(failures)} failed' if failures else 'all passed')
 sys.exit(1 if failures else 0)

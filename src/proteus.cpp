@@ -185,18 +185,25 @@ Unit units[kMaxUnits]{};
 
 SRWLOCK zoneLock=SRWLOCK_INIT;
 struct Zone { bool on; ProteusZone z; std::int32_t team; const void* human; ULONGLONG at; } zone{};
-// zone.on mirrored for the readers' lock-free path (SearchHook runs per candidate of every soldier's target search):
-// every write of `zone` ends, still under zoneLock exclusive, with ZoneWritten. Clear, a reader skips the lock as if it
-// had taken it and seen on==false; set, it takes the lock and copies the whole Zone the writer released.
-std::atomic<bool> zoneOn{false};
-void ZoneWritten() noexcept { zoneOn.store(zone.on,std::memory_order_release); }
-// The zone when it is on (false: off, `*z` untouched).
-bool ReadZone(Zone* z) noexcept {
-    if(!zoneOn.load(std::memory_order_acquire))return false;
-    AcquireSRWLockShared(&zoneLock);
-    *z=zone;
-    ReleaseSRWLockShared(&zoneLock);
-    return z->on;
+// The low bit publishes whether the zone is active. Writers change the generation under the exclusive lock.
+// Once a thread has copied a generation, its next reads of that generation need no shared lock.
+std::atomic<std::uint64_t> zoneStamp{0};
+void ZoneWritten() noexcept {
+    const auto next=(zoneStamp.load(std::memory_order_relaxed)&~std::uint64_t{1})+2;
+    zoneStamp.store(next|std::uint64_t{zone.on},std::memory_order_release);
+}
+// The returned view belongs to this thread and is used only until its next ReadZone.
+const Zone* ReadZone(std::uint64_t stamp) noexcept {
+    if(!(stamp&1u))return nullptr;
+    struct Snapshot { std::uint64_t stamp{}; Zone value{}; };
+    static thread_local Snapshot snapshot;
+    if(snapshot.stamp!=stamp) {
+        AcquireSRWLockShared(&zoneLock);
+        snapshot.stamp=zoneStamp.load(std::memory_order_relaxed);
+        if(snapshot.stamp&1u)snapshot.value=zone;
+        ReleaseSRWLockShared(&zoneLock);
+    }
+    return (snapshot.stamp&1u) ? &snapshot.value : nullptr;
 }
 SRWLOCK readoutLock=SRWLOCK_INIT;
 struct Out { ProteusReadout r; ULONGLONG at; } out{};
@@ -445,14 +452,19 @@ void PublishZone(const Unit& u,const unsigned char* v,const Config& c) noexcept 
         std::memcpy(zone.z.centre,Pos(v),12);
         zone.z.radius=c.proteusPriorityRadius;zone.z.weight=c.proteusPriority;zone.z.vehicle=v;
         zone.team=player.team;zone.human=PlayerHuman();zone.at=GameMs();
-    } else if(zone.z.vehicle==v)zone.on=false;
-    ZoneWritten();
+        ZoneWritten();
+    } else if(zone.z.vehicle==v && zone.on) {
+        zone.on=false;
+        ZoneWritten();
+    }
     ReleaseSRWLockExclusive(&zoneLock);
 }
 void DropZone(const unsigned char* v) noexcept {
     AcquireSRWLockExclusive(&zoneLock);
-    if(zone.z.vehicle==v)zone.on=false;
-    ZoneWritten();
+    if(zone.z.vehicle==v && zone.on) {
+        zone.on=false;
+        ZoneWritten();
+    }
     ReleaseSRWLockExclusive(&zoneLock);
 }
 
@@ -608,26 +620,26 @@ void Incompatible(Unit& u,unsigned char* v,std::uint32_t version) noexcept {
 
 // --- the allies' priority (the soldiers' target search) ---
 // Whether the soldier searching (`f`) is on the zone's side and `cand` is an enemy the zone puts first.
-bool Priority(const unsigned char* f,const unsigned char* cand,float* weight) noexcept {
-    Zone z;
-    if(!ReadZone(&z) || GameMs()-z.at>kStaleMs)return false;
+bool Priority(const unsigned char* f,const unsigned char* cand,float* weight,std::uint64_t stamp) noexcept {
+    const auto* const z=ReadZone(stamp);
+    if(!z || GameMs()-z->at>kStaleMs)return false;
     const auto searcher=At<const unsigned char*>(f,kSearcher);
-    if(!Readable(searcher,kTeam+4) || At<std::int32_t>(searcher,kTeam)!=z.team || !Readable(cand,kEnemyTarget+8))return false;
+    if(!Readable(searcher,kTeam+4) || At<std::int32_t>(searcher,kTeam)!=z->team || !Readable(cand,kEnemyTarget+8))return false;
     const void* const target=At<const void*>(cand,kEnemyTarget);
     const float* p=Pos(cand);
-    const float d[3]={p[0]-z.z.centre[0],p[1]-z.z.centre[1],p[2]-z.z.centre[2]};
-    if(target!=z.z.vehicle && (!target || target!=z.human) && Dot3(d,d)>z.z.radius*z.z.radius)return false;
-    *weight=z.z.weight;
+    const float d[3]={p[0]-z->z.centre[0],p[1]-z->z.centre[1],p[2]-z->z.centre[2]};
+    if(target!=z->z.vehicle && (!target || target!=z->human) && Dot3(d,d)>z->z.radius*z->z.radius)return false;
+    *weight=z->z.weight;
     return *weight>0.0f && *weight<1.0f;
 }
 
 // The stock keeps the least distance (+0x10) and its enemy (+0x18). A priority enemy is weighed by `w`: compared
 // against the best / w, and kept (as d x w) when it wins; the best put back as it was when it does not.
-void __fastcall SearchHook(void* functor,void* cand) {
+__declspec(noinline) void __fastcall SearchWithZone(void* functor,void* cand,std::uint64_t stamp) {
     auto f=static_cast<unsigned char*>(functor);
     float w=1.0f;
     bool weigh=false;
-    __try { weigh=cand && Priority(f,static_cast<const unsigned char*>(cand),&w); } __except(EXCEPTION_EXECUTE_HANDLER){weigh=false;}
+    __try { weigh=cand && Priority(f,static_cast<const unsigned char*>(cand),&w,stamp); } __except(EXCEPTION_EXECUTE_HANDLER){weigh=false;}
     if(!weigh){nextSearch(functor,cand);return;}
     const float best=At<float>(f,kSearchBest);
     const void* const found=At<const void*>(f,kSearchFound);
@@ -635,6 +647,12 @@ void __fastcall SearchHook(void* functor,void* cand) {
     nextSearch(functor,cand);
     if(At<const void*>(f,kSearchFound)==cand && found!=cand)Put<float>(f,kSearchBest,At<float>(f,kSearchBest)*w);
     else Put<float>(f,kSearchBest,best);
+}
+
+void __fastcall SearchHook(void* functor,void* cand) {
+    const auto stamp=zoneStamp.load(std::memory_order_acquire);
+    if(!(stamp&1u))return nextSearch(functor,cand);
+    return SearchWithZone(functor,cand,stamp);
 }
 
 bool AllMatch(const Sig* s,std::size_t n,const char* what) noexcept {
@@ -719,9 +737,9 @@ bool ProteusViewLift(const unsigned char* seat,float* look,float* eye) noexcept 
 }
 
 bool ProteusPriorityZone(ProteusZone* z) noexcept {
-    Zone c;
-    if(!ReadZone(&c) || !Cfg().enabled || GameMs()-c.at>kStaleMs)return false;
-    *z=c.z;
+    const auto* const c=ReadZone(zoneStamp.load(std::memory_order_acquire));
+    if(!c || !Cfg().enabled || GameMs()-c->at>kStaleMs)return false;
+    *z=c->z;
     return true;
 }
 

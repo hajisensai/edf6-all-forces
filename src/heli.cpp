@@ -54,6 +54,7 @@
 #include "damagestats.h"
 #include "mapcmd.h"
 #include "scopereticle.h"
+#include "ground_body_rays.h"
 #include "map_floor.h"
 #include "body506.h"
 #include "heliaim.h"
@@ -332,6 +333,15 @@ bool rayOk=false;
 struct alignas(16) RayInput { float from[4],to[4]; std::uint32_t filter,unk24; std::uint64_t pad; };
 static_assert(sizeof(RayInput)==0x30,"EdfRayInput");
 struct alignas(16) RayHits { unsigned char raw[0xA0]; };
+RayHits allRayStart{},mapRayStart{};
+void PrepareRayStarts() noexcept {
+    allRayStart={};mapRayStart={};
+    *reinterpret_cast<const void**>(allRayStart.raw)=image+kHitVtbl;
+    *reinterpret_cast<const void**>(mapRayStart.raw)=image+kGroundVtbl;
+    const auto reset=reinterpret_cast<void(*)(void*)>(image+kHitReset);
+    reset(&allRayStart);
+    reset(&mapRayStart);
+}
 
 // Metres along a->b to the nearest terrain/building, or -1 with none (or no physics world). `hit`
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
@@ -340,16 +350,28 @@ constexpr std::uint32_t kMapLayer=0x16;
 constexpr std::uint32_t kObjectLayer=0x0B;   // the bullets' object layer (ObjectRay)
 // `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn). `body`: the hit body's id
 // (collector +0x78, docs/raycast-re.md §2.2).
-float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
-              std::uint32_t filter=kMapLayer,float* normal=nullptr,std::uint32_t* body=nullptr) noexcept {
-    if(!rayOk)return -1.0f;
+unsigned char* RayWorld() noexcept {
+    if(!rayOk)return nullptr;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
-    if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
+    return Readable(g,0x70) && At<const void*>(g,0x68) ? g : nullptr;
+}
+
+__forceinline void FireRay(unsigned char* g,const float* a,const float* b,std::uint32_t filter,RayHits& col) noexcept {
     const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
-    RayHits col{};
-    *reinterpret_cast<const void**>(col.raw)=image+(any ? kHitVtbl : kGroundVtbl);
-    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
     reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+}
+
+__forceinline float RayDistance(float fraction,const float* a,const float* b) noexcept {
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    return fraction*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
+
+float CastRayIn(unsigned char* g,const float* a,const float* b,float* hit=nullptr,bool any=false,
+                std::uint32_t* flags=nullptr,std::uint32_t filter=kMapLayer,float* normal=nullptr,
+                std::uint32_t* body=nullptr) noexcept {
+    if(!g)return -1.0f;
+    RayHits col=any ? allRayStart : mapRayStart;
+    FireRay(g,a,b,filter,col);
     if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
     const float f=*reinterpret_cast<const float*>(col.raw+0x50);
     if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
@@ -357,8 +379,12 @@ float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,st
     if(flags)std::memcpy(flags,col.raw+0x9C,4);
     if(normal)std::memcpy(normal,col.raw+0x40,12);
     if(body)std::memcpy(body,col.raw+0x78,4);
-    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
-    return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    return RayDistance(f,a,b);
+}
+
+float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
+              std::uint32_t filter=kMapLayer,float* normal=nullptr,std::uint32_t* body=nullptr) noexcept {
+    return CastRayIn(RayWorld(),a,b,hit,any,flags,filter,normal,body);
 }
 
 // What a hit body is (map_floor.h Body): its flags read from hknpWorld's body array. The world is *(g+0x68)+0x20
@@ -423,17 +449,24 @@ void LogSea(Sea sea,std::size_t areas,float y) noexcept {
     else Log("WATER %s: %zu water area(s) on the map",sea==Sea::land ? "no water here" : "unknown",areas);
 }
 
-Sea SeaProbe(float x,float z,float* surface) noexcept {
-    if(!rayOk || !waterOk)return Sea::unknown;
+struct WaterAreas { unsigned char* head;std::uint64_t count; };
+WaterAreas ReadWaterAreas() noexcept {
+    if(!waterOk)return {};
     __try {
-        const auto g=At<unsigned char*>(image,kHavokGlobal);
         const auto top=At<unsigned char*>(image,kMoveAreas);
-        if(!Readable(g,0x70) || !At<const void*>(g,0x68) || !top)return Sea::unknown;
+        if(!top)return {};
         const auto mgr=top-8;
-        if(!Readable(mgr+0x30,0x10))return Sea::unknown;
+        if(!Readable(mgr+0x30,0x10))return {};
         const auto head=At<unsigned char*>(mgr,0x30);
         const auto count=At<std::uint64_t>(mgr,0x38);
-        if(!Readable(head,8) || count>256)return Sea::unknown;
+        return Readable(head,8) && count<=256 ? WaterAreas{head,count} : WaterAreas{};
+    } __except(EXCEPTION_EXECUTE_HANDLER){return {};}
+}
+
+Sea CastWaterAreas(unsigned char* g,WaterAreas areas,float x,float z,float* surface) noexcept {
+    const auto [head,count]=areas;
+    if(!head)return Sea::unknown;
+    __try {
         bool found=false;float best=0.0f;
         std::uint64_t n=0;
         for(auto node=At<unsigned char*>(head,0);node!=head && n<count;node=At<unsigned char*>(node,0),++n) {
@@ -444,9 +477,7 @@ Sea SeaProbe(float x,float z,float* surface) noexcept {
             if(!Readable(holder,0xF4))continue;
             const std::uint32_t id=At<std::uint32_t>(holder,0xF0);
             const RayInput in{{x,4000.0f,z,1.0f},{x,-4000.0f,z,1.0f},0,0,0};
-            RayHits col{};
-            *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
-            reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+            RayHits col=allRayStart;
             reinterpret_cast<void(*)(void*,void*,const RayInput*,const std::uint32_t*,int)>(image+kCastRayBodies)(g+0x10,&col,&in,&id,1);
             if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)continue;
             const float y=*reinterpret_cast<const float*>(col.raw+0x34);
@@ -459,6 +490,14 @@ Sea SeaProbe(float x,float z,float* surface) noexcept {
         LogSea(sea,static_cast<std::size_t>(count),best);
         if(found && surface)*surface=best;
         return sea;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return Sea::unknown;}
+}
+
+Sea SeaProbe(float x,float z,float* surface) noexcept {
+    if(!waterOk)return Sea::unknown;
+    __try {
+        auto* const g=RayWorld();
+        return g ? CastWaterAreas(g,ReadWaterAreas(),x,z,surface) : Sea::unknown;
     } __except(EXCEPTION_EXECUTE_HANDLER){return Sea::unknown;}
 }
 
@@ -709,6 +748,47 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
     return ForEachEnemyOf(At<std::int32_t>(v,kTeam),v,static_cast<F&&>(f));
 }
 
+struct StepSide {
+    enemypoints::TeamMask enemies=0;
+    bool taken=false,watched=false;
+};
+SceneStep enemyStep{};
+std::vector<enemypoints::Point> stepRegistry;
+StepSide stepSides[kMaxTeam];
+
+// Game-thread AI readers share one native walk. The scene step advances before the vehicle inputs, unlike GameFrame().
+// Derive each side lazily from the same ordered lock points. The mission key prevents reuse when an address recurs.
+StepSide* PointsThisStep(std::int32_t team) noexcept {
+    if(team==kTeamVehicle)team=player.team;
+    if(team<0 || team>=kMaxTeam)return nullptr;
+    const SceneStep step=SceneStepNow();
+    if(!step.scene)return nullptr;
+    if(enemyStep.scene!=step.scene || enemyStep.count!=step.count || enemyStep.mission!=step.mission) {
+        const unsigned char* head=nullptr;
+        std::uint64_t nodes=0;
+        if(!edf::LockList(image,head,nodes))return nullptr;
+        enemypoints::Collect(head,nullptr,stepRegistry,nodes);
+        for(auto& side:stepSides)side.taken=side.watched=false;
+        enemyStep=step;
+    }
+    auto& side=stepSides[team];
+    if(!side.taken) {
+        const auto* relation=edf::Relations(image,team);
+        if(!relation)return nullptr;
+        side.enemies=enemypoints::EnemyTeams(relation);
+        side.taken=true;
+    }
+    return &side;
+}
+
+template<class F> bool ForEachEnemyThisStep(std::int32_t team,const void* self,F&& f) noexcept {
+    if(auto* side=PointsThisStep(team)) {
+        enemypoints::Visit(stepRegistry,self,static_cast<F&&>(f),side->enemies);
+        return true;
+    }
+    return ForEachEnemyOf(team,self,static_cast<F&&>(f));
+}
+
 // ---- The medic heli (tools/make_jets.py MEDIC_HELI_FILE; the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，
 // 自瞄也是锁队友」) ----
 // A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way) aims at hurt friends.
@@ -885,7 +965,9 @@ template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) no
     if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept {
         f(o,a,share*kHurtWeight,[]() noexcept { return false; });
     });
-    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); }); });
+    return ForEachEnemyThisStep(At<std::int32_t>(v,kTeam),v,[&](const void* o,const float* a) noexcept {
+        f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });
+    });
 }
 
 // Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
@@ -2045,7 +2127,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // and between two kills there is none, which used to set it down mid-fight.
     const ULONGLONG game=GameMs();
     if(!s.follow)h.enemyAt=game;
-    else ForEachEnemy(v,[&](const void*,const float* p) noexcept {
+    else ForEachEnemyThisStep(At<std::int32_t>(v,kTeam),v,[&](const void*,const float* p) noexcept {
         const float d[3]={p[0]-player.pos[0],0,p[2]-player.pos[2]};
         if(Dot2(d,d)<Cfg().heliRange*Cfg().heliRange)h.enemyAt=game;
     });
@@ -3992,11 +4074,7 @@ bool InstallDoorGuns() noexcept {
     return doorOk;
 }
 
-bool MapRayReady() noexcept {
-    if(!rayOk)return false;
-    const auto world=At<const unsigned char*>(image,kHavokGlobal);
-    return Readable(world,0x70) && At<const void*>(world,0x68)!=nullptr;
-}
+bool MapRayReady() noexcept {return RayWorld()!=nullptr;}
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
 float MapFixedRay(const float* a,const float* b,float* hit) noexcept {
     return mapfloor::Fixed(a,b,
@@ -4052,11 +4130,8 @@ float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
-    RayHits col{};
-    *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
-    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
-    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+    RayHits col=allRayStart;
+    FireRay(g,a,b,filter,col);
     if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
     const float f=*reinterpret_cast<const float*>(col.raw+0x50);
     if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
@@ -4102,6 +4177,217 @@ void LearnMapNormals(const float* standing) noexcept {
 float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
     return mapfloor::Floor(a,b,mapNormals,&FloorHit,hit);
 }
+namespace {
+constexpr std::size_t kWorldBodyBox=0xE4D480,kShapeRayResolved=0x11A77C0;
+constexpr std::size_t kSimdBroadPhase=0x1C21450,kGroupCollisionFilter=0x18BBFC0,kShapeTagCodec=0x1AE3388;
+constexpr std::size_t kBodyIdAllocator=0x1F826E0,kReleaseBodyIds=0x97B150;
+constexpr std::size_t kScratchInit=0x1607D70,kScratchCall=0x11A7812,kScratchRelease=0x978FB0;
+constexpr std::size_t kScratchTriangleTable=0x18BBB98,kScratchOwnershipBytes=0x40;
+bool groundBodyCompatible=false,scratchInstalled=false;
+
+struct NativeRayScratch {
+    const void* dispatcher;
+    void* triangles[2];
+    std::uint32_t reserved;
+    std::uint32_t borrowed;
+};
+static_assert(sizeof(NativeRayScratch)==0x20 && offsetof(NativeRayScratch,borrowed)==0x1C);
+
+bool GroundRayCodeMatches(std::size_t first,std::size_t end,std::uint64_t expected) noexcept {
+    if(!Readable(image+first,end-first))return false;
+    std::uint64_t fingerprint=14695981039346656037ull;
+    for(auto i=first;i<end;++i)fingerprint=(fingerprint^image[i])*1099511628211ull;
+    return fingerprint==expected;
+}
+
+bool GroundBodyRayProfile() noexcept {
+    // The bodies query and the full ray must select the same broad-phase trees and body layers.
+    constexpr unsigned char allowTree[]{0xB0,0x01,0xC3};
+    constexpr unsigned char release[]{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x44,0x89,0x4C,0x24,0x20,0x44};
+    return Readable(image+kWorldVtbl,0x1B8) && At<const void*>(image+kWorldVtbl,0x188)==image+kWorldBodyBox &&
+        At<const void*>(image+kWorldVtbl,0x1B0)==image+0xE4D160 &&
+        Readable(image+kSimdBroadPhase,0xB8) && At<const void*>(image+kSimdBroadPhase,0x78)==image+0x16060A0 &&
+        At<const void*>(image+kSimdBroadPhase,0xB0)==image+0x16020B0 &&
+        Readable(image+kGroupCollisionFilter,0x40) && At<const void*>(image+kGroupCollisionFilter,0x30)==image+0xD93700 &&
+        At<const void*>(image+kGroupCollisionFilter,0x38)==image+0xD93770 &&
+        Matches(0xD93770,allowTree,sizeof(allowTree)) && Matches(kReleaseBodyIds,release,sizeof(release)) &&
+        GroundRayCodeMatches(kWorldBodyBox,0xE4D5D0,0x943F82F7424EC158ull) &&
+        GroundRayCodeMatches(0x16060A0,0x16062F9,0xEBBD70C42BECB389ull) &&
+        GroundRayCodeMatches(kCastRay,0x11A7FF7,0x59A947B3B2974E9Full) &&
+        GroundRayCodeMatches(0x16020B0,0x1602C88,0xC6D552FB2361FD4Full) &&
+        GroundRayCodeMatches(0x1605DC0,0x1605EAD,0x3B228A7C11065113ull) &&
+        GroundRayCodeMatches(0xD93700,0xD93770,0x32C306AEE29CBD97ull) &&
+        GroundRayCodeMatches(kShapeRayResolved,0x11A7ABC,0x81C15323984D56BFull);
+}
+}
+
+thread_local GroundBodyRays::Scratch* GroundBodyRays::pendingScratch=nullptr;
+
+void* GroundBodyRays::InitScratch(void* native) noexcept {
+    const auto init=reinterpret_cast<void*(*)(void*)>(image+kScratchInit);
+    Scratch* const loan=pendingScratch;
+    pendingScratch=nullptr;   // Only the initializer for this cast can consume the loan.
+    if(!loan)return init(native);
+
+    if(loan->release) {
+        for(int i=0;i!=2;++i) {
+            if(std::memcmp(loan->triangles[i],loan->initial[i],kScratchOwnershipBytes)==0)continue;
+            loan->Reset();
+            loan->rejected=true;
+            return init(native);
+        }
+        for(int i=0;i!=2;++i)
+            std::memcpy(static_cast<unsigned char*>(loan->triangles[i])+kScratchOwnershipBytes,
+                        loan->initial[i]+kScratchOwnershipBytes,sizeof(loan->initial[i])-kScratchOwnershipBytes);
+        const NativeRayScratch context{nullptr,{loan->triangles[0],loan->triangles[1]},0,1};
+        std::memcpy(native,&context,sizeof(context));
+        return native;
+    }
+
+    void* const result=init(native);
+    auto& context=*static_cast<NativeRayScratch*>(native);
+    // The triangle destructor can release relative-array elements or allocated capacity.
+    // Borrow only the empty inline form and keep its ownership header out of the payload restore.
+    for(const void* triangle:context.triangles) {
+        if(triangle && At<const void*>(triangle,0)==image+kScratchTriangleTable &&
+           At<const void*>(triangle,8) && At<std::uint64_t>(triangle,0x10)==1 &&
+           At<int>(triangle,0x38)==0 && At<int>(triangle,0x3C)>=0)continue;
+        loan->rejected=true;
+        return result;
+    }
+    if(context.triangles[0]==context.triangles[1]) {
+        loan->rejected=true;
+        return result;
+    }
+    for(int i=0;i!=2;++i) {
+        loan->triangles[i]=context.triangles[i];
+        std::memcpy(loan->initial[i],context.triangles[i],sizeof(loan->initial[i]));
+    }
+    loan->release=reinterpret_cast<Scratch::Release>(image+kScratchRelease);
+    context.borrowed=1;   // The native epilogue leaves borrowed triangles to their owner.
+    return result;
+}
+
+bool GroundBodyRays::InstallScratch() noexcept {
+    if(!GroundRayCodeMatches(kScratchInit,0x1607DE0,0x145E33C301E59F43ull) ||
+       !GroundRayCodeMatches(0xDD1590,0xDD173E,0x7B366385BD0B03F1ull) ||
+       !GroundRayCodeMatches(kScratchRelease,0x978FD2,0x8880055BA60C4951ull))return false;
+    edf::RedirectCall(image+kScratchCall,image+kScratchInit,reinterpret_cast<void*>(&InitScratch),scratchInstalled);
+    return scratchInstalled;
+}
+
+bool GroundBodyRays::Capture(const float* lower,const float* upper) noexcept {
+    if(!groundBodyCompatible)return false;
+    for(int axis=0;axis<3;++axis)
+        if(!std::isfinite(lower[axis]) || !std::isfinite(upper[axis]) || lower[axis]>upper[axis])return false;
+    auto* const g=RayWorld();
+    if(!g)return false;
+    auto* const holder=At<unsigned char*>(g,0x68);
+    auto* const world=holder+0x20;
+    if(!Readable(world,0x958) || At<const void*>(world,0)!=image+kWorldVtbl)return false;
+
+    const auto* const broadPhase=At<const unsigned char*>(world,0x4C0);
+    const auto* const filter=At<const unsigned char*>(world,0x4B8);
+    const auto* const codec=At<const unsigned char*>(world,0x950);
+    const void* const dispatcher=At<const void*>(holder,0x520);
+    if(!dispatcher || !Readable(broadPhase,8) || At<const void*>(broadPhase,0)!=image+kSimdBroadPhase ||
+       !Readable(filter,8) || At<const void*>(filter,0)!=image+kGroupCollisionFilter ||
+       !Readable(codec,8) || At<const void*>(codec,0)!=image+kShapeTagCodec ||
+       !Readable(image+kBodyIdAllocator,sizeof(void*)))return false;
+    auto* const allocator=At<void*>(image,kBodyIdAllocator);
+    if(!allocator)return false;
+
+    struct alignas(16) BodyBox {
+        const void* codec;
+        const void* filter;
+        std::uint16_t material,reserved;
+        std::uint32_t layer;
+        std::uint64_t user;
+        std::uint8_t flags[16];
+        float lower[4],upper[4];
+    };
+    struct BodyIds { std::uint32_t* data;int count;std::uint32_t capacityAndFlags; };
+    static_assert(sizeof(BodyBox)==0x50 && offsetof(BodyBox,lower)==0x30 && sizeof(BodyIds)==0x10);
+    const BodyBox box{nullptr,filter,0xFFFF,0,kMapLayer,0,{1,0,0xFB},
+                      {lower[0],lower[1],lower[2],0},{upper[0],upper[1],upper[2],0}};
+    std::uint32_t storage[32];
+    BodyIds ids{storage,0,0x80000020u};
+    reinterpret_cast<void(*)(void*,const BodyBox*,BodyIds*)>(image+kWorldBodyBox)(world,&box,&ids);
+    const auto id=(ids.count==1 && ids.data) ? ids.data[0] : 0xFFFFFFu;
+    if(!(ids.capacityAndFlags&0x80000000u) && ids.data && ids.data!=storage)
+        reinterpret_cast<void(*)(void*,void*,int,int)>(image+kReleaseBodyIds)(
+            allocator,ids.data,4,static_cast<int>(ids.capacityAndFlags&0x3FFFFFFFu));
+    if(id==0xFFFFFFu || BodyKind(id)!=mapfloor::Body::fixed)return false;
+    const auto getBody=reinterpret_cast<const void*(*)(void*,std::uint32_t)>(image+kWorldGetBody);
+    const void* const resolved=getBody(world,id);
+    if(!resolved)return false;
+    body=resolved;
+    context={dispatcher,filter,codec};
+    return true;
+}
+
+__forceinline void GroundBodyRays::Cast(const float* from,const float* to,void* collector) const noexcept {
+    const RayInput in{{from[0],from[1],from[2],1.0f},{to[0],to[1],to[2],1.0f},kMapLayer,0,0};
+    using CastFn=void(*)(const Context*,void*,const RayInput*,const void* const*,int);
+    const auto cast=reinterpret_cast<CastFn>(image+kShapeRayResolved);
+    Scratch* const previous=pendingScratch;
+    pendingScratch=scratchInstalled && !scratch.rejected ? &scratch : nullptr;
+    cast(&context,collector,&in,&body,1);
+    pendingScratch=previous;
+}
+
+bool GroundBodyRays::Unobstructed(const float* from,const float* to) const noexcept {
+    RayHits col=mapRayStart;
+    Cast(from,to,&col);
+    return At<std::int32_t>(col.raw,0x0C)==0;
+}
+
+float GroundBodyRays::FloorHit(const float* from,const float* to,float* point,float* normal) const noexcept {
+    RayHits col=mapRayStart;
+    Cast(from,to,&col);
+    if(!At<std::int32_t>(col.raw,0x0C))return -1.0f;
+    const float f=At<float>(col.raw,0x50);
+    if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
+    std::memcpy(point,col.raw+0x30,12);
+    std::memcpy(normal,col.raw+0x40,12);
+    return RayDistance(f,from,to);
+}
+
+unsigned char* GroundRayBatch::World() noexcept {
+    if(!opened){world=RayWorld();opened=true;}
+    return world;
+}
+float GroundRayBatch::Floor(const float* a,const float* b,float* hit,const GroundBodyRays* first) noexcept {
+    auto* const g=World();
+    if(!g)return -1.0f;
+    const auto ray=[g](const float* from,const float* to,float* point,float* normal) noexcept {
+        return CastRayIn(g,from,to,point,false,nullptr,kMapLayer,normal);
+    };
+    if(!first)return mapfloor::Floor(a,b,mapNormals,ray,hit);
+    return mapfloor::FloorWithFirst(a,b,mapNormals,ray,[first](const float* from,const float* to,float* point,float* normal) noexcept {
+        return first->FloorHit(from,to,point,normal);
+    },hit);
+}
+bool GroundRayBatch::Clear(const float* a,const float* b) noexcept {
+    auto* const g=World();
+    if(!g)return true;
+    RayHits col=mapRayStart;
+    FireRay(g,a,b,kMapLayer,col);
+    if(At<std::int32_t>(col.raw,0x0C)==0)return true;
+    const float f=At<float>(col.raw,0x50);
+    return !(f>=0.0f && f<=1.0f);
+}
+Sea GroundRayBatch::Water(float x,float z,float* surface) noexcept {
+    auto* const g=World();
+    if(!g)return Sea::unknown;
+    if(!waterChecked) {
+        const auto areas=ReadWaterAreas();
+        waterHead=areas.head;waterCount=areas.count;waterChecked=true;
+        if(Dry())LogSea(Sea::land,0,0.0f);
+    }
+    if(Dry())return Sea::land;
+    return CastWaterAreas(g,{waterHead,waterCount},x,z,surface);
+}
 bool MapGroundNear(float x,float z,float y,float* h,bool standable) noexcept {
     const float top[3]={x,y+4000.0f,z},bottom[3]={x,y-4000.0f,z};
     // Standable: open air over it (not the ground inside a building's or a rock's collision under its roof).
@@ -4122,48 +4408,24 @@ bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noe
     return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
-// The enemies of a side copied once per scene step (enemy_points.h): the registry walked once per side per frame,
-// not once per gunner seat. The copy is taken at the side's first ask in the step; one that has died since is skipped.
-// Keyed by the native scene step (SceneStepNow), not GameFrame: that one moves on only after the first vehicle's input,
-// where the gunners run. With the step unreadable: the live walk.
-namespace {
-struct StepPoints { SceneStep step; bool taken,ok; std::vector<enemypoints::Point> points; };
-StepPoints stepPoints[kMaxTeam];
-// The side's copy for this step, or null: the step unreadable or the team out of the table (the live walk then).
-StepPoints* PointsThisStep(const unsigned char* vehicle) noexcept {
-    const SceneStep step=SceneStepNow();
-    std::int32_t team=At<std::int32_t>(vehicle,kTeam);
-    if(team==kTeamVehicle)team=player.team;
-    if(!step.scene || team<0 || team>=kMaxTeam)return nullptr;
-    StepPoints& s=stepPoints[team];
-    if(!s.taken || s.step.scene!=step.scene || s.step.count!=step.count || s.step.mission!=step.mission) {
-        const unsigned char* head=nullptr;
-        const std::int32_t* relation=nullptr;
-        std::uint64_t nodes=0;
-        s.ok=EnemyRegistry(team,head,relation,nodes);
-        if(s.ok)enemypoints::Collect(head,relation,s.points,nodes);
-        else s.points.clear();
-        s.step=step;s.taken=true;
-        // every enemy's window watched each step, not only the would-be best a seat asks of (damagestats.h)
-        for(const enemypoints::Point& p:s.points)WatchTarget(p.object);
-    }
-    return &s;
-}
-}  // namespace
 bool NearestEnemyThisStep(const unsigned char* vehicle,const float* from,float reach,EnemyUsable usable,void* ctx,
                           const void*& best,float& bestDist) noexcept {
     best=nullptr;bestDist=1e30f;
     auto dist=[](const float* a,const float* b) noexcept { return npc::Dist(a,b); };
     auto ok=[&](const void* object) noexcept { return usable(ctx,object); };
-    StepPoints* const s=PointsThisStep(vehicle);
+    auto* const s=PointsThisStep(At<std::int32_t>(vehicle,kTeam));
     if(!s) {   // the live walk, Nearest's rule
         return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept {
             const float d=dist(from,aim);
             if(d<=reach && d<bestDist && ok(object)){best=object;bestDist=d;}
         });
     }
-    if(!s->ok)return false;
-    const enemypoints::Pick p=enemypoints::Nearest(s->points,vehicle,from,reach,dist,ok);
+    if(!s->watched) {
+        s->watched=true;
+        // Observe every enemy's window even when it never becomes a candidate for a seat.
+        enemypoints::Visit(stepRegistry,nullptr,[](const void* object,const float*) noexcept { WatchTarget(object); },s->enemies);
+    }
+    const enemypoints::Pick p=enemypoints::Nearest(stepRegistry,vehicle,from,reach,dist,ok,s->enemies);
     best=p.object;bestDist=p.dist;
     return true;
 }
@@ -4186,6 +4448,10 @@ bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept {
 
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {
     return ForEachEnemyOf(team,nullptr,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
+}
+
+bool VisitEnemiesThisStep(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {
+    return ForEachEnemyThisStep(team,nullptr,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
 bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept {
@@ -4217,15 +4483,20 @@ bool CheckHeliProfile() noexcept {
         deleteOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));
         if(!deleteOk)Log("HELI delete: profile mismatch (called helis that leave fly on away instead of being deleted)");
         // Avoidance has its own check: without it the helis still fly, just blind.
-        rayOk=Readable(image+kHitVtbl,0x28) && At<const unsigned char*>(image,kHitVtbl)==image+kHitSlot0 &&
+        bool rayProfile=Readable(image+kHitVtbl,0x28) && At<const unsigned char*>(image,kHitVtbl)==image+kHitSlot0 &&
               At<const unsigned char*>(image,kHitVtbl+0x20)==image+kHitAdd &&
               Readable(image+kGroundVtbl,0x28) && At<const unsigned char*>(image,kGroundVtbl)==image+kHitSlot0 &&
               At<const unsigned char*>(image,kGroundVtbl+0x10)==image+kHitReset &&
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
-        for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
+        for(const auto& s:kRaySignatures)rayProfile=rayProfile && Matches(s.rva,s.bytes,s.size);
+        if(rayProfile)PrepareRayStarts();
+        rayOk=rayProfile;
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
         bodyOk=rayOk && Readable(image+kWorldVtbl,0x88) && At<const unsigned char*>(image,kWorldVtbl+16*8)==image+kWorldGetBody;
         for(const auto& s:kBodySignatures)bodyOk=bodyOk && Matches(s.rva,s.bytes,s.size);
+        groundBodyCompatible=bodyOk && GroundBodyRayProfile();
+        const bool reuseTriangleScratch=groundBodyCompatible && GroundBodyRays::InstallScratch();
+        Log("MAP ray triangle scratch reuse=%d",reuseTriangleScratch?1:0);
         Log("MAP ray bodies=%d%s",bodyOk,bodyOk ? " (the map view's eye passes moving bodies)" :
             " (unexpected EDF.dll code: the map view's eye stays over every map-layer hit)");
         visitOk=Matches(kVisitFriends,kVisitFriendsSig,sizeof(kVisitFriendsSig));

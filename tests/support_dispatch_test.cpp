@@ -554,7 +554,7 @@ int main() {
     check(installedCreatedObserver==&NoteSupportMissionPlayerCreated && configuredHooks.createdMatches==&MissionParticipantCreationsMatch,
           "successful native actor creation observer and exact identity matcher are both wired before creation");
     installedCreatedObserver(0,ObjRef{});
-    check(!deployments.Allocated() && deployments.begin()==deployments.end(),"no deployment rows before the first support arrives (mem-4)");
+    check(deployments.Size()==0,"no deployment rows before the first support arrives (mem-4)");
     check(SupportCallAt(0,target,note,128) && made==0,"request only queues: no objects materialise on click");
     const int quietBefore=quietTicks;
     SupportDispatchTick();
@@ -568,8 +568,8 @@ int main() {
     check(At<float>(objects[0],kPosition)==-1400 && At<float>(objects[0],kPosition+4)==150,"hull starts in the air at the planned edge");
     check(At<float>(objects[1],kPosition+4)==150 && At<const void*>(seats[0],kSeatRider)==objects[1],
           "the real soldier is made inside its aircraft and sits in the driver's seat at spawn");
-    const Deployment* const deploymentRows=deployments.begin();   // the cursor converts to the row pointer
-    check(deploymentRows && deployments.Allocated(),"the first spawn allocates the deployment rows");
+    check(deployments.Size()==1,"the first spawn allocates just one deployment row");
+    const Deployment* const firstDeployment=&deployments[0];
     check(IsSupportAirborneAircraft(deployments[0].plan.units[0].resourceId),"the plan marks the hull airborne");
     fixtureMs+=100;SupportDispatchTick();
     fixtureMs+=100;SupportDispatchTick();check(activated==1,"activation is once, not every frame");
@@ -1843,7 +1843,7 @@ int main() {
     check(protocolTicks==ticksBefore+2,"NPC-only update continues service progress next frame");
     SupportActorFrame(nullptr);
     check(protocolTicks==ticksBefore+2,"missing actor cannot create a service frame");
-    check(deployments.begin()==deploymentRows,"every later spawn and mission reset reuses the same rows: never moved, never freed");
+    check(&deployments[0]==firstDeployment,"every later spawn and mission reset reuses the same rows: never moved, never freed");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
     return 0;
 }

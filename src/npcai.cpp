@@ -577,7 +577,7 @@ void Gather(std::int32_t team) noexcept {
     __try {
         w.player=player.at && GameMs()-player.at<kPlayerFixMs;
         if(w.player)std::memcpy(w.playerAt,player.pos,12);
-        VisitEnemiesOf(team,&SeeEnemy,&w);
+        VisitEnemiesThisStep(team,&SeeEnemy,&w);
         // The local player first: whatever the walk's order, no shot crosses them (B1).
         if(unsigned char* const me=PlayerHuman(); me && HumanOnFoot(me)) {
             const float* p=Pos(me);
@@ -792,40 +792,29 @@ npc::TargetKind KindOf(const Enemy& e,const float* pos) noexcept {
     if(e.aim[1]-pos[1]>kAirAbove)return npc::TargetKind::air;
     return e.points>=kLargePoints ? npc::TargetKind::large : npc::TargetKind::light;
 }
-// The friends (the player among them) but `self` a shot from `from` to `to` (a round of `blast`) can touch, for
-// ShotClear, into `out` (each caller's own buffer, kept from frame to frame): those in the cells along its line and round
-// where it lands (npc_grid.h ShotCandidates), in the list's order. ShotClear over them is ShotClear over every friend but
-// `self`: the others are farther off its line and its blast than any friend's radius. The same for a thrown round's arc
-// and landing (npc_backpack.h ArcClear: its ground track is the line's, its landing `blast` its Radius), so no caller
-// copies every friend any more.
-int FriendsOnShot(const void* self,const float* from,const float* to,float blast,std::vector<npc::Friend>& out) noexcept {
-    static std::vector<int> rows;
-    npc::grid::ShotCandidates(world.friendGrid,from,to,world.frRadius+kSpread,blast>0.0f ? blast*1.25f+world.frRadius : 0.0f,rows);
-    if(out.size()<rows.size())out.resize(rows.size());
-    int n=0;
-    for(const int i:rows)if(world.frObject[static_cast<std::size_t>(i)]!=self)out[static_cast<std::size_t>(n++)]=world.fr[static_cast<std::size_t>(i)];
-    return n;
-}
-// ShotClear over every friend but `self` for a shot from `from` to `to` (a round of `blast`), asked of the same cells as
-// FriendsOnShot and done at the first friend in the way: a yes or no needs neither their order nor each once, so nothing
-// is gathered or sorted (gathering and sorting the candidates cost 30 ms a frame with 2132 soldiers in one crowd).
+// Veto a shot at the first blocker in the relevant cells.
 bool ShotClearOf(const void* self,const float* from,const float* to,float blast) noexcept {
-    bool clear=true;
-    const auto test=[&](int i) noexcept {
-        const std::size_t k=static_cast<std::size_t>(i);
-        if(clear && world.frObject[k]!=self && !npc::ShotClear(from,to,kSpread,blast,&world.fr[k],1))clear=false;
-    };
-    world.friendGrid.Capsule(from,to,world.frRadius+kSpread,test);
-    if(clear && blast>0.0f)world.friendGrid.Around(to,blast*1.25f+world.frRadius,test);
-    return clear;
+    return npc::grid::ShotClear(world.friendGrid,npc::Shot(from,to,kSpread,blast),world.frRadius,
+        [](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; },
+        [self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; });
 }
-// A friend but `self` within `r` of `at`: looked for in the cells round it (the same answer as over every friend).
+template<class Blocked>
+bool PackArcClearOf(const void* self,const npcpack::Weapon& pack,const float* from,const float* to,
+                    float pitch,Blocked blocked) noexcept {
+    const auto at=[](int i) noexcept -> const npc::Friend& { return world.fr[static_cast<std::size_t>(i)]; };
+    const auto isSelf=[self](int i) noexcept { return world.frObject[static_cast<std::size_t>(i)]==self; };
+    return npcpack::ArcClear(pack,from,to,pitch,kSpread,
+        [&](const npc::Shot* chords,int count) noexcept {
+            return npc::grid::ArcChordsClear(world.friendGrid,chords,count,world.frRadius,at,isSelf);
+        },[&](const float* landing,float radius) noexcept {
+            return npc::grid::BlastClear(world.friendGrid,npc::Shot(landing,landing,0.0f,radius),world.frRadius,at,isSelf);
+        },blocked);
+}
 bool FriendNear(const void* self,const float* at,float r) noexcept {
-    bool found=false;
-    world.friendGrid.Around(at,r,[&](int i) noexcept {
-        if(!found && world.frObject[static_cast<std::size_t>(i)]!=self && npc::Dist(world.fr[static_cast<std::size_t>(i)].pos,at)<r)found=true;
+    return world.friendGrid.AnyAround(at,r,[&](int i) noexcept {
+        const auto k=static_cast<std::size_t>(i);
+        return world.frObject[k]!=self && npc::Dist(world.fr[k].pos,at)<r;
     });
-    return found;
 }
 
 // --- The block's writes ---
@@ -845,11 +834,11 @@ constexpr float kAirborneProbe=80.0f;   // m under the soldier the floor its rou
 //  - with the next leg (and the route on to a goal that moved) searched from the end of the one it walks while it walks
 //    it (Profile::ahead; testhub #41 / #47: followers stood at every leg's end and whenever their point moved 16 m).
 npc::navigation::Profile SoldierRoute() noexcept { npc::navigation::Profile p;p.horizon=kRouteHorizon;p.ahead=true;return p; }
-void RouteStart(const float* pos,float* from) noexcept {
+void RouteStart(GroundRayBatch& rays,const float* pos,float* from) noexcept {
     from[0]=pos[0];from[1]=pos[1];from[2]=pos[2];
     const float above[3]={pos[0],pos[1]+0.3f,pos[2]},below[3]={pos[0],pos[1]-kAirborneProbe,pos[2]};
     float floor[3];
-    if(MapFloorRay(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
+    if(rays.Floor(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
 }
 // Both ends on the floor under them (RouteStart): a route is the ground's. A goal left in the air (a flying top followed,
 // a Wing Diver held where she hovers) is never reached from the floor: every search ran out its nodes, failed, and
@@ -883,8 +872,9 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     // an attack-move's stand or a new order waits its turn standing.
     if(GroundNavigateDeferred(soldier->navigation))route=GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull);
     else {
-        RouteStart(pos,from);RouteStart(to,goal);
-        route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull);
+        GroundRayBatch rays;
+        RouteStart(rays,pos,from);RouteStart(rays,to,goal);
+        route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull,&rays);
     }
     if(route!=npc::navigation::Result::moving || !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     if(!(pace>0.0f)){Stand(h);return;}
@@ -904,13 +894,13 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
                                                 npc::mobility::kRunSlack,soldier->moveRunDir);
     if(!(soldier->moveRun>0.0f))std::memcpy(soldier->moveRunDir,dir,12);
 }
-void Look(unsigned char* h,const float* dir) noexcept {
+void Look(unsigned char* h,const float* dir,std::optional<npc::AimAngles>* shared=nullptr) noexcept {
     // The native action may freeze look even while the script's control mask permits it.
     // 0x573B9F skips integration and 0x59FF65 sends zero in this state, but 0x5741E7
     // still feeds d64 into CAS. Never add our repeated turn intent to a frozen pose.
     if(At<std::uint32_t>(h,kActionLimits)&2)return;
     float d[2];
-    if(!npc::AimDelta(At<float>(h,kAimPitch),At<float>(h,kAimYaw),dir,1.0f,kLookMost,d))return;
+    if(!npc::AimDelta(At<float>(h,kAimPitch),At<float>(h,kAimYaw),dir,1.0f,kLookMost,d,shared))return;
     Put<float>(h,kLookPitch,d[0]);Put<float>(h,kLookYaw,d[1]);
 }
 
@@ -946,20 +936,21 @@ int ChooseArm(Soldier& s,unsigned char* h,const Arms& a,const Enemy* t,const flo
 
 // The trigger for target `t` with arm `i`: ready, in its true reach, the look on it, the map open, the round's line and
 // blast clear of friends.
-bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const float* eye) noexcept {
-    if(i<0 || i>=a.n || !a.arm[i].ready)return false;
-    const float dist=npc::Dist(eye,t.aim);
-    if(dist>a.arm[i].reach || dist<npc::MinRange(a.arm[i]))return false;
-    const float dir[3]={t.aim[0]-eye[0],t.aim[1]-eye[1],t.aim[2]-eye[2]};
-    const float cone=std::atan(kHitRadius/(dist>1.0f ? dist : 1.0f));
-    if(npc::AimError(At<float>(h,kViewPitch),At<float>(h,kViewYaw),dir)>(cone>kFireConeMin ? cone : kFireConeMin))return false;
+bool ShotOk(Soldier& s,unsigned char* h,const npc::Arm& arm,const Enemy& t,const float* eye,
+            const float* dir,const std::optional<npc::AimAngles>& shared) noexcept {
+    const float dist=npc::Len(dir);
+    if(dist>arm.reach || dist<npc::MinRange(arm))return false;
+    const float cone=npc::FireCone(dist,kHitRadius,kFireConeMin);
+    const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
+    const float error=shared ? npc::AimError(pitch,yaw,*shared) : npc::AimError(pitch,yaw,dir);
+    if(error>cone)return false;
     if(GameFrame()-s.losFrame>=kLosFrames || s.losObject!=t.object) {
         float hit[3];
         const float wall=MapRay(eye,t.aim,hit);
         s.los=wall<0.0f || wall>dist-2.0f;s.losFrame=GameFrame();s.losObject=t.object;
     }
     if(!s.los)return false;
-    return ShotClearOf(h,eye,t.aim,a.arm[i].blast);
+    return ShotClearOf(h,eye,t.aim,arm.blast);
 }
 
 // A pulled trigger taken off a shot at `t` that would hit a friend. Each hand is tested with the weapon its own WeaponSet
@@ -1043,7 +1034,7 @@ void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,const
 constexpr int kMaxThreats=64;
 int ThreatsNear(const float* pos,float reach,npc::Threat* out) noexcept {
     static std::vector<int> rows;
-    npc::grid::FirstAround(world.enemyGrid,pos,reach,kMaxThreats,
+    world.enemyGrid.FirstAround(pos,reach,kMaxThreats,
                            [pos,reach](int i) noexcept { return npc::Horiz(pos,world.enemy[static_cast<std::size_t>(i)].aim)<reach; },rows);
     int n=0;
     for(const int i:rows) {
@@ -1533,10 +1524,11 @@ bool AttackMoveSee(Squad& q,bool target,bool fired,ULONGLONG ms) noexcept {
 
 // --- Its backpack weapon (docs/npc-backpack-re.md; npc_backpack.h) ---
 // The enemies within `radius` of target `t`'s lock point, `t` among them.
-int GroupAt(const Enemy& t,float radius) noexcept {
-    int n=0;
-    world.enemyGrid.Around(t.aim,radius,[&n,&t,radius](int i) noexcept { if(npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=radius)++n; });
-    return n>0 ? n : 1;
+bool PackGroupExists(const Enemy& t,float radius) noexcept {
+    int found=0;
+    return world.enemyGrid.AnyAround(t.aim,radius,[&](int i) noexcept {
+        return npc::Dist(world.enemy[static_cast<std::size_t>(i)].aim,t.aim)<=radius && ++found>=npcpack::kGroupLeast;
+    });
 }
 ULONGLONG packLoggedAt=0;
 // After the main weapon's look and trigger: a throw or a swing at `t` when its backpack weapon is for it (npc_backpack.h
@@ -1563,7 +1555,6 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
         return;
     }
     if(!t)return;
-    static std::vector<npc::Friend> fr;
     const float dist=npc::Dist(eye,t->aim);
     for(int i=0;i<n;++i) {
         const PackWeapon& row=*slots[i].row;
@@ -1576,22 +1567,18 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
                              std::isfinite(factor) && factor>0.0f ? factor*npcpack::kGravity : 0.0f,row.lift,
                              At<std::int32_t>(w,kWeaponAmmo)>0};
         if(!npcpack::Rested(row.use,s.packUsed,ms-s.packAt))continue;
-        const npcpack::Target target{dist,npc::Horiz(eye,t->aim),t->aim[1]-eye[1],GroupAt(*t,npcpack::GroupRadius(pack)),
-                                     t->points>=kLargePoints};
+        const npcpack::Target target{dist,npc::Horiz(eye,t->aim),t->aim[1]-eye[1],t->points>=kLargePoints};
         float pitch=0.0f,dir[3],hit[3];
-        if(!npcpack::Fits(pack,target,&pitch))continue;
-        // The friends its round can touch: along the line over the ground (a throw's arc keeps to it: npc_backpack.h
-        // ArcClear's points are eye + (aim - eye) * t/flight on x and z) and round where it lands (its Radius).
-        const int friends=FriendsOnShot(h,eye,t->aim,row.use==PackUse::thrown ? npcpack::Radius(pack) : 0.0f,fr);
+        if(!npcpack::Fits(pack,target,&pitch,[&]() noexcept { return PackGroupExists(*t,npcpack::GroupRadius(pack)); }))continue;
         if(row.use==PackUse::thrown) {
             npcpack::ThrowLook(eye,t->aim,pitch,row.lift,dir);
-            if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr.data(),friends,[](const float* from,const float* to) noexcept {
+            if(!PackArcClearOf(h,pack,eye,t->aim,pitch,[](const float* from,const float* to) noexcept {
                 float collision[3];return MapRay(from,to,collision)>=0.0f;
             }))continue;
         } else {
             dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
             const float wall=MapRay(eye,t->aim,hit);
-            if(!npc::ShotClear(eye,t->aim,kSpread,0.0f,fr.data(),friends) || (wall>=0.0f && wall<dist-2.0f))continue;
+            if(!ShotClearOf(h,eye,t->aim,0.0f) || (wall>=0.0f && wall<dist-2.0f))continue;
         }
         if(!(mask&kMaskLook))return;
         Look(h,dir);
@@ -1962,8 +1949,10 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         const bool armed=p.arm>=0 && p.arm<a.n;
         const bool hold=HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
         const float dir[3]={at.aim[0]-eye[0],at.aim[1]-eye[1],at.aim[2]-eye[2]};
-        if(mask&kMaskLook)Look(h,dir);
-        p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
+        const bool checkShot=!hold && armed && a.arm[p.arm].ready;
+        std::optional<npc::AimAngles> shared;
+        if(mask&kMaskLook)Look(h,dir,checkShot ? &shared : nullptr);
+        p.fire=checkShot && ShotOk(s,h,a.arm[p.arm],at,eye,dir,shared) && (mask&kMaskTrigger);
         h[kTrigger]=p.fire ? 1 : 0;
         // ShotOk already checked the primary weapon at its predicted impact. The stock offhand can still be firing
         // directly at the target's current position and needs its own check.

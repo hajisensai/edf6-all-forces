@@ -237,7 +237,7 @@ public:
         if(!live_ || !context_.host || !hooks_.ApplyAction)return false;
         for(const auto& l:leases_)if(l.view.id==id && (l.view.phase==Phase::active || l.view.phase==Phase::draining) &&
             (!blocked_ || l.view.phase==Phase::draining) && l.actionCount<kActionWindow) {
-            for(const auto& action:actionPool_)if(!action.used)return true;return false;
+            return HasActionSlot();
         }
         return false;
     }
@@ -257,7 +257,7 @@ public:
     std::uint32_t ActiveCount() const noexcept {std::uint32_t n=0;for(const auto& l:leases_)n+=l.view.phase==Phase::active;return n;}
 private:
     struct Peer {char puid[65]{};std::uint64_t requestHigh=0,hello=0,seen=0;bool capable=false;};
-    struct Action {std::uint64_t sequence=0,since=0,retry=0;std::size_t size=0;std::array<std::uint8_t,kMaxPoseBytes> bytes{};std::array<bool,kMaxPeers+1> ack{},sent{};std::array<std::uint64_t,kMaxPeers+1> sentAt{};std::array<std::uint32_t,kMaxPeers+1> creditBytes{};std::array<std::uint16_t,kMaxPeers+1> creditPackets{};bool used=false;};
+    struct Action {std::uint64_t sequence=0,since=0,retry=0;std::size_t size=0;std::array<std::uint8_t,kMaxPoseBytes> bytes{};std::array<bool,kMaxPeers+1> ack{},sent{};std::array<std::uint64_t,kMaxPeers+1> sentAt{};std::array<std::uint32_t,kMaxPeers+1> creditBytes{};std::array<std::uint16_t,kMaxPeers+1> creditPackets{};};
     struct Lease {
         LeaseView view{};std::uint64_t request=0,since=0,retry=0,ownerSequence=0,inputSequence=0,nextOwnerSequence=0;
         std::array<bool,kMaxPeers+1> prepared{},begun{},activated{},restored{},quiesced{};
@@ -275,7 +275,10 @@ private:
     };
     struct Cancellation {std::uint64_t request=0,profile=0;NativeId source{},target{};char owner[65]{};};
     std::array<Cancellation,kMaxLeases> cancelled_{};
-    std::array<Action,kMaxActions> actionPool_{}; // shared bounded pool, not a separate large payload pool per native lease
+    std::array<Action,kMaxActions> actionPool_{};
+    // Slots are stable for every lease's ring. Returned indices are reused before touching unused slots.
+    std::array<ActionIndex,kMaxActions> returnedActions_{};
+    std::size_t returnedCount_=0,nextUnusedAction_=0;
     Hooks hooks_{};Context context_{};char local_[65]{},hostPuid_[65]{};
     bool live_=false,welcomed_=false,blocked_=false,paced_=false;Result last_=Result::Idle;
     std::uint64_t transportFrameAt_=0,appliedAckAt_=0;std::size_t sendCursor_=0,ackCursor_=0;
@@ -303,6 +306,12 @@ private:
     bool SendAction(Lease&,std::uint64_t now) noexcept;
     void AcceptAppliedAck(Lease&,std::uint32_t peer,std::uint64_t sequence,std::uint64_t now) noexcept;
     int SendOneAction(Lease&,std::uint64_t now,std::array<std::size_t,kMaxPeers+1>* quota=nullptr) noexcept;
+    bool HasActionSlot() const noexcept {return returnedCount_ || nextUnusedAction_<kMaxActions;}
+    std::size_t TakeActionSlot() noexcept {
+        if(returnedCount_)return returnedActions_[--returnedCount_];
+        return nextUnusedAction_<kMaxActions ? nextUnusedAction_++ : kMaxActions;
+    }
+    void ReturnActionSlot(ActionIndex slot) noexcept {returnedActions_[returnedCount_++]=slot;}
     void ReleaseActionCredit(Action&) noexcept;
     void ReleaseRetiredCredit(Lease&,std::uint32_t peer) noexcept;
     void ReleaseActions(Lease&) noexcept;
@@ -628,9 +637,17 @@ inline void Protocol::ReleaseRetiredCredit(Lease& l,std::uint32_t peer) noexcept
     const auto bytes=l.retiredCreditBytes[peer];const auto packets=l.retiredCreditPackets[peer];actionPeerBytes_[peer]=actionPeerBytes_[peer]>=bytes ? actionPeerBytes_[peer]-bytes : 0;actionPeerPackets_[peer]=actionPeerPackets_[peer]>=packets ? actionPeerPackets_[peer]-packets : 0;l.retiredCreditBytes[peer]=0;l.retiredCreditPackets[peer]=0;
 }
 inline void Protocol::ReleaseActions(Lease& l) noexcept {
-    for(std::size_t i=0;i<l.actionCount;++i){auto& action=actionPool_[l.actions[(l.actionHead+i)%kActionWindow]];
-        if(paced_ && live_ && context_.host){for(std::size_t peer=1;peer<=kMaxPeers;++peer){l.retiredCreditBytes[peer]+=action.creditBytes[peer];l.retiredCreditPackets[peer]=static_cast<std::uint16_t>(l.retiredCreditPackets[peer]+action.creditPackets[peer]);action.creditBytes[peer]=0;action.creditPackets[peer]=0;}}
-        else ReleaseActionCredit(action);action={};}
+    for(std::size_t i=0;i<l.actionCount;++i) {
+        const ActionIndex slot=l.actions[(l.actionHead+i)%kActionWindow];
+        auto& action=actionPool_[slot];
+        if(paced_ && live_ && context_.host) {
+            for(std::size_t peer=1;peer<=context_.peerCount;++peer) {
+                l.retiredCreditBytes[peer]+=action.creditBytes[peer];
+                l.retiredCreditPackets[peer]=static_cast<std::uint16_t>(l.retiredCreditPackets[peer]+action.creditPackets[peer]);
+            }
+        } else ReleaseActionCredit(action);
+        ReturnActionSlot(slot);
+    }
     l.actionCount=l.actionHead=0;
 }
 inline int Protocol::SendOneAction(Lease& l,std::uint64_t now,std::array<std::size_t,kMaxPeers+1>* quota) noexcept {
@@ -700,7 +717,16 @@ inline void Protocol::AcceptAppliedAck(Lease& l,std::uint32_t peer,std::uint64_t
     if(!acknowledged || !acknowledged->sent[peer])return;
     for(std::size_t i=0;i<l.actionCount;++i){const auto& item=actionPool_[l.actions[(l.actionHead+i)%kActionWindow]];if(item.sequence<=sequence && !item.sent[peer])return;}
     for(std::size_t i=0;i<l.actionCount;++i){auto& item=actionPool_[l.actions[(l.actionHead+i)%kActionWindow]];if(item.sequence<=sequence){item.ack[peer]=true;const auto credit=item.creditBytes[peer];const auto packets=item.creditPackets[peer];actionPeerBytes_[peer]=actionPeerBytes_[peer]>=credit ? actionPeerBytes_[peer]-credit : 0;actionPeerPackets_[peer]=actionPeerPackets_[peer]>=packets ? actionPeerPackets_[peer]-packets : 0;item.creditBytes[peer]=0;item.creditPackets[peer]=0;}}
-    while(l.actionCount){auto& head=actionPool_[l.actions[l.actionHead]];bool all=true;for(std::uint32_t p=0;p<=context_.peerCount;++p)all=all && head.ack[p];if(!all)break;head={};l.actionHead=(l.actionHead+1)%kActionWindow;--l.actionCount;}
+    while(l.actionCount) {
+        const ActionIndex slot=l.actions[l.actionHead];
+        const auto& head=actionPool_[slot];
+        bool all=true;
+        for(std::uint32_t p=0;p<=context_.peerCount && all;++p)all=head.ack[p];
+        if(!all)break;
+        ReturnActionSlot(slot);
+        l.actionHead=(l.actionHead+1)%kActionWindow;
+        --l.actionCount;
+    }
     if(l.actionCount)l.actionSince=actionPool_[l.actions[l.actionHead]].since;
 }
 inline bool Protocol::SubmitAction(std::uint64_t id,const void* bytes,std::size_t size,std::uint64_t now) noexcept {
@@ -710,9 +736,9 @@ inline bool Protocol::SubmitAction(std::uint64_t id,const void* bytes,std::size_
         End(*l,Result::ApplyFailed,now);return false;
     }
     if(!context_.peerCount){++l->nextAction;return true;}
-    std::size_t free=0;while(free<kMaxActions && actionPool_[free].used)++free;
+    const auto free=TakeActionSlot();
     if(free==kMaxActions){End(*l,Result::ApplyFailed,now);return false;}
-    auto& action=actionPool_[free];action={};action.used=true;action.sequence=++l->nextAction;action.since=now;action.ack[0]=true;
+    auto& action=actionPool_[free];action={};action.sequence=++l->nextAction;action.since=now;action.ack[0]=true;
     l->actions[(l->actionHead+l->actionCount)%kActionWindow]=static_cast<ActionIndex>(free);
     action.size=size;std::memcpy(action.bytes.data(),bytes,size);++l->actionCount;
     if(l->actionCount==1)l->actionSince=now;
@@ -732,7 +758,9 @@ inline void Protocol::TryAction(Lease& l,std::uint64_t now) noexcept {
         const auto result=hooks_.ApplyAction ? hooks_.ApplyAction(hooks_.user,l.view.id,l.view.spec,action.sequence,action.bytes.data(),action.size) : ActionResult::failed;
         if(result==ActionResult::pending){l.actionPending=true;return;}
         if(result!=ActionResult::applied){ActionReply(l,action.sequence,false,now);Fault(l,Result::ApplyFailed,now);return;}
-        const auto sequence=action.sequence;l.actionApplied=sequence;action={};l.actionHead=(l.actionHead+1)%kActionWindow;--l.actionCount;
+        const auto sequence=action.sequence;l.actionApplied=sequence;
+        ReturnActionSlot(l.actions[l.actionHead]);
+        l.actionHead=(l.actionHead+1)%kActionWindow;--l.actionCount;
         l.actionPending=l.actionCount!=0;if(l.actionCount)l.actionSince=actionPool_[l.actions[l.actionHead]].since;
         if(!ActionReply(l,sequence,true,now))return;
         if(l.view.phase!=Phase::active && l.view.phase!=Phase::draining)return;
@@ -1003,8 +1031,9 @@ inline bool Protocol::Receive(std::uint32_t peer,const char* authenticatedPuid,c
         std::memcpy(action.bytes.data()+offset,m.input.data(),m.inputSize);action.size=offset+m.inputSize;++l->actionNext;
         if(l->actionNext==parts) {
             if(l->actionCount>=kActionWindow){Fault(*l,Result::ApplyFailed,now);return true;}
-            std::size_t free=0;while(free<kMaxActions && actionPool_[free].used)++free;if(free==kMaxActions){Fault(*l,Result::ApplyFailed,now);return true;}
-            auto& queued=actionPool_[free];queued=action;queued.used=true;queued.since=now;
+            const auto free=TakeActionSlot();
+            if(free==kMaxActions){Fault(*l,Result::ApplyFailed,now);return true;}
+            auto& queued=actionPool_[free];queued=action;queued.since=now;
             l->actions[(l->actionHead+l->actionCount)%kActionWindow]=static_cast<ActionIndex>(free);++l->actionCount;l->nextAction=m.sequence;
             l->actionNext=l->actionParts=0;l->actionPending=true;if(l->actionCount==1)l->actionSince=now;
             TryAction(*l,now);

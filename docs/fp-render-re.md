@@ -451,15 +451,14 @@ hook 0x6BF9F0(model, ctx, pass, view):
 - `selected` 是全局指针：镜头步进（游戏线程）与绘制（渲染线程）各自用 `StateScope` 改它。分屏或多相机时，绘制途中游戏线程切到另一台
   相机的 `State`，绘制就会用另一个玩家的 T / 手 / 显示掩码（错手、错 State）；单人时两边多半都指向 `states[0]`，风险小但同样无同步。
   绘制还直接读游戏线程正在改写的 64 字节矩阵（撕裂）。
-- 修复：`selected` 改为 `thread_local`；镜头步进末尾把绘制要读的内容整份发布到与 `State` 分开的 `published[]`
-  （序号奇数 = 正在写，`Publish`），每次绘制/补交/激光取一份完整快照（`TakeSnapshot`，读前后序号相同才用，否则重读，忙时用上一份完整的），
-  绘制路径只读这份快照（`PartOf`、`BodyMask`、`DrawTransforms`、`Pose`、`FitArm`、激光、补交）。
-  `fp_ride_lifecycle_test` 加了并发发布/读取与线程各自选择的检查。
+- `selected` 由各线程独立持有。镜头步进在自己的暂存区组装数据，再用 `RenderSnapshot` 发布给绘制、补交和激光。快照的载荷和版本均为原子值。
+  读者只接受一次完整发布，发布交错时沿用该线程的上一个副本。正常重复绘制共用同一个副本，嵌套绘制拿独立副本。
+  `fp_ride_lifecycle_test` 覆盖并发发布、构建期间读最新已提交快照、嵌套绘制与线程各自选择。
 - 审查补修（同日）：上面的快照之外绘制路径还读写着 `State`：
   - 渲染相机：`CaptureRenderCamera`（相机提交 `0x118E10A`）在游戏线程写 `renderView`，渲染线程的 `ViewState`→`MatchView` 直接读它，且只和**最新**一次提交比。
     绘制比游戏线程晚 0–3 步（§17.2），快速转身时这次绘制的 `view+0x20` 是旧帧、`renderView` 已是新帧，L1 误差超过 0.1 → 认不出主人 →
-    这次绘制整次走原版（身体 / 枪一闪）。改为每台相机把最近 8 次提交（`kViewHistory`，提交时不在第一人称的记为无效）按同一序号锁发布
-    （`ViewHistory`、`SeqPublish` / `SeqTake`，与快照共用），绘制拿这次绘制的矩阵在历史里找**同一帧**，阈值不变；离开第一人称（`Leave`）、
+    这次绘制整次走原版（身体 / 枪一闪）。每台相机用同一种快照交接发布最近 8 次提交（`kViewHistory`，提交时不在第一人称的记为无效），
+    绘制拿这次绘制的矩阵在历史里找**同一帧**，阈值不变。离开第一人称（`Leave`）、
     任务重置（`SyncSession`）与相机步进出错时清空历史。`ViewState` 的缓存改为渲染线程自己的（`thread_local`），以各相机历史的序号判有效，
     不再读游戏线程的 `renderFrame` / `viewRevision`。
   - 仪表：`InstrumentPose` 读的座位、`instrumentsReady`、读数进快照（`rideSeat` / `instrumentsReady` / `instruments`）；

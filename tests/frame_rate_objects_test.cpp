@@ -202,6 +202,31 @@ void BlendAndRestore() {
     Take();
 }
 
+const unsigned char* stagedInstance=nullptr;
+float stagedDelta=0.0f;
+bool AcceptStage(const unsigned char* instance,const float* delta) noexcept {
+    stagedInstance=instance;
+    stagedDelta=delta[12];
+    return true;
+}
+void RenderOwnedBlend() {
+    NewScene();
+    const Obj actor=MakeObj(thermal::Family::kOther,2);
+    List({&actor});
+    Steps({&actor},0,2);
+    SetX(actor.model.pose+16,3.0f);
+    renderpose::stagePose=&AcceptStage;
+    Frame(0.5f,nullptr,nullptr,nullptr);
+    renderpose::stagePose=nullptr;
+    Check(stagedInstance==actor.model.mem+kModelInst && std::fabs(stagedDelta+1.0f)<1e-5f,
+          "the native model and its interpolated delta go to the render recording");
+    Check(NearX(actor.model.pose,2.0f) && NearX(actor.model.pose+16,3.0f) && posed.empty(),
+          "accepted models never write to or create restore records for the simulation pose");
+    frameobjects::Restore();
+    frameobjects::SceneOver();
+    Take();
+}
+
 void Reasons() {
     NewScene();
     const Obj one=MakeObj(thermal::Family::kOther),late=MakeObj(thermal::Family::kOther),
@@ -481,8 +506,14 @@ void CatchUp() {
     Check(c.posed==1 && NearX(a.model.pose,2.5f),
           "catch-up: drawn half a tick on from the tick before cur (x 2.5, not 2 from a blend over the pair)");
     frameobjects::Restore();
+    Check(bodies[0].prepared,"the first presentation prepares the sampled pair");
+    Frame(0.25f,nullptr,nullptr,nullptr);
+    c=Take();
+    Check(c.posed==1 && NearX(a.model.pose,2.25f),"the same pair is reused at a different presentation phase");
+    frameobjects::Restore();
     // A pair two ticks apart moves up to twice the cut.
     Root(a,3.0f+15.0f);TickOnly();TickOnly();frameobjects::Sample(false);
+    Check(!bodies[0].prepared,"a new sample invalidates the prepared pair");
     Frame(0.5f,nullptr,nullptr,nullptr);
     c=Take();
     Check(c.posed==1 && NearX(a.model.pose,3.0f+15.0f*0.75f),"catch-up: a move over the gap is cut at gap times kCutMove");
@@ -524,6 +555,7 @@ int main() {
     Check(on && bodies.capacity()>=kFirstBodies && posedAfter.capacity()>=kFirstPoseFloats,"install: the tables reserved");
     WeakCounts();
     BlendAndRestore();
+    RenderOwnedBlend();
     Reasons();
     Forgetting();
     RidersAndWeapons();

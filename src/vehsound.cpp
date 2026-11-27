@@ -150,7 +150,7 @@ struct Vehicle {
 Vehicle vehicles[kVehicles]{};
 // Each vehicle's past (vehicles[i]'s), for the speed of sound, 46 KB each: on the heap from the first engine heard,
 // not in the image (2.2 MB of .data committed for every player otherwise: tests/plugin_image_size_guard.py).
-LazyRows<engine::Trail,kVehicles> trails;
+IncrementalRows<engine::Trail,kVehicles> trails;
 // A report on its way (the sound's travel time, a case's fall): played when the game clock reaches `due`.
 // `wt`: a War Thunder recording's group (wt_clips.h), `variant` the one of it.
 struct Pending { int clip=-1; bool wt=false; int variant=0; audio::Heard heard{}; ULONGLONG due=0; };
@@ -353,7 +353,7 @@ Vehicle* EntryFor(unsigned char* v,ULONGLONG ms,bool make) noexcept {
     free->turrets=Named(VehicleClassName(v),{"403_Tank","404_Tank"}) ? 4 : 2;
     if(free->body==Body::heavy || free->body==Body::light || free->body==Body::bike)
         for(const engine::ClassDrive& c:engine::kDrives)if(!std::strcmp(VehicleClassName(v),c.name))free->drive=&c.d;
-    if(trails.Allocated())trails[static_cast<std::size_t>(free-vehicles)].count=0;
+    if(auto* trail=trails.Get(static_cast<std::size_t>(free-vehicles)))trail->count=0;
     std::memcpy(free->last,v+kPosition,12);
     std::memcpy(free->nose,v+kMatrix+32,12);
     return free;
@@ -452,8 +452,8 @@ void EngineStep(unsigned char* v,Vehicle& s,float dt) noexcept {
     const bool ours=engined && vol>0.0f;
     if(ours){Presets(v,kEnginePresets,s.engine,3,true);for(const std::size_t h:kEngineHandles)StopPlaying(v+h);}
     else if(engined)Presets(v,kEnginePresets,s.engine,3,false);
-    // No heap for the trails: the engines stay silent (logged once by LazyRows).
-    if(!ours || !s.drive || !trails.Allocate("vehicle engine sound")){CloseVoices(s.engineVoice);CloseVoices(s.gearVoice);return;}
+    auto* const trail=ours && s.drive ? trails.Ensure(static_cast<std::size_t>(&s-vehicles),"vehicle engine sound") : nullptr;
+    if(!trail){CloseVoices(s.engineVoice);CloseVoices(s.gearVoice);return;}
     const engine::Drive& d=*s.drive;
     const bool driven=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none && !v[kDead];
     const float wasOn=s.on;
@@ -482,10 +482,9 @@ void EngineStep(unsigned char* v,Vehicle& s,float dt) noexcept {
     x.in.v[engine::kSpeed]=run*3.6f;x.in.v[engine::kTurn]=s.turn;
     x.in.v[engine::kSpeedShare]=100.0f*speed*3.6f/d.top;
     x.ms=stepMs;
-    engine::Trail& trail=trails[static_cast<std::size_t>(&s-vehicles)];
-    engine::Push(trail,x);
+    engine::Push(*trail,x);
     float listener[3];
-    const engine::Sample* r=ListenerAt(listener) ? engine::Retarded(trail,listener,x.ms) : nullptr;
+    const engine::Sample* r=ListenerAt(listener) ? engine::Retarded(*trail,listener,x.ms) : nullptr;
     SoundPlace p{};
     if(!r || !SoundAt(r->pos,r->vel,&p)){CloseVoices(s.engineVoice);CloseVoices(s.gearVoice);return;}
     const float cone=engine::ConeAngle(r->nose,p.toCamera);

@@ -215,5 +215,105 @@ check(not [c for c in s.calls if c[0] == 'WaitForSingleObject'], 'after close + 
 s.call(CONST['kQueueClose'], queue + 0x18)
 check([c[0] for c in s.calls] == ['lock', 'unlock'], f'a second close only takes the lock ({[c[0] for c in s.calls]})')
 
+# Execute the real Cling contact gate and continuation. Mock only the body lookup and
+# read-only manifold decode, including the caller-saved register clobbers.
+native_math = open(os.path.join(ROOT, 'src', 'native_body_math.cpp'), encoding='utf-8').read()
+cling_gate = 0x6DAC9B
+cling_body = 0x6DACD5
+cling_reject = 0x6DAE2C
+cling_resume = 0x6DACFE
+
+
+def math_bytes(name):
+    match = re.search(r'\b' + name + r'\[\]=\{(.*?)\};', native_math, re.S)
+    body = re.sub(r'//[^\n]*', '', match.group(1))
+    return bytes(int(value, 0) for value in body.split(',') if value.strip())
+
+
+def cling_fixture(patched):
+    s = Sim()
+    uc = s.uc
+    if patched:
+        for at, prefix in ((cling_gate, 'kClingGate'), (cling_body, 'kClingBody')):
+            uc.mem_write(BASE + at, math_bytes(prefix + 'Patched'))
+    world, event, input_ctx = s.alloc(0x90), s.alloc(0x80), s.alloc(0x28)
+    bodies = [s.alloc(0x48), s.alloc(0x48)]
+    manifold = s.alloc(0x40)
+    s.w64(BASE + 0x20B2958, world)
+    s.w32(event + 8, 61)
+    s.w32(event + 0xC, 207)
+    s.w64(input_ctx, world + 0x50)
+    rsp = STACK + STACK_SIZE - 0x1000
+    history = []
+    phase_out = []
+    scratch_value = b'CLING_MANIFOLD'
+
+    def substitute(machine, address, size, _):
+        at = address - BASE
+        if at == 0x11AD2E0:
+            body_id = machine.reg_read(U.UC_X86_REG_EDX)
+            world_arg = machine.reg_read(U.UC_X86_REG_RCX)
+            history.append(('lookup', world_arg, body_id))
+            answer = bodies[(61, 207).index(body_id)]
+        elif at == 0xDD2480:
+            rcx = machine.reg_read(U.UC_X86_REG_RCX)
+            rdx = machine.reg_read(U.UC_X86_REG_RDX)
+            r8 = machine.reg_read(U.UC_X86_REG_R8)
+            history.append(('decode', rcx, rdx, r8))
+            machine.mem_write(r8, scratch_value)
+            answer = manifold
+        else:
+            phase_out.append(at)
+            machine.emu_stop()
+            return
+        call_rsp = machine.reg_read(U.UC_X86_REG_RSP)
+        machine.reg_write(U.UC_X86_REG_RAX, answer)
+        for reg, value in ((U.UC_X86_REG_RCX, 0x111), (U.UC_X86_REG_RDX, 0x222), (U.UC_X86_REG_R8, 0x33333333)):
+            machine.reg_write(reg, value)
+        machine.reg_write(U.UC_X86_REG_RSP, call_rsp+8)
+        machine.reg_write(U.UC_X86_REG_RIP, s.r64(call_rsp))
+
+    for at in (0x11AD2E0, 0xDD2480, cling_resume, cling_reject):
+        uc.hook_add(unicorn.UC_HOOK_CODE, substitute, begin=BASE+at, end=BASE+at)
+
+    def contact(side, phase, blocked):
+        history.clear()
+        phase_out.clear()
+        s.w32(input_ctx + 0x20, side)
+        s.w8(event + 0x10, phase)
+        for body in bodies:
+            s.w8(body + 0x28, int(blocked))
+        s.w64(rsp + 0x30, 0)
+        s.w64(rsp + 0x158, 0)
+        uc.mem_write(rsp + 0x70, bytes(len(scratch_value)))
+        uc.reg_write(U.UC_X86_REG_RBX, event)
+        uc.reg_write(U.UC_X86_REG_R15, input_ctx)
+        uc.reg_write(U.UC_X86_REG_R12, 0x11223344)
+        s.call(0x6DAC6C)
+        expected_id=(61,207)[side]
+        accepted=not blocked and phase in (1,2,4)
+        want=[('lookup',world+0x10,expected_id)]
+        if accepted:
+            want.append(('decode',event,world+0x50,rsp+0x70))
+            if not patched:
+                want.append(('lookup',world+0x10,expected_id))
+        if history!=want or phase_out!=([cling_resume] if accepted else [cling_reject]):
+            return False
+        return (uc.reg_read(U.UC_X86_REG_RSP)==rsp and
+                (not accepted or (s.r64(rsp+0x30)==bodies[side] and s.r64(rsp+0x158)==0x11223344 and
+                 uc.reg_read(U.UC_X86_REG_RAX)==bodies[side] and uc.reg_read(U.UC_X86_REG_R12)==manifold and
+                 uc.reg_read(U.UC_X86_REG_R8)&0xFFFF==0x8000 and uc.mem_read(rsp+0x70,len(scratch_value))==scratch_value)))
+    return contact
+
+
+for at, prefix in ((cling_gate, 'kClingGate'), (cling_body, 'kClingBody')):
+    expected=math_bytes(prefix + 'Stock')
+    check(IMG[at:at+len(expected)]==expected, f'{prefix} matches the original PE')
+old_cling, new_cling=cling_fixture(False),cling_fixture(True)
+for side in (0,1):
+    for phase, blocked in [(p,False) for p in (0,1,2,3,4,5,255)] + [(2,True)]:
+        check(old_cling(side,phase,blocked) and new_cling(side,phase,blocked),
+              f'Cling contact side {side}, phase {phase}, blocked {blocked}: same continuation with one fewer lookup')
+
 print(f'havok_mt_sim: {checks} checks, {failures} failures')
 raise SystemExit(1 if failures else 0)

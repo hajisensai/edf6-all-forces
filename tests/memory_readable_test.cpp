@@ -16,6 +16,7 @@
 #include <cstdio>
 
 #include "edf/memory.h"
+#include "edf/page_access_cache.h"
 
 namespace {
 int failures = 0;
@@ -35,6 +36,28 @@ void WaitTick() {
     while (GetTickCount64() == t) Sleep(1);
 }
 
+void CacheTags() {
+    using Cache=edf::detail::PageAccessCache;
+    static_assert(sizeof(Cache)<65*1024);
+    Cache cache;
+    constexpr std::uintptr_t page=0x10000,other=page+Cache::kSlots*Cache::kPage;
+    cache.Begin(0);
+    cache.Put(page,3);
+    cache.Put(other,0);
+    cache.Begin(0);
+    Check(cache.Access(page)==3 && cache.Access(other)==0,
+          "aligned arenas keep different permissions and a cached denial is not a miss");
+    cache.Begin(1);
+    Check(cache.Access(page)==Cache::kMissing && cache.Access(other)==Cache::kMissing,
+          "the next tick invalidates both permissions");
+    cache.Put(page,1);
+    for(std::uint64_t tick=2;tick<Cache::kPage/4;++tick)cache.Begin(tick);
+    Check(cache.Access(page)==Cache::kMissing && cache.Access(other)==Cache::kMissing,
+          "wrapping a packed tick tag cannot revive an old page or denial");
+    cache.Put(other,3);
+    Check(cache.Access(other)==3,"a wrapped tick can record new permissions");
+}
+
 // The old Readable: VirtualQuery per region, no cache (its cache hardly ever hit, see memory.cpp).
 bool OldReadable(const void* ptr, std::size_t size) {
     auto at = reinterpret_cast<std::uintptr_t>(ptr);
@@ -52,6 +75,7 @@ bool OldReadable(const void* ptr, std::size_t size) {
 
 int main() {
     using edf::Readable;
+    CacheTags();
     DWORD old0 = 0;
     unsigned char* rw = Alloc(4, PAGE_READWRITE);
     rw[0] = 1;
@@ -63,17 +87,22 @@ int main() {
         Check(K32QueryWorkingSetEx(GetCurrentProcess(), &w, sizeof w) && w.VirtualAttributes.Valid,
               "a touched page is in the working set (QueryWorkingSetEx answers it: the page path)");
     }
-    {   // two pages 32 MB apart share a cache slot (8192 entries): each answered as itself
+    {   // These two pages 32 MiB apart used to evict each other on each ask.
         constexpr std::size_t kSlots = 8192;
         unsigned char* far1 = Alloc(kSlots + 1, PAGE_READWRITE);
         far1[0] = far1[kSlots * kPage] = 1;
         VirtualProtect(far1 + kSlots * kPage, kPage, PAGE_READONLY, &old0);
         WaitTick();
+        edf::TakeReadableStats();
         bool same = true;
         for (int i = 0; i < 4; ++i)
             same = same && Readable(far1, 8, true) && !Readable(far1 + kSlots * kPage, 8, true) &&
                    Readable(far1 + kSlots * kPage, 8);
-        Check(same, "two pages in one cache slot, asked in turn: each answered as itself");
+        const auto stats=edf::TakeReadableStats();
+        Check(same, "two pages 32 MiB apart, asked in turn: each answered as itself");
+        std::printf("     alternating aligned pages: %llu asks, %llu hits, %llu working-set calls\n",
+                    stats.asks,stats.pageHits,stats.wsCalls);
+        VirtualFree(far1,0,MEM_RELEASE);
     }
     {   // the image: this exe's code is readable, not writable; its read-only data too
         const auto* code = reinterpret_cast<const unsigned char*>(&main);
@@ -120,6 +149,29 @@ int main() {
     WaitTick();
     Check(Readable(two + kPage - 8, 8), "the last bytes before the no-access page");
     Check(!Readable(two + kPage - 8, 16), "a span into the no-access page");
+
+    {   // A cached prefix must be counted once, while separated misses still share one system call.
+        unsigned char* span = Alloc(4, PAGE_READWRITE);
+        for(std::size_t i=0;i<4;++i)span[i*kPage]=1;
+        VirtualProtect(span+2*kPage,kPage,PAGE_READONLY,&old);
+        bool batched=false,denied=false;
+        for(int attempt=0;attempt<5 && !(batched && denied);++attempt) {
+            WaitTick();
+            const auto tick=GetTickCount64();
+            Check(Readable(span,1) && Readable(span+2*kPage,1),"cache a writable and read-only page");
+            edf::TakeReadableStats();
+            const bool writable=Readable(span+kPage-8,16+kPage,true);
+            const auto rejection=edf::TakeReadableStats();
+            const bool readable=Readable(span,4*kPage);
+            const auto batch=edf::TakeReadableStats();
+            if(tick!=GetTickCount64())continue;
+            denied=!writable && rejection.wsCalls==0 && rejection.pageHits==2;
+            batched=readable && batch.wsCalls==1 && batch.wsPages==2 && batch.pageHits==2;
+        }
+        Check(denied,"cached denial after an uncached page avoids the working-set query");
+        Check(batched,"one working-set call for both uncached pages and one hit per cached page");
+        VirtualFree(span,0,MEM_RELEASE);
+    }
 
     // past kMaxPages (16): the region path, a hole in the middle seen
     unsigned char* big = Alloc(40, PAGE_READWRITE);
