@@ -86,21 +86,36 @@ int main() {
               "a fade of 0: at once (as before)");
         Check(jetmix::Step(0.5f,false,1.5f,jetmix::kDeadFade,0.125f)==0.0f,"a wreck fades out in kDeadFade");
     }
-    // The ranking: the loudest `most`, those heard keeping their place against one not 3 dB louder.
+    // The ranking: every one heard by default; the loudest `most` with a cap, those heard keeping their place against
+    // one not 3 dB louder; within a voice budget, the loudest that fit.
     {
         const float loud[5]={0.1f,0.05f,0.3f,0.0001f,0.2f};
         bool was[5]{},in[5]{};
-        jetmix::Rank(loud,was,5,2,engine::kOpenGain,in);
-        Check(in[2] && in[4] && !in[0] && !in[1] && !in[3],"rank: the two loudest");
-        jetmix::Rank(loud,was,5,9,engine::kOpenGain,in);
+        int order[5];
+        jetmix::Rank(loud,was,nullptr,5,0,-1,engine::kOpenGain,order,in);
+        Check(in[0] && in[1] && in[2] && in[4] && !in[3],"rank, no cap (the default): every one above the opening level");
+        jetmix::Rank(loud,was,nullptr,5,2,-1,engine::kOpenGain,order,in);
+        Check(in[2] && in[4] && !in[0] && !in[1] && !in[3],"rank, a cap of 2: the two loudest");
+        jetmix::Rank(loud,was,nullptr,5,9,-1,engine::kOpenGain,order,in);
         Check(in[0] && in[1] && in[2] && in[4] && !in[3],"rank: none under the opening level, however many allowed");
+        const int need[5]={2,2,4,1,3};
+        jetmix::Rank(loud,was,need,5,0,8,engine::kOpenGain,order,in);   // 4 + 3 of 8, then 1 left: none of 2 fits
+        Check(in[2] && in[4] && !in[0] && !in[3] && !in[1],"rank within 8 voices: the loudest that fit (4 + 3), none past it");
+        jetmix::Rank(loud,was,need,5,0,9,engine::kOpenGain,order,in);   // 4 + 3 + 2
+        Check(in[2] && in[4] && in[0] && !in[1],"rank within 9 voices: one more");
+        const int big[3]={5,1,1};
+        const float l3[3]={0.3f,0.2f,0.1f};
+        bool w3[3]{},r3[3]{};int o3[3];
+        jetmix::Rank(l3,w3,big,3,0,2,engine::kOpenGain,o3,r3);
+        Check(!r3[0] && r3[1] && r3[2],"rank: one too big for the voices left makes room for quieter ones that fit");
         const float a[2]={0.10f,0.13f};   // the newcomer 2.3 dB louder: the one heard stays
-        bool w[2]={true,false},r[2]{};
-        jetmix::Rank(a,w,2,1,engine::kOpenGain,r);
+        bool w[2]={true,false},r[2]{};int o2[2];
+        jetmix::Rank(a,w,nullptr,2,1,-1,engine::kOpenGain,o2,r);
         Check(r[0] && !r[1],"rank: one heard keeps its place against one under 3 dB louder");
         const float b[2]={0.10f,0.15f};   // 3.5 dB louder: it takes it
-        jetmix::Rank(b,w,2,1,engine::kOpenGain,r);
+        jetmix::Rank(b,w,nullptr,2,1,-1,engine::kOpenGain,o2,r);
         Check(!r[0] && r[1],"rank: ...and gives it up to one over 3 dB louder");
+        Check(jetmix::Params{}.most==0,"JetSoundMostHeard's default: 0, every jet heard");
     }
     std::printf("%d failures\n",failures);
     return failures ? 1 : 0;

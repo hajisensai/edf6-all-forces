@@ -572,6 +572,13 @@ target_include_directories(vsound_check PRIVATE src common third_party/EDFModLoa
 target_link_libraries(vsound_check PRIVATE edf6common xaudio2 sapi ole32)
 target_compile_options(vsound_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vsound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# How many engine voices XAudio2 carries and at what CPU (tools/jet_voice_bench.cpp): needs an audio output, no ctest.
+# cmake --build build --target jet_voice_bench && build\jet_voice_bench.exe
+add_executable(jet_voice_bench EXCLUDE_FROM_ALL tools/jet_voice_bench.cpp)
+target_include_directories(jet_voice_bench PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(jet_voice_bench PRIVATE edf6common xaudio2 sapi ole32)
+target_compile_options(jet_voice_bench PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(jet_voice_bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The EMC's charged beam offline (tools/emc_check.cpp: src/emc_plan.h's trigger cycle, damage budget and the scan along the
 # beam against a stand-in line of buildings and a hill). Not part of the plugin build:

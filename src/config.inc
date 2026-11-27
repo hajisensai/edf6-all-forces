@@ -399,7 +399,7 @@
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
     float jetSoundFade=1.5f;        // ...s: a jet newly heard fades in over this, one gone (its last sound heard) or ranked out fades out (jet_mix.h)
     float jetSoundFar=8000.0f;      // ...m: past the AI event's max distance (3000 m) 1/d on, tapered to nothing by this (0: held there, as before)
-    int jetSoundMostHeard=12;       // ...jets heard at once: the loudest (a margin for the ones heard: no swapping), the rest faded out
+    int jetSoundMostHeard=0;        // ...jets heard at once, the loudest (a margin for the ones heard: no swapping), the rest faded out; 0: every one
     bool warnAudio=true;            // the cockpit's warnings heard (warn.cpp): PULL UP, stall horn, launch warble, callouts
     bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
@@ -1301,7 +1301,7 @@
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("JetSoundFade",n.jetSoundFade,0.0f,10.0f);
     Fix("JetSoundFar",n.jetSoundFar,0.0f,30000.0f);
-    n.jetSoundMostHeard=static_cast<int>(FixInt("JetSoundMostHeard",n.jetSoundMostHeard,1,32));
+    n.jetSoundMostHeard=static_cast<int>(FixInt("JetSoundMostHeard",n.jetSoundMostHeard,0,1024));
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
     n.lockToneBeeps=static_cast<int>(FixInt("LockToneBeeps",n.lockToneBeeps,0,100));
     n.lockToneLockedMs=static_cast<int>(FixInt("LockToneLockedMs",n.lockToneLockedMs,0,60000));

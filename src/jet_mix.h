@@ -9,11 +9,14 @@
 //  - the AI's event rolls off as 1/d only out to its max distance (3000 m, FMOD's inverse rolloff) and is held there:
 //    a jet 8 km off was as loud as one at 3 km, until it was deleted. FarGain carries 1/d on past it and tapers it
 //    away to nothing by `reach` (FMOD culls an event past its max distance outright: here it fades out instead);
-//  - first come, first served: 32 jets heard, each taking its voices from the shared pool as long as any were free.
-//    Rank keeps the loudest `most` (with a margin for the ones already heard: no swapping back and forth) and the
-//    rest fade out (FMOD's max instances with steal quietest, its virtual voices by audibility).
+//  - first come, first served: 32 jets heard (a table of ours, no limit of the machine's), each taking its voices from
+//    the shared pool as long as any were free. Now every jet is heard (the far ones made quiet by the distance, none
+//    past `reach`); only when the pool has no voices left for them all does Rank keep the loudest (with a margin for
+//    the ones already heard: no swapping back and forth) and the rest fade out (FMOD's virtual voices by audibility,
+//    its max instances with steal quietest: JetSoundMostHeard, off by default).
 // Pure: tools/jet_mix_check.cpp checks it offline.
 #pragma once
+#include <algorithm>
 #include <cmath>
 
 namespace crew::jetmix {
@@ -22,7 +25,7 @@ struct Params {
     float fadeIn=1.0f;    // s: a jet newly heard, from nothing to its level (0: at once, as before 2026-11-27)
     float fadeOut=1.5f;   // s: a jet gone or ranked out, its level to nothing
     float reach=8000.0f;  // m: past the event's max distance 1/d on, tapered away to nothing by this (0: held, as before)
-    int most=12;          // jets heard at once, the loudest
+    int most=0;           // jets heard at once, the loudest (0: every one)
 };
 constexpr float kDeadFade=0.25f;       // s: a wreck's engine (the blast over it), whatever fadeOut is
 constexpr float kTaperFrom=0.5f;       // ...the taper begins at this share of `reach` (or the max distance, past it)
@@ -60,20 +63,23 @@ inline float Gain(float level) noexcept {
     return x*x*(3.0f-2.0f*x);
 }
 
-// The `most` loudest of `n` jets heard (`loud`: each one's level as it would be heard, before its presence; under
-// `floor`: nothing to hear), the ones heard before (`was`) counted kKeepMargin louder. `in` gets the outcome. Ties keep
-// the lower index (stable).
-inline void Rank(const float* loud,const bool* was,int n,int most,float floor,bool* in) noexcept {
-    for(int i=0;i<n;++i)in[i]=false;
-    for(int k=0;k<most;++k) {
-        int best=-1;float top=0.0f;
-        for(int i=0;i<n;++i) {
-            if(in[i] || !(loud[i]>floor))continue;
-            const float v=loud[i]*(was[i] ? kKeepMargin : 1.0f);
-            if(best<0 || v>top){best=i;top=v;}
-        }
-        if(best<0)return;
-        in[best]=true;
+// The jets heard of `n` (`loud`: each one's level as it would be heard, before its presence; under `floor`: nothing
+// to hear), loudest first, the ones heard before (`was`) counted kKeepMargin louder, each taken while it fits: at most
+// `most` of them (0: no limit) and its voices (`need`) within `budget` (the voices to share; negative: no limit). One
+// that does not fit leaves room for a quieter one that does. `order` is scratch for `n` indices; `in` gets the outcome.
+// Ties keep the lower index.
+inline void Rank(const float* loud,const bool* was,const int* need,int n,int most,int budget,float floor,int* order,
+                 bool* in) noexcept {
+    int m=0;
+    for(int i=0;i<n;++i){in[i]=false;if(loud[i]>floor)order[m++]=i;}
+    const auto key=[&](int i){return loud[i]*(was[i] ? kKeepMargin : 1.0f);};
+    std::sort(order,order+m,[&](int a,int b){const float ka=key(a),kb=key(b);return ka>kb || (ka==kb && a<b);});
+    int taken=0;
+    for(int k=0;k<m && (most<=0 || taken<most);++k) {
+        const int i=order[k],c=need ? need[i] : 0;
+        if(budget>=0 && c>budget)continue;
+        in[i]=true;++taken;
+        if(budget>=0)budget-=c;
     }
 }
 }  // namespace crew::jetmix

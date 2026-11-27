@@ -24,6 +24,7 @@ crew::jet::Jet npc{};
 // The voices open (by loop index) and what each was last set to: the engine's level is their sum.
 bool used[256]{};
 crew::audio::Heard lastSet[256]{};
+int pool=256;   // the stand-in voice pool's size (the plugin's: audio::kLoopPool)
 float Loud() noexcept { float g=0.0f;for(int i=0;i<256;++i)if(used[i])g+=lastSet[i].gain;return g; }
 int Open() noexcept { int n=0;for(bool u:used)n+=u ? 1 : 0;return n; }
 void Check(bool pass,const char* name) {
@@ -55,6 +56,7 @@ Jet* FindJet(const unsigned char*) noexcept {if(jetFaults)RaiseFault();return np
 namespace audio {
 bool Start() noexcept {return true;}
 int OpenWtLoop(int) noexcept {
+    if(::Open()>=pool)return -1;
     for(int i=0;i<256;++i)if(!used[i]){used[i]=true;lastSet[i]=Heard{};++opens;return i;}
     return -1;
 }
@@ -63,12 +65,13 @@ void SetLoop(int i,const Heard& h) noexcept {if(setFaults)RaiseFault();++sets;if
 void PlayWt(int,int,const Heard&) noexcept {++shots;}
 bool WtThere(int) noexcept {return true;}
 int LoopsOpen() noexcept {return ::Open();}
+int LoopsFree() noexcept {return pool-::Open();}
 void Beat(float) noexcept {}
 }
 }
 // The voices one aircraft has open (its entry's), -1 with no entry.
 int VoicesOf(unsigned char* p) noexcept {
-    for(auto& s:crew::sounds)if(s.ref.Is(p)) {
+    for(int i=0;i<crew::rowCount;++i)if(const auto& s=crew::rows[i]->s;s.ref.Is(p)) {
         int n=0;
         for(int l:s.voice)n+=l ? 1 : 0;
         return n;
@@ -100,7 +103,7 @@ int main() {
     Check(opens==0,"empty displaced aircraft remains silent");
     // A frame: the jet's step, then the frame's mix (JetSoundTick: the camera, every jet heard together).
     auto frameOn=[&]{++nowFrame;nowMs+=16;JetSound(v);JetSoundTick();};
-    auto rpm=[]{ return sounds[0].heard.v[engine::kRpm]; };
+    auto rpm=[]{ return rows[0]->s.heard.v[engine::kRpm]; };
     // Frames of `step` until no voice is open: how many (-1: not within `most`), the first one's voices still open
     // (none cut at once), and the worst frame's fall as a share of the level before (no step down).
     struct Out { int frames=-1;bool firstOpen=false;float worst=0.0f; };
@@ -135,7 +138,7 @@ int main() {
     Check(rpm()>hoverRpm+300.0f,"a rotor craft's engine power raises its rpm");
     flight={false,true,false,false,1.0f,200.0f};
     for(int i=0;i<300;++i)frameOn();
-    Check(std::fabs(rpm()-engine::kJetWep)<1.0f && sounds[0].spool.wep>0.99f && shots>0,
+    Check(std::fabs(rpm()-engine::kJetWep)<1.0f && rows[0]->s.spool.wep>0.99f && shots>0,
           "full throttle lights the afterburner: the top rpm, its layer, the ignition's one-shot");
     std::printf("  idle %.0f rpm level %.3f; afterburner %.0f rpm level %.3f, %d voices\n",idleRpm,idle,rpm(),Loud(),Open());
     flight={false,true,true,true,0.0f,0.0f};frameOn();
@@ -173,17 +176,17 @@ int main() {
     // idles, however fast it moves (no guess from its speed: 250 m/s lit the afterburner before).
     npcState=false;playerState=false;occupied=true;
     for(int i=0;i<300;++i){Put<float>(v,kPosition+8,static_cast<float>(i)*250.0f/60.0f);frameOn();}
-    Check(Open()>0 && std::fabs(rpm()-engine::AiRpm(engine::kJetIdle))<1.0f && sounds[0].spool.wep<0.01f,
+    Check(Open()>0 && std::fabs(rpm()-engine::AiRpm(engine::kJetIdle))<1.0f && rows[0]->s.spool.wep<0.01f,
           "another machine's fast jet, no lever heard: idling, no afterburner from its speed");
     // Its lever heard (jet_lever_net.cpp): the engine and the afterburner follow it, as ours.
     // (Back by the camera and still: what is heard is the lever, not the motion.)
     Put<float>(v,kPosition+8,0.0f);
     leverHeard=true;heardLever={1.0f,false,false};
     for(int i=0;i<300;++i)frameOn();
-    Check(rpm()>engine::AiRpm(engine::kJetIdle)+300.0f && sounds[0].spool.wep>0.99f,"its heard lever full: spooled up, the afterburner lit");
+    Check(rpm()>engine::AiRpm(engine::kJetIdle)+300.0f && rows[0]->s.spool.wep>0.99f,"its heard lever full: spooled up, the afterburner lit");
     heardLever={0.55f,false,false};
     for(int i=0;i<300;++i)frameOn();
-    Check(sounds[0].spool.wep<0.01f,"its heard lever at cruise: the afterburner out");
+    Check(rows[0]->s.spool.wep<0.01f,"its heard lever at cruise: the afterburner out");
     // An unmanned one (a drone) is heard by its lever alone.
     occupied=false;frameOn();
     Check(Open()>0,"an empty jet with its lever heard still sounds");
@@ -194,7 +197,7 @@ int main() {
     // The mix (jet_mix.h) over several jets: NPC rotor craft at full power, each its own body.
     ResetJetSound();
     leverHeard=false;playerState=false;occupied=false;npcState=true;npc.role=jet::Role::carrier;npc.m.power=0.9f;
-    std::vector<std::vector<unsigned char>> bodies(33,std::vector<unsigned char>(0x3000));
+    std::vector<std::vector<unsigned char>> bodies(48,std::vector<unsigned char>(0x3000));
     auto jetAt=[&](int i){return bodies[static_cast<std::size_t>(i)].data();};
     auto frames=[&](int n,int from,int to) {
         for(int f=0;f<n;++f) {
@@ -221,7 +224,16 @@ int main() {
         Check(top>0.0f && first<0.05f*top && worst<0.04f && at>=80 && at<=100,
               "a jet newly heard fades in over JetSoundFade (1.5 s), not there at once");
     }
-    // The loudest `most` heard, the rest not: four jets out to 1.6 km, two heard.
+    // Every jet heard by default (JetSoundMostHeard 0): 40 of them, out to 4.9 km (32 entries before: the rest none).
+    ResetJetSound();
+    Check(config.jetSoundMostHeard==0,"JetSoundMostHeard's default: 0, every jet");
+    for(int i=0;i<40;++i)body(jetAt(i),1000.0f+100.0f*static_cast<float>(i));
+    frames(300,0,40);
+    int heard=0;
+    for(int i=0;i<40;++i)heard+=VoicesOf(jetAt(i))>0 ? 1 : 0;
+    std::printf("  40 jets 1.0 to 4.9 km off: %d heard, %d voices, %d entries\n",heard,Open(),rowCount);
+    Check(heard==40 && rowCount==40,"40 jets: every one heard, an entry each");
+    // A cap asked for (JetSoundMostHeard 2): the two nearest of four heard, the two far ones not.
     ResetJetSound();
     config.jetSoundMostHeard=2;
     body(jetAt(0),200.0f);body(jetAt(1),400.0f);body(jetAt(2),800.0f);body(jetAt(3),1600.0f);
@@ -235,21 +247,23 @@ int main() {
     frames(300,0,5);
     Check(fading && VoicesOf(jetAt(4))>0 && VoicesOf(jetAt(0))>0 && VoicesOf(jetAt(1))==0,
           "a jet newly near outranks the farther one heard: it fades in as that one fades out");
-    // More jets than entries (32): one newly near takes the entry of the quietest not heard, not refused.
+    config.jetSoundMostHeard=0;
+    // The voice pool full (16 voices for 20 jets): the nearest heard, as many as fit; one newly near is heard in a far
+    // one's place, never past the pool.
     ResetJetSound();
-    config.jetSoundMostHeard=12;
-    for(int i=0;i<32;++i)body(jetAt(i),1000.0f+100.0f*static_cast<float>(i));
-    frames(300,0,32);
-    int heard=0;
-    for(int i=0;i<32;++i)heard+=VoicesOf(jetAt(i))>0 ? 1 : 0;
-    Check(heard==12,"32 jets: the 12 loudest heard");
-    body(jetAt(32),150.0f);
-    frames(200,0,33);
-    std::printf("  33 jets: the newcomer's voices %d, the farthest one's entry %d\n",VoicesOf(jetAt(32)),VoicesOf(jetAt(31)));
-    bool kept=true;
-    for(int i=0;i<31;++i)kept=kept && VoicesOf(jetAt(i))>=0;
-    Check(VoicesOf(jetAt(32))>0 && VoicesOf(jetAt(31))<0 && kept,
-          "a 33rd jet near takes the farthest's entry (first come, first served before: none for it), the rest keep theirs");
+    pool=16;
+    for(int i=0;i<20;++i)body(jetAt(i),1000.0f+100.0f*static_cast<float>(i));
+    int most=0;
+    for(int f=0;f<300;++f){frames(1,0,20);most=Open()>most ? Open() : most;}
+    heard=0;
+    for(int i=0;i<20;++i)heard+=VoicesOf(jetAt(i))>0 ? 1 : 0;
+    std::printf("  20 jets, 16 voices: %d heard, at most %d voices open\n",heard,most);
+    Check(heard>0 && heard<20 && VoicesOf(jetAt(0))>0 && VoicesOf(jetAt(19))==0 && most<=16,
+          "the voice pool full: the nearest jets heard, the farthest not, the pool never passed");
+    body(jetAt(20),150.0f);
+    for(int f=0;f<300;++f){frames(1,0,21);most=Open()>most ? Open() : most;}
+    Check(VoicesOf(jetAt(20))>0 && most<=16,"...a jet newly near heard in a far one's place");
+    pool=256;
     // A jet gone 2 km off: its sound still on its way (5.9 s) heard on, then faded; not cut when it went.
     ResetJetSound();
     body(jetAt(0),2000.0f);
@@ -286,13 +300,13 @@ int main() {
     for(int i=0;i<120;++i)frameOn();
     const int closedBefore=closes,openBefore=Open();
     playerState=false;jetFaults=true;nowMs+=16;++nowFrame;JetSound(v);jetFaults=false;
-    Check(broken && openBefore>0 && closes==closedBefore+openBefore && closesBeforeUnwind==0 && !sounds[0].ref,
+    Check(broken && openBefore>0 && closes==closedBefore+openBefore && closesBeforeUnwind==0 && !rows[0]->s.ref,
           "a game-memory fault closes the voices after unwinding, not in the filter");
     // One inside a voice call: no voice is called into again, neither in the filter nor after.
     broken=false;playerState=true;for(int i=0;i<120;++i)frameOn();
     const int closedThen=closes,openedThen=opens;
     setFaults=true;frameOn();setFaults=false;
-    Check(broken && closes==closedThen && closesBeforeUnwind==0 && !sounds[0].ref && !inAudio,
+    Check(broken && closes==closedThen && closesBeforeUnwind==0 && !rows[0]->s.ref && !inAudio,
           "a fault inside a voice call lets the voices go untouched");
     frameOn();
     Check(closes==closedThen && opens==openedThen,"jet sound stays off after a fault");

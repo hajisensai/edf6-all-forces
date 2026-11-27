@@ -449,7 +449,7 @@ constexpr float kClipPeak[kClipCount]={0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.8
                                        0.7f,0.9f,0.9f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f};
 // The ultimate's (jetaudio.h UltClip): <dll name>_ult_<name>.wav, the player's recordings only.
 const wchar_t* const kUltClipName[kUltClipCount]={L"charge",L"circle",L"thunder",L"gather",L"beam",L"blast",L"shock"};
-constexpr int kLoops=256,kShots=160;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets, a cannon's
+constexpr int kLoops=kLoopPool,kShots=160;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets, a cannon's
                                      // War Thunder layers ten a shot (sound_event.h), an engine up to
                                      // engine::kMostEventLayers a vehicle: room for them
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
@@ -799,6 +799,8 @@ int OpenWtLoop(int group) noexcept {
     loopsNoneFree.fetch_add(1,std::memory_order_relaxed);
     return -1;
 }
+int LoopsOpen() noexcept;
+int LoopsFree() noexcept { return kLoops-LoopsOpen(); }
 int LoopsOpen() noexcept {
     int n=0;
     for(const LoopVoice& l:loops)n+=l.used ? 1 : 0;
