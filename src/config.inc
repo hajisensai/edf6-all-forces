@@ -397,6 +397,9 @@
     bool edf41NetMirror=false;      // development only, offline: a second UfoRobo follows the first through the game's own stream code (a guest copy)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    float jetSoundFade=1.5f;        // ...s: a jet newly heard fades in over this, one gone (its last sound heard) or ranked out fades out (jet_mix.h)
+    float jetSoundFar=8000.0f;      // ...m: past the AI event's max distance (3000 m) 1/d on, tapered to nothing by this (0: held there, as before)
+    int jetSoundMostHeard=12;       // ...jets heard at once: the loudest (a margin for the ones heard: no swapping), the rest faded out
     bool warnAudio=true;            // the cockpit's warnings heard (warn.cpp): PULL UP, stall horn, launch warble, callouts
     bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
@@ -921,6 +924,9 @@
     n.edf41NetMirror=ReadBool(L"Edf41NetMirror",n.edf41NetMirror);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
+    n.jetSoundFade=ReadFloat(L"JetSoundFade",n.jetSoundFade);
+    n.jetSoundFar=ReadFloat(L"JetSoundFar",n.jetSoundFar);
+    n.jetSoundMostHeard=ReadInt(L"JetSoundMostHeard",static_cast<DWORD>(n.jetSoundMostHeard));
     n.warnAudio=ReadBool(L"WarnAudio",n.warnAudio);
     n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
     n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
@@ -1293,6 +1299,9 @@
     n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",n.edf41Mother401Dev,0,8388607));
     n.edf41Mother401DevAction=static_cast<int>(FixInt("Edf41Mother401DevAction",n.edf41Mother401DevAction,0,63));
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
+    Fix("JetSoundFade",n.jetSoundFade,0.0f,10.0f);
+    Fix("JetSoundFar",n.jetSoundFar,0.0f,30000.0f);
+    n.jetSoundMostHeard=static_cast<int>(FixInt("JetSoundMostHeard",n.jetSoundMostHeard,1,32));
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
     n.lockToneBeeps=static_cast<int>(FixInt("LockToneBeeps",n.lockToneBeeps,0,100));
     n.lockToneLockedMs=static_cast<int>(FixInt("LockToneLockedMs",n.lockToneLockedMs,0,60000));
