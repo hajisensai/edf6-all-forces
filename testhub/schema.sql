@@ -108,7 +108,15 @@ CREATE TABLE IF NOT EXISTS story_missions (
   sort REAL NOT NULL,
   author TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  -- migrations/0008: what the mission is, the outline step it plays out, and the version edits are checked against
+  goal TEXT NOT NULL DEFAULT '',
+  enemies TEXT NOT NULL DEFAULT '',
+  handoff TEXT NOT NULL DEFAULT '',
+  book INTEGER,
+  step TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_by TEXT
 );
 CREATE INDEX IF NOT EXISTS story_missions_grp ON story_missions(grp, sort, id);
 -- Each group's story outlines (/outline.html, src/outline.js), numbered from 1 within the group; migrations/0005.
@@ -128,6 +136,8 @@ CREATE TABLE IF NOT EXISTS story_outlines (
   updated_by TEXT,
   updated_at INTEGER,
   author TEXT,                      -- who started it (migrations/0006)
+  open INTEGER NOT NULL DEFAULT 0,  -- 1 = any account may edit it, not only its group (migrations/0009)
+  main INTEGER NOT NULL DEFAULT 0,  -- 1 = the main outline: listed first, opened by default; at most one (migrations/0009)
   PRIMARY KEY (grp, book)
 );
 

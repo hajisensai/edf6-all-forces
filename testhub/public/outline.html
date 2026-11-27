@@ -10,70 +10,40 @@
 <main class="wide">
   <header class="top">
     <h1>EDF 全军出击 · 剧情大纲</h1>
-    <nav><a href="/">测试</a> · <a href="/plan.html">关卡策划</a> · <a href="/story.html">MOD 剧情关卡</a> · <b>剧情大纲</b> · <a href="/rate.html">外部评分</a></nav>
+    <nav aria-label="页面"><a href="/">测试</a> · <b aria-current="page">剧情大纲</b> · <a href="/story.html">关卡策划</a></nav>
     <span class="me"><span id="me"></span> · <a id="auth" href="/logout">退出</a></span>
   </header>
   <p id="error" class="err hide" role="alert"></p>
   <div id="groupBar" class="row hide bar"><span>查看哪个组</span><fieldset id="group" class="chips" aria-label="查看哪个组"></fieldset></div>
   <div id="bookBar" class="row hide bar"><span>这个组的大纲</span><fieldset id="books" class="chips" aria-label="这个组的大纲"></fieldset>
     <button class="btn ghost small hide" id="newBook" type="button">＋ 新建一份大纲</button></div>
-  <section>
+  <div id="draftBar" class="banner row hide" role="status"></div>
+  <section class="olHead">
     <div class="row">
-      <h2 id="title" style="margin:0">剧情大纲</h2>
-      <input type="text" id="titleInput" class="hide" maxlength="60" placeholder="大纲名称" aria-label="大纲名称">
-      <span class="row" style="margin-left:auto">
-        <button class="btn ghost small" id="edit" type="button">编辑</button>
-        <button class="btn ghost small hide" id="addLane" type="button">＋ 新任务线</button>
+      <h2 id="title" class="olTitle">剧情大纲</h2><span id="badges" class="olBadges"></span>
+      <input type="text" id="titleInput" class="hide olTitleInput" maxlength="60" placeholder="大纲名称" aria-label="大纲名称">
+      <span class="grow"></span>
+      <span class="row tight olActs">
+        <button class="btn ghost small hide" id="undo" type="button" title="Ctrl+Z" aria-label="撤销">↶ 撤销</button>
+        <button class="btn ghost small hide" id="redo" type="button" title="Ctrl+Y" aria-label="重做">↷ 重做</button>
+        <button class="btn ghost small hide" id="addLane" type="button">＋ 新世界线</button>
         <button class="btn ghost small" id="copy" type="button">复制为文字</button>
-        <button class="btn ghost small danger hide" id="removeBook" type="button">删除这份大纲</button>
-        <button class="btn small hide" id="save" type="button">保存</button>
+        <button class="btn ghost small hide" id="edit" type="button" aria-pressed="false">编辑</button>
+        <button class="btn small hide" id="save" type="button" title="Ctrl+S">保存</button>
       </span>
     </div>
-    <p class="muted hide" id="hint">一个组可以有好几份大纲（上面切换，「＋ 新建一份大纲」再写一份），同组成员都能改。每份大纲里几条任务线并排，每条从上往下是剧情顺序；「接在哪些线后面」的线画在下面，表示几条线汇合。登录后每条线、每一步都能打分（1–5）和写评价。点「编辑」后点任意一步就能改，每步、每条线都能移动和删除，改完点「保存」。</p>
-    <p class="muted" id="saved" role="status"></p>
-    <textarea id="copyBox" class="hide" readonly aria-label="大纲文字"></textarea>
-    <div id="board" aria-live="polite">加载中……</div>
+    <p class="muted small" id="saved" role="status"></p>
+    <div id="problem" class="stProblem hide" role="alert"></div>
+    <p class="muted small hide" id="hint">点任意一步就地修改 · 拖 ⠿ 或 <kbd>Alt</kbd>+方向键 移到别的位置、别的线 · <kbd>Delete</kbd> 删除选中的一步 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · 打字即存本机草稿 · <span id="who">同组成员都能改</span> <button class="btn ghost small danger hide" id="removeBook" type="button">删除这份大纲</button></p>
+    <div id="mapBox" class="olMapBox hide">
+      <div class="row"><h3 class="olMapTitle">世界线总图</h3><span id="mapInfo" class="muted small"></span></div>
+      <div id="map" class="olMapScroll"></div>
+      <p class="muted small">箭头表示哪条线接到哪条线；圆点是每一步，实心的已经写了关卡。点方框跳到那条线。</p>
+    </div>
   </section>
-  <dialog id="stepDlg" class="digestBox outlineDlg" aria-labelledby="stepDlgTitle">
-    <form id="stepForm" method="dialog">
-      <h2 id="stepDlgTitle">编辑这一步</h2>
-      <label for="fTitle">标题</label><input type="text" id="fTitle" maxlength="80" required>
-      <label for="fTag">标签（可空，比如「轮回 1」「DLC」）</label><input type="text" id="fTag" maxlength="20">
-      <label for="fTone">颜色（用来区分同一条线里不同来源的步骤，比如梦境关卡）</label><select id="fTone"><option value="">跟任务线一样</option><option value="edf">绿</option><option value="hazard">橙</option><option value="violet">紫</option></select>
-      <label for="fBody">内容</label><textarea id="fBody" maxlength="4000"></textarea>
-      <p class="row"><button class="btn ghost small danger" id="fDelete" type="button">删除这一步</button>
-        <span class="row" style="margin-left:auto"><button class="btn ghost" id="fCancel" type="button">取消</button><button class="btn" type="submit">确定</button></span></p>
-    </form>
-  </dialog>
-  <dialog id="rateDlg" class="digestBox outlineDlg" aria-labelledby="rateDlgTitle">
-    <form id="rateForm" method="dialog">
-      <h2 id="rateDlgTitle">评分与评价</h2>
-      <p class="muted" id="rSummary"></p>
-      <div id="rReviews"></div>
-      <label>我的评分</label>
-      <div class="choices" id="rScore">
-        <label><input type="radio" name="score" value="1">1</label><label><input type="radio" name="score" value="2">2</label>
-        <label><input type="radio" name="score" value="3">3</label><label><input type="radio" name="score" value="4">4</label>
-        <label><input type="radio" name="score" value="5">5</label>
-      </div>
-      <label for="rBody">我的评价（可空）</label><textarea id="rBody" maxlength="1000"></textarea>
-      <p id="rError" class="err" role="alert"></p>
-      <p class="row"><button class="btn ghost small danger hide" id="rDelete" type="button">删掉我的评分</button>
-        <span class="row" style="margin-left:auto"><button class="btn ghost" id="rCancel" type="button">关闭</button><button class="btn" id="rSave" type="submit">保存评分</button></span></p>
-    </form>
-  </dialog>
-  <dialog id="laneDlg" class="digestBox outlineDlg" aria-labelledby="laneDlgTitle">
-    <form id="laneForm" method="dialog">
-      <h2 id="laneDlgTitle">编辑任务线</h2>
-      <label for="lName">名称</label><input type="text" id="lName" maxlength="40" required>
-      <label for="lNote">说明（可空）</label><textarea id="lNote" maxlength="1000"></textarea>
-      <label for="lTone">颜色</label><select id="lTone"><option value="edf">绿</option><option value="hazard">橙</option><option value="violet">紫</option></select>
-      <label>接在哪些任务线后面（汇合线就勾上它前面的线）</label><div id="lAfter" class="choices"></div>
-      <p class="row"><button class="btn ghost small danger" id="lDelete" type="button">删除整条线</button>
-        <span class="row" style="margin-left:auto"><button class="btn ghost" id="lCancel" type="button">取消</button><button class="btn" type="submit">确定</button></span></p>
-    </form>
-  </dialog>
+  <div id="board" aria-live="polite">加载中……</div>
 </main>
+<script src="/ui.js"></script>
 <script src="/groups.js"></script>
 <script src="/outline.js"></script>
 </body>

@@ -186,6 +186,7 @@ test('outline migration 0005 moves each group\'s outline and its scores into out
   db.exec(sql);
   db.exec(sql);
   db.exec(readFileSync(new URL('../migrations/0006-outline-author.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('../migrations/0009-outline-main-open.sql', import.meta.url), 'utf8'));
   const seen = await get(e, 'bob', 'a');
   assert.deepEqual([seen.book, seen.version, seen.outline.title, seen.updated_by, seen.author], [1, 4, '轮回剧情大纲', 'alice', 'alice']);
   assert.deepEqual(seen.scores.s1, { avg: 4, n: 1 });
@@ -202,8 +203,9 @@ test('outline: a group keeps several outlines, each saved, scored and deleted on
   assert.equal((await save({ outline: { title: '空的', lanes: [] }, version: 0 })).status, 200);   // outline 3, empty
   const list = await get(e, 'amy');
   assert.equal(list.book, 1);
-  assert.deepEqual(list.books, [{ book: 1, title: '轮回剧情大纲', lanes: 2, author: 'alice' }, { book: 2, title: '星导者复仇线', lanes: 1, author: 'amy' },
-    { book: 3, title: '空的', lanes: 0, author: 'alice' }]);
+  const flags = { open: false, main: false };
+  assert.deepEqual(list.books, [{ book: 1, title: '轮回剧情大纲', lanes: 2, author: 'alice', ...flags }, { book: 2, title: '星导者复仇线', lanes: 1, author: 'amy', ...flags },
+    { book: 3, title: '空的', lanes: 0, author: 'alice', ...flags }]);
   assert.equal(list.author, 'alice');   // who started it, not who saved it last
   assert.deepEqual((await (await visit(e, '?group=a')).json()).books.map((b) => b.author), [null, null]);   // visitors see no authors
   assert.equal((await (await visit(e, '?group=a')).json()).author, null);
@@ -235,4 +237,43 @@ test('outline: a group keeps several outlines, each saved, scored and deleted on
   // the limit
   for (let i = 0; i < 18; i++) await save({ outline: { title: '', lanes: [] }, version: 0 }, i % 2 ? 'alice' : 'amy');
   assert.equal((await save({ outline: { title: '', lanes: [] }, version: 0 })).status, 400);
+});
+
+test('outline: the main outline comes first and opens by default; an open outline is saved by any account', async () => {
+  const e = env();
+  await call(e, '/api/outline/save', { outline: sample(), version: 0 });             // a/1
+  await call(e, '/api/outline/save', { outline: sample(), version: 0 }, 'bob');      // b/1
+  await call(e, '/api/outline/save', { outline: sample(), version: 0 }, 'bob');      // b/2
+  assert.equal((await get(e, 'alice')).group, 'a');
+  assert.equal((await call(e, '/api/outline/settings', { group: 'b', book: 2, main: true, open: true }, 'alice')).status, 403);
+  assert.equal((await call(e, '/api/outline/settings', { group: 'b', book: 9, main: true }, 'dev')).status, 404);
+  assert.equal((await call(e, '/api/outline/settings', { group: 'a', book: 1, main: true }, 'dev')).status, 200);
+  assert.equal((await call(e, '/api/outline/settings', { group: 'b', book: 2, main: true, open: true }, 'dev')).status, 200);
+  const seen = await get(e, 'alice');                       // not her own group: the main outline's
+  assert.equal(seen.group, 'b');
+  assert.equal(seen.book, 2);
+  assert.deepEqual(seen.groups, ['b', 'a']);
+  assert.deepEqual(seen.books.map((b) => [b.book, b.main, b.open]), [[2, true, true], [1, false, false]]);   // only one main
+  assert.equal(seen.editable, true);
+  assert.equal(seen.member, false);
+  assert.equal((await visit(e)).status, 200);
+  assert.equal((await (await visit(e)).json()).editable, false);   // a visitor still only reads
+  // alice saves b/2, but b/1 (not open) and deleting b/2 stay with group b
+  assert.equal((await call(e, '/api/outline/save', { group: 'b', book: 2, outline: sample(), version: 1 })).status, 200);
+  assert.equal((await get(e, 'bob', 'b')).version, 2);
+  assert.equal((await get(e, 'alice', 'a')).version, 1);   // her own outline untouched
+  assert.equal((await call(e, '/api/outline/save', { group: 'b', book: 1, outline: sample(), version: 1 })).status, 200);   // lands in a/1
+  assert.equal((await get(e, 'alice', 'a')).version, 2);
+  assert.equal((await call(e, '/api/outline/remove', { group: 'b', book: 2, version: 2 })).status, 409);   // aims at a/2: none
+  assert.equal((await get(e, 'bob', 'b')).version, 2);
+  assert.equal((await get(e, 'alice', 'a')).main, false);
+});
+
+test('outline: migration 0009 adds the main / open flags to a database made before them', () => {
+  const e = env();
+  e.DB.raw.exec(`DROP TABLE story_outlines; CREATE TABLE story_outlines (grp TEXT NOT NULL, book INTEGER NOT NULL, data TEXT NOT NULL,
+    version INTEGER NOT NULL, updated_by TEXT, updated_at INTEGER, author TEXT, PRIMARY KEY (grp, book))`);
+  e.DB.raw.exec(readFileSync(new URL('../migrations/0009-outline-main-open.sql', import.meta.url), 'utf8'));
+  const cols = e.DB.raw.prepare('PRAGMA table_info(story_outlines)').all().map((c) => c.name);
+  assert.ok(cols.includes('open') && cols.includes('main'), cols.join());
 });
