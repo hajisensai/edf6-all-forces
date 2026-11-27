@@ -1273,6 +1273,8 @@ add_test(NAME redirect_owner_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOUR
 # 0-tick frames (n = 0) run no online pump and send nothing: the pump dedups on the logical frame, the senders sit on
 # tick paths, the per-frame files send nothing (tests/frame_rate_net_guard.py, docs/unlimited-fps-re.md §4.4).
 add_test(NAME frame_rate_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/frame_rate_net_guard.py")
+# Every HUD text in its 4 languages against its line's 127 characters and its slot's width (tests/hudtext_fit.py: hud_view's glyph table).
+add_test(NAME hudtext_fit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hudtext_fit.py")
 # The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
 # The plugins' keys in the game's key store and the key config pages' stubs (common/edf/keybind.h, src/keyconfig_menu.h):
 # the codes, the slot catalog against both shipped inis, the conflict matrix, every stub decoded.

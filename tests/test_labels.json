@@ -3338,6 +3338,12 @@
    ],
    "scripts": []
   },
+  "hudtext_fit": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": []
+  },
   "ifc_model": {
    "labels": [
     "plugin-native"
@@ -7801,6 +7807,8 @@
     "ROOT",
     "_wrapper_body",
     "cockpit_warnings_wired",
+    "hud_parts",
+    "hud_src",
     "os",
     "re",
     "registry",
@@ -8218,6 +8226,8 @@
     "gen_calls",
     "gen_stores",
     "hud_literal_words",
+    "hud_parts",
+    "hud_src",
     "hudtext_entries",
     "in_team_field",
     "installer",
@@ -10933,6 +10943,8 @@
     "_wrapper_body",
     "before_stock_input",
     "emc_copies_agree",
+    "hud_parts",
+    "hud_src",
     "installs",
     "ledger",
     "os",
@@ -11328,6 +11340,8 @@
    "uses": [
     "ROOT",
     "game_clock_and_hud_stop_with_the_pause",
+    "hud_parts",
+    "hud_src",
     "os",
     "re",
     "src"
@@ -11466,6 +11480,8 @@
     "ROOT",
     "_wrapper_body",
     "gun_stabilizer_wired",
+    "hud_parts",
+    "hud_src",
     "installs",
     "os",
     "re",
@@ -11628,6 +11644,8 @@
    "uses": [
     "ROOT",
     "heli_mouse_aim_wired",
+    "hud_parts",
+    "hud_src",
     "os",
     "re",
     "src"
@@ -11780,7 +11798,9 @@
    ],
    "uses": [
     "ROOT",
+    "hud_parts",
     "hud_scale_one_source",
+    "hud_src",
     "os",
     "re",
     "src"
@@ -11798,8 +11818,11 @@
    ],
    "uses": [
     "ROOT",
+    "hud_parts",
+    "hud_src",
     "hud_switch_cues_wired",
     "os",
+    "re",
     "src"
    ]
   },
@@ -11827,6 +11850,8 @@
     "HUD_TEXT_SOURCES",
     "ROOT",
     "hud_literal_words",
+    "hud_parts",
+    "hud_src",
     "hud_text_localized",
     "hudtext_entries",
     "os",
@@ -12129,6 +12154,8 @@
     "gen_calls",
     "gen_stores",
     "hud_literal_words",
+    "hud_parts",
+    "hud_src",
     "hudtext_entries",
     "in_team_field",
     "installer",
@@ -12712,6 +12739,8 @@
    "uses": [
     "ROOT",
     "_wrapper_body",
+    "hud_parts",
+    "hud_src",
     "map_commands_wired",
     "os",
     "re",
@@ -12735,6 +12764,8 @@
    ],
    "uses": [
     "ROOT",
+    "hud_parts",
+    "hud_src",
     "map_hides_stock_hud",
     "os",
     "re",
@@ -12786,6 +12817,8 @@
    "uses": [
     "ROOT",
     "_wrapper_body",
+    "hud_parts",
+    "hud_src",
     "installs",
     "map_wired",
     "os",
@@ -13011,6 +13044,8 @@
     "ROOT",
     "_wrapper_body",
     "before_stock_input",
+    "hud_parts",
+    "hud_src",
     "npc_ai_wired",
     "os",
     "re",
@@ -13058,6 +13093,8 @@
    ],
    "uses": [
     "ROOT",
+    "hud_parts",
+    "hud_src",
     "npc_pickup_wired",
     "os",
     "re",
@@ -13320,6 +13357,8 @@
    "uses": [
     "ROOT",
     "_wrapper_body",
+    "hud_parts",
+    "hud_src",
     "os",
     "play_area_wired",
     "re",
@@ -14312,6 +14351,8 @@
     "gen_calls",
     "gen_stores",
     "hud_literal_words",
+    "hud_parts",
+    "hud_src",
     "hudtext_entries",
     "in_team_field",
     "installer",
@@ -14469,6 +14510,8 @@
    "uses": [
     "ROOT",
     "_wrapper_body",
+    "hud_parts",
+    "hud_src",
     "installs",
     "os",
     "re",
@@ -14942,6 +14985,8 @@
    "uses": [
     "ROOT",
     "_wrapper_body",
+    "hud_parts",
+    "hud_src",
     "installs",
     "os",
     "re",
@@ -14990,6 +15035,8 @@
    "uses": [
     "ROOT",
     "dsgo",
+    "hud_parts",
+    "hud_src",
     "os",
     "re",
     "src",
@@ -15066,6 +15113,8 @@
    "uses": [
     "ROOT",
     "_wrapper_body",
+    "hud_parts",
+    "hud_src",
     "installs",
     "ledger",
     "os",
@@ -15119,6 +15168,8 @@
     "ROOT",
     "_wrapper_body",
     "dsgo",
+    "hud_parts",
+    "hud_src",
     "os",
     "re",
     "registry",

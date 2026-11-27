@@ -119,6 +119,7 @@ float Width(const wchar_t* text) {
 struct Drew { float x0,y0,x1,y1; std::wstring text; bool world=false; std::uint64_t key=0; };
 std::vector<Drew> drew;
 std::set<std::pair<wchar_t,int>> glyphs;
+std::set<std::string> fitCuts;   // the lines FitLine cut with "..." ("<language> <text>", UTF-8): a slot's too-long text
 
 // The recorders the stand-in image's functions jump to.
 struct PanelBox { float x0,y0,x1,y1; };
@@ -216,6 +217,14 @@ void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar
         owedRestore=false;
     }
     if(rgba[3]<=0.0f)return;   // the world lines' restore (hud.cpp RestoreOrtho): nothing to see
+    if(recording) {   // a line FitLine cut (past kMinScale, "..." after it): listed in the summary, by language
+        const std::size_t n=std::wcslen(text);
+        if(n>3 && !std::wcscmp(text+n-3,L"...")) {
+            char narrow[256];
+            WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
+            fitCuts.insert(std::string(hudtext::Name(hudtext::InUse()))+" "+narrow);
+        }
+    }
     tallest=std::fmax(tallest,y1-y0);
     if(boxing){++drawn;Grow(x0,y0);Grow(x1,y1);}
     if(recording) {
@@ -2894,6 +2903,8 @@ int wmain(int argc,wchar_t** argv) {
     failed+=textFailed;
     std::printf(lineLosses ? "lines: %d lost (LineSink / TextWritten above)\n" : "lines: none lost\n",lineLosses);
     failed+=lineLosses;
+    std::printf("fit: %zu texts cut with ... by FitLine (past kMinScale in their slot)\n",fitCuts.size());
+    for(const std::string& c:fitCuts)std::printf("      %s\n",c.c_str());
     config.hudLanguage=1;hudtext::Use(hudtext::Lang::en);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     // The HUD's scale (src/hudscale.h).
