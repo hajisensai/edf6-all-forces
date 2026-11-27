@@ -2220,8 +2220,12 @@ def sortie_copies_agree() -> None:
     assert 2000 <= hold <= 3000, hold
     assert 'constexpr float kRainOpen=' in plan and srcscan.has(plan, 'inline bool RainHoldStep(')
     sortie_cpp = src('src/jet_sortie.cpp')
-    assert srcscan.has(sortie_cpp, 'sortie::RainHoldStep(s.phase,s.phaseAt,dist,noseOff,ms)')
+    assert srcscan.has(sortie_cpp, 'sortie::RainHoldStep(s.phase,s.phaseAt,dist,noseOff,sortie::RainSteep(pos,j.t.aim,mark),ms)')
     assert srcscan.has(sortie_cpp, '*missileOk=open && arms.missileRange>0.0f;') and 'missile rain: open fire' in sortie_cpp
+    # Level, not diving at a ground target (the player, 2026-11-27: 「一堆导弹全炸地上了」; tools/sortie_check.cpp
+    # RainClearance): the nose from sortie::RainWant, no NoseOn in the rain.
+    rain = sortie_cpp[sortie_cpp.index('case SortiePass::missileRain:'):sortie_cpp.index('case SortiePass::gunshipLap:')]
+    assert srcscan.has(rain, 'sortie::RainWant(level,pos,j.t.aim,want);') and 'NoseOn(' not in srcscan.masked(rain)
     # The salvo's volleys (src/salvo_volley.h, src/lockon.cpp ShotHook; the user, 2026-11-26: 「每帧只能出一发 什么垃圾设定，
     # 改」): its constants the store's, both shot calls patched, one lock enough, the old repeat-lock queue gone.
     volley = src('src/salvo_volley.h')

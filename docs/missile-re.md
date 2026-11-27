@@ -151,7 +151,13 @@ AI（`src/jet_combat.cpp`）：天顶导弹雨的开火门用 `sortie::kRainFire
 - 母弹尾迹粗、子弹细：尾迹宽绑在 AmmoSize（也是模型尺寸）上，只能改模型大小，未改。烟的「粗」只能靠 alpha（母弹 0.8、子弹 0.55）和寿命体现。
 - 武库鸟是从机背向上弹出；这里仍是机腹挂点下落（挂点在模型里，改到机背要改模型，离线验证不了），未改。
 
-开火时机（`src/sortie_plan.h` `RainHoldStep`，离线检查 `tools/sortie_check.cpp` RainHold；玩家：「不需要一进场就发射其实，可以稍微等一会」）：导弹雨从 4000 m 起机头就对准目标，但要进到目标区上空 `kRainOpen` = 2400 m 内、且机头偏离瞄准方向 ≤ `kRainSteadyCone` = 0.25 rad 连续 `kRainHoldMs` = 2.5 s 才开火；中途转弯或拉起就重新计时，一旦开火保持到本次通过结束。开火时 debug 日志一行 `JET ... missile rain: open fire N m from the mark ...`。只在房主 AI 里判断，联机无新协议。
+开火时机（`src/sortie_plan.h` `RainHoldStep`，离线检查 `tools/sortie_check.cpp` RainHold；玩家：「不需要一进场就发射其实，可以稍微等一会」）：导弹雨从 4000 m 起盯住目标，但要进到目标区上空 `kRainOpen` = 2400 m 内、且机头偏离瞄准方向 ≤ `kRainSteadyCone` = 0.25 rad 连续 `kRainHoldMs` = 2.5 s 才开火；中途转弯或拉起就重新计时，一旦开火保持到本次通过结束。开火时 debug 日志一行 `JET ... missile rain: open fire N m from the mark ...`。只在房主 AI 里判断，联机无新协议。
+
+导弹砸地（2026-11-27，玩家：「天顶截击机是飞的太低了还是什么，一堆导弹全炸地上了」；`src/salvo_flight.h` 离线模型，`tools/sortie_check.cpp` RainClearance）：
+- 根因不是巡航高度常量（`kFerryAlt`、`mapcmd::kJetHighShare` 都不管导弹雨，它按 mark+`kRainAlt` 飞），而是进 4000 m 后 `NoseOn` 让飞机俯冲对准地面目标（地板 mark+110）：开火时约 2000 m 外、离地 150-190 m。母弹 FireAccuracy 0.3 rad 扇形出膛、子弹在母弹机头（CP[13] 模式 0）±0.45 rad 内分裂，插件 PN（N = 3，横向上限 |own| × turn）把偏出视线的弹拉回来时会向视线下方弯出约 0.19 × 射程 × 偏角，射程长、视线坡度小时低处的弹弯进目标前几百米的地面。离线模型：旧俯冲 1024 发子弹约一半落在离目标 20 m 外的地面。
+- 决定是否砸地的是视线坡度（离地高 / 水平距离），不是高度本身：平飞 400 m 从 1900 m 外开火仍浪费约 7%，坡度 ≥ 1/3 时 < 1%（320 m、400 m、500 m 都一样）。
+- 改法：导弹雨全程平飞（`sortie::RainWant`：在自己上方的空中目标仍抬头对准），`kRainAlt` 320 → 400 m；`RainHoldStep` 多一个条件 `RainSteep`：目标处离地高 ≥ 水平距离 × `kRainSlope`（1/3），目标在自己上方时直接满足。400 m 平飞即约 1200 m 内开火，齐射 1.55 s 打完仍在 `kRainTo` 之前（static_assert）。
+- 模型没算的：挂架偏移、目标移动、子弹继承母弹速度（按不继承算）、0x4E820 锥内分布（按极角均匀算）。
 
 卡住的特效（玩家：「那个导弹在开始的时候阶段有一些特效会卡住，很久不消失」）：根因是插件光晕画了已经死掉、只在等烟尾淡完的弹（`docs/round-glow.md` §插件怎么读），已改为只画活着且点着火的弹；旧的蓝色 HDR 烟尾在发射处持续发光 300 帧也会像卡住，一并改成白烟。同一局里用探针行的 dead / unlit 计数就能区分两者：光团消失时 dead 仍非零 = 光晕那条，dead 归 0 后还有亮的 = 烟尾那条。
 
@@ -161,5 +167,6 @@ AI（`src/jet_combat.cpp`）：天顶导弹雨的开火门用 `sortie::kRainFire
 - 近炸引爆的爆炸特效是否正常播放（M）。
 - 锁定条目里的瞄准点是否每帧都会刷新（M）。
 - 齐射（MissileBullet02）：HDR 颜色的实际亮度和 256 条烟尾的性能；弹体光晕的位置、亮度和联机远端是否也发光（`docs/round-glow.md` §待实机确认）；冷发射 0.4 s / 4.7 m 下坠看不看得出、点火瞬间够不够亮；±80° 离轴目标 PN 能否转过来；飞行中是否真的没有重力下沉（上面 M 的一条）。
+- 导弹雨（2026-11-27 改）：飞机在 mark 上方约 400 m 平飞不俯冲、约 1200 m 内才开火；子弹不再成片砸在目标前方地面；对空目标仍抬头开火。
 
 打开 debug 后，日志里会有 `MISSILE ... proximity fuse` 行。

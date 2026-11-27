@@ -737,6 +737,7 @@ SALVO_DROP_GRAVITY = 4.0        # AmmoGravityFactor, felt only before ignition: 
 SALVO_FAN = 0.3                 # rad, FireAccuracy: the rounds leave in a 17 deg cone (polar angle uniform in [0, it])
 SALVO_ACCEL = 0.27              # m a frame per frame (CP[4]): own speed SALVO_CHILD_SPEED at the split
 SALVO_TOP = 12.0                # m a frame (CP[6])
+SALVO_TURN = 0.1                # rad a frame (CP[5], the helicopter template's own): the PN's limit |own| x it a frame
 SALVO_HOMING_DELAY = 8.0        # frames after ignition before it steers (CP[8]): the fan opens first
 SALVO_SPLIT_AFTER = 40.0        # frames after ignition it splits (CP[12] = [1, it]: by time, the target alive or not)
 SALVO_SPLIT_CONE = 0.45         # rad, CP[13][2]: the children's cone off the carrier's heading
@@ -2649,6 +2650,7 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         cp.items[7].items[:] = list(SALVO_DROP)
         cp.items[2] = SALVO_TRAIL
         # Native guidance for the carrier (src/guidance.cpp's PN), not MissileBullet01's plugin mode.
+        cp.items[5] = SALVO_TURN
         cp.items[8], cp.items[9] = SALVO_HOMING_DELAY, 0.0
         cp.items.extend(split)
         declare_glow(cp, 'MissileBullet02', SALVO_GLOW)
