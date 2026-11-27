@@ -1188,6 +1188,8 @@ set_tests_properties(weapon_records_native PROPERTIES ENVIRONMENT PYTHONIOENCODI
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME generator_excludes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/generator_excludes_test.py")
+set_tests_properties(generator_excludes PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # 原版启动.cmd: ModLoader.ini off for one run and back (tools/vanilla_launch.py).
 add_test(NAME vanilla_launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vanilla_launch_test.py")
 set_tests_properties(vanilla_launch PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)

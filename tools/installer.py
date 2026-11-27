@@ -946,7 +946,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     # recoil, the optics' model redirect above): the AP tank is that file with another gun.
     write_loadout_files(game)
     write_menu_preview(game)
-    generator = install_generator(game, generator_source())
+    generator = install_generator(game, fresh_source_generator() or generator_source())
     if generator:
         print(tr('写入', 'Writing'), generator, tr('（游戏内战前配置菜单保存后在后台用它生成新文件）',
                                                  '(the in-game loadout menu runs it in the background to make new files)'))
@@ -1515,6 +1515,34 @@ def generator_source() -> str | None:
     if os.path.isfile(slim):
         return slim
     return sys.executable if getattr(sys, 'frozen', False) else None
+
+
+def fresh_source_generator() -> str | None:
+    """Run from source: the slim generator beside the plugin files (bundle_dir), frozen again (tools/build_release.py
+    build_generator) when it is missing or older than any tools/ or pylib/ module, so an install never keeps an old
+    generator that the newer plugin then runs before every sortie (2026-11-27: an 11-22 exe without support_config made
+    every sortie say 'ModuleNotFoundError'). Frozen installer: None (it ships its own). None too when it cannot be built
+    (said; the install goes on with generator_source)."""
+    if getattr(sys, 'frozen', False):
+        return None
+    slim = os.path.join(bundle_dir(), GENERATOR)
+    root = os.path.normpath(os.path.join(HERE, '..'))
+    newest = max(os.path.getmtime(os.path.join(root, d, n)) for d in ('tools', 'pylib')
+                 for n in os.listdir(os.path.join(root, d)) if n.endswith('.py'))
+    if os.path.isfile(slim) and os.path.getmtime(slim) >= newest:
+        return slim
+    import shutil
+    import subprocess
+    print(tr('正在打包战前配置生成器（源码比它新）…', 'Freezing the loadout generator (the sources are newer)...'))
+    try:
+        import build_release
+        built = build_release.build_generator()
+        os.makedirs(bundle_dir(), exist_ok=True)
+        shutil.copy2(built, slim)
+    except (ImportError, OSError, subprocess.CalledProcessError) as e:
+        print(tr(f'！ 生成器打包失败（{e}）', f'! Could not freeze the generator ({e})'))
+        return None
+    return slim
 
 
 def install_generator(game: str, exe: str | None) -> str | None:
