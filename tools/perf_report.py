@@ -440,15 +440,21 @@ COLLIDE_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE constru
 NPC_PARALLEL = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF NPCMT (on|off), (\d+) threads: ([\d.]+) soldiers decided '
                           r'a step, (\d+) faults; a step: gather ([\d.]+) ms, decide ([\d.]+) ms, stock think ([\d.]+) ms, '
                           r'apply ([\d.]+) ms \(asks made at apply ([\d.]+) ms\); kept answers (\d+), asked at apply (\d+), '
-                          r'no intent (\d+), stale (\d+), mismatches (\d+)')
+                          r'no intent (\d+), stale (\d+), shadow differs (\d+) of (\d+); '
+                          r'asked at apply: pick (\d+), hold (\d+), close (\d+), ray (\d+), clear (\d+); '
+                          r'why: no answer (\d+), other object (\d+), weapon (\d+), held (\d+), drift (\d+), plan (\d+), '
+                          r'line (\d+); kept unused: pick (\d+), hold (\d+), close (\d+), ray (\d+), clear (\d+)')
 NPC_PARALLEL_TIMES = ('gather', 'decide', 'stock think', 'apply', 'asks at apply')
-NPC_PARALLEL_COUNTS = ('faults', 'kept', 'asked at apply', 'no intent', 'stale', 'mismatches')
+NPC_PARALLEL_COUNTS = ('faults', 'kept', 'asked at apply', 'no intent', 'stale', 'differs', 'shadowed')
+NPC_PARALLEL_ASKS = ('pick', 'hold', 'close', 'ray', 'clear')
+NPC_PARALLEL_CAUSES = ('no answer', 'other object', 'weapon', 'held', 'drift', 'plan', 'line')
 
 
 def read_npc_parallel(log: str, window: tuple[float, float]) -> dict:
-    """The soldiers' Think split (src/npcai.cpp NpcParallelReport, PerfProbe=1 and Debug=1): each part's ms a step
-    (the rows' mean: each row one PerfTick period), the soldiers decided a step, the counters summed; the switch and
-    the threads as the last row has them."""
+    """The soldiers' Think split (src/npcai.cpp NpcParallelReport, PerfProbe=1): each part's ms a step (the rows' mean:
+    each row one PerfTick period), the soldiers decided a step, the counters summed (the shadow's under Debug=1); the
+    asks made again at apply by kind ('by ask') and by why ('by cause'; stale apart), and the kept answers Drive did not
+    use by kind ('unused'); the switch and the threads as the last row has them."""
     rows = _rows(log, NPC_PARALLEL, window)
     if not rows:
         return {}
@@ -456,7 +462,10 @@ def read_npc_parallel(log: str, window: tuple[float, float]) -> dict:
     out: dict = {'rows': n, 'mode': rows[-1][4], 'threads': int(rows[-1][5]),
                  'decided': sum(float(m[6]) for m in rows) / n}
     out.update({key: sum(float(m[i]) for m in rows) / n for i, key in enumerate(NPC_PARALLEL_TIMES, 8)})
-    out.update({key: sum(int(m[i]) for m in rows) for i, key in zip((7, 13, 14, 15, 16, 17), NPC_PARALLEL_COUNTS)})
+    out.update({key: sum(int(m[i]) for m in rows) for i, key in zip((7, 13, 14, 15, 16, 17, 18), NPC_PARALLEL_COUNTS)})
+    out['by ask'] = {key: sum(int(m[i]) for m in rows) for i, key in enumerate(NPC_PARALLEL_ASKS, 19)}
+    out['by cause'] = {key: sum(int(m[i]) for m in rows) for i, key in enumerate(NPC_PARALLEL_CAUSES, 24)}
+    out['unused'] = {key: sum(int(m[i]) for m in rows) for i, key in enumerate(NPC_PARALLEL_ASKS, 31)}
     return out
 
 
@@ -1052,7 +1061,10 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
         out += [f'| {k} | {mt[k]:.3f} |' for k in NPC_PARALLEL_TIMES]
         out += ['', f"{mt['decided']:.1f} soldiers decided a step; kept answers {mt['kept']:,}, asked at apply "
                 f"{mt['asked at apply']:,} (stale {mt['stale']:,}, no intent {mt['no intent']:,}); "
-                f"faults {mt['faults']}, mismatches {mt['mismatches']}."]
+                f"faults {mt['faults']}; shadow differs {mt['differs']:,} of {mt['shadowed']:,}.",
+                '', 'Asked again at apply by ask: ' + ', '.join(f'{k} {v:,}' for k, v in mt['by ask'].items()) +
+                '; by cause: ' + ', '.join(f'{k} {v:,}' for k, v in mt['by cause'].items()) +
+                '; kept answers unused: ' + ', '.join(f'{k} {v:,}' for k, v in mt['unused'].items()) + '.']
     collide = read_collide(log, cw)
     if collide:
         n, construct_ms = collide['construct']

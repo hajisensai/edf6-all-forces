@@ -340,9 +340,11 @@ def probe_parsing() -> None:
             f.write('[13:00:15.000] ' + collide % (100, 50.0, 60, 60.0, 60, 20, 10.0) + '\n')
             f.write('[13:00:20.000] ' + collide % (150, 80.0, 150, 150.0, 120, 0, 0.0) + '\n')
             f.write('[13:00:40.000] ' + collide % (9, 9.0, 9, 9.0, 9, 9, 9.0) + '\n')
-            f.write('[13:00:15.000] ' + npcmt % ('on', 9, 30.0, 0, 0.5, 1.0, 2.0, 4.0, 0.5, 900, 30, 3, 10, 0) + '\n')
-            f.write('[13:00:20.000] ' + npcmt % ('on', 9, 40.0, 1, 0.7, 2.0, 2.0, 6.0, 1.5, 1100, 50, 5, 20, 1) + '\n')
-            f.write('[13:00:40.000] ' + npcmt % ('off', 1, 0.0, 0, 9.0, 9.0, 9.0, 9.0, 9.0, 0, 0, 0, 0, 0) + '\n')
+            f.write('[13:00:15.000] ' + npcmt % ('on', 9, 30.0, 0, 0.5, 1.0, 2.0, 4.0, 0.5, 900, 30, 3, 10, 0, 28,
+                                             10, 5, 4, 1, 0, 2, 3, 1, 4, 6, 4, 0, 7, 6, 5, 4, 3) + '\n')
+            f.write('[13:00:20.000] ' + npcmt % ('on', 9, 40.0, 1, 0.7, 2.0, 2.0, 6.0, 1.5, 1100, 50, 5, 20, 1, 34,
+                                             20, 10, 6, 2, 2, 3, 2, 2, 5, 9, 7, 0, 0, 0, 0, 0, 0) + '\n')
+            f.write('[13:00:40.000] ' + npcmt % (('off', 1, 0.0, 0, 9.0, 9.0, 9.0, 9.0, 9.0) + (0,) * 23) + '\n')
             f.write('[13:00:20.000] ' + graph % (1, 2, 2, 0, 1, 3.0) + '\n')
             f.write('[13:00:20.000] ' + graph % (2, 1, 2, 0, 0, 1.0) + '\n')
             f.write('[13:00:40.000] ' + graph % (3, 1, 1, 0, 0, 9.0) + '\n')
@@ -389,7 +391,11 @@ def probe_parsing() -> None:
               abs(mt['gather'] - 0.6) < 1e-9 and abs(mt['decide'] - 1.5) < 1e-9 and abs(mt['stock think'] - 2.0) < 1e-9 and
               abs(mt['apply'] - 5.0) < 1e-9 and abs(mt['asks at apply'] - 1.0) < 1e-9 and mt['faults'] == 1 and
               mt['kept'] == 2000 and mt['asked at apply'] == 80 and mt['no intent'] == 8 and mt['stale'] == 30 and
-              mt['mismatches'] == 1, "PERF NPCMT: the soldiers' Think split, its counters summed in the clean window")
+              mt['differs'] == 1 and mt['shadowed'] == 62 and
+              mt['by ask'] == {'pick': 30, 'hold': 15, 'close': 10, 'ray': 3, 'clear': 2} and
+              mt['by cause'] == {'no answer': 5, 'other object': 5, 'weapon': 3, 'held': 9, 'drift': 15, 'plan': 11,
+                                 'line': 0} and
+              mt['unused'] == {'pick': 7, 'hold': 6, 'close': 5, 'ray': 4, 'clear': 3}, "PERF NPCMT: the soldiers' Think split, its counters summed in the clean window")
         c = perf_report.read_collide(log, w)
         check(c == {'construct': (250, 130.0), 'dispatch': (210, 210.0), 'sleep': (20, 10.0), 'mode0': 180},
               'collision timing keeps empty graphs, non-mode-0 dispatches and waits distinct')

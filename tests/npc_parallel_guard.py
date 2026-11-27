@@ -4,7 +4,8 @@ runs on the pool's threads during the stock AI pass, so everything it can reach 
 Its call graph (npcai.cpp's functions it calls, transitively; the grid / logic / reference / index headers they call
 into, whole) must not
   - write the wastedfire book or ask what writes it (WastedFire, HoldFire, WastedFireHit, WatchTarget, WastedFirePrime:
-    only WastedFirePeek, the read-only side);
+    only WastedFirePeek / WastedFirePeekFor, the read-only side: the memo's verdicts and the pairs' last plans,
+    under the shared lock, nothing made);
   - pick a weapon, pull a trigger, look or move (kPickWeapon, kTrigger, Look, Walk, Stand, Put<...>, ChooseArm);
   - read the clock, the config, the frame counter or log (GameMs, GameFrame, GetTickCount64, Cfg, Log), or the memo's
     game-thread state (applying, stats);
@@ -42,7 +43,8 @@ KNOWN = {
     'static_cast', 'reinterpret_cast', 'const_cast', 'sizeof', 'alignof', 'decltype', 'noexcept', 'return',
     'if', 'for', 'while', 'switch', 'memcpy', 'memcmp', 'memset',
     'At',               # edf::At<T>(p,off): a typed read
-    'WastedFirePeek',   # wastedfire.cpp's read-only side
+    'WastedFirePeek',   # wastedfire.cpp's read-only side (checked below: no plan made, no exclusive lock)
+    'WastedFirePeekFor',
     'MapRay',           # the Havok ray query (see above)
 }
 FORBIDDEN_CALLS = ('WastedFire', 'HoldFire', 'WastedFireHit', 'WatchTarget', 'WastedFirePrime', 'GameMs', 'GameFrame',
@@ -131,11 +133,31 @@ for m in sorted(members):
 fork = srcscan.function(npcai, 'Fork')
 check(srcscan.order(fork, 'WastedFirePrime', 'WastedFireVersion', 'Run'), 'mt::Fork primes the book, takes its version, then runs the pool')
 check(srcscan.has(fork, 'workers::Run(&Decide'), 'mt::Fork runs mt::Decide on the pool')
-# Every memo wrapper keeps an answer only for the same inputs bit for bit (Same3), and asks again otherwise.
-for wrapper, now in (('ShotClearOf', 'ShotClearNow'), ('FriendNear', 'FriendNearNow'), ('MapRayQ', 'MapRay'),
-                     ('PickTarget', 'PickRowNow')):
+# Every memo wrapper keeps an answer by what it is about: the same object (target), the same weapon (Same1 of its blast /
+# radius / scope / reach), from and to within mt::kNear (Near3); else it asks again and says why (Sync's cause).
+for wrapper, now, target in (('ShotClearOf', 'ShotClearNow', True), ('FriendNear', 'FriendNearNow', True),
+                             ('MapRayQ', 'MapRay', True), ('PickTarget', 'PickRowNow', False)):
     body = srcscan.function(npcai, wrapper)
-    check(srcscan.calls(body, 'Same3') and srcscan.calls(body, now), f'{wrapper} keeps an answer only for the same inputs, else asks {now}')
+    check(srcscan.calls(body, 'Near3') and srcscan.calls(body, now) and srcscan.mentions(body, 'Sync') and
+          (not target or srcscan.has(body, 'target!=target')),
+          f'{wrapper} keeps an answer only for the same object and weapon from about the same place, else asks {now}')
+    check(srcscan.calls(body, 'Shadow') and srcscan.calls(body, 'Differs'),
+          f'{wrapper}: Debug=1 shadow-asks its kept answers and counts the differences')
+check(srcscan.has(srcscan.function(npcai, 'Near3'), 'kNear*kNear'), 'Near3: within mt::kNear')
+# The kept answers Drive did not use are counted (End, after Drive in Think); Veto records the hands it tests.
+think = srcscan.function(npcai, 'Think')
+check(srcscan.order(think, 'mt::Begin', 'Drive', 'mt::End'), 'Think: mt::Begin, Drive, then mt::End (the unused answers counted)')
+check(srcscan.mentions(srcscan.function(npcai, 'Veto'), 'vetoed'), 'Veto records the hands it tests (the next fork\'s guess)')
+# wastedfire.cpp's peek is read-only: the memo's verdicts and the pairs' plans read under the shared lock, none made.
+wastedfire = srcscan.read('src/wastedfire.cpp')
+for fn in ('WastedFirePeekFor', 'PeekPlan', 'PeekFeedback'):
+    body = srcscan.function(wastedfire, fn)
+    check(bool(body), f'src/wastedfire.cpp defines {fn}')
+    for bad in ('PlanFor', 'Make', 'Wasted', 'HoldFire', 'WatchTarget'):
+        if not (fn == 'PeekFeedback' and bad == 'Wasted'):   # wastedfire::Wasted: the book's pure verdict
+            check(not srcscan.calls(body, bad), f'{fn} calls {bad} (the peek must not make or write anything)')
+    for bad in ('unique_lock', 'lock_guard', 'AcquireSRWLockExclusive'):
+        check(not srcscan.mentions(body, bad), f'{fn} takes an exclusive lock ({bad})')
 # The holds kept only under the book's version at the Decide (a settled hit since: asked again).
 check(srcscan.calls(srcscan.function(npcai, 'KeptHold'), 'Fresh') and
       srcscan.calls(srcscan.function(npcai, 'Fresh'), 'WastedFireVersion'), 'the kept holds stand only under the same WastedFireVersion')
