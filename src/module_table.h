@@ -10,6 +10,7 @@
 #include "plugin_log.h"
 #include "config.h"
 #include "native_body_math.h"
+#include "target_grid.h"
 #include "scene.h"
 #include "boarding.h"
 #include "plugin_body.h"
@@ -130,6 +131,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kFrameLatency,"frame latency",kLoadOnly) \
     M(kFrameRate,"frame rate",kLoadOnly) \
     M(kNativePerformance,"native performance",kLoadOnly) \
+    M(kTargetGrid,"target grid",kLoadOnly) \
     M(kFsBudget,"fs budget",kLoadOnly) \
     M(kTeamCapacity,"team capacity",kLoadOnly) \
     M(kHavokProps,"havok props",kLoadOnly) \
@@ -334,6 +336,7 @@ constexpr InstallEntry kInstalls[]={
         Log("PHYSICS rigid-body growth and motion ID limit: %u/%u native paths optimized",InstallNativeBodyMath(),kNativeBodyMathSites);
     }},
     {IP::kBeforeAppInit,Id::kFsBudget,&Install<&InstallFsLoaderBudget>},   // before the application's init starts CRI File System (fsbudget.cpp)
+    {IP::kBeforeAppInit,Id::kTargetGrid,&Install<&InstallTargetGrid>},   // the nearest-enemy pick on team grids (target_grid.cpp)
     {IP::kBeforeAppInit,Id::kTeamCapacity,&Install<&InstallTeamCapacity>}, // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     {IP::kBeforeAppInit,Id::kHavokProps,&Install<&InstallHavokProps>},     // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
     {IP::kBeforeAppInit,Id::kAiWorldCapacity,&Install<&InstallAiWorldCapacity>},   // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024

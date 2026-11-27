@@ -93,6 +93,16 @@ public:
     // Points kept apart from the cells, visited by every query: the odd ones and those off the main body (far ones).
     int Apart() const noexcept { return static_cast<int>(apart.size()); }
     float Cell() const noexcept { return cell; }
+    // The cell Build gave point i (-1: kept apart), and the cell a point at (x, z) stands in now, by the same monotonic
+    // expression, unclamped (-1: off the cells, or not finite). A point that moved after Build is still where the queries
+    // look for it while the two agree (src/target_grid.h keeps the ones that no longer do apart itself).
+    int Where(int i) const noexcept { return where[static_cast<std::size_t>(i)]; }
+    int CellOf(float x,float z) const noexcept {
+        if(!nx || !std::isfinite(x) || !std::isfinite(z))return -1;
+        const int cx=CellXUnclamped(x),cz=CellZUnclamped(z);
+        if(cx<0 || cx>=nx || cz<0 || cz>=nz)return -1;
+        return cz*nx+cx;
+    }
 
     // f(i) for every point that can lie within [x0, x1] x [z0, z1] (padded for rounding), and every one apart. A bound
     // that is not a number: every point.
