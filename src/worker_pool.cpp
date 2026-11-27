@@ -140,9 +140,9 @@ int Run(TaskFn fn,void* ctx,int count,Fault* fault) noexcept {
     if(wakeN>0)ReleaseSemaphore(wake,wakeN,nullptr);
     Drain();
     if(wakeN>0)WaitForSingleObject(done,INFINITE);   // every woken worker checked out: the job is free again
-    const int faults=job.faults.load();
-    if(fault){*fault=job.first;fault->count=faults;}
-    return faults;
+    const int faulted=job.faults.load();
+    if(fault){*fault=job.first;fault->count=faulted;}
+    return faulted;
 }
 
 void Shutdown() noexcept {

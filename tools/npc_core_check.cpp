@@ -9,6 +9,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #define GetWindowThreadProcessId markinput::Process
 #include "../src/npcai.cpp"
 #undef GetWindowThreadProcessId
+#include "../src/worker_pool.cpp"   // the parallel Decide's pool (the fixtures that include this file link it too)
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -165,7 +166,7 @@ bool GatherCaught(std::int32_t team) {
     __try { Gather(team); return false; } __except(EXCEPTION_EXECUTE_HANDLER) { return true; }
 }
 void Reset() {
-    heldSupportActor=nullptr;playerObj=nullptr;ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;flatFloor=completeRide=false;follows=rides=announcedBoards=0;
+    heldSupportActor=nullptr;playerObj=nullptr;ResetNpcAi();ResetNpcParallel();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;flatFloor=completeRide=false;follows=rides=announcedBoards=0;
     arcWallZ=0.0f;
     std::memset(human,0,sizeof(human));std::memset(dead,0,sizeof(dead));std::memset(other,0,sizeof(other));
     std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(ctrl,0,sizeof(ctrl));
@@ -310,6 +311,18 @@ bool HoldFire(const void*,const void* target,const float*,float speed,float grav
     if(aim && weakAimSet && target)std::memcpy(aim,weakAim,12);
     return target && (target==wastedTarget || target==heldTarget);
 }
+// wastedfire.cpp's read-only side for the parallel Decide: an ordinary target's verdict (WastedFire's), -1 for one
+// HoldFire decides with a plan of its own here (heldTarget, or a weak spot to aim at); the version bumped by the case
+// where the game's damage hook would settle a hit (wastedVersion).
+std::uint64_t wastedVersion=1;
+int WastedFirePeek(const void*,const void* target) noexcept {
+    if(!target)return 0;
+    if(target==heldTarget || weakAimSet)return -1;
+    return target==wastedTarget ? 1 : 0;
+}
+void WastedFirePrime(const void* const*,int) noexcept {}
+std::uint64_t WastedFireVersion() noexcept { return wastedVersion; }
+MiniDumpWriteDumpFn MiniDumpWriter() noexcept { return nullptr; }   // crash_dump.cpp: no dump from the fixtures
 int coaxCalls=0;   // payload.cpp NpcOwnWeaponsFire: called beside every crew aim (no coax or keyed weapons on these fixtures)
 bool NpcOwnWeaponsFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
 void SeatTurretsTrain(unsigned char*,unsigned,const void*) noexcept {}   // seat_turret.cpp: no gunner seat turrets on these fixtures
@@ -1703,6 +1716,152 @@ int main() {
         const std::vector<const void*> all={reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5000)),
             reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5010)),reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5020))};
         Expect(watchedTargets==all,"Gather watches every enemy of the frame, once an object");
+    }
+    // The parallel Decide (NpcParallelThink, docs/npc-ai-design.md「并行决策与串行提交」): the same frames with every ask
+    // made at Drive (off), with the fork on one thread (the caller alone) and on the whole pool give the same bits: the
+    // intents of the two forks, and after each frame every soldier's block (trigger, pick, look, move stick), its entry's
+    // target / hand / line-of-sight cache and its plan. The frames go through what turns kept answers stale or unused:
+    // fire and holds, a hand switched (its arms changed), the walk to a combat spot, the wastedfire book written part way
+    // through the pass (a settled hit), a soldier dead and one turned to another faction part way (Think's early
+    // returns: no Drive), the map ray's wall coming and going, the targets moving. Debug=1's shadow asks find nothing to
+    // differ, and a kept answer made wrong on purpose is caught (NPCMT MISMATCH) with the game thread's answer used.
+    {
+        constexpr int kCrowd=24,kFoes=6;
+        alignas(16) static unsigned char crowd[kCrowd][0x2200]{},crowdCtrl[kCrowd][0x10]{};
+        alignas(16) static unsigned char foes[kFoes][0x300]{},foeCtrl[kFoes][0x10]{};
+        struct Seen {
+            const void* target;int arm,wantArm;ULONGLONG losFrame;const void* losObject;bool los;
+            const char* move;bool fire;int planArm;
+        };
+        struct Run { std::vector<unsigned char> blocks;std::vector<Seen> seen;std::vector<unsigned char> intents;mt::Stats st{}; };
+        const auto armsOf=[](int k,int frameNo) {
+            Arms a{};a.n=2;
+            a.arm[0]=npc::Arm{120,0,10,false,true,false};      // a rifle
+            a.arm[1]=npc::Arm{90,6,30,false,true,false};       // a rocket launcher
+            const bool switched=k==5 && frameNo>=2;            // its hand switched from frame 2
+            a.held[0]=(k%3==0)!=switched ? 1 : 0;a.held[1]=k%4==0 ? 1-a.held[0] : -1;
+            return a;
+        };
+        const auto run=[&](int mode)->Run {
+            Run r;
+            Reset();config.npcParallelThink=mode!=0;config.debug=mode==3;flatFloor=true;wall=false;
+            wastedTarget=heldTarget=nullptr;weakAimSet=false;wastedVersion=1;
+            workers::SetLimit(mode==1 ? 1 : 0);
+            std::memset(crowd,0,sizeof(crowd));std::memset(crowdCtrl,0,sizeof(crowdCtrl));
+            std::memset(foes,0,sizeof(foes));std::memset(foeCtrl,0,sizeof(foeCtrl));
+            for(int k=0;k<kCrowd;++k) {
+                unsigned char* h=crowd[k];
+                Put<void*>(h,0,image+kSoldiers[0].vtable);Put<int>(h,kTeam,kTeamFriend);Put<void*>(h,kLeader,nullptr);
+                Put<unsigned>(h,kHumanMask,1);Put<unsigned>(h,kControlMask,kMaskMove|kMaskLook|kMaskTrigger);
+                Put<void*>(h,kSelfCtrl,crowdCtrl[k]);Put<long>(crowdCtrl[k],8,1);Put<long>(crowdCtrl[k],12,1);
+                const float at[3]={static_cast<float>(k%6)*6.0f-15.0f,0.0f,static_cast<float>(k/6)*7.0f-140.0f+static_cast<float>(k%5)*40.0f};
+                std::memcpy(h+kPosition,at,12);
+            }
+            for(int i=0;i<kFoes;++i){Put<void*>(foes[i],kSelfCtrl,foeCtrl[i]);Put<long>(foeCtrl[i],8,1);Put<long>(foeCtrl[i],12,1);}
+            for(int f=1;f<=6;++f) {
+                now+=16;++frame;world.frame=frame;wall=f%2==0;
+                world.enemies=kFoes;
+                for(int i=0;i<kFoes;++i)
+                    world.enemy[static_cast<std::size_t>(i)]=Enemy{foes[i],{static_cast<float>(i)*9.0f-20.0f+static_cast<float>(f),
+                        i%3==0 ? 1.0f : 30.0f,40.0f+static_cast<float>(i)*25.0f-static_cast<float>(f)*2.0f},i==2 ? 400 : 1};
+                // friends: the crowd (each its own object, passed over by its own clears) and two in the lines of fire
+                world.friends=kCrowd+2;
+                for(int k=0;k<kCrowd;++k) {
+                    const float* p=Pos(crowd[k]);
+                    world.fr[static_cast<std::size_t>(k)]=npc::Friend{{p[0],p[1]+1.0f,p[2]},0.8f};
+                    world.frObject[static_cast<std::size_t>(k)]=crowd[k];
+                }
+                world.fr[kCrowd]=npc::Friend{{-10.0f,1.5f,20.0f},0.8f};world.frObject[kCrowd]=other;
+                world.fr[kCrowd+1]=npc::Friend{{8.0f,20.0f,50.0f},0.8f};world.frObject[kCrowd+1]=dead;
+                IndexFixture();
+                mt::Fork(GameFrame(),now);
+                if(mode!=0) {
+                    const auto* b=reinterpret_cast<const unsigned char*>(mt::intents.data());
+                    r.intents.insert(r.intents.end(),b,b+mt::intents.size()*sizeof(mt::Intent));
+                }
+                for(int k=0;k<kCrowd;++k) {
+                    unsigned char* h=crowd[k];
+                    if(f==3 && k==kCrowd/2){wastedTarget=foes[1];++wastedVersion;}   // a hit settled part way through the pass
+                    if(f>=4 && k==7)h[kDead]=1;                     // dead part way (frame 4 on): Think returns before Drive
+                    if(f>=4 && k==9)Put<int>(h,kTeam,1);            // another faction: likewise
+                    if(h[kDead] || At<int>(h,kTeam)!=kTeamFriend){r.seen.push_back(Seen{});continue;}
+                    Soldier* s=Entry(h,now);
+                    s->seen=now;
+                    if(!s->controlSet){s->control=npc::Control::free;s->controlSet=true;std::memcpy(s->home,Pos(h),12);s->homeSet=true;}
+                    const Arms a=armsOf(k,f);
+                    const float* pos=Pos(h);
+                    const float eye[3]={pos[0],pos[1]+kEye,pos[2]};
+                    mt::Begin(h);
+                    const Plan p=Drive(*s,h,kSoldiers[0],a,nullptr,eye,pos,nullptr,now);
+                    mt::applying=nullptr;
+                    r.seen.push_back(Seen{s->target.obj,s->arm,s->wantArm,s->losFrame,s->losObject,s->los,p.move,p.fire,p.arm});
+                }
+                r.blocks.insert(r.blocks.end(),&crowd[0][0],&crowd[0][0]+sizeof(crowd));
+            }
+            r.st=mt::stats;
+            return r;
+        };
+        const auto same=[](const Run& x,const Run& y) {
+            if(x.blocks!=y.blocks || x.seen.size()!=y.seen.size())return false;
+            for(std::size_t i=0;i<x.seen.size();++i) {
+                const Seen& a=x.seen[i];const Seen& b=y.seen[i];
+                if(a.target!=b.target || a.arm!=b.arm || a.wantArm!=b.wantArm || a.losFrame!=b.losFrame ||
+                   a.losObject!=b.losObject || a.los!=b.los || a.fire!=b.fire || a.planArm!=b.planArm ||
+                   (a.move!=b.move && (!a.move || !b.move || std::strcmp(a.move,b.move)!=0)))return false;
+            }
+            return true;
+        };
+        const Run off=run(0),one=run(1),pool=run(2),shadow=run(3);
+        int fired=0,switched=0,walked=0,picks=0,sticks=0;
+        for(const Seen& v:off.seen){fired+=v.fire;switched+=v.arm!=v.wantArm || v.planArm==1;walked+=v.move && std::strcmp(v.move,"stock")!=0;}
+        for(std::size_t at=0;at<off.blocks.size();at+=0x2200) {   // every soldier's block after every frame
+            const unsigned char* b=off.blocks.data()+at;
+            picks+=b[kPickWeapon]|b[kPickWeapon+1]|b[kPickWeapon+2];
+            sticks+=At<float>(b,kMoveX)!=0.0f || At<float>(b,kMoveZ)!=0.0f;
+        }
+        char what[260];
+        std::snprintf(what,sizeof(what),"the frames off: %d shots, %d with the second hand or switching (%d weapon picks "
+                      "written), %d plans of the plugin's, %d moving",fired,switched,picks,walked,sticks);
+        Expect(fired>0 && switched>0 && picks>0 && walked>0 && sticks>0,what);
+        Expect(off.st.applied==0 && off.st.hits==0 && off.intents.empty(),"NpcParallelThink=0: no fork, every ask at Drive");
+        std::snprintf(what,sizeof(what),"the fork on 1 thread and on %d: the same intents bit for bit (%zu bytes)",
+                      workers::Threads(),pool.intents.size());
+        Expect(!one.intents.empty() && one.intents==pool.intents && pool.intents==shadow.intents,what);
+        Expect(same(off,one) && same(off,pool) && same(off,shadow),
+               "every frame's blocks, entries and plans: the same with the asks kept (1 thread, the pool) as made at Drive");
+        std::snprintf(what,sizeof(what),"kept answers %u (pool %u), asked at Drive %u, stale %u, no intent %u",
+                      one.st.hits,pool.st.hits,one.st.misses,one.st.stale,one.st.noIntent);
+        Expect(one.st.hits>0 && one.st.hits==pool.st.hits && one.st.misses==pool.st.misses && one.st.misses>0 &&
+               one.st.stale>0 && one.st.faults==0 && pool.st.faults==0,what);
+        Expect(shadow.st.mismatches==0,"Debug=1's shadow asks: no kept answer differs");
+        // A kept answer made wrong (the pick turned to no target): the shadow ask catches it and the game thread's is used.
+        {
+            Reset();flatFloor=true;workers::SetLimit(0);
+            unsigned char* h=crowd[0];
+            std::memset(crowd,0,sizeof(crowd));std::memset(crowdCtrl,0,sizeof(crowdCtrl));
+            Put<void*>(h,0,image+kSoldiers[0].vtable);Put<int>(h,kTeam,kTeamFriend);Put<void*>(h,kLeader,nullptr);
+            Put<unsigned>(h,kControlMask,kMaskMove|kMaskLook|kMaskTrigger);
+            Put<void*>(h,kSelfCtrl,crowdCtrl[0]);Put<long>(crowdCtrl[0],8,1);Put<long>(crowdCtrl[0],12,1);
+            Put<void*>(foes[0],kSelfCtrl,foeCtrl[0]);Put<long>(foeCtrl[0],8,1);Put<long>(foeCtrl[0],12,1);
+            world.enemies=1;world.enemy[0]=Enemy{foes[0],{0,1,30},1};world.friends=0;IndexFixture();
+            const Arms a=armsOf(1,1);
+            const float eye0[3]={0,kEye,0};
+            Soldier* s0=Entry(h,now);s0->control=npc::Control::free;s0->controlSet=s0->homeSet=true;
+            const auto frameOf=[&](bool corrupt) {
+                now+=16;++frame;world.frame=frame;s0->seen=now;
+                mt::Fork(GameFrame(),now);
+                if(corrupt && !mt::intents.empty()){mt::intents[0].pick.row=-1;config.debug=1;mt::shadowTick=31;}
+                mt::Begin(h);
+                Drive(*s0,h,kSoldiers[0],a,nullptr,eye0,Pos(h),nullptr,now);
+                mt::applying=nullptr;config.debug=0;
+            };
+            frameOf(false);
+            const unsigned before=mt::stats.mismatches;
+            frameOf(true);
+            Expect(mt::intents.size()==1 && mt::stats.mismatches==before+1 && s0->target.Is(foes[0]),
+                   "a wrong kept pick: NPCMT MISMATCH, the target the game thread's pick");
+        }
+        workers::SetLimit(0);
     }
     // stepobj (common/edf/step_objects.h): with the fixture's objects in a stand-in System's list for this frame, a
     // soldier's PreThink and Think ask edf::Readable for none of them (stress:100: ~63,000 asks a step before).
