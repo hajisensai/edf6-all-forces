@@ -28,7 +28,11 @@
 #include "weapon_equip.h"
 #include "weapon_page_logic.h"
 #include "worldmap_logic.h"
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "infantryscope.h"
 #include "hudtext.h"
 #include "map.h"
 #include "memory.h"
@@ -71,6 +75,9 @@ bool installed=false;
 std::mutex viewLock;
 ar::View published;                          // under viewLock
 std::atomic<unsigned char*> drawOn{nullptr}; // the screen object it is open on (nullptr: closed)
+// 整备 closed for the world map, still drawn (armory_logic.h Handoff): `holding` for the render thread; `mapDrawn`:
+// the select drew since the UI thread last looked, `mapShown`: it is in place (worldmap.cpp's Draw, MapDrawn / MapShown).
+std::atomic<bool> holding{false},mapDrawn{false},mapShown{false};
 std::atomic<unsigned char*> gone{nullptr};   // a destructor ran on this object since the UI thread last looked
 
 // The render thread's: the renderer, its labels, the viewport last drawn into (for the pointer).
@@ -164,6 +171,25 @@ void ReadPointer(ar::Input& in) noexcept {
     in.x=at.x;in.y=at.y;
 }
 
+// A stick axis past the pad's right dead zone, -1..1 (0 inside it).
+float StickAxis(SHORT v) noexcept {
+    constexpr float kStickDead=XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE,kFull=32767.f;
+    const float a=static_cast<float>(v);
+    if(a>kStickDead)return a>=kFull ? 1.f : (a-kStickDead)/(kFull-kStickDead);
+    if(a<-kStickDead)return a<=-kFull ? -1.f : (a+kStickDead)/(kFull-kStickDead);
+    return 0.f;
+}
+// Seconds since the last call (the frame's dt), 0 the first time; at most 0.1.
+float FrameSeconds() noexcept {
+    static LARGE_INTEGER last{},freq{};
+    LARGE_INTEGER now{};
+    if(!freq.QuadPart && !QueryPerformanceFrequency(&freq))return 0.f;
+    QueryPerformanceCounter(&now);
+    const float s=last.QuadPart ? static_cast<float>(now.QuadPart-last.QuadPart)/static_cast<float>(freq.QuadPart) : 0.f;
+    last=now;
+    return s<0.f ? 0.f : s>0.1f ? 0.1f : s;
+}
+
 // The frame's input: nothing while the game is not in front or the mission's map holds the keys.
 ar::Input ReadInput(bool toggleDown) noexcept {
     ar::Input in;
@@ -196,10 +222,15 @@ ar::Input ReadInput(bool toggleDown) noexcept {
         h[ar::kTabPrev]|=(b&XINPUT_GAMEPAD_LEFT_SHOULDER)!=0;h[ar::kTabNext]|=(b&XINPUT_GAMEPAD_RIGHT_SHOULDER)!=0;
         h[ar::kSubPrev]|=pad.Gamepad.bLeftTrigger>XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
         h[ar::kSubNext]|=pad.Gamepad.bRightTrigger>XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
-        // the right stick: left / right a page's alternate (the weapons page's category), up / down its jump
+        // the right stick: left / right a page's alternate (the weapons page's category), up / down its jump; a page
+        // looking round its 3D view takes it whole instead (Page::Look: lookX / lookY, the keys only it holds)
         constexpr int kStick=16000;
-        h[ar::kAltPrev]|=pad.Gamepad.sThumbRX<-kStick;h[ar::kAltNext]|=pad.Gamepad.sThumbRX>kStick;
-        h[ar::kJumpPrev]|=pad.Gamepad.sThumbRY>kStick;h[ar::kJumpNext]|=pad.Gamepad.sThumbRY<-kStick;
+        const bool stick[4]={pad.Gamepad.sThumbRX<-kStick,pad.Gamepad.sThumbRX>kStick,pad.Gamepad.sThumbRY>kStick,
+                             pad.Gamepad.sThumbRY<-kStick};
+        const int keys[4]={ar::kAltPrev,ar::kAltNext,ar::kJumpPrev,ar::kJumpNext};
+        for(int i=0;i<4;++i)
+            if(stick[i] && !h[keys[i]]){h[keys[i]]=true;in.stickKeys|=1u<<keys[i];}
+        in.lookX=StickAxis(pad.Gamepad.sThumbRX);in.lookY=StickAxis(pad.Gamepad.sThumbRY);
     }
     ReadPointer(in);
     return in;
@@ -539,14 +570,33 @@ void DropEdits(const char* why) noexcept {
     editsDropped+=dropped;
 }
 
-void CloseNow(const char* why) noexcept {
+ar::HandoffState handoff;
+// `hold` (the world map asked): the view as last published stays drawn on its screen until the select takes over.
+void CloseNow(const char* why,bool hold=false) noexcept {
     if(!state.open && !openOn)return;
     ar::Close(state);
     WeaponsView(false);
     wantText.store(false);
+    if(hold && openOn && drawOn.load()==openOn) {
+        ar::HandoffAsk(handoff);
+        mapDrawn.store(false);mapShown.store(false);
+        holding.store(true);
+        Log("ARMORY closed (%s): still drawn until the select is in place",why);
+        return;
+    }
+    handoff=ar::HandoffState{};
+    holding.store(false);
     Publish(false);
     Log("ARMORY closed (%s)",why);
     openOn=nullptr;
+}
+void EndHandoff(const char* why) noexcept {
+    if(handoff.phase==ar::Handoff::none && !holding.load())return;
+    handoff=ar::HandoffState{};
+    holding.store(false);
+    Publish(false);
+    openOn=nullptr;
+    Log("ARMORY no longer drawn for the world map (%s)",why);
 }
 
 // --- The render thread ---
@@ -593,7 +643,8 @@ void Paint(unsigned char* ctx) noexcept {
 }
 std::uint64_t DrawOver(DrawFn next,unsigned char* self,unsigned char* ctx) noexcept {
     const std::uint64_t result=next(self,ctx);
-    if(ctx && self && drawOn.load()==self && gone.load()!=self && !gpuBroken.load())Paint(ctx);
+    if(ctx && self && drawOn.load()==self && gone.load()!=self && !gpuBroken.load() && !(holding.load() && mapShown.load()))
+        Paint(ctx);
     return result;
 }
 std::uint64_t __fastcall HqDrawHook(unsigned char* self,unsigned char* ctx) { return DrawOver(nextHqDraw,self,ctx); }
@@ -649,6 +700,8 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
     pvpAsked=false;
     mapAsked=false;
     openRoom=room;
+    handoff=ar::HandoffState{};
+    holding.store(false);
     saveNote[0]=0;saveWarn=false;genPolled=0;
     if(tab>=0 && tab<kPageCount)state.tab=tab;
     wchar_t why[160]{};
@@ -676,6 +729,12 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
 bool IsOpen() noexcept { return state.open; }
 
 bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
+    if(handoff.phase!=ar::Handoff::none) {
+        if(self!=openOn || drawOn.load()!=openOn || gone.load()==openOn)EndHandoff("its screen changed or ended");
+        else if(mapShown.load())EndHandoff("the select in place");
+        else if(!ar::HandoffFrame(handoff,hasInput,mapDrawn.exchange(false)))
+            EndHandoff(hasInput ? "the screen has its input again without the select" : "the screen lost its input before the press");
+    }
     if(state.open && (self!=openOn || gone.load()==openOn)) {
         DropEdits("its screen changed or ended");
         CloseNow("its screen changed or ended");
@@ -694,7 +753,8 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
     }
     FillWords();
     FillRules();
-    const ar::Input in=ReadInput(toggleDown);
+    ar::Input in=ReadInput(toggleDown);
+    in.dt=FrameSeconds();
     const int tabWas=state.tab;
     const ar::Effects fx=ar::Step(state,kPages,kPageCount,presets,words,in);
     // Esc at the root of HQ's armory returns to the replacement mission map. The room's own lobby remains its parent.
@@ -719,7 +779,7 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
     if(missionPage.mapAsked){missionPage.mapAsked=false;mapAsked=true;ar::Close(state);}
     WeaponsView(state.open && state.tab==kWeaponsTab && state.popup==ar::Popup::none);
     if(!state.open) {
-        CloseNow(pvpAsked ? "the 对战 pages asked" : mapAsked ? "the world map asked" : "its own keys");
+        CloseNow(pvpAsked ? "the 对战 pages asked" : mapAsked ? "the world map asked" : "its own keys",mapAsked);
         latched=AnyHeld(in);
         return true;   // this frame's keys were ours
     }
@@ -731,7 +791,8 @@ bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,ro
                    bool* own,roompreview::SquadSpec* squad) noexcept {
     if(own)*own=false;
     if(squad)squad->count=0;
-    if(!state.open || !support.env.previewOn)return false;   // as the page's Hole: the popups are drawn over the model
+    // held for the world map: the model stays in the drawn view's hole too
+    if((!state.open && handoff.phase==ar::Handoff::none) || !support.env.previewOn)return false;   // as the page's Hole: the popups are drawn over the model
     if(state.tab==kWeaponsTab) {
         // the player's own model holding the weapon under the cursor, in the details column's hole (front camera)
         ar::skin::Rect hole{};
@@ -764,6 +825,14 @@ bool TakeMapRequest() noexcept {
     mapAsked=false;
     return asked;
 }
+void MapPressed(bool pressed) noexcept {
+    if(handoff.phase!=ar::Handoff::asked)return;
+    mapDrawn.store(false);
+    ar::HandoffPressed(handoff,pressed);
+    if(!pressed)EndHandoff("the select button not pressed");
+}
+void MapDrawn() noexcept { if(holding.load())mapDrawn.store(true); }
+void MapShown() noexcept { if(holding.load())mapShown.store(true); }
 void AskOpen(int tab) noexcept { openTab=tab>=0 && tab<kPageCount ? tab : -1; }
 int TakeOpenAsk() noexcept {
     const int tab=openTab;

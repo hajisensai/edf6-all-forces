@@ -4,7 +4,7 @@
 // walk visits, 0 when its bound is not whole rows within kTeamCapacity, is not the manager's live row count (+0x48:
 // a walk past the rows would read beyond the array) or the array is not readable that far.
 #pragma once
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include "team_native_logic.h"
 #include <cstdint>

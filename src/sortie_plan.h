@@ -6,13 +6,14 @@
 // and the few numbers each pass is made of.
 #pragma once
 #include "salvo_volley.h"
+#include "py_consts.inc"
 #include <cmath>
 
 namespace crew {
 namespace sortie {
 constexpr float kPi=3.14159265358979f;
 
-// The passes (crew.h SortiePass's order after its `none`; tools/calls.py SORTIE_PASSES).
+// The passes (jet.h SortiePass's order after its `none`; tools/calls.py SORTIE_PASSES).
 // Jets
 constexpr float kMaxOffset=80.0f;         // m: a formation's aircraft at most this far across their line from the mark
 constexpr float kPassBeyond=900.0f;       // m past the mark along its line a level pass ends (it withdraws)
@@ -24,7 +25,25 @@ constexpr float kPopDrop=45.0f;           // m: its bombs go when they would lan
 constexpr int kPopBombs=2;
 constexpr float kPopClimb=1.6f;           // its climb away: up this much for each 1 along
 constexpr unsigned long long kPopClimbMs=4500;
-constexpr float kRainAlt=320.0f;
+// The rain flies level at kRainAlt over the mark (RainWant: its nose never down at a ground target) and opens fire only
+// once its height over the target is at least kRainSlope of its distance out (RainSteep). Its rounds leave in a
+// kSalvoFan fan and split in a kSalvoSplitCone cone, and PN (N = 3) brings a round started off the line of sight back
+// onto it by a bow below it that grows with the range, so what decides whether the low ones clear the ground is the
+// line of sight's slope, not the height alone (tools/sortie_check.cpp RainClearance, src/salvo_flight.h: at a slope of
+// 1/3 under 1% come down off the target, at 0.2 from 400 m 8%, at 0.16 from 320 m 14%). The dive it once flew at the
+// target (to mark+110) opened fire ~2000 m out 150-190 m up and put a third or more of the rounds into the ground
+// hundreds of metres short (player report 2026-11-27: 「一堆导弹全炸地上了」).
+constexpr float kRainAlt=400.0f;
+constexpr float kRainSlope=1.0f/3.0f;
+// From `pos` the target at `aim` is steep enough under it to open fire on: its height over the ground there (`floorY`,
+// the mark's, or the target's own when lower) at least kRainSlope of the distance (level); a target above it always is
+// (its rounds climb to it, away from the ground).
+inline bool RainSteep(const float* pos,const float* aim,float floorY) noexcept {
+    if(aim[1]>=pos[1])return true;
+    const float dx=pos[0]-aim[0],dz=pos[2]-aim[2];
+    const float floor=aim[1]<floorY ? aim[1] : floorY;
+    return pos[1]-floor>=kRainSlope*std::sqrt(dx*dx+dz*dz);
+}
 constexpr float kRainFrom=4000.0f,kRainTo=450.0f,kRainSpeed=155.0f;
 // The 256 rounds go in volleys (salvo_volley.h: 8 every 3 frames, the last 1.55 s after the first). Keep flying the
 // pass while the burst is draining, and as long before the next trigger.
@@ -41,15 +60,55 @@ constexpr bool SalvoLocked(int loaded,int locked) noexcept { return loaded>0 && 
 constexpr float kRainFireCone=0.8f;
 // What its rounds fly at, for the fire-or-hold check (wastedfire HoldFire): the children's launch speed, m/s
 // (SALVO_CHILD_SPEED x 60), with no gravity (the carrier's AmmoGravityFactor acts only in the drop before ignition).
-constexpr float kRainRoundSpeed=660.0f;
+constexpr float kRainRoundSpeed=pyconst::kSalvoChildSpeed;
+// The rain's hold before it opens fire (the user, 2026-11-26: 「不需要一进场就发射其实，可以稍微等一会」): its nose goes on the
+// target from kRainFrom out, but it fires only once inside kRainOpen of the mark (over the target area) and after its
+// nose has stayed within kRainSteadyCone of its aim for kRainHoldMs on end (a turn or a pull-up starts the count again),
+// and with the target steep enough under it (`steep`: RainSteep); once open it stays open for the rest of the pass, so
+// the lock's dwell and the burst are not cut off by a wobble.
+constexpr float kRainOpen=2400.0f;           // m from the mark (level): over the target area
+constexpr float kRainSteadyCone=0.25f;       // rad between the nose and its aim: the nose settled
+constexpr unsigned long long kRainHoldMs=2500;
+static_assert(kRainOpen<kRainFrom && kRainOpen>kRainTo+kRainSpeed*(kRainHoldMs+kRainBurstMs)/1000.0f,
+              "the hold and the burst fit between kRainOpen and the end of the window");
+static_assert(kRainSteadyCone<kRainFireCone,"settled is tighter than the fire cone");
+// One step of the hold. `phase` 0 waiting, 1 settled since `since`, 2 open; true: it may fire now.
+inline bool RainHoldStep(int& phase,unsigned long long& since,float dist,float noseOff,bool steep,unsigned long long now) noexcept {
+    if(phase==2)return true;
+    if(!(dist<kRainOpen) || !(noseOff<=kRainSteadyCone)){phase=0;return false;}
+    if(phase!=1){phase=1;since=now;}
+    if(now-since<kRainHoldMs || !steep)return false;
+    phase=2;
+    return true;
+}
+// The rain's nose: `level` (unit: its Level flight at kRainAlt toward the target) unless the line of sight from `pos`
+// to `aim` climbs more (a target in the air above it: the nose on it); never the dive down at a ground target.
+inline void RainWant(const float* level,const float* pos,const float* aim,float* want) noexcept {
+    float los[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
+    const float l=std::sqrt(los[0]*los[0]+los[1]*los[1]+los[2]*los[2]);
+    const bool up=l>1.0f && los[1]/l>level[1];
+    for(int i=0;i<3;++i)want[i]=up ? los[i]/l : level[i];
+}
 constexpr unsigned long long kLockMs=700,kMissileGapMs=700;   // a sortie's missiles: the nose held, then one a gap
+static_assert(kRainAlt/kRainSlope<kRainOpen && kRainAlt/kRainSlope>kRainTo+kRainSpeed*(kLockMs+kRainBurstMs)/1000.0f,
+              "level at kRainAlt the rain turns steep inside kRainOpen, early enough for the lock's dwell and the burst");
 constexpr unsigned long long kSearchMs=45000;   // a pass that found nothing to strike this long after it came gives up
 constexpr float kRunMin=100.0f,kRunMax=2400.0f;
+// A call's way in (the user, 2026-11-26: 「叫支援的时候应该可以调整入场方向」): (x, z) the unit heading it flies in on, or
+// none (0, 0: from the requester toward the target); `half` > 0 only with a gun run's or a carpet's line on the map (its
+// half length, the target its centre). An aircraft comes in on that heading exactly (support_entry.h AirRoute).
 struct RunSpec { float x=0.0f,z=0.0f,half=0.0f; };
+inline bool HasHeading(const RunSpec& r) noexcept { return r.x!=0.0f || r.z!=0.0f; }
 inline bool RunValid(const RunSpec& r) noexcept {
-    if(r.half==0.0f)return r.x==0.0f && r.z==0.0f;
-    return std::isfinite(r.x+r.z+r.half) && std::fabs(r.x*r.x+r.z*r.z-1.0f)<0.001f &&
-           r.half>=kRunMin*0.5f && r.half<=kRunMax*0.5f;
+    if(r.half==0.0f && !HasHeading(r))return true;
+    if(!std::isfinite(r.x+r.z+r.half) || std::fabs(r.x*r.x+r.z*r.z-1.0f)>=0.001f)return false;
+    return r.half==0.0f || (r.half>=kRunMin*0.5f && r.half<=kRunMax*0.5f);
+}
+// The heading alone (no line): (x, z) made unit; none for a zero one.
+inline RunSpec HeadingRun(float x,float z) noexcept {
+    const float n=std::sqrt(x*x+z*z);
+    if(!(n>1e-4f) || !std::isfinite(n))return RunSpec{};
+    return RunSpec{x/n,z/n,0.0f};
 }
 inline bool RunFromPoints(const float* a,const float* b,RunSpec* out,float* centre) noexcept {
     const float x=b[0]-a[0],z=b[2]-a[2],length=std::hypot(x,z);
@@ -58,6 +117,124 @@ inline bool RunFromPoints(const float* a,const float* b,RunSpec* out,float* cent
     for(int i=0;i<3;++i)centre[i]=a[i]+(b[i]-a[i])*0.5f;
     return true;
 }
+// What one aircraft of a ground run (a gun run's or a carpet's line) lets go along it: its bombs, its rockets (rounds),
+// its air-to-ground missiles. Its stores' rates on the line: a bomb every kBombGapMs (the hit and run's pair too; the
+// store's own ripple is 8 frames, pylib/vcobjects.py Bomb.interval), a rocket ripple of kRocketRipple every kRocketGapMs
+// (jet_combat.cpp Fire; vcobjects.py RKT burst), a missile after the lock's kLockMs and one every kMissileGapMs.
+struct RunLoad { int bombs=0,rockets=0,missiles=0; };
+constexpr unsigned long long kBombGapMs=150,kRocketGapMs=600;
+constexpr int kRocketRipple=4;
+// The shortest line it all goes down on (the user, 2026-11-27: the length "最短也得是能投完这架飞机所有对地挂载的距离"):
+// the time its slowest store takes to empty at `speed` m/s (a carpet lets go only its bombs), within kRunMin..kRunMax.
+inline float RunLeast(const RunLoad& l,float speed,bool carpet) noexcept {
+    float seconds=0.0f;
+    if(l.bombs>1)seconds=static_cast<float>(l.bombs-1)*static_cast<float>(kBombGapMs)*0.001f;
+    if(!carpet) {
+        const int ripples=(l.rockets+kRocketRipple-1)/kRocketRipple;
+        if(ripples>1)seconds=std::fmax(seconds,static_cast<float>(ripples-1)*static_cast<float>(kRocketGapMs)*0.001f);
+        if(l.missiles>0)
+            seconds=std::fmax(seconds,(static_cast<float>(kLockMs)+static_cast<float>(l.missiles-1)*static_cast<float>(kMissileGapMs))*0.001f);
+    }
+    const float length=(speed>0.0f && std::isfinite(speed) ? speed : 0.0f)*seconds;
+    return length<kRunMin ? kRunMin : length>kRunMax ? kRunMax : length;
+}
+// The map's ground run (the user, 2026-11-27: the way first, then the length; Broken Arrow's order drag): pressed at its
+// start `a`, dragged toward `b`: along a -> b, as long as the drag and at least `least` (at most kRunMax). A press let go
+// short of kRunDragLeast keeps the way it had (x, z: from the player toward the point, or turned) at `least`. `centre`
+// its middle (the request's target), `end` where it ends. False for no way at all.
+constexpr float kRunDragLeast=25.0f;   // m on the ground: a press let go nearer its start is a click
+inline bool RunFromDrag(const float* a,const float* b,float least,float x,float z,RunSpec* out,float* centre,float* end) noexcept {
+    const float dx=b[0]-a[0],dz=b[2]-a[2],dragged=std::hypot(dx,dz);
+    if(dragged>=kRunDragLeast && std::isfinite(dragged)){x=dx/dragged;z=dz/dragged;}
+    else {
+        const float n=std::hypot(x,z);
+        if(!(n>1e-4f) || !std::isfinite(n))return false;
+        x/=n;z/=n;
+    }
+    least=least<kRunMin ? kRunMin : least>kRunMax ? kRunMax : least;
+    const float length=dragged>=kRunDragLeast ? (dragged<least ? least : dragged>kRunMax ? kRunMax : dragged) : least;
+    *out=RunSpec{x,z,length*0.5f};
+    end[0]=a[0]+x*length;end[1]=b[1];end[2]=a[2]+z*length;
+    for(int i=0;i<3;++i)centre[i]=(a[i]+end[i])*0.5f;
+    return true;
+}
+// A line shorter than `least` (the host flies stock stores where the requester asked with its own pylons:
+// support_dispatch.cpp DecideVariant) made `least` long from the same start on the same way: its new centre.
+inline void RunLengthen(RunSpec& r,float* centre,float least) noexcept {
+    const float half=(least>kRunMax ? kRunMax : least)*0.5f;
+    if(!(r.half>0.0f) || r.half>=half)return;
+    centre[0]+=r.x*(half-r.half);centre[2]+=r.z*(half-r.half);
+    r.half=half;
+}
+// The gun run's strafe along a line (the user, 2026-11-26: 「扫射时间是不是不对」「只有机枪」). The nose (and the path,
+// the guns and rockets along it) on the point `lead` m on along the line: that point walks at the jet's speed, so the
+// whole line from -half to +half is under fire for 2 half / speed s, and the jet comes down as exp(-x / lead) (the slope
+// to the point is its height over its lead). A fixed lead of 260 m from 160 m came down to the old 70 m floor in some
+// 215 m (2.5 s) and fired no more. The lead is chosen so the height it comes in at lasts the whole line down to
+// kStrafeFloor; the height it comes in at so the lead the guns reach (StrafeHeight) does.
+constexpr float kStrafeFloor=45.0f;                      // m over the mark: the run ends with the jet about this low
+constexpr float kStrafeLow=160.0f,kStrafeTop=600.0f;      // m over the mark: the run in's height bounds
+constexpr float kStrafeLeadMost=1100.0f;                  // m: the rockets' reach (jet_combat.cpp kRocketOpen) inside
+constexpr float kStrafeCross=65.0f;                       // m beside its line a jet strafes it from
+constexpr float kStrafeAngle=0.35f;                       // rad off its line a jet strafes it at (20 deg)
+constexpr float kStrafeSettleS=2.0f;                      // s its nose is on the point before the window opens
+inline float StrafeLead(float half,float over,float least,float most) noexcept {
+    const float ratio=over/kStrafeFloor;
+    float lead=ratio>1.05f ? 2.0f*half/std::log(ratio) : most;
+    if(lead>most)lead=most;
+    if(lead<least)lead=least;
+    return lead;
+}
+inline float StrafeHeight(float half,float lead) noexcept {
+    const float h=kStrafeFloor*std::exp(2.0f*half/(lead>1.0f ? lead : 1.0f));
+    return h<kStrafeLow ? kStrafeLow : h>kStrafeTop ? kStrafeTop : h;
+}
+// m short of the mark (a marked run's centre) a jet must stand, straight on its line, to fly its gun run in without a
+// turn (the user, 2026-11-27: 「还是会进场先转圈」; support_entry.h AirRoute `runIn`). A marked strafe (jet_sortie.cpp
+// MarkedRun) puts its nose down once `room` = -half - settle - lead - along is used up and calls the line missed (the
+// teardrop: a lap) when it is past -settle there: from an entry `t` m out (along = -t) that is t >= half + settle + lead,
+// the lead at most kStrafeLeadMost, and one more settle for its nose to come down onto the line first. An unmarked gun
+// run (jet_combat.cpp Strike) dives once within `diveStart` of its target with it off its nose by less than the dive cone;
+// nearer than that at its entry it finds the target inside its turn and flies out to come round: diveStart and a settle.
+// `attack`: the jet's attack speed (m/s); 0 for a pass that needs no straight run in.
+inline float StraightRunIn(bool gunRun,float half,float attack,float diveStart) noexcept {
+    if(!gunRun || !(attack>0.0f))return 0.0f;
+    const float settle=attack*kStrafeSettleS;
+    return half>0.0f ? half+2.0f*settle+kStrafeLeadMost : diveStart+settle;
+}
+// The aim on the line (along + lead): from -half the window is open, past +half it is over.
+inline bool StrafeOpen(float along,float lead,float half) noexcept { return along+lead>=-half; }
+inline bool StrafeOver(float along,float lead,float half) noexcept { return along+lead>half; }
+// m over the mark after `flown` m with the nose on the point `lead` on (from `over`).
+inline float StrafeDescent(float over,float lead,float flown) noexcept { return over*std::exp(-flown/lead); }
+// s the strafe lasts at `speed` m/s.
+inline float StrafeSeconds(float half,float speed) noexcept { return speed>1.0f ? 2.0f*half/speed : 0.0f; }
+
+// m along its line a jet `cross` m beside it (signed along the line's side) heading `angle` rad off it (signed: toward
+// +side) needs, turning at `radius`, to be on it and along it: turned straight first (its sideways drift with it), then
+// an S of two arcs (or two quarter circles and the rest straight across) onto it; straight on and one arc where it
+// already closes on it at that angle. Heading away (a quarter circle or more off): it cannot, short of a lap (1e9).
+// The gun run's capture (jet_sortie.cpp): onto its line by turns it can make, small misses mended, never a lap.
+inline float CaptureDistance(float cross,float angle,float radius) noexcept {
+    const float a=std::fabs(angle);
+    if(a>=kPi*0.5f)return 1e9f;
+    const float r=radius>1.0f ? radius : 1.0f;
+    const float arc=r*(1.0f-std::cos(a));   // the sideways an arc of `a` covers
+    const float left=std::fabs(cross+(angle>0.0f ? arc : -arc));
+    const float first=r*std::sin(a);
+    float turned;   // turned straight, then the S across what is left
+    if(left>=2.0f*r)turned=first+2.0f*r;
+    else {
+        const float c=1.0f-left/(2.0f*r);
+        turned=first+2.0f*r*std::sin(std::acos(c<-1.0f ? -1.0f : c>1.0f ? 1.0f : c));
+    }
+    if(a>1e-3f && cross*angle<0.0f && std::fabs(cross)>=arc) {   // closing: straight on, then one arc onto it
+        const float closing=(std::fabs(cross)-arc)/std::tan(a)+r*std::sin(a);
+        return closing<turned ? closing : turned;   // a shallow closing angle: steeper by an S instead
+    }
+    return turned;
+}
+
 // Helicopters
 constexpr float kHeliStrafeAlt=35.0f,kHeliStrafeLead=200.0f,kHeliPassBeyond=450.0f;
 constexpr float kHunterStation=300.0f,kHunterAlt=90.0f,kHunterNear=60.0f;   // m from the mark, over it, how near is there

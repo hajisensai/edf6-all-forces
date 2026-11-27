@@ -5,11 +5,12 @@
 #include "enemy_control_monster_definition.h"
 #include "enemy_control_gun_factory.h"
 #include "enemy_control_action_native.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include "lazy_rows.h"
 #include <cstring>
 #include <limits>
+#include <initializer_list>
 
 namespace crew::enemy_native {
 #ifdef ENEMY_CONTROL_MONSTER_NET_TEST

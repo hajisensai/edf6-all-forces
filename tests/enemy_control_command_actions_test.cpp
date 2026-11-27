@@ -1,3 +1,4 @@
+#include <initializer_list>
 #define ENEMY_CONTROL_COMMAND_ACTIONS_TEST
 #include "../src/enemy_control_command_actions.cpp"
 #include <cstdio>

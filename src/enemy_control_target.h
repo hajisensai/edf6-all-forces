@@ -1,5 +1,8 @@
 #pragma once
-#include "crew.h"
+#include "objref.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 
 namespace crew::enemy_target {
 // This ray belongs to the authenticated controller's current view. A network host

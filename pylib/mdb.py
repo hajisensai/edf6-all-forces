@@ -745,12 +745,18 @@ def insert_bone(md: Mdb, name: str, parent: str) -> int:
             if not idx:
                 continue
             v = bytearray(me.vdata)
+            # moved() of each index byte, a column of the vertices at a time (bytes.translate: a vertex a Python loop
+            # was 24 s of the menu graft test's 57 s); an index of 255 has no next byte (as bytes(256) would refuse).
+            table = bytes(moved(x) for x in range(255)) + bytes([255])
+            end = me.nverts * me.vsize
             for e in idx:
                 if e.fmt != 21:
                     raise ValueError(f'blend indices in vertex format {e.fmt}')
-                for k in range(me.nverts):
-                    o = k * me.vsize + e.offset
-                    v[o:o + 4] = bytes(moved(x) for x in v[o:o + 4])
+                for j in range(4):
+                    column = slice(e.offset + j, end, me.vsize)
+                    if at <= 255 and 255 in v[column]:
+                        raise ValueError('bytes must be in range(0, 256)')
+                    v[column] = v[column].translate(table)
             me.vdata = bytes(v)
     kids = [b for b in md.bones if b.parent == moved(p)]
     new = Bone(at, moved(p), -1, -1, len(md.names), 0, 0, 0, 0, 0, 0,

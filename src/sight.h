@@ -24,7 +24,7 @@ inline void RoundAt(const float* pos,const float* nose,float speed,float drop,fl
 }
 
 // Where a round is `n` frames on under the game's per-frame step (v += drop, p += v; m/frame, m/frame^2: the bullet
-// core 0x233DC4), in closed form: pos + n vel + drop n(n+1)/2 (crew.h RoundImpact steps the same arc frame by frame).
+// core 0x233DC4), in closed form: pos + n vel + drop n(n+1)/2 (launchers.h RoundImpact steps the same arc frame by frame).
 inline void RoundAfter(const float* pos,const float* vel,const float* drop,float n,float* out) noexcept {
     const float fall=0.5f*n*(n+1.0f);
     for(int i=0;i<3;++i)out[i]=pos[i]+n*vel[i]+drop[i]*fall;

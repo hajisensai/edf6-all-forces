@@ -1,6 +1,8 @@
 // 整备方案 at run time: armory_presets.h. EDF.dll 0x678CCB46 RVAs (docs/loadout-re.md §1, §8; docs/armory-re.md §4).
 #include "armory_presets.h"
-#include "crew.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
 #include "loadout_store.h"
 #include "player_slots.h"
 #include "room_preview.h"

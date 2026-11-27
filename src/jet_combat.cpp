@@ -3,6 +3,10 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "lockon.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "mapbounds.h"
+#include "damagestats.h"
 
 namespace crew {
 namespace jet {
@@ -516,8 +520,8 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
 }
 
 bool WeaponsFree(const Jet& j) noexcept {
-    return Cfg().jetPilot && (j.t.target || j.sortie.strafing) && j.mode!=Mode::withdraw &&
-           j.mode!=Mode::recover && j.mode!=Mode::takeoff;
+    return Cfg().jetPilot && (j.t.target || j.sortie.strafing) && !jetphase::Leaving(j.phase) &&
+           j.mode!=Mode::takeoff;
 }
 
 // Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (its fall from here
@@ -526,7 +530,7 @@ bool WeaponsFree(const Jet& j) noexcept {
 // Rockets (StoreRole::rocket) in a strafing run: a ripple (the store's burst) every kRocketMs while the guns' lead is
 // within kRocketCone of the nose, from kRocketOpen in to kRocketClose times the guns' closest; then the guns go on.
 constexpr float kRocketOpen=1400.0f,kRocketClose=2.5f,kRocketCone=0.026f;   // m, x gunClose, rad (1.5 deg)
-constexpr ULONGLONG kRocketMs=600;
+constexpr ULONGLONG kRocketMs=sortie::kRocketGapMs;
 constexpr float kBombHit=1.0f,kBombSafe=100.0f;
 constexpr ULONGLONG kBombMs=400;
 void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) noexcept {

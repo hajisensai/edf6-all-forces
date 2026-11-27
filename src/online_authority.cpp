@@ -1,6 +1,11 @@
 // The game's side of the online authority (src/online_authority.h has the rules and what each function is).
 #include "online_authority.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "netprobe.h"
+#include "vhud.h"
+#include "npcai.h"
 #include "gunnerrecoil.h"
 #include "memory.h"
 #include "real_driver_native.h"

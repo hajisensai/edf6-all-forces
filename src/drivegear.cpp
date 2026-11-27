@@ -9,7 +9,17 @@
 // emplacement (it never drives), not the mechs (their W / S walk). Each one's gears are shares of its own top: the
 // native drive's top gear speed as its setup left it (docs/vehicle-top-speed-re.md); a vehicle whose gear table cannot
 // be read gets no gears (one log line), never a stand-in speed.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "emplacement.h"
+#include "subcarrier.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "drivegear.h"
 #include "drive_gear.h"
 #include "heli.h"

@@ -20,7 +20,9 @@
 // and finds those UIs gone, as it finds the loading icon its comment says _DeleteAllMenuUi takes. A mission without a
 // before.bvm never reaches the call: nothing changes for EDF6's or EDF5's missions.
 // EDF.dll TimeDateStamp 0x678CCB46; every byte the patch relies on is checked first (tests/edf41_before_native_audit.py).
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 
 #include <cstdint>

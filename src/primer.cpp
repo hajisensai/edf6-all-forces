@@ -26,6 +26,9 @@
 #include "primer_pose.h"
 #include <cstdio>
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "seats.h"
 
 namespace crew {
 namespace jet {

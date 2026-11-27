@@ -1,6 +1,9 @@
 // The same production translation unit and game stand-ins used by the runtime regression, with network-specific cases.
 #define main ExistingRuntimeChecks
 #include "sazabi_runtime_test.cpp"
+#include "../src/edf_layout.h"
+#include "../src/scene.h"
+#include "../src/sazabi.h"
 #undef main
 int main() {
     using namespace crew;

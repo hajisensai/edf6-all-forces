@@ -6,12 +6,23 @@
 #include "jet_lever_net.h"
 #include "jet_lever_protocol.h"
 #include "jetsound_state.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "booster.h"
+#include "jet.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "march_pace.h"
+#include "support_call.h"
+#include "transport.h"
 #include "online_authority.h"
 #include "net_object_resolve.h"
 #include "command_identity.h"
 #include "plugin_net.h"
-#include "seat_net.h"
+#include "object_net.h"
 #include <cstring>
 
 namespace crew {
@@ -35,7 +46,7 @@ In ins[kJets]{};
 bool netReady=false;
 unsigned logs=0;
 
-bool Registered(const unsigned char* v) noexcept { return seat_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)); }
+bool Registered(const unsigned char* v) noexcept { return object_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)); }
 
 float Within(float x,float lo,float hi) noexcept { return x<lo ? lo : x>hi ? hi : x; }
 

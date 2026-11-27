@@ -7,7 +7,7 @@
 #include "enemy_control_merman_net.h"
 #include "enemy_control_boss_gun_net.h"
 #include "enemy_control_boss_moves.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

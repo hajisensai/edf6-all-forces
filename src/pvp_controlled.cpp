@@ -3,7 +3,9 @@
 #include "pvp_controlled.h"
 #include "pvp.h"
 #include "memory.h"
+#include "lazy_rows.h"
 #include <cstring>
+#include "edf_layout.h"
 
 namespace crew::controlled_pvp {
 namespace {
@@ -22,7 +24,7 @@ struct State {
 struct Collection { ObjRef members[kMaxMembers]{};unsigned memberGroups[kMaxMembers]{};unsigned count=0;
     Emitter emitters[kMaxEmitters]{};unsigned emitterGroups[kMaxEmitters]{};unsigned emitted=0;int teams[kMaxEmitters]{}; };
 struct Reservation {std::uint64_t id=0,lease=0;ObjRef parent{};SpawnProof proof{};unsigned remaining=0;bool accepted=false;};
-State leases[kMaxLeases]{};
+LazyRows<State,kMaxLeases> leases;   // heap from the first Acquire (plugin_image_size_guard: no image table)
 std::uint64_t serial=0,spawnSerial=0;
 Reservation reservations[kMaxSpawnReservations]{};
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
@@ -44,13 +46,14 @@ Life MemberLife(const ObjRef& ref) noexcept {
     if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;
     if(At<LONG>(ref.ctrl,8)<=0)return Life::gone;
     if(!Readable(ref.obj,kObjectFlags+4))return Life::invalid;
-    if(At<const void*>(ref.obj,kSelfCtrl)!=ref.ctrl || (At<unsigned char>(ref.obj,0x18)&4u))return Life::gone;
+    // 三态（invalid / gone / live）是成员存储的契约，和 StorageLife 一样每步只读一次控制块；live 的条件与
+    // objref::Exists 相同（docs/objref-re.md），这里不再调它，免得 use count 读两次、两次之间对象死掉时前后不一致。
+    if(At<const void*>(ref.obj,kSelfCtrl)!=ref.ctrl || (At<unsigned char>(ref.obj,objref::kObjectFlags)&objref::kRemoved))return Life::gone;
     return Life::live;
 }
 bool Live(const ObjRef& ref) noexcept {return MemberLife(ref)==Life::live;}
 bool CurrentIdentity(const ObjRef& ref) noexcept {
-    return ref.obj && ref.ctrl && Readable(ref.ctrl,16) && At<LONG>(ref.ctrl,8)>0 &&
-        Readable(ref.obj,kSelfCtrl+sizeof(void*)) && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl && At<const void*>(ref.obj,kSelf)==ref.obj;
+    return objref::Identity(ref)>=objref::Life::removed && At<const void*>(ref.obj,kSelf)==ref.obj;
 }
 Life StorageLife(const ObjRef& ref) noexcept {
     if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;
@@ -369,6 +372,7 @@ bool Acquire(const ObjRef& root,const char* authenticatedSourcePuid,const Hooks&
     __try {
         if(PvpSupportTeam(authenticatedSourcePuid)<0)return false;
         Collection collection{};if(!Gather(root,hooks,collection))return false;
+        if(!leases.Allocate("PVP controlled leases"))return false;
         State* state=nullptr;
         for(auto& s:leases) {
             if(s.id && Same(s.root,root))return false;

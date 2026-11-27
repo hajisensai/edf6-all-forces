@@ -1,5 +1,6 @@
 #include "real_driver_native.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include "support_firepower.h"
 

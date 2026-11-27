@@ -5,7 +5,8 @@
 #include "enemy_control_action_native.h"
 #include "enemy_control_types.h"
 #include "enemy_control.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "scopereticle.h"
 #include "memory.h"
 #include <array>
 #include <cstdio>

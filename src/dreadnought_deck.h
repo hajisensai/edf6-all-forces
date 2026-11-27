@@ -23,7 +23,7 @@ namespace dreadnought {
 constexpr int kHangars=4;            // its AB_primary sockets (tools/prep_dreadnought.py HANGAR_SOCKETS)
 constexpr int kBaysPerHangar=2;
 constexpr int kBays=kHangars*kBaysPerHangar;
-constexpr int kKinds=4;              // crew.h kDnFighterKinds
+constexpr int kKinds=4;              // jet.h kDnFighterKinds
 constexpr unsigned kAllHangars=(1u<<kHangars)-1u;
 
 constexpr int HangarOfBay(int bay) noexcept { return bay/kBaysPerHangar; }

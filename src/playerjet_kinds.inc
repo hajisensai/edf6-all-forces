@@ -22,7 +22,7 @@ static_assert(NearKind(KindFrom(pjet::Row(jet::Body::fighter)->perf),kKinds[0]),
 static_assert(NearKind(KindFrom(pjet::Row(jet::Body::strike)->perf),kKinds[1]),"the derivation strays from the player strike jet");
 
 // The jet body `v` is (its mark; the strike jets that took over a bomber share the strike jet's mark and are told by
-// their model's bones, crew.h BomberBody), when it is one the player may board: its row, else nullptr.
+// their model's bones, jet.h BomberBody), when it is one the player may board: its row, else nullptr.
 const pjet::Boardable* BoardRowOf(const unsigned char* v) noexcept {
     if(BodyOf(v)!=PluginBody::jet || !Cfg().playerJetAll)return nullptr;
     const float mark=BodyMark(v);

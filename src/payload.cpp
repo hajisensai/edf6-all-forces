@@ -36,7 +36,21 @@
 //    seat's trigger. A weapon on the driver's keys is the driver's to fire: it rides his aim, and pulling it by itself
 //    whenever that aim crossed an enemy was no turret (the player, 2026-11-21: 「载具的某些副炮塔能自动开火真的对劲吗，
 //    怎么感觉怪怪的」; vcobjects Store.auto). Every one of them is pulled through FireSeat (ControlOf: who pulls it).
-#include "crew.h"
+#include "edf/input_source.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "heli.h"
+#include "map.h"
+#include "netprobe.h"
+#include "vhud.h"
+#include "payload.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"
@@ -46,7 +60,8 @@
 #include "retired_loadout.h"
 #include "edf/weapon.h"
 #include "online_authority.h"
-#include "seat_net_transport.h"
+#include "object_net_transport.h"
+#include "seat_net.h"
 #include "plugin_net.h"
 #include <cmath>
 #include <cstring>
@@ -106,10 +121,10 @@ Pick picks[kTracked]{};
 // sent for a seat it runs (sent again on a change, else every kPickRefreshMs).
 struct RemotePick { ObjRef ref; unsigned seat; std::int32_t holder; bool npc; ULONGLONG at; };
 RemotePick remotes[kTracked]{};
-// Each seat's sender watermarks, apart from the records (seat_net.h StreamGates): a record dropped when stale or taken
+// Each seat's sender watermarks, apart from the records (object_net.h StreamGates): a record dropped when stale or taken
 // for another seat keeps its seat's gate, so a delayed older pick is never admitted again. Dropped with the vehicle,
 // the room's members (plugin_net::RoomGeneration) and the mission (ResetPayload).
-seat_net::StreamGates<kTracked*2,64> pickGates;
+object_net::StreamGates<kTracked*2,64> pickGates;
 std::uint32_t pickGatesRoom=0;
 struct SentPick { ObjRef ref; unsigned seat; std::int32_t holder; ULONGLONG at; };
 SentPick sentPicks[kTracked]{};
@@ -550,8 +565,8 @@ void RedirectPayload(unsigned char* v,unsigned seat,Pick& p,unsigned char* const
 // other one lands that seat's pulls on the same weapon (ApplyRemotePicks -> PullHook). ---
 // Send the pick of seat `seat` (`weapon`, null none) this machine runs, when it changed or is due again.
 void SendPick(unsigned char* v,unsigned seat,const unsigned char* weapon,bool npc) noexcept {
-    if(!pickNetOk || !seat_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))return;
-    seat_net::ChainVehicle(v);   // this class hears its copies' picks too
+    if(!pickNetOk || !object_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))return;
+    object_net::ChainVehicle(v);   // this class hears its copies' picks too
     const ULONGLONG now=GameMs();
     SentPick* slot=nullptr;
     for(auto& x:sentPicks) {
@@ -564,9 +579,9 @@ void SendPick(unsigned char* v,unsigned seat,const unsigned char* weapon,bool np
     const std::int32_t holder=index>=0 && index<static_cast<std::int64_t>(seat_net::kMostHolders) ? static_cast<std::int32_t>(index) : -1;
     if(!seat_net::PickDue(holder!=slot->holder,now,slot->at))return;
     seat_net::Pick m;
-    m.seat=seat;m.holder=holder;m.flags=npc ? seat_net::kNpc : 0;m.head.controller=seat_net::SeatController(v,seat);
-    if(!seat_net::Stamp(&m,sizeof(m)) || !seat_net::Valid(m))return;
-    if(seat_net::Send(v,&m,sizeof(m))){slot->holder=holder;slot->at=now;}
+    m.seat=seat;m.holder=holder;m.flags=npc ? seat_net::kNpc : 0;m.head.controller=object_net::SeatController(v,seat);
+    if(!object_net::Stamp(&m,sizeof(m)) || !seat_net::Valid(m))return;
+    if(object_net::Send(v,&m,sizeof(m))){slot->holder=holder;slot->at=now;}
 }
 // A pick from another machine (game thread). Admitted for a seat this machine does not run itself, in the control epoch
 // this machine sees there (the rider's ReferenceId, -1 an NPC or none), newer than that sender's last.
@@ -590,7 +605,7 @@ void PickReceived(unsigned char* v,const void* block,std::size_t size) noexcept 
         auto* const gate=pickGates.For({ref.obj,ref.ctrl,m.seat},[](const void* obj,const void* ctrl) noexcept {
             return Readable(obj,kSelfCtrl+8) && ObjRef{obj,ctrl}.Is(obj);
         });
-        if(!gate || !gate->Admit(m.head,InSession(),here,seat_net::SeatController(v,m.seat)))return;
+        if(!gate || !gate->Admit(m.head,InSession(),here,object_net::SeatController(v,m.seat)))return;
         if(!slot->ref.Is(v) || slot->seat!=m.seat){*slot=RemotePick{};slot->ref=ref;slot->seat=m.seat;slot->holder=-1;}
         slot->holder=m.holder;slot->npc=(m.flags&seat_net::kNpc)!=0;slot->at=now;
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -941,7 +956,7 @@ void PayloadFrame(unsigned char* v) noexcept {
     if(v[kDead]){ClearRedirect(v);ClearChoiceContext(v);return;}
     if(BodyOf(v)!=PluginBody::none){ClearRedirect(v);if(!choiceContext.aircraft)ClearChoiceContext(v);return;}
     if(pickNetOk) {
-        if(seat_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))seat_net::ChainVehicle(v);   // this class hears its copies' picks
+        if(object_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))object_net::ChainVehicle(v);   // this class hears its copies' picks
         ApplyRemotePicks(v);
     }
     const int seat=PlayerSeatOf(v);
@@ -1419,7 +1434,7 @@ bool InstallPayload() noexcept {
         std::memcpy(jump+6,&to,8);
         pullOk=edf::PatchCode(image+kPull,kPullCode,jump,sizeof(jump));
         Log("HOOK payload=%d (the holder pull lands on the store picked)",pullOk);
-        pickNetOk=pullOk && seat_net::Install() && seat_net::Register(seat_net::kPickMagic,&PickReceived);
+        pickNetOk=pullOk && object_net::Install() && object_net::Register(seat_net::kPickMagic,&PickReceived);
         Log("HOOK payload online=%d (a seat's pick to the vehicle's copies, tag 15 'SPCK')",pickNetOk);
         return pullOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

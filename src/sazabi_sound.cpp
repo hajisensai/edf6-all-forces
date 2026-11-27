@@ -10,7 +10,9 @@
 //    alone owns the voices, so its order against the Sazabi's own frame does not matter (one frame's lag at most).
 // Game thread only.
 #include "sazabi_sound.h"
-#include "crew.h"
+#include "config.h"
+#include "scene.h"
+#include "sound.h"
 #include "jetaudio.h"
 #include "surround.h"
 #include "vehmix.h"

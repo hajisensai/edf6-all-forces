@@ -1,7 +1,13 @@
 // Each twin barrel's own recoil on its own shot (barrel_recoil.h): the counters of the barrels the plugin fires in turn
 // (stores.h TwinPairOf), the bone each one's muzzle hangs on, the kick written into that bone's local at the 603's last
 // pose step (vulcan_rotor.cpp Build, before 0x1100B90 builds the worlds from the locals). Game thread.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "scene.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "barrel_recoil.h"
 #include "body506.h"
 #include "layout.h"

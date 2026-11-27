@@ -1,5 +1,11 @@
 #include "mission_participant_gate.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "campaign.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 
 namespace crew {
@@ -39,9 +45,7 @@ ObjRef* __fastcall UpperHook(void* context,ObjRef* out,const float* matrix,int i
     }
     if(ready && InSession() && observer && index>=0) {
         __try {
-            if(Readable(result,sizeof(ObjRef)) && result->obj && Readable(result->ctrl,16) &&
-               At<LONG>(result->ctrl,8)>0 && Readable(result->obj,kSelfCtrl+8) && result->Is(result->obj) &&
-               !(At<unsigned char>(result->obj,0x18)&4))observer(index,*result);
+            if(Readable(result,sizeof(ObjRef)) && objref::Exists(*result))observer(index,*result);
         } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
     return result;

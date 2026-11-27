@@ -61,6 +61,21 @@
 #include <cmath>
 #include <cstring>
 #include <cwchar>
+#include "edf/input_source.h"
+#include "plugin_log.h"
+#include "bay_rounds.h"
+#include "boarding.h"
+#include "plugin_body.h"
+#include "booster.h"
+#include "dreadnought.h"
+#include "hud.h"
+#include "launchers.h"
+#include "map.h"
+#include "missile.h"
+#include "shield.h"
+#include "sightzoom_api.h"
+#include "world.h"
+#include "vhud.h"
 
 namespace crew {
 namespace {
@@ -347,9 +362,7 @@ const Kind* KindOf(const unsigned char* v) noexcept {
 
 // Whether the entry's object is there and alive (subcarrier.cpp Live).
 bool Live(const PJet& j) noexcept {
-    const auto ctrl=static_cast<const unsigned char*>(j.ref.ctrl);
-    return j.vehicle && Readable(ctrl,kCtrlUses+4) && At<std::int32_t>(ctrl,kCtrlUses)>0 && Readable(j.vehicle,kTeam+4) &&
-           j.ref.Is(j.vehicle) && !(j.vehicle[kObjFlags]&kObjDeleted) && !j.vehicle[kDead];
+    return j.vehicle && j.ref.obj==j.vehicle && objref::Alive(j.ref) && Readable(j.vehicle,kTeam+4);
 }
 PJet* Find(const unsigned char* v) noexcept {
     for(auto& j:jets)if(j.vehicle==v && j.ref.Is(v))return &j;
@@ -491,7 +504,7 @@ void RightOf(const float* dir,float* right) noexcept {
     if(!Normalize(right)){right[0]=-1.0f;right[1]=0.0f;right[2]=0.0f;}
 }
 
-// The walls (playarea.h): where the map's ground ends, kVoidMargin inside it (until 2026-10-06 the play edge, crew.h
+// The walls (playarea.h): where the map's ground ends, kVoidMargin inside it (until 2026-10-06 the play edge, world.h
 // PlayEdge: the physics world's square, km out over the void on a stock map). From kEdgeBuffer m in the share of the
 // path allowed out at a wall falls from all of it to none at the wall, and past it the path must point back in by
 // kWallIn: the plane is bent round smoothly along it, its heading never flipped (a hard turn at the wall flipped its

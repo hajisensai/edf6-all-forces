@@ -5,6 +5,13 @@
 #include "../src/jet_hooks.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/plugin_body.h"
+#include "../src/booster.h"
+#include "../src/netprobe.h"
+#include "../src/shield.h"
+#include "../src/sidecar.h"
 
 namespace {
 int failures=0,lookups=0,sidecarAsks=0,stockCalls=0,passengersNow=0;

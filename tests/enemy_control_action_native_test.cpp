@@ -1,5 +1,6 @@
 // Runs the production main-action gate, codec and replay against synthetic native
 // callback objects. Native setter/dispatch test seams observe real lifecycle calls.
+#include <initializer_list>
 #define ENEMY_CONTROL_ACTION_TEST
 #include "../src/enemy_control_action_native.cpp"
 #include <cstdio>

@@ -60,17 +60,17 @@ const wchar_t* const kCallLabels[]={
     L"C-130 炮艇机·跟随",
     L"Brute 410 救护型·守点",
     L"Brute 410 救护型·跟随",
-    L"Eros 506 直升机（扫射型）",
-    L"Eros 506 直升机（导弹型）",
-    L"Brute 410 直升机（舱门炮型）",
-    L"DN 轰炸机（火箭挂载）",
-    L"DN 防御者战斗机（对地导弹型）",
-    L"DN 轰炸机（广域挂载）",
-    L"DN 轰炸机（低空挂载）",
+    L"直升机扫射（Eros 506）",
+    L"导弹猎手（Eros 506）",
+    L"死亡回旋（Brute 410）",
+    L"俯冲扫射（DN 轰炸机）",
+    L"导弹掠过（DN 防御者战斗机）",
+    L"地毯轰炸（DN 轰炸机）",
+    L"打了就跑（DN 轰炸机）",
     L"天顶截击机",
-    L"Eros 506／DN 轰炸机",
-    L"DN 战斗机（俯冲挂载）",
-    L"C-130／DN 轰炸机",
+    L"锤与砧（Eros 506／DN 轰炸机）",
+    L"狼群（DN 战斗机）",
+    L"引导打击（C-130／DN 轰炸机）",
 };
 static_assert(sizeof(kCallLabels)/sizeof(kCallLabels[0])==kCallCount,"a label per call");
 // Every live weapon row tools/call_weapons.py installs (vehicle requests, thrown drones, guns): its id, weapon SGO, object SGO.
@@ -144,6 +144,9 @@ const CallRow kCallRows[]={
     {L"EDF6VC_CALL_XM_SMALL_MECH",L"EDF6VC_CALL_XM_SMALL_MECH.SGO",L"EDF6VC_XM_SMALL_MECH.SGO"},
     {L"EDF6VC_CALL_XM_LARGE_MECH",L"EDF6VC_CALL_XM_LARGE_MECH.SGO",L"EDF6VC_XM_LARGE_MECH.SGO"},
     {L"EDF6VC_CALL_ANDRYUSHA",L"EDF6VC_CALL_ANDRYUSHA.SGO",L"EDF6VC_ANDRYUSHA.SGO"},
+    {L"EDF6VC_CALL_AURA_CMD",L"EDF6VC_CALL_AURA_CMD.SGO",L"EDF6VC_AURA_CMD.SGO"},
+    {L"EDF6VC_CALL_AURA_REP",L"EDF6VC_CALL_AURA_REP.SGO",L"EDF6VC_AURA_REP.SGO"},
+    {L"EDF6VC_CALL_AURA_AMO",L"EDF6VC_CALL_AURA_AMO.SGO",L"EDF6VC_AURA_AMO.SGO"},
 };
 constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));
 // The rows of the supports moved to the map (2026-10-26): their placeholders' ids, un-owned at every save load.

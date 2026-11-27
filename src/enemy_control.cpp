@@ -1,7 +1,14 @@
 // Enemy bodies retain their real native object, skills, physics and network owner.
 // AI decisions, input and target selection are leased. The original
 // Soldier remains the authenticated source and resumes immediately on release.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "team_native_logic.h"
 #include "enemy_control.h"
 #include "net_object_resolve.h"
@@ -102,31 +109,22 @@ bool Same(const ObjRef& a,const ObjRef& b) noexcept { return a.obj==b.obj && a.c
 bool CurrentObject(const ObjRef& ref) noexcept {
     return enemy_identity::Read(ref.obj,ref.ctrl)==enemy_identity::State::current;
 }
-bool Live(const ObjRef& ref) noexcept {
-    if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16) || At<LONG>(ref.ctrl,8)<=0)return false;
-    const auto* object=static_cast<const unsigned char*>(ref.obj);
-    return Readable(object,kDead+1) && !(object[0x18]&4) && !object[kDead] &&
-        At<const void*>(object,kSelfCtrl)==ref.ctrl;
-}
+// The sessions' owner / target hold one weak count each (Keep / Drop, explicit: a session's two references go together,
+// DropReady checks both before either is let go); the counting and the liveness test are objref.h's.
+using objref::Alive;
 bool Keep(const ObjRef& ref) noexcept {
-    if(!Live(ref) || !Readable(ref.ctrl,16,true))return false;
-    InterlockedIncrement(reinterpret_cast<volatile LONG*>(const_cast<unsigned char*>(static_cast<const unsigned char*>(ref.ctrl))+12));
+    if(!Alive(ref))return false;
+    objref::Retain(ref.ctrl);
     return true;
 }
 bool DropReady(const ObjRef& ref) noexcept {
-    __try {return !ref.ctrl ? !ref.obj : Readable(ref.ctrl,16,true) && At<LONG>(ref.ctrl,12)>0;}
+    __try {return !ref.ctrl ? !ref.obj : Readable(ref.ctrl,16,true) && At<LONG>(ref.ctrl,objref::kCtrlWeaks)>0;}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool Drop(ObjRef& ref) noexcept {
-    __try {
     if(!DropReady(ref))return false;
-    if(ref.ctrl) {
-        auto* ctrl=const_cast<unsigned char*>(static_cast<const unsigned char*>(ref.ctrl));
-        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(ctrl+12))==0)
-            reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(ctrl,0)[1])(ctrl);
-    }
+    objref::Release(ref.ctrl);
     ref={};return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 void Name(const char* name,wchar_t (&out)[96]) noexcept {
     unsigned i=0;
@@ -273,7 +271,7 @@ void Publish() {
         published[i].snapshot=c.snapshot;published[i].abilities=c.catalogue.abilities;++i;
     }
     for(auto& s:sessions) {
-        if(On() && s.local && !s.closing && s.snapshot.phase==Phase::active && Live(s.owner) && Live(s.target) && Readable(s.target.obj,0x31C)) {
+        if(On() && s.local && !s.closing && s.snapshot.phase==Phase::active && Alive(s.owner) && Alive(s.target) && Readable(s.target.obj,0x31C)) {
             auto& r=radar[radarCount];r.ownerObject=reinterpret_cast<std::uintptr_t>(s.owner.obj);r.ownerControl=reinterpret_cast<std::uintptr_t>(s.owner.ctrl);
             const auto* actor=static_cast<const unsigned char*>(s.target.obj);
             std::memcpy(r.center,actor+0x90,12);std::memcpy(r.side,actor+0x70,12);std::memcpy(r.forward,actor+0x80,12);
@@ -318,11 +316,11 @@ void FillSnapshot(Snapshot& snapshot,const ObjRef& owner,const ObjRef& target,co
 Reason CanPrepare(const ObjRef& requester,const ObjRef& target,Catalogue* catalogue) {
     if(!On())return Reason::disabled;
     if(!targetReady)return Reason::nativeMismatch;
-    if(!Live(requester) || !IsAnyPlayer(static_cast<const unsigned char*>(requester.obj)) || !IsSoldierClass(requester.obj))
+    if(!Alive(requester) || !IsAnyPlayer(static_cast<const unsigned char*>(requester.obj)) || !IsSoldierClass(requester.obj))
         return Reason::invalidRequester;
     // Riding is the player's own state, not a broken requester: say what to do about it.
     if(!HumanOnFoot(static_cast<const unsigned char*>(requester.obj)))return Reason::riding;
-    if(!Live(target))return Reason::invalidTarget;
+    if(!Alive(target))return Reason::invalidTarget;
     if(Same(requester,target))return Reason::sameObject;
     if(ByOwner(requester) || ByObject(target.obj))return Reason::busy;
     if(!ReadCatalogue(target,*catalogue))return enemy_native::Profile(target.obj) ? Reason::incompleteSkills : Reason::unsupportedFamily;
@@ -377,7 +375,7 @@ bool Patch(Session& session) noexcept {
     session.nativeOwned=true;return true;
 }
 bool AimRay(const Session& session,float yaw,float pitch,enemy_target::Ray* ray) noexcept {
-    if(!ray || !Live(session.target) || !Readable(session.target.obj,0x9C) || !std::isfinite(yaw) || !std::isfinite(pitch))return false;
+    if(!ray || !Alive(session.target) || !Readable(session.target.obj,0x9C) || !std::isfinite(yaw) || !std::isfinite(pitch))return false;
     const auto* object=static_cast<const unsigned char*>(session.target.obj);
     const auto* position=reinterpret_cast<const float*>(object+0x90);
     float pivot[3]={position[0],position[1]+2.0f,position[2]};edf41c::AimPoint(object,pivot);
@@ -475,7 +473,7 @@ void* __fastcall Target14(void* object) {
     // The original GOB selector returns a raw real actor, including nullptr.
     // A null controlled focus must never fall through to autonomous retargeting.
     if(!s || !EnemyControlTargetActive(object) || !CurrentObject(s->owner))return nullptr;
-    return Live(s->focus.actor) ? const_cast<void*>(s->focus.actor.obj) : nullptr;
+    return Alive(s->focus.actor) ? const_cast<void*>(s->focus.actor.obj) : nullptr;
 }
 std::uint64_t __fastcall Input4(void* object,void* dt) {
     auto* s=ByObject(object);return s && s->original ? Run(*s,4,dt) : 0;
@@ -713,12 +711,12 @@ bool EnemyControlBegin(const ObjRef& requester,const ObjRef& target,std::uint64_
 }
 bool EnemyControlActivate(std::uint64_t lease) noexcept {
     auto* s=ByLease(lease);
-    if(!s || !On() || !Live(s->owner) || !Live(s->target) || s->snapshot.phase!=Phase::pending)return false;
+    if(!s || !On() || !Alive(s->owner) || !Alive(s->target) || s->snapshot.phase!=Phase::pending)return false;
     s->snapshot.phase=Phase::active;s->received=GameMs();Publish();return true;
 }
 bool EnemyControlValidateInput(std::uint64_t lease,const Input& input) noexcept {
     const auto* s=ByLease(lease);
-    if(!s || s->closing || s->snapshot.phase!=Phase::active || !On() || !Live(s->owner) || !Live(s->target) || !ValidInput(input))return false;
+    if(!s || s->closing || s->snapshot.phase!=Phase::active || !On() || !Alive(s->owner) || !Alive(s->target) || !ValidInput(input))return false;
     for(const auto& active:input.active)if(active.id) {
         const auto* ability=FindAbility(s->catalogue,active.id);
         if(!ability || (active.phase==1 && !(ability->flags&AbilityFlag::held)) ||
@@ -769,7 +767,7 @@ bool EnemyControlRestore(std::uint64_t lease) noexcept {
 }
 
 bool EnemyControlLeaseLive(std::uint64_t lease) noexcept {
-    const auto* s=ByLease(lease);return s && On() && !s->faulted && !s->closing && Live(s->owner) && Live(s->target);
+    const auto* s=ByLease(lease);return s && On() && !s->faulted && !s->closing && Alive(s->owner) && Alive(s->target);
 }
 void EnemyControlFrame() noexcept {
     if(!On()){ResetEnemyControl();return;}
@@ -784,7 +782,7 @@ void EnemyControlFrame() noexcept {
             if(EnemyControlAbortNetworkActions(s.snapshot.lease))EnemyControlRestore(s.snapshot.lease);continue;
         }
         if(s.closing){if(s.aborted)EnemyControlRestore(s.snapshot.lease);continue;} // Normal close is drained by the authenticated protocol.
-        if(s.snapshot.phase==Phase::restoring || !Live(s.owner) || !Live(s.target) || s.faulted) {
+        if(s.snapshot.phase==Phase::restoring || !Alive(s.owner) || !Alive(s.target) || s.faulted) {
             if(s.networked) {EnemyControlQuiesceNetworkActions(s.snapshot.lease);continue;}
             EnemyControlRestore(s.snapshot.lease);continue;
         }
@@ -821,7 +819,7 @@ bool EnemyControlPickable(const void* object) noexcept {
 }
 bool EnemyControlDescribe(const ObjRef& requester,const ObjRef& target,Snapshot* out) noexcept {
     if(!out)return false;*out={};
-    if(!Live(requester) || !IsPlayer(static_cast<const unsigned char*>(requester.obj))) {out->reason=Reason::invalidRequester;return false;}
+    if(!Alive(requester) || !IsPlayer(static_cast<const unsigned char*>(requester.obj))) {out->reason=Reason::invalidRequester;return false;}
     for(auto& c:candidates)if(Same(c.owner,requester) && Same(c.target,target) && c.seen) {
         c.seen=GameMs();MergeNetwork(c.snapshot);
         if(c.snapshot.phase!=Phase::pending && c.snapshot.phase!=Phase::restoring && c.snapshot.phase!=Phase::active) {
@@ -844,7 +842,7 @@ bool EnemyControlDescribe(const ObjRef& requester,const ObjRef& target,Snapshot*
     const auto reason=CanPrepare(requester,target,&catalogue);
     if(!Keep(requester)){out->reason=Reason::invalidRequester;return false;}
     c->owner=requester;
-    if(Live(target) && Keep(target))c->target=target;
+    if(Alive(target) && Keep(target))c->target=target;
     c->catalogue=std::move(catalogue);FillSnapshot(c->snapshot,requester,target,c->catalogue);
     c->snapshot.reason=reason;c->seen=GameMs();*out=c->snapshot;Publish();return true;
 }
@@ -883,7 +881,7 @@ unsigned EnemyControlAbilities(const Snapshot& snapshot,unsigned first,Ability* 
 }
 bool EnemyControlRequest(const Snapshot& snapshot) noexcept {
     auto* c=ByCandidate(snapshot);
-    if(!c || !Live(c->owner) || !Live(c->target) || c->snapshot.phase==Phase::pending ||
+    if(!c || !Alive(c->owner) || !Alive(c->target) || c->snapshot.phase==Phase::pending ||
         c->snapshot.phase==Phase::restoring || c->snapshot.phase==Phase::active)return false;
     Catalogue fresh;const auto reason=CanPrepare(c->owner,c->target,&fresh);
     if(reason!=Reason::none || fresh.hash!=c->snapshot.profileHash)return false;
@@ -958,7 +956,7 @@ bool EnemyControlCurrentInput(const void* target,Input* out) noexcept {
     if(!out)return false;*out={};
     const auto* s=ByObject(target);
     if(!On() || !s || s->faulted || s->closing || !EnemyControlTargetActive(target) || s->snapshot.phase!=Phase::active ||
-        !Live(s->owner) || !Live(s->target) || !s->received || GameMs()<s->received ||
+        !Alive(s->owner) || !Alive(s->target) || !s->received || GameMs()<s->received ||
         GameMs()-s->received>kFreshInput || !s->input.absoluteAim)return false;
     *out=s->input;return true;
 }
@@ -968,7 +966,7 @@ bool EnemyControlWeaponAim(const void* target,float out[3]) noexcept {
             !session->adapterAttempted || !CurrentObject(session->target) || !session->catalogue.adapter->Match(target) ||
             session->catalogue.adapter->ProfileHash(target)!=session->catalogue.hash) ||
         (session->snapshot.phase!=Phase::active && !session->closing) ||
-        !(session->closing ? CurrentObject(session->owner) && CurrentObject(session->target) : Live(session->owner) && Live(session->target)) ||
+        !(session->closing ? CurrentObject(session->owner) && CurrentObject(session->target) : Alive(session->owner) && Alive(session->target)) ||
         !session->aimPointValid)return false;
     // Existing native actions may finish at their last accepted target when a
     // heartbeat is late. New input is neutralized after kFreshInput; a finishing
@@ -977,13 +975,13 @@ bool EnemyControlWeaponAim(const void* target,float out[3]) noexcept {
 }
 bool EnemyControlAimTarget(const void* root,ObjRef* out) noexcept {
     if(!out)return false;*out={};float point[3];if(!EnemyControlWeaponAim(root,point))return false;
-    const auto* s=ByObject(root);if(Live(s->focus.actor))*out=s->focus.actor;return true;
+    const auto* s=ByObject(root);if(Alive(s->focus.actor))*out=s->focus.actor;return true;
 }
 bool EnemyControlWeaponLock(const void* root,void* out16) noexcept {
     if(!out16 || !Readable(out16,16,true))return false;
     float point[3];if(!EnemyControlWeaponAim(root,point))return false;
     std::memset(out16,0,16);const auto* s=ByObject(root);
-    if(Live(s->focus.actor) && s->focus.lock.obj)enemy_target::CopyLock(s->focus,out16);
+    if(Alive(s->focus.actor) && s->focus.lock.obj)enemy_target::CopyLock(s->focus,out16);
     return true;
 }
 bool EnemyControlWeaponLockIdentity(const void* root,unsigned char id[32],int* ordinal) noexcept {
@@ -991,7 +989,7 @@ bool EnemyControlWeaponLockIdentity(const void* root,unsigned char id[32],int* o
         if(!id || !ordinal || !Readable(id,32,true) || !Readable(ordinal,sizeof(*ordinal),true))return false;
         std::memset(id,0,32);*ordinal=-1;float point[3];if(!EnemyControlWeaponAim(root,point))return false;
         const auto* session=ByObject(root);const auto& focus=session->focus;
-        if(!Live(focus.actor) || !focus.lock.obj || !focus.lock.ctrl || focus.lockIndex<0 || !Readable(focus.actor.obj,0x380))return true;
+        if(!Alive(focus.actor) || !focus.lock.obj || !focus.lock.ctrl || focus.lockIndex<0 || !Readable(focus.actor.obj,0x380))return true;
         const auto count=At<std::uint64_t>(focus.actor.obj,0x378);const auto* table=At<const unsigned char*>(focus.actor.obj,0x368);
         if(count>1024 || static_cast<unsigned>(focus.lockIndex)>=count || !Readable(table,static_cast<std::size_t>(count)*16))return true;
         const auto* member=table+static_cast<unsigned>(focus.lockIndex)*16;
@@ -1023,14 +1021,14 @@ unsigned EnemyControlWeaponAimRoots(const void** out,unsigned capacity) noexcept
 const unsigned char* EnemyControlBodyForMap(const unsigned char* human) noexcept {
     if(!On() || !human)return nullptr;
     for(const auto& session:sessions)if(session.local && session.snapshot.phase==Phase::active &&
-        session.owner.obj==human && Live(session.owner) && Live(session.target))
+        session.owner.obj==human && Alive(session.owner) && Alive(session.target))
         return static_cast<const unsigned char*>(session.target.obj);
     return nullptr;
 }
 
 bool EnemyControlNormalizeNetworkInput(std::uint64_t lease,Input* input) noexcept {
     auto* s=ByLease(lease);
-    if(!s || !input || s->closing || s->snapshot.phase!=Phase::active || !Live(s->owner) || !Live(s->target) || !ValidInput(*input))return false;
+    if(!s || !input || s->closing || s->snapshot.phase!=Phase::active || !Alive(s->owner) || !Alive(s->target) || !ValidInput(*input))return false;
     if(!input->absoluteAim){std::memset(input->focusRef,0,32);return true;}
     enemy_target::Ray ray{};if(!AimRay(*s,input->aimYaw,input->aimPitch,&ray))return false;
     return enemy_target::Normalize(s->owner,s->target,input->focusRef,ray);
@@ -1075,7 +1073,7 @@ bool EnemyControlAbortNetworkActions(std::uint64_t lease) noexcept {
 bool EnemyControlNeedsNetworkPose(std::uint64_t lease) noexcept {
     const auto* s=ByLease(lease);
     return s && s->networked && !s->catalogue.adapter && s->snapshot.phase==Phase::active &&
-        Live(s->owner) && Live(s->target) && enemy_native::PoseRequired(s->native);
+        Alive(s->owner) && Alive(s->target) && enemy_native::PoseRequired(s->native);
 }
 bool EnemyControlCaptureNetworkPose(std::uint64_t lease,enemy_native::pose::State* out) noexcept {
     const auto* s=ByLease(lease);
@@ -1087,7 +1085,7 @@ bool EnemyControlApplyNetworkPose(std::uint64_t lease,const enemy_native::pose::
 }
 bool EnemyControlSuppressHuman(const unsigned char* human) noexcept {
     if(!human)return false;
-    for(const auto& s:sessions)if(s.local && s.snapshot.lease && s.sourceProtected && s.owner.obj==human && Live(s.owner) && CurrentObject(s.target))return true;
+    for(const auto& s:sessions)if(s.local && s.snapshot.lease && s.sourceProtected && s.owner.obj==human && Alive(s.owner) && CurrentObject(s.target))return true;
     return false;
 }
 // Over its shoulder: the eye kShoulderUp of the body's height over the line behind its lock point and kShoulderSide of it
@@ -1097,7 +1095,7 @@ bool EnemyControlSuppressHuman(const unsigned char* human) noexcept {
 constexpr float kShoulderUp=0.8f,kShoulderSide=0.5f,kAimRange=2000.0f,kLookFar=300.0f;
 bool EnemyControlCamera(const unsigned char* human,const float*,const float*,float* eye,float* look) noexcept {
     if(!On() || !human || !eye || !look)return false;
-    for(const auto& s:sessions)if(s.local && s.snapshot.phase==Phase::active && s.owner.obj==human && Live(s.owner) && Live(s.target)) {
+    for(const auto& s:sessions)if(s.local && s.snapshot.phase==Phase::active && s.owner.obj==human && Alive(s.owner) && Alive(s.target)) {
         const auto* object=static_cast<const unsigned char*>(s.target.obj);
         const auto* position=reinterpret_cast<const float*>(object+0x90);
         // AimPoint follows the native lock point (large monsters and separate

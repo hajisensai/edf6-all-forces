@@ -10,11 +10,15 @@
 //   carpet       level kCarpetAlt over the mark along its line, its bombs let go to land within kCarpetHalf of it either
 //                side, a gap apart over the run (SortieFire); a formation abreast lays parallel bands
 //   popUp        in low (kPopAlt) at the mark, two bombs onto it, then a steep climb away
-//   missileRain  approaches the mark at kRainAlt and releases its magazine after every missile has a native lock.
+//   missileRain  approaches the mark level at kRainAlt and stays level (never diving at a ground target:
+//                sortie::RainWant), holds its fire until over the target area with its nose settled and the
+//                target at least kRainSlope under it (sortie::RainHoldStep, RainSteep), then releases its magazine
+//                on its first native lock.
 //   gunshipLap   the gunship's own circle round the mark and its shells, one lap counted (sortie::Lap), then away
 // Every pass that finds nothing to strike gives up after kSearchMs, or once past the mark on its line.
 #include "jet_internal.h"
 #include "sortie_plan.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace jet {
@@ -51,6 +55,118 @@ void CountMissile(Jet& j) noexcept {
 }
 const char* const kPassNames[]={"none","gun run","missile pass","carpet","hit and run","missile rain","gunship lap",
                                 "heli strafe","heli hunter","heli circle"};
+// The strafe's nose on `aim`: the guns and rockets fire along the nose, which rides the angle of attack above the path,
+// so the path is aimed under the line to it by the nose's offset (as jet_combat.cpp GunToward); no steeper than
+// kNoseDown, and up off it below `floorY`.
+void StrafeNose(const Jet& j,const float* pos,const float* nose,const float* aim,float floorY,float* want) noexcept {
+    Toward(pos,aim,want);
+    float path[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
+    if(Normalize(path)) {
+        float aimed[3];
+        for(int i=0;i<3;++i)aimed[i]=want[i]-(nose[i]-path[i]);
+        if(Normalize(aimed))std::memcpy(want,aimed,12);
+    }
+    if(want[1]<kNoseDown)want[1]=kNoseDown;
+    if(pos[1]<floorY && want[1]<0.15f)want[1]=0.15f;
+    Normalize(want);
+}
+// The marked strafe (a gun run along its line, sortie_plan.h; the user, 2026-11-26: 「需要绕一或n圈才能进入航线，应该直接
+// 进入航线才对」「只有机枪」「扫射时间是不是不对」). In along the line from its entry (support_entry.h AirRoute: on the line
+// produced beyond its start, heading along it) at the height (StrafeHeight) its guns' lead lasts the line from. Its nose
+// goes onto the point its lead on kStrafeSettleS before that point reaches the line's start (the jet on the line by then:
+// kStrafeCross, kStrafeAngle), so it is pitched down and steady as the window opens; from there the point walks down the
+// line at its own speed (2 half / speed s: StrafeSeconds), guns, rockets and missiles (Fire: by its stores) on it, to the
+// line's end. Off the line it turns onto it while it can (CaptureDistance at its hardest turn); a real miss (it cannot be
+// on it in time, or heads away) comes round once on a teardrop to the line produced, never a lap; a second miss, or too
+// long, ends the pass.
+//   phase 0  in toward the window     1  the strafe     2  the teardrop out     3  turning in onto the line
+void MarkedRun(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,float along,ULONGLONG ms,
+               float* want,float* speed,bool* gunsOk,bool* missileOk) noexcept {
+    Sortie& s=j.sortie;
+    const sortie::Line& l=s.line;
+    const float mark=l.at[1],half=s.runHalf;
+    const float settle=kind.attack*sortie::kStrafeSettleS,run=half+settle*0.5f;   // the line and its settling, halved
+    const float least=kind.gunClose*2.6f,reach=GunReach(kind,arms);
+    const float preferred=std::fmax(least,reach*0.9f);
+    const float inHeight=mark+sortie::StrafeHeight(run,preferred);
+    // Its turns: onto the line at its hardest (maxG, a short S), round the teardrop at the g it holds (TurnRadiusOf).
+    const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f,hard=kind.maxG/mass;
+    const float sharp=airbound::TurnRadius(kind.attack,std::sqrt(hard*hard>1.0f ? hard*hard-1.0f : 0.25f));
+    const float wide=TurnRadiusOf(kind,j.burden.mass,kind.attack);
+    const float capture=std::fmax(sharp,900.0f);   // m ahead on the line it steers for, off it
+    const float relative[3]={pos[0]-l.at[0],0.0f,pos[2]-l.at[2]};
+    const float cross=sortie::Dot2(relative,l.side);
+    const float angle=std::atan2(sortie::Dot2(nose,l.side),sortie::Dot2(nose,l.dir));
+    *speed=kind.attack;
+    if(s.phase!=1 && ms-s.phaseAt>2*sortie::kSearchMs) {
+        Done(j,"sortie: its strafe's line never reached",ms);
+        Level(pos,nose,inHeight,want);
+        return;
+    }
+    const auto missed=[&](const char* why,float need,float room) noexcept {
+        if(s.reentered) {
+            Log("JET v=%p sortie: strafe line missed again (%s: %.0f m off, %.0f deg, %.0f m to turn in, %.0f m left)",j.Vehicle(),
+                why,cross,angle*180.0f/kPi,need,room);
+            Done(j,"sortie: its strafe's line missed twice",ms);
+            Level(pos,nose,inHeight,want);
+            return true;
+        }
+        s.phase=2;s.phaseAt=ms;s.reenterSide=cross<0.0f ? -1.0f : 1.0f;
+        Log("JET v=%p sortie: strafe line missed (%s: %.0f m off, %.0f deg, %.0f m to turn in, %.0f m left): coming round once",
+            j.Vehicle(),why,cross,angle*180.0f/kPi,need,room);
+        return false;
+    };
+    if(s.phase==0) {
+        const float over=std::fmax(pos[1]-mark,sortie::kStrafeFloor*1.1f);
+        const float lead=sortie::StrafeLead(run,over,least,sortie::kStrafeLeadMost);
+        const float room=-half-settle-lead-along;   // m on before its nose goes down onto the point
+        // What it needs to be on it (within kStrafeCross of it, along it): nothing once there.
+        const bool onLine=std::fabs(cross)<=sortie::kStrafeCross && std::fabs(angle)<=sortie::kStrafeAngle;
+        const float beside=std::fabs(cross)>sortie::kStrafeCross ? cross-(cross>0.0f ? sortie::kStrafeCross : -sortie::kStrafeCross) : 0.0f;
+        const float need=onLine ? 0.0f : sortie::CaptureDistance(beside,angle,sharp);
+        if(room<=0.0f && onLine) {
+            s.phase=1;s.phaseAt=ms;s.strafeLead=lead;
+            Log("JET v=%p sortie: strafe settling, lead %.0f m from %.0f m up, %.0f m off at %.0f deg, %.1f s down a %.0f m line",
+                j.Vehicle(),lead,pos[1]-mark,cross,angle*180.0f/kPi,sortie::StrafeSeconds(half,kind.attack),2.0f*half);
+        } else if(room<= -settle) {
+            if(missed("off the line at its start",need,room))return;
+        } else if(need>room+settle || Dot(nose,l.dir)<=0.0f) {
+            if(missed(need>=1e8f ? "heading away" : "no room to turn onto it",need,room))return;
+        } else {
+            Run(j,pos,inHeight,capture,want);
+            return;
+        }
+    }
+    if(s.phase==1) {
+        if(along>half || (sortie::StrafeOver(along,s.strafeLead,half) && along>half-kind.gunClose*1.5f)) {
+            Done(j,"sortie: marked strafe completed",ms);
+            Run(j,pos,pos[1],600.0f,want);
+            return;
+        }
+        // The point its lead on, held at the line's end once there (a long line's last guns closing on it); short of the
+        // line's start (settling) the nose on it, no fire.
+        const float point=std::fmin(along+s.strafeLead,half);
+        for(int i=0;i<3;++i)s.shotPoint[i]=l.at[i]+l.dir[i]*point;
+        StrafeNose(j,pos,nose,s.shotPoint,mark+sortie::kStrafeFloor*0.6f,want);
+        s.strafing=true;*gunsOk=sortie::StrafeOpen(along,s.strafeLead,half);
+        *missileOk=j.t.target && !j.t.flyer && arms.missiles>0 && MissileReach(kind,arms)>0.0f;
+        return;
+    }
+    if(s.phase==2) {
+        // Out beside the line, back past its start, far enough out to turn in and settle onto it (a teardrop).
+        const float back=settle+preferred+2.5f*wide,aside=2.0f*wide*s.reenterSide;
+        const float out[3]={l.at[0]-l.dir[0]*(half+back)+l.side[0]*aside,inHeight,l.at[2]-l.dir[2]*(half+back)+l.side[2]*aside};
+        const float onto[3]={out[0]-pos[0],0.0f,out[2]-pos[2]};
+        if(sortie::Dot2(onto,onto)<wide*wide || along<-half-back){s.phase=3;s.phaseAt=ms;}
+        else {
+            Level(pos,onto,inHeight,want);
+            return;
+        }
+    }
+    // Phase 3: round onto the line; along it again, in as at first (one more miss ends the pass).
+    if(Dot(nose,l.dir)>0.7f){s.phase=0;s.reentered=true;}
+    Run(j,pos,inHeight,capture,want);
+}
 }  // namespace
 
 void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms,
@@ -59,7 +175,7 @@ void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const
     s=Sortie{};
     s.pass=pass;s.begun=ms;s.phaseAt=ms;
     const float explicitHeading[3]={run.x,0.0f,run.z};
-    s.line=sortie::LineThrough(mark,pos,run.half>0.0f ? explicitHeading : heading);
+    s.line=sortie::LineThrough(mark,pos,sortie::HasHeading(run) ? explicitHeading : heading);
     s.runHalf=run.half;
     s.missileSeen=j.t.missileAt;
     Log("JET v=%p sortie: %s at (%.0f,%.0f,%.0f)",j.Vehicle(),kPassNames[static_cast<int>(pass)],mark[0],mark[1],mark[2]);
@@ -74,15 +190,19 @@ bool SortieStoreFlyer(const Jet& j,bool flyer) noexcept {
     return flyer || (j.sortie.pass==SortiePass::missileRain && !j.sortie.done);
 }
 
+// A marked strafe (a gun run along a line) passes its targets in a few seconds: its missiles go on a sortie's dwell and
+// gap, not the dogfight's 2.5 s each (which let at most one go a pass).
+bool MarkedStrafe(const Sortie& s) noexcept { return s.pass==SortiePass::gunRun && s.runHalf>0.0f; }
 ULONGLONG SortieLockMs(const Jet& j,ULONGLONG stock) noexcept {
     const SortiePass p=j.sortie.pass;
-    return !j.sortie.done && (p==SortiePass::missilePass || p==SortiePass::missileRain) ? sortie::kLockMs : stock;
+    return !j.sortie.done && (p==SortiePass::missilePass || p==SortiePass::missileRain || MarkedStrafe(j.sortie)) ?
+           sortie::kLockMs : stock;
 }
 ULONGLONG SortieMissileGapMs(const Jet& j,ULONGLONG stock) noexcept {
     const SortiePass p=j.sortie.pass;
     if(j.sortie.done)return stock;
     if(p==SortiePass::missileRain)return sortie::kRainBurstMs;
-    return p==SortiePass::missilePass ? sortie::kMissileGapMs : stock;
+    return p==SortiePass::missilePass || MarkedStrafe(j.sortie) ? sortie::kMissileGapMs : stock;
 }
 
 bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,
@@ -96,34 +216,7 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
     switch(s.pass) {
     case SortiePass::gunRun:
         if(s.runHalf>0.0f) {
-            const float attackHeight=mark+160.0f;
-            *speed=kind.attack;
-            Run(j,pos,attackHeight,550.0f,want);
-            const float relative[3]={pos[0]-s.line.at[0],0.0f,pos[2]-s.line.at[2]};
-            const float cross=std::fabs(sortie::Dot2(relative,s.line.side));
-            if(s.phase==0 && along< -s.runHalf && cross<=65.0f && Dot(nose,s.line.dir)>0.7f)s.phase=1;
-            if(s.phase==0 && ms-s.begun<=2*sortie::kSearchMs) {
-                const float staging[3]={s.line.at[0]-s.line.dir[0]*(s.runHalf+650.0f),attackHeight,
-                                        s.line.at[2]-s.line.dir[2]*(s.runHalf+650.0f)};
-                const float onto[3]={staging[0]-pos[0],0.0f,staging[2]-pos[2]};
-                Level(pos,onto,attackHeight,want);
-                return true;
-            }
-            if(along>s.runHalf || ms-s.begun>2*sortie::kSearchMs) {
-                Done(j,"sortie: marked strafe completed",ms);
-                return true;
-            }
-            const float reach=GunReach(kind,arms);
-            if(cross<=65.0f && along>=-s.runHalf-reach*0.6f) {
-                const float point=Clamp(along+reach*0.65f,-s.runHalf,s.runHalf);
-                const float space=point-along;
-                if(space>kind.gunClose) {
-                    for(int i=0;i<3;++i)s.shotPoint[i]=s.line.at[i]+s.line.dir[i]*point;
-                    NoseOn(pos,s.shotPoint,mark+70.0f,want);
-                    s.strafing=true;*gunsOk=true;
-                }
-                *missileOk=j.t.target && arms.missiles>0 && MissileReach(kind,arms)>0.0f;
-            }
+            MarkedRun(j,kind,arms,pos,nose,along,ms,want,speed,gunsOk,missileOk);
             return true;
         }
         if(!ground) {
@@ -182,9 +275,25 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
             return true;
         }
         if(j.t.target && dist<sortie::kRainFrom && !outsideWindow && arms.missiles>0) {
-            NoseOn(pos,j.t.aim,mark+110.0f,want);
-            *missileOk=arms.missileRange>0.0f;
-        } else Run(j,pos,mark+sortie::kRainAlt,600.0f,want);
+            // Level at kRainAlt toward it, the nose up on it only when it is above (sortie::RainWant: a dive at a ground
+            // target sends the fanned rounds into the ground short of it).
+            const float to[3]={j.t.aim[0]-pos[0],0.0f,j.t.aim[2]-pos[2]};
+            float level[3];Level(pos,to,mark+sortie::kRainAlt,level);
+            sortie::RainWant(level,pos,j.t.aim,want);
+            // Held until it is over the target area with its nose settled and the target steep enough under it
+            // (sortie::RainHoldStep, RainSteep).
+            float n[3]={nose[0],nose[1],nose[2]};
+            const float cosOff=Normalize(n) ? Dot(n,want) : -1.0f;
+            const float noseOff=std::acos(cosOff>1.0f ? 1.0f : cosOff<-1.0f ? -1.0f : cosOff);
+            const int was=s.phase;
+            const bool open=sortie::RainHoldStep(s.phase,s.phaseAt,dist,noseOff,sortie::RainSteep(pos,j.t.aim,mark),ms);
+            if(open && was!=2)Log("JET v=%p missile rain: open fire %.0f m from the mark, nose %.2f rad off, %llu ms after it came",
+                                  j.Vehicle(),dist,noseOff,ms-s.begun);
+            *missileOk=open && arms.missileRange>0.0f;
+        } else {
+            if(s.phase==1)s.phase=0;   // off its aim: the hold starts again (an open pass stays open)
+            Run(j,pos,mark+sortie::kRainAlt,600.0f,want);
+        }
         return true;
     }
     case SortiePass::gunshipLap: {
@@ -230,7 +339,7 @@ void SortieFire(Jet& j,const unsigned char* v,const float* pos,const Arms& arms,
     }
     int bombs=0;
     for(int i=0;i<arms.storeCount;++i)if(arms.stores[i].spec->role==StoreRole::bomb)bombs+=arms.stores[i].ammo>0 ? arms.stores[i].ammo : 0;
-    const ULONGLONG gap=carpet ? sortie::CarpetGapMs(bombs+s.fired,Len(j.m.vel),half) : 150;
+    const ULONGLONG gap=carpet ? sortie::CarpetGapMs(bombs+s.fired,Len(j.m.vel),half) : sortie::kBombGapMs;
     if(s.fired && ms-s.bombAt<gap)return;
     for(int i=0;i<arms.storeCount;++i) {
         const Store& st=arms.stores[i];

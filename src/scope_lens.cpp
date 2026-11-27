@@ -1,5 +1,9 @@
 // The picture-in-picture scope's lens view (src/scope_lens.h; docs/scope-pip-re.md §4-§5).
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "infantryscope.h"
 #include "scope_lens.h"
 #include "scope_pip.h"
 #include "memory.h"

@@ -20,6 +20,10 @@
 #include "team_walk.h"
 #include <cmath>
 #include <cstring>
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
+#include "mapcmd.h"
 
 namespace crew {
 namespace {
@@ -33,13 +37,13 @@ constexpr unsigned kMostDeployments=16,kMostPlayers=16;
 
 struct Deployment {
     std::uint64_t transaction=0;
-    ObjRef soldier{};
+    WeakRef soldier{};   // held (objref.h)
     unsigned char requester[32]{};
-    ObjRef leader{};
+    WeakRef leader{};
     bool remote=false,own=false,active=false;
 };
 Deployment deployments[kMostDeployments]{};
-struct Guard { ObjRef ref{}; std::uint32_t added=0; };
+struct Guard { WeakRef ref{}; std::uint32_t added=0; };
 Guard guards[kMostPlayers]{};
 
 commander::Request request{};
@@ -52,10 +56,7 @@ std::uint64_t nextOffline=0x4000000000000000ULL;   // offline transactions: thei
 bool offlinePending=false;
 SupportPlan offlinePlan{};
 
-bool Alive(const ObjRef& r) noexcept {
-    __try { return r.obj && Readable(r.obj,kReadable) && r.Is(r.obj) && !At<unsigned char>(r.obj,kDead); }
-    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
-}
+using objref::Alive;
 Deployment* Find(std::uint64_t tx) noexcept {
     for(auto& d:deployments)if(d.transaction==tx)return &d;
     return nullptr;
@@ -104,7 +105,7 @@ void GuardPlayer(const unsigned char* soldier) noexcept {
     Guard* g=nullptr;
     for(auto& row:guards)if(row.ref.obj==soldier){g=&row;break;}
     __try {
-        if(g && !g->ref.Is(soldier))*g=Guard{};   // another object at the address: a fresh row
+        if(g && !g->ref.Is(soldier)){g->ref.Reset();g->added=0;}   // another object at the address: a fresh row
         if(!g)for(auto& row:guards)if(!row.ref.obj){g=&row;break;}
         if(!g)return;
         auto* object=const_cast<unsigned char*>(soldier);
@@ -120,14 +121,14 @@ void ReleaseGuards(const char* why) noexcept {
     for(auto& g:guards) {
         if(g.ref.obj && g.added) {
             __try {
-                if(Readable(g.ref.obj,kReadable) && g.ref.Is(g.ref.obj)) {
+                if(objref::Identity(g.ref)>=objref::Life::removed) {   // the object still there (dead or deleted too)
                     auto* object=const_cast<void*>(g.ref.obj);
                     Put<std::uint32_t>(object,kObjectFlags,At<std::uint32_t>(object,kObjectFlags)&~g.added);
                     Log("COMMANDER guard released on %p (+0x380 &= ~0x%X): %s",g.ref.obj,g.added,why);
                 }
             } __except(EXCEPTION_EXECUTE_HANDLER){}
         }
-        g=Guard{};
+        g.ref.Reset();g.added=0;
     }
 }
 

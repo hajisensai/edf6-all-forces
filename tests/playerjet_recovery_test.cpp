@@ -2,6 +2,20 @@
 #include "../src/playerjet.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/bay_rounds.h"
+#include "../src/boarding.h"
+#include "../src/plugin_body.h"
+#include "../src/booster.h"
+#include "../src/dreadnought.h"
+#include "../src/hud.h"
+#include "../src/launchers.h"
+#include "../src/map.h"
+#include "../src/missile.h"
+#include "../src/shield.h"
+#include "../src/sightzoom_api.h"
+#include "../src/vhud.h"
 
 namespace crew {
 bool payloadScenario=false,payloadMap=false;

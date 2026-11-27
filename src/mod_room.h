@@ -72,8 +72,17 @@ namespace crew {
 //  22 (2026-11-26): a registered jet's engine lever goes to every peer (jet_lever_net.h AFJL, state stream jetLever): the
 //      other machines' engine sound, afterburner and exhaust read it instead of guessing from its speed. An older build
 //      would neither send it (its jets silent elsewhere: no guess any more) nor read it.
+//  23 (2026-11-26): a flown call's request carries its way in (sortie_plan.h RunSpec's heading-only form, the map's G /
+//      the caller's facing): an older build rejects that message (its RunValid wants half 0 with no heading). The aura
+//      trucks (aura.h AFAU, state stream auraVehicles): the host decides which auras stand and every machine applies
+//      them; an older build would neither send nor read them.
+//  24 (2026-11-27): a jet sortie flies the pylons configured for its airframe (support_dispatch.cpp HullOf: the dive's,
+//      carpet's and hit and run's STRIKE, the missile pass's MULTIROLE, the wolf pack's FIGHTER), a plan unit's variant
+//      named under that catalog's body; a ground run's line is at least what its jets need to let every ground store go
+//      (sortie_plan.h RunLeast), lengthened by the host. An older build would read such a sortie's variant as none (no
+//      body under its own key) and fly it stock, its line where the host's is not.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=22;  // a registered jet's engine lever (jet_lever_net.h)
+constexpr std::int64_t kAllForcesRoomProtocol=24;  // a jet sortie's configured pylons (support_dispatch.cpp HullOf), its line's least length
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

@@ -1,6 +1,7 @@
 #include "mission_watch.h"
 #include "crash_dump.h"
-#include "crew.h"
+#include "plugin_log.h"
+#include "world.h"
 #include <Windows.h>
 #include <atomic>
 #include <cwchar>

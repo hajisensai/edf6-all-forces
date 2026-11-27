@@ -29,7 +29,8 @@
 // as int32 and the equipped weapons' stars by value (0x78E9A0 reads them from the relocated table: patched).
 #include "weapon_records.h"
 #include "weapon_records_logic.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include "pack_notice.h"
 #include "edf/patch.h"

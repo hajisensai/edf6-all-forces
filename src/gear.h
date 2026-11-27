@@ -1,7 +1,8 @@
 // Landing gear of the jet models (gear.cpp; the models' bones: pylib/jet_gear.py). Game thread only, except
 // GearHudLatest (any thread).
 #pragma once
-#include "crew.h"
+#include <Windows.h>
+#include "step_fresh.h"
 
 namespace crew {
 constexpr int kGearLegs=3;   // the nose, the left and the right main (pylib/jet_gear.py LEGS)

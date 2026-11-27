@@ -19,7 +19,9 @@
 // liveness, 0x62D7F0, the gun's matrix +0xB0, 0x5F9FB0), the same steps as the 403's own index 0 branch; the store's
 // BodyRecoil record (make_stock_stores._params: [0, 0] for a missile) pushes the hull by that. Every other holder takes
 // the 403's own code. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include <atomic>
+#include "edf_layout.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include "storerecoil.h"
 
@@ -31,7 +33,7 @@ using store_recoil::Route;
 
 constexpr std::size_t kSlotFired=48;
 constexpr std::size_t kHolders=0x638,kHolderCount=0x648,kHolderStride=0x48;
-static_assert(kSeatCount==0x618,"the seat vector's count (crew.h)");
+static_assert(kSeatCount==0x618,"the seat vector's count (edf/layout.h)");
 constexpr unsigned kVtable403=0x17D8FA0,kFired403=0x5FED60,kHullFired=0x5FFEE0;
 // 0x5FED92 call 0x62DB10 (the holder's index)
 constexpr unsigned kIndexCall=0x5FED92;

@@ -84,8 +84,9 @@ void Codec() {
     m.request.formationTotal=1;
     Check(!Encode(m,bytes,sizeof(bytes)),"HOLD carries no formation slots");
     Check(static_cast<int>(mapcmd::Order::hold)==13 && static_cast<int>(mapcmd::Order::formation)==14 &&
-          mapcmd::kLastOrder==mapcmd::Order::formation,"HOLD is appended (13), the formation order after it (14)");
-    Check(kVersion==10,"the wire is version 10 (DISMOUNT ALL's choice), the one spoken (net-6: no negotiation)");
+          static_cast<int>(mapcmd::Order::fastMove)==15 && mapcmd::kLastOrder==mapcmd::Order::decoy,
+          "HOLD is appended (13), the formation order after it (14), the Broken Arrow orders after that (15..22)");
+    Check(kVersion==11,"the wire is version 11 (the Broken Arrow orders, lines and pings), the one spoken (net-6: no negotiation)");
     {   // The requester only a player's reference, a unit only a NetId, the focus either (an enemy player in PvP).
         Request r=Make(2,mapcmd::Order::focus);
         Check(ValidRequest(r),"a focus by its NetId");
@@ -111,7 +112,7 @@ void Codec() {
         std::uint32_t was;std::memcpy(&was,edit+kOrderAt,4);
         Check(was==static_cast<std::uint32_t>(mapcmd::Order::guard),"the order word where the codec writes it");
         std::memcpy(edit+kOrderAt,&last,4);
-        const std::uint32_t param=mapcmd::FormationParam(-2,-1);std::memcpy(edit+52,&param,4);   // the formation order's own word
+        const std::uint32_t param=0;std::memcpy(edit+52,&param,4);   // DECOY (the last) takes no parameter
         Check(Decode(edit,sizeof(edit),out) && out.request.command.order==mapcmd::kLastOrder,"the last order decodes");
         std::memcpy(edit+kOrderAt,&past,4);
         Check(!Decode(edit,sizeof(edit),out),"an order past the last one is not decoded");
@@ -151,7 +152,71 @@ void Version8() {
         unsigned char edit[kWireSize];std::memcpy(edit,bytes,sizeof(edit));std::memcpy(edit+4,&old,4);
         Check(Owned(edit,sizeof(edit)) && !Decode(edit,sizeof(edit),copy),"an older build's request is consumed, never read");
     }
-    Check(Encode(m,bytes,sizeof(bytes)) && bytes[4]==kVersion && !bytes[5] && !bytes[6] && !bytes[7],"everything goes out at version 10");
+    Check(Encode(m,bytes,sizeof(bytes)) && bytes[4]==kVersion && !bytes[5] && !bytes[6] && !bytes[7],"everything goes out at version 11");
+}
+// Version 11: the Broken Arrow orders, a point order's line (a right drag) in its parameter, the switches' params, and
+// the pings (Kind::ping), relayed by the host to every other member when the sender speaks for its player.
+bool Speaks(void*,const char* puid,const unsigned char* requester) noexcept {
+    return puid && !std::strcmp(puid,"client-one") && crew::netref::IsPlayer(requester);
+}
+void Version11() {
+    Message m;m.kind=Kind::request;m.epoch=7;m.sequence=9;
+    unsigned char bytes[kWireSize];Message copy;
+    for(auto order:{mapcmd::Order::fastMove,mapcmd::Order::reverseMove,mapcmd::Order::unloadAt}) {
+        m.request=Make(1,order);
+        Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order,
+              "FAST / REVERSE / UNLOAD AT round trip");
+        m.request.flags=kQueued;Check(Encode(m,bytes,sizeof(bytes)),"and are queued as the point orders they are");
+        m.request.flags=0;m.request.command.param=mapcmd::LineParam(0.5f,30.0f);
+        Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.param==m.request.command.param,
+              "a right drag's line rides on a point order");
+    }
+    m.request=Make(2,mapcmd::Order::move);m.request.command.param=0x1234u;
+    Check(!Encode(m,bytes,sizeof(bytes)),"a move's parameter that is no line refused");
+    m.request=Make(1,mapcmd::Order::holdFire);m.request.command.param=1;
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.param==1,"HOLD FIRE on round trips");
+    m.request.command.param=0;Check(Encode(m,bytes,sizeof(bytes)),"HOLD FIRE off");
+    m.request.command.param=2;Check(!Encode(m,bytes,sizeof(bytes)),"HOLD FIRE's switch is 0 / 1");
+    m.request.command.param=mapcmd::LineParam(0.5f,30.0f);Check(!Encode(m,bytes,sizeof(bytes)),"no line on a switch");
+    m.request=Make(1,mapcmd::Order::altitude);m.request.command.param=mapcmd::kAltitudeHigh;
+    Check(Encode(m,bytes,sizeof(bytes)),"ALTITUDE high");
+    m.request.flags=kQueued;Check(!Encode(m,bytes,sizeof(bytes)),"a switch is not queued");
+    for(auto order:{mapcmd::Order::sprint,mapcmd::Order::smoke,mapcmd::Order::decoy}) {
+        m.request=Make(1,order);
+        Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order,
+              "SPRINT / SMOKE / DECOY round trip");
+        m.request.command.param=1;Check(!Encode(m,bytes,sizeof(bytes)),"with no parameter");
+    }
+    {   // The ping's codec: a player's point and its kind, nothing else.
+        Message p;p.kind=Kind::ping;p.epoch=7;p.sequence=1;crew::netref::MakePlayer(2,p.request.requester);
+        p.request.command.at[0]=5;p.request.command.at[2]=-8;p.request.command.param=kPingKinds-1;
+        Check(Encode(p,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.kind==Kind::ping &&
+              copy.request.command.param==kPingKinds-1 && copy.request.command.at[2]==-8.0f,"a ping round trips");
+        Message bad=p;bad.request.command.param=kPingKinds;Check(!Encode(bad,bytes,sizeof(bytes)),"a ping's kind past the last refused");
+        bad=p;bad.request.count=1;bad.request.units[0][0]=1;Check(!Encode(bad,bytes,sizeof(bytes)),"a ping names no unit");
+        bad=p;std::memset(bad.request.requester,0,32);bad.request.requester[0]=9;Check(!Encode(bad,bytes,sizeof(bytes)),"a ping's sender a player");
+        bad=p;bad.request.command.order=mapcmd::Order::move;Check(!Encode(bad,bytes,sizeof(bytes)),"a ping carries no order");
+        bad=p;bad.sequence=0;Check(!Encode(bad,bytes,sizeof(bytes)),"a ping is counted");
+    }
+    {   // The ping through the room: a client's to the host, shown there and relayed to the other client.
+        Room r;r.nodes[0]->session->Configure({r.nodes[0].get(),&Send,&Execute,&Speaks});
+        Ping p;crew::netref::MakePlayer(2,p.requester);p.at[0]=11;p.kind=2;
+        Check(r.nodes[1]->session->SendPing(p,r.now),"the client sends its ping");
+        Check(!r.nodes[1]->session->SendPing(p,r.now+1),"a second within kPingGapMs is not sent");
+        r.Pump();
+        Ping heard;
+        Check(r.nodes[0]->session->TakePing(&heard) && heard.kind==2 && heard.at[0]==11.0f,"the host hears it");
+        Check(r.nodes[2]->session->TakePing(&heard) && heard.kind==2 && !std::memcmp(heard.requester,p.requester,32),"the other client hears it from the host");
+        Check(!r.nodes[1]->session->TakePing(&heard),"not sent back to its sender");
+        Check(!r.nodes[0]->session->TakePing(&heard),"heard once");
+        // A ping from a member who does not speak for that player (client-two): dropped by the host.
+        r.Step();Check(r.nodes[2]->session->SendPing(p,r.now),"client-two sends one in another's name");r.Pump();
+        Check(!r.nodes[0]->session->TakePing(&heard) && !r.nodes[1]->session->TakePing(&heard),"the host drops it, no one hears it");
+        // The host's own: to every member.
+        r.Step();Check(r.nodes[0]->session->SendPing(p,r.now),"the host sends its own");r.Pump();
+        Check(r.nodes[1]->session->TakePing(&heard) && r.nodes[2]->session->TakePing(&heard),"every member hears the host's");
+        Ping bad=p;bad.kind=kPingKinds;Check(!r.nodes[0]->session->SendPing(bad,r.now+1000),"a kind past the last is not sent");
+    }
 }
 // One version, no negotiation (net-6): a hello carries nothing but its epoch; a message of another version is never read.
 void Negotiation() {
@@ -283,4 +348,4 @@ void Protocol() {
     Check(rebound.nodes[0]->executed==1 && rebound.sent.size()==packets,"peer index cannot inherit another PUID's capability or result cache");
 }
 }
-int main(){Codec();Version8();Negotiation();WaysMessages();WaysReconnect();Protocol();std::printf("command protocol: %d checks passed\n",checks);}
+int main(){Codec();Version8();Version11();Negotiation();WaysMessages();WaysReconnect();Protocol();std::printf("command protocol: %d checks passed\n",checks);}

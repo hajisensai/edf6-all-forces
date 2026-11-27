@@ -5,6 +5,8 @@
 #include "enemy_control_gun_factory.h"
 #include "enemy_control_walking_parts.h"
 #include "memory.h"
+#include "lazy_rows.h"
+#include "edf/patch.h"
 #include "team_native_logic.h"
 #include <cstring>
 namespace crew {
@@ -73,7 +75,7 @@ struct Notification {ObjRef object{};void* callback=nullptr;void* function=nullp
 struct ShotChild {ObjRef ref{},bullet{};void* manager=nullptr;bool complete=false,activate=false;Notification notice{};};
 struct Shot {ObjRef root{};std::uint64_t token=0;unsigned expected=0,created=0,tracked=0;bool owned=false,failed=false;ObjRef denied{};ShotChild children[controlled_pvp::kMaxMembers]{};};
 struct Construction {void* memory=nullptr;void* result=nullptr;bool entered=false,completed=false,rejected=false,creatingDamage=false;};
-Root roots[kRootLimit]{};Born born[kBornLimit]{};Binding bindings[kBindingLimit]{};
+Root roots[kRootLimit]{};LazyRows<Born,kBornLimit> born;LazyRows<Binding,kBindingLimit> bindings;   // heap from the first record (plugin_image_size_guard)
 unsigned char bulletPublicationCode[28]{};const unsigned char* bulletPublicationRelay=nullptr;unsigned char bulletPublicationAfter[13]{};bool bulletPublicationChanged=false;
 unsigned char publicationCode[24]{};const unsigned char* publicationRelay=nullptr;const void* constructingRocket=nullptr;Construction* construction=nullptr;Shot* active=nullptr;BombBirth* activeBomb=nullptr;ObjRef pendingDenied{};unsigned char publicationAfter[9]{};bool publicationChanged=false;bool installed=false,attempted=false,globalUnsafe=false;unsigned char* admittedImage=nullptr;std::uint64_t serial=0;
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
@@ -201,11 +203,11 @@ bool Sweep() noexcept {
  }
  return true;
 }
-unsigned Room() noexcept {if(!Sweep())return 0;unsigned n=0;for(const auto& b:born)n+=b.child ? 0u : 1u;return n;}
+unsigned Room() noexcept {if(!born.Allocate("PVP berserker births") || !Sweep())return 0;unsigned n=0;for(const auto& b:born)n+=b.child ? 0u : 1u;return n;}
 bool Record(const ObjRef& parent,const ObjRef& child,int bodyTeam,int bodyLast,int parentTeam,int parentLast,bool controlled) noexcept {
  if(Identity(parent)!=Life::live || Identity(child)!=Life::live || Same(parent,child) || !Team(bodyTeam) || !Team(bodyLast) || !Team(parentTeam) || !Team(parentLast))return false;
  if(auto* b=Recorded(child))return Same(b->parent,parent);
- if(!Sweep())return false;Born* free=nullptr;
+ if(!born.Allocate("PVP berserker births") || !Sweep())return false;Born* free=nullptr;
  for(auto& b:born){if(b.child.obj==child.obj && b.child.ctrl!=child.ctrl)return false;if(!b.child && !free)free=&b;}
  if(!free || !Hold(parent))return false;if(!Hold(child)){ObjRef copy=parent;Drop(copy);return false;}
  *free={parent,child,bodyTeam,bodyLast,parentTeam,parentLast,false,controlled,false};return true;
@@ -250,6 +252,7 @@ Binding* Bind(const ObjRef& owner,const ObjRef& holder,const ObjRef& bullet,cons
   int team=-1,last=-1;if(!Original(owner,&team,&last))return nullptr;filter=damage=lastSource ? last : team;
  }
  if(!Team(filter) || !Team(damage))return nullptr;
+ if(!bindings.Allocate("PVP berserker bullet bindings"))return nullptr;
  Binding* target=nullptr;for(auto& b:bindings)if(!b.serial){target=&b;break;}if(!target)return nullptr;
  if(!Hold(owner))return nullptr;if(!Hold(holder)){ObjRef r=owner;Drop(r);return nullptr;}
  if(!Hold(bullet)){ObjRef a=owner,z=holder;Drop(a);Drop(z);return nullptr;}
@@ -669,37 +672,27 @@ constexpr unsigned kPublication=0x1194949;
 constexpr unsigned char kPublicationBytes[]={0x4C,0x8D,0x44,0x24,0x48,0x48,0x8D,0x55,0xB7};
 const void* publicationTable[3]={nullptr,nullptr,reinterpret_cast<void*>(&ScenePublication)};
 bool PatchPublication() noexcept {
- if(!Readable(image+kPublication,9) || std::memcmp(image+kPublication,kPublicationBytes,9))return false;
  // Replace only the argument LEAs. Native null-callback JE ->1194955 and CALL [RAX+10] stay intact.
  // This is a leaf: the real C++ guard is called from the original native instruction/pdata frame.
  unsigned char code[]={0x4C,0x8B,0x48,0x10,0x4C,0x8D,0x44,0x24,0x50,0x48,0x8D,0x55,0xB7,0x48,0xB8,0,0,0,0,0,0,0,0,0xC3};
  const auto table=reinterpret_cast<std::uintptr_t>(publicationTable);std::memcpy(code+15,&table,8);
- const auto* thunk=static_cast<const unsigned char*>(AllocateNearCode(image+kPublication,code,sizeof(code)));if(!thunk)return false;
- const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(image+kPublication+5);if(delta<INT32_MIN || delta>INT32_MAX)return false;
- unsigned char patch[9]={0xE8,0,0,0,0,0x90,0x90,0x90,0x90};const auto relative=static_cast<std::int32_t>(delta);std::memcpy(patch+1,&relative,4);
- edf::ClaimCode(image+kPublication,9);   // a code write of its own (edf/code_owner.h)
- DWORD old=0;if(!VirtualProtect(image+kPublication,9,PAGE_EXECUTE_READWRITE,&old))return false;
- std::memcpy(image+kPublication,patch,9);FlushInstructionCache(GetCurrentProcess(),image+kPublication,9);DWORD ignored=0;
- if(!VirtualProtect(image+kPublication,9,old,&ignored))return false;
- std::memcpy(publicationAfter,patch,9);std::memcpy(publicationCode,code,sizeof(code));publicationRelay=thunk;publicationChanged=true;return true;
+ // The 9 LEA bytes become a call to the leaf and nops: the leaf page given back when the site is not written.
+ const auto* thunk=edf::RedirectToCode(image+kPublication,kPublicationBytes,9,code,sizeof(code),edf::Branch::kCall,publicationAfter);
+ if(!thunk)return false;
+ std::memcpy(publicationCode,code,sizeof(code));publicationRelay=thunk;publicationChanged=true;return true;
 }
 
 constexpr unsigned kBulletPublication=0x1194395;
 constexpr unsigned char kBulletPublicationBytes[]={0x4C,0x8D,0x44,0x24,0x70,0x48,0x8D,0x94,0x24,0x80,0,0,0};
 const void* bulletPublicationTable[3]={nullptr,nullptr,reinterpret_cast<void*>(&BulletPublication)};
 bool PatchBulletPublication() noexcept {
- if(!Readable(image+kBulletPublication,13) || std::memcmp(image+kBulletPublication,kBulletPublicationBytes,13))return false;
  // A leaf replaces only argument LEAs; native null-callback branch and indirect CALL remain in their original frame.
  unsigned char code[]={0x4C,0x8B,0x48,0x10,0x4C,0x8D,0x44,0x24,0x78,0x48,0x8D,0x94,0x24,0x88,0,0,0,0x48,0xB8,0,0,0,0,0,0,0,0,0xC3};
  const auto table=reinterpret_cast<std::uintptr_t>(bulletPublicationTable);std::memcpy(code+19,&table,8);
- const auto* thunk=static_cast<const unsigned char*>(AllocateNearCode(image+kBulletPublication,code,sizeof(code)));if(!thunk)return false;
- const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(image+kBulletPublication+5);if(delta<INT32_MIN || delta>INT32_MAX)return false;
- unsigned char patch[13]={0xE8,0,0,0,0,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};const auto relative=static_cast<std::int32_t>(delta);std::memcpy(patch+1,&relative,4);
- edf::ClaimCode(image+kBulletPublication,13);   // a code write of its own (edf/code_owner.h)
- DWORD old=0;if(!VirtualProtect(image+kBulletPublication,13,PAGE_EXECUTE_READWRITE,&old))return false;
- std::memcpy(image+kBulletPublication,patch,13);FlushInstructionCache(GetCurrentProcess(),image+kBulletPublication,13);DWORD ignored=0;
- if(!VirtualProtect(image+kBulletPublication,13,old,&ignored))return false;
- std::memcpy(bulletPublicationAfter,patch,13);std::memcpy(bulletPublicationCode,code,sizeof(code));bulletPublicationRelay=thunk;bulletPublicationChanged=true;return true;
+ const auto* thunk=edf::RedirectToCode(image+kBulletPublication,kBulletPublicationBytes,13,code,sizeof(code),edf::Branch::kCall,
+                                       bulletPublicationAfter);
+ if(!thunk)return false;
+ std::memcpy(bulletPublicationCode,code,sizeof(code));bulletPublicationRelay=thunk;bulletPublicationChanged=true;return true;
 }
 
 bool HookReady(const HookSite& h) noexcept {

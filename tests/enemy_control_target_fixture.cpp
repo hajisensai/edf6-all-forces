@@ -5,6 +5,9 @@
 #include <cstdlib>
 #include <limits>
 #include <vector>
+#include "../src/edf_layout.h"
+#include "../src/heli.h"
+#include "../src/payload.h"
 namespace crew {unsigned char* image=nullptr;}
 namespace {
 using namespace crew;

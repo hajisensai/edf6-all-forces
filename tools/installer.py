@@ -102,7 +102,7 @@ NEW_DEFAULTS_1017: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1017 = '; edf6vc-defaults-2026-10-17：安装器已把仍是旧出厂值 15 的 Edf41MotherParts 改成 31' \
                      '（4.1 母舰的板甲也建出来；想改就改，之后安装不会再改）'
-# The high view (the user, 2026-10-23: "俯瞰视角太小了"): its eye from 45 m over / 35 m behind to 90 / 55 (src/crew.h
+# The high view (the user, 2026-10-23: "俯瞰视角太小了"): its eye from 45 m over / 35 m behind to 90 / 55 (src/config.h
 # highCamHeight / highCamBack); merge_ini keeps an old ini's 45 / 35, so it never saw the farther view.
 NEW_DEFAULTS_1024: dict[str, dict[str, tuple[str, str]]] = {
     SECTION: {'HighCamHeight': ('45', '90'), 'HighCamBack': ('35', '55')},
@@ -110,7 +110,7 @@ NEW_DEFAULTS_1024: dict[str, dict[str, tuple[str, str]]] = {
 DEFAULTS_MARK_1024 = '; edf6vc-defaults-2026-10-24：安装器已把仍是旧出厂值的高视角 HighCamHeight 45 / HighCamBack 35 ' \
                      '改成 90 / 55（想改就改，之后安装不会再改）'
 # Fire key 4 on a pad (2026-11-08, docs/feedback-2026-11-08-grape-keys.md): the Grape's coax moved off the Car's throttle
-# (LT) onto fire key 4, whose pad button shipped 0 (none); RB now (src/crew.h vehicleFire4Button). merge_ini keeps an old
+# (LT) onto fire key 4, whose pad button shipped 0 (none); RB now (src/config.h vehicleFire4Button). merge_ini keeps an old
 # ini's 0, which would leave the Grape's coax with no pad button at all.
 NEW_DEFAULTS_1108: dict[str, dict[str, tuple[str, str]]] = {
     SECTION: {'VehicleFire4Button': ('0', '512')},
@@ -705,6 +705,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_stock_stores
     import make_sidecar
     import make_sedan
+    import make_aura_vehicles
     import make_sub
     import rootcpk
     rootcpk.use(game)
@@ -755,6 +756,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         *((kind, make_xmorph.LABELS[kind], (), None) for kind in xmorph_kinds),
         ('sidecar', tr('边三轮摩托', 'Sidecar motorcycle'), (), None),
         ('sedan', tr('民用轿车', 'Civilian sedan'), (), None),
+        ('aura_vehicles', tr('光环载具（指挥车、维修车、弹药车）', 'Aura trucks (command, repair, ammo)'), (), None),
         ('sazabi', tr('沙扎比（模型生成约 1.5 分钟）', 'Sazabi (about 1.5 minutes to generate)'), (), None),
         ('dreadnought', tr(f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
                            f'Dreadnought and its aircraft (hangar modules: {make_dreadnought.fitting_text(hangars)}; '
@@ -776,6 +778,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     xmorph = {kind: built[kind] for kind in xmorph_kinds}
     sidecar, sedan, sazabi, dreadnought, c130, helicarrier, proteus, bigmap = (
         built[g] for g in ('sidecar', 'sedan', 'sazabi', 'dreadnought', 'c130', 'helicarrier', 'proteus', 'bigmap'))
+    aura = built['aura_vehicles']
     stock = None
     if stock_stores:
         print(tr('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……',
@@ -820,6 +823,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
              for path in buildcache.tool(kind).install(game, files)] + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
+            (make_aura_vehicles.install(game, aura) if aura is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
             (make_dreadnought.install(game, dreadnought) if dreadnought is not None else []) + \
             (make_c130.install(game, c130) if c130 is not None else []) + \
@@ -962,7 +966,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), *cars.items(), *xmorph.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('c130', c130), ('helicarrier', helicarrier), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), *cars.items(), *xmorph.items(), ('sidecar', sidecar), ('sedan', sedan), ('aura_vehicles', aura), ('sazabi', sazabi), ('dreadnought', dreadnought), ('c130', c130), ('helicarrier', helicarrier), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -1080,6 +1084,7 @@ def uninstall(game: str) -> None:
     import make_stock_stores
     import make_sidecar
     import make_sedan
+    import make_aura_vehicles
     import make_sub
     import buildcache
     import rootcpk
@@ -1125,7 +1130,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_stock_holds.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_c130.remove, make_helicarrier.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, worldmap_pack.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_stock_holds.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_c130.remove, make_helicarrier.remove, make_sedan.remove, make_aura_vehicles.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, worldmap_pack.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -1685,6 +1690,9 @@ def check_package() -> int:
                for text in cockpit_instruments.LABELS[key] for ch in text)
     assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
     assert make_sedan.OWNER in ledger.OWNERS
+    import make_aura_vehicles
+    assert make_aura_vehicles.OWNER in ledger.OWNERS
+    assert all(cockpit_fits.FITS[t.stem] for t in make_aura_vehicles.TRUCKS)
     # The fighters' tub cut to its gaps (cockpit_tub.gap_liner) runs shapely's GEOS: run it, not just import it.
     import numpy as np
     import cockpit_shapes

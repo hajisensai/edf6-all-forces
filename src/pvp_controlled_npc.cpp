@@ -4,6 +4,7 @@
 #include "npc_native_hooks.h"
 #include <array>
 #include <cstring>
+#include "edf_layout.h"
 
 namespace crew { namespace npc_pvp_detail {
 using controlled_pvp::Emitter;using controlled_pvp::EmitterKind;using controlled_pvp::Life;

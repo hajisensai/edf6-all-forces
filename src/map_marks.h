@@ -17,7 +17,7 @@
 #include <cstdint>
 
 namespace crew::mapmarks {
-constexpr std::int32_t kNobodysTeam=5;   // crew.h kTeamVehicle
+constexpr std::int32_t kNobodysTeam=5;   // edf_layout.h kTeamVehicle
 
 // The walks a gather makes for `team` (the player's): the friends' always, team 5's unless that is the player's own
 // (then the friends' walk has it already).

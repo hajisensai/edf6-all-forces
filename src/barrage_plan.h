@@ -21,14 +21,11 @@ namespace barrage {
 constexpr float kPi=3.14159265358979f;
 constexpr int kFps=60;
 
-// The calls (tools/calls.py brings 'barrage', `barrage` its kind's name; kKindNames below, in this order).
-enum class Kind : std::uint8_t { katyusha, guided, thermobaric, cluster, creeping, mrsi, heavy, cruise, ballistic, count };
-constexpr int kKinds=static_cast<int>(Kind::count);
+// The calls (tools/calls.py brings 'barrage', `barrage` its kind's name: BARRAGE_KINDS, in this order).
+#include "barrage_kind.inc"   // enum class Kind, kKinds, kKindNames (tools/gen_calls.py)
 constexpr bool HasOrientedFootprint(int kind) noexcept {
     return kind==static_cast<int>(Kind::creeping) || kind==static_cast<int>(Kind::mrsi);
 }
-constexpr const char* kKindNames[kKinds]={"katyusha","guided","thermobaric","cluster","creeping","mrsi","heavy","cruise",
-                                          "ballistic"};
 enum class Path : std::uint8_t { arc, lobDive, cruise };
 
 constexpr int kMaxRounds=160;          // a barrage's rounds at most (the cluster's 12 carriers and 144 bomblets)

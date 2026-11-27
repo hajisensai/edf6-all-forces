@@ -15,6 +15,8 @@
 // can be local: enabled commits additionally require fresh ACKs from every
 // participant, so an isolated extension fault cannot leave the others enabled.
 namespace pvp_protocol {
+// The plugin_net channel's magic (the message's first little-endian word, as every channel's), 'AFPV'.
+constexpr std::uint32_t kMagic = 0x56504641u;
 constexpr std::uint8_t kVersion = 3;
 constexpr std::size_t kMaxMembers = 8;
 constexpr std::size_t kEntryBytes = 70;   // puid 65, team, faction, role, unit 2
@@ -121,7 +123,7 @@ inline std::size_t Encode(const Message& msg, void* buffer, std::size_t capacity
     if (!buffer || n > capacity) return 0;
     auto* out = static_cast<std::uint8_t*>(buffer);
     std::memset(out, 0, n);
-    Put(out, 0x56504641u, 4); // AFPV
+    Put(out, kMagic, 4);
     out[4] = kVersion; out[5] = static_cast<std::uint8_t>(msg.kind);
     Put(out + 6, n, 2); Put(out + 8, msg.epoch, 8);
     Put(out + 16, msg.revision, 4); Put(out + 20, msg.token, 4);
@@ -148,7 +150,7 @@ inline std::size_t Encode(const Message& msg, void* buffer, std::size_t capacity
 inline bool Decode(const void* buffer, std::size_t n, Message& msg) noexcept {
     if (!buffer || n < 32 || n > kMaxWireBytes) return false;
     const auto* in = static_cast<const std::uint8_t*>(buffer);
-    if (Get(in, 4) != 0x56504641u || in[4] != kVersion || Get(in + 6, 2) != n ||
+    if (Get(in, 4) != kMagic || in[4] != kVersion || Get(in + 6, 2) != n ||
         Get(in + 28, 4) != Checksum(in, n) || in[5] < 1 || in[5] > static_cast<std::uint8_t>(Kind::LeaseAck)) return false;
     Message next{};
     next.kind = static_cast<Kind>(in[5]);
@@ -309,7 +311,7 @@ public:
         Message msg{};
         if (!wire::Decode(data, size, msg)) {
             const auto* bytes = static_cast<const std::uint8_t*>(data);
-            if (bytes && size >= 5 && wire::Get(bytes, 4) == 0x56504641u && bytes[4] != kVersion)
+            if (bytes && size >= 5 && wire::Get(bytes, 4) == kMagic && bytes[4] != kVersion)
                 result_ = Result::ProtocolError;
             return false;
         }

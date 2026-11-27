@@ -22,7 +22,11 @@
 //    flight what PN asks (at most all of it), the rest along; then the stock top speed.
 // Each machine flies its own copy of a round (no network ownership in these updates, docs/guidance-re.md §6): every
 // player in a room wants the same setting. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "missile.h"
+#include "patches.h"
 #include "memory.h"
 #include "pn.h"
 #include <cmath>

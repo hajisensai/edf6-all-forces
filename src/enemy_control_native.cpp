@@ -2,7 +2,7 @@
 // locomotion, weapons, animation events and per-variant equipment gates.
 #include "enemy_control_native.h"
 #include "enemy_control_identity.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <atomic>
 #include <cmath>

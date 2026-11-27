@@ -19,8 +19,8 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from online_gate_guard import body, code_only, before  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pylib"))
+from srcscan import body, code as code_only, precedes as before  # noqa: E402  (the one C++ reader)
 
 failures: list[str] = []
 

@@ -392,26 +392,26 @@ int main() {
         for(int i=0;i<3;++i){Put<int>(weapons[0][i],kWeaponAmmo,10);weapons[0][i][kWeaponTrigger]=0;weapons[0][i][0x102]=0;
                              Put<float>(weapons[0][i],0x89C,10);}
         weapons[0][1][0x101]=1;Put<const wchar_t*>(weapons[0][1],0x08,L"EDF6VC_AAM_S_2.SGO");
-        pickNetOk=seat_net::Register(seat_net::kPickMagic,&PickReceived);   // InstallPayload's, past its native pull patch
-        check(pickNetOk && seat_net::fakeMagic==seat_net::kPickMagic && seat_net::fakeHandler,"the pick kind has its receiver");
+        pickNetOk=object_net::Register(seat_net::kPickMagic,&PickReceived);   // InstallPayload's, past its native pull patch
+        check(pickNetOk && object_net::fakeMagic==seat_net::kPickMagic && object_net::fakeHandler,"the pick kind has its receiver");
         // This machine's player in the gunner seat, on a pad: LB picks the next weapon; the pick goes out at once.
         riders[0][edf::kHumanPlayer]=1;Put<void*>(riders[0],edf::kHumanPad,riders[0]);riders[0][edf::kRiderNet+edf::kNetFlags]=0;
         trackedHuman=riders[0];authority=true;
         seat[kSeatPad]=1;Put<std::uint16_t>(seat,kSeatButtons,0);
         fakeSession=true;Put<std::uint16_t>(v,0x128,2);
-        int from=seat_net::fakeSends;
+        int from=object_net::fakeSends;
         now+=16;PayloadFrame(v);
         Pick sent{};
         check(seat_net::LastPick(from,&sent) && sent.seat==0 && sent.holder==0 && !(sent.flags&seat_net::kNpc),
               "boarding: the seat's pick (the main gun, holder 0) goes to the copies");
-        from=seat_net::fakeSends;now+=16;PayloadFrame(v);
-        check(seat_net::fakeSends==from,"unchanged within the refresh: nothing sent");
+        from=object_net::fakeSends;now+=16;PayloadFrame(v);
+        check(object_net::fakeSends==from,"unchanged within the refresh: nothing sent");
         Put<std::uint16_t>(seat,kSeatButtons,0x10);now+=16;PayloadFrame(v);Put<std::uint16_t>(seat,kSeatButtons,0);
         check(seat_net::LastPick(from,&sent) && sent.holder==1,"LB: the new pick (holder 1) at once");
-        from=seat_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
+        from=object_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
         check(seat_net::LastPick(from,&sent) && sent.holder==1,"refreshed every kPickRefreshMs");
-        fakeSession=false;from=seat_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
-        check(seat_net::fakeSends==from,"offline: no pick goes out");
+        fakeSession=false;from=object_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
+        check(object_net::fakeSends==from,"offline: no pick goes out");
         // Another machine's copy of that vehicle: the seat's rider is that machine's player (its network flag), this
         // machine runs no one there. Before any pick its pulls are the stock gun's.
         ResetPayload();fakeSession=true;authority=false;trackedHuman=nullptr;
@@ -422,20 +422,20 @@ int main() {
         check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"no pick heard: the stock pull is the gun's");
         weapons[0][0][kWeaponTrigger]=0;
         sent.head.sender=0x77;sent.head.sequence=5;sent.head.controller=-1;
-        seat_net::fakeHandler(v,&sent,sizeof(sent));
+        object_net::fakeHandler(v,&sent,sizeof(sent));
         now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"the remote player's pick: this copy's pull lands on it too");
         check(!PayloadPicked(v),"a remote pick is no pick of this machine's player (its HUD, its sight)");
         Pick back=sent;back.holder=0;back.head.sequence=4;
-        seat_net::fakeHandler(v,&back,sizeof(back));
+        object_net::fakeHandler(v,&back,sizeof(back));
         weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1,"an older message from that sender cannot undo the pick");
         Pick epoch=sent;epoch.holder=0;epoch.head.sequence=9;epoch.head.controller=42;
-        seat_net::fakeHandler(v,&epoch,sizeof(epoch));
+        object_net::fakeHandler(v,&epoch,sizeof(epoch));
         weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1,"a message of another control epoch (a rider who left) is refused");
         Pick bad=sent;bad.reserved=1;bad.head.sequence=10;bad.holder=0;
-        seat_net::fakeHandler(v,&bad,sizeof(bad));seat_net::fakeHandler(v,&bad,sizeof(bad)-4);
+        object_net::fakeHandler(v,&bad,sizeof(bad));object_net::fakeHandler(v,&bad,sizeof(bad)-4);
         weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1,"a malformed block is ignored");
         weapons[0][1][kWeaponTrigger]=0;now+=seat_net::kPickStaleMs+1;PayloadFrame(v);PullHook(holders0[0]);
@@ -444,42 +444,42 @@ int main() {
         // The record went with it, the sender's watermark did not (2026-10-20 review: it lived in the record): a delayed
         // older pick is still refused, a newer one taken; another room's members start the watermarks over.
         Pick late=sent;late.head.sequence=3;
-        seat_net::fakeHandler(v,&late,sizeof(late));
+        object_net::fakeHandler(v,&late,sizeof(late));
         now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"a delayed older pick after the record expired: still refused");
         weapons[0][0][kWeaponTrigger]=0;
         Pick newer=sent;newer.head.sequence=6;
-        seat_net::fakeHandler(v,&newer,sizeof(newer));
+        object_net::fakeHandler(v,&newer,sizeof(newer));
         now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"a newer pick of that sender: taken");
         weapons[0][1][kWeaponTrigger]=0;
-        seat_net::fakeHandler(v,&late,sizeof(late));
+        object_net::fakeHandler(v,&late,sizeof(late));
         now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1,"...and the old one after it refused");
         weapons[0][1][kWeaponTrigger]=0;
         Pick gun=sent;gun.holder=0;gun.head.sequence=7;
-        seat_net::fakeHandler(v,&gun,sizeof(gun));
+        object_net::fakeHandler(v,&gun,sizeof(gun));
         ++plugin_net::fakeRoomGeneration;
-        seat_net::fakeHandler(v,&late,sizeof(late));   // sequence 3, the store: below 7, but the room is another now
+        object_net::fakeHandler(v,&late,sizeof(late));   // sequence 3, the store: below 7, but the room is another now
         now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"another room's members: the watermarks start over");
         weapons[0][1][kWeaponTrigger]=0;
         now+=seat_net::kPickStaleMs+1;PayloadFrame(v);
         // This machine's own player takes the seat: a pick heard for it never applies (it runs the seat itself).
-        sent.head.sequence=20;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        sent.head.sequence=20;object_net::fakeHandler(v,&sent,sizeof(sent));
         riders[0][edf::kRiderNet+edf::kNetFlags]=0;Put<void*>(riders[0],edf::kHumanPad,riders[0]);trackedHuman=riders[0];
-        sent.head.sequence=21;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        sent.head.sequence=21;object_net::fakeHandler(v,&sent,sizeof(sent));
         Put<std::uint16_t>(seat,kSeatButtons,0);now+=16;PayloadFrame(v);
         PayloadReadout local{};
         check(PlayerPayload(&local) && local.picked==0,"the local player's own pick (the gun), not the remote one");
         // An NPC gunner: the machine that runs it (AiGunner) sends its pick, flagged; a copy lands its pulls the same way.
         ResetPayload();trackedHuman=nullptr;riders[0][edf::kHumanPlayer]=0;Put<void*>(riders[0],edf::kHumanPad,nullptr);
         riders[0][edf::kRiderNet+edf::kNetFlags]=0;authority=true;
-        from=seat_net::fakeSends;
+        from=object_net::fakeSends;
         check(NpcPayloadSelect(v,0,400,true)==weapons[0][1],"the NPC picks the AA store against an aircraft");
         check(seat_net::LastPick(from,&sent) && sent.holder==1 && (sent.flags&seat_net::kNpc),"...and sends it, flagged as an NPC's");
         ResetPayload();authority=false;   // the copy: this machine does not run that NPC
-        sent.head.sender=0x99;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        sent.head.sender=0x99;object_net::fakeHandler(v,&sent,sizeof(sent));
         for(int i=0;i<3;++i)weapons[0][i][kWeaponTrigger]=0;
         now+=16;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"the host's NPC pick: the copy's pull lands on the store");
@@ -701,12 +701,12 @@ int main() {
         // APDS moves both onto its barrels; the cadence comes after (TwinBarrelFrame), so both pulls are seen first.
         {
             ResetPayload();fakeSession=true;Put<std::uint16_t>(v,0x128,2);Put<float>(s,0x2E0,0.0f);
-            pickNetOk=seat_net::Register(seat_net::kPickMagic,&PickReceived);
+            pickNetOk=object_net::Register(seat_net::kPickMagic,&PickReceived);
             seat_net::Pick heard{};heard.head.sender=0x77;heard.head.controller=-1;
             std::uint32_t sequence=0;
             const auto hear=[&](std::int32_t holder,bool npc) {
                 heard.seat=0;heard.holder=holder;heard.flags=npc ? seat_net::kNpc : 0;heard.head.sequence=++sequence;
-                seat_net::fakeHandler(v,&heard,sizeof(heard));
+                object_net::fakeHandler(v,&heard,sizeof(heard));
                 clear();now+=16;PayloadFrame(v);PullHook(list[0]);PullHook(list[1]);
                 return latches();
             };

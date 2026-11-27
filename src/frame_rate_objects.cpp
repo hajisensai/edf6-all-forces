@@ -61,7 +61,13 @@
 #include "fp_view.h"
 #include "thermal_models.h"
 #include "scene_object.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "layout.h"
 #include "memory.h"
 #include "edf/seat.h"
@@ -196,20 +202,15 @@ unsigned char* TakeWeak(const unsigned char* obj) noexcept {
     if(At<const unsigned char*>(obj,kSelf)!=obj)return nullptr;
     const auto ctrl=At<unsigned char*>(obj,kSelfCtrl);
     if(!ctrl || At<std::int32_t>(ctrl,edf::kCtrlUses)<=0)return nullptr;
-    _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+kCtrlWeaks));
+    objref::Retain(ctrl);
     return ctrl;
 }
 void DropWeak(unsigned char* ctrl) noexcept {
-    if(!ctrl)return;
-    if(_InterlockedDecrement(reinterpret_cast<volatile long*>(ctrl+kCtrlWeaks))==0) {   // the last reference: free the block
-        const auto vt=At<void* const*>(ctrl,0);
-        if(vt && Readable(vt,16))reinterpret_cast<void(__fastcall*)(void*)>(vt[1])(ctrl);
-    }
+    objref::Release(ctrl);
 }
 // The body's object still there (its use count; the weak count keeps the block), the same, not being deleted.
 bool Alive(const Body& b) noexcept {
-    return b.ctrl && At<std::int32_t>(b.ctrl,edf::kCtrlUses)>0 && At<const unsigned char*>(b.object,kSelfCtrl)==b.ctrl &&
-           !(At<unsigned char>(b.object,kObjFlags)&kObjDeleted);
+    return objref::ExistsHeld(ObjRef{b.object,b.ctrl});   // TakeWeak 持有这块的 weak count
 }
 
 // A live vehicle's seat count (edf::SeatCount's bound, read without Readable).

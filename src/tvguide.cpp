@@ -21,7 +21,15 @@
 // Online TV never takes a round: each machine flies its own copy and TV controls are not synchronized. The existing
 // laser guidance (stock or PN) remains in charge on every machine.
 #include "tvguide.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "netprobe.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "memory.h"
 #include "pn.h"
 #include <atomic>

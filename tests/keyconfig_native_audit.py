@@ -106,6 +106,8 @@ ok(b[0x8969FB] == ('mov', 'dword ptr [rsi + 0x7b0], r15d') and b[0x896AD2] == ('
 # ---- Stage 3 (docs/keyconfig-re.md §5..§7): the codes, the defaults, COMMON.CFG, and every site src/keyconfig.cpp patches.
 import re  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader)
 sys.path.insert(0, str(ROOT / 'tools'))
 img = p.get_memory_mapped_image()
 base = p.OPTIONAL_HEADER.ImageBase
@@ -125,7 +127,7 @@ for k in range(0x67):
     assert a.mnemonic == 'mov' and a.op_str.startswith('eax, ') and b2.mnemonic == 'ret'
     vks.append(int(a.op_str.split(', ')[1], 16))
 table_h = re.search(r'kKeyVk\[[^\]]*\]=\{(.*?)\};', keybind, re.S).group(1)
-table_h = re.sub(r'//[^\n]*', '', table_h)
+table_h = srcscan.code(table_h)
 ok([int(x, 16) for x in re.findall(r'0x[0-9A-Fa-f]{2}', table_h)] == vks, 'keybind.h kKeyVk is 0x11852C0\'s 0x67 virtual keys')
 ok(ins(0x11852C0, 4)[0x11852C0] == ('cmp', 'ecx, 0x66') and ins(0x11856F0, 4)[0x11856F0] == ('cmp', 'ecx, 0x66'),
    'keyboard codes 0x12..0x78 (index 0..0x66) in both the virtual-key and the name tables')

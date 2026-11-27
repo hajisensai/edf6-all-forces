@@ -18,7 +18,10 @@
 // wrapper only checks the 16 floats and calls on): such a placement is logged (VIEWDIAG umbra) with the call path and,
 // when the stack holds it, the object it belongs to, so a player's log names the source. Nothing about the call changes.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "hud.h"
+#include "view.h"
 #include "heli.h"
 #include "memory.h"
 #include "playarea.h"
@@ -125,12 +128,8 @@ bool InstallUmbraWatch() noexcept {
     // The import resolved into umbra_sandlot.dll (outside EDF.dll); anything else is not the build this was read from.
     if(!now || (static_cast<unsigned char*>(now)>=image && static_cast<unsigned char*>(now)<image+0x2400000))return false;
     umbraNext=reinterpret_cast<UmbraMatrixFn>(now);
-    edf::ClaimCode(entry,sizeof(void*));   // a write of its own (edf/code_owner.h): EDF.dll's import table
-    DWORD old=0;
-    if(!VirtualProtect(entry,sizeof(void*),PAGE_READWRITE,&old))return false;
-    const bool swapped=InterlockedCompareExchangePointer(entry,reinterpret_cast<void*>(&UmbraObjectMatrix),now)==now;
-    edf::RestoreProtection(entry,sizeof(void*),old);
-    return swapped;
+    // EDF.dll's import table entry swapped as a vtable slot is (claimed, compare-exchanged while it still holds `now`).
+    return edf::PatchVtableSlot(entry,now,reinterpret_cast<void*>(&UmbraObjectMatrix));
 }
 
 void ViewDiagTick() noexcept {

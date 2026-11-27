@@ -2,6 +2,7 @@
 // shells and its cannon, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "py_consts.inc"
 #include "preload_set.h"
 #include "online_authority.h"
 #include "vehicleram.h"
@@ -11,6 +12,10 @@
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
+#include "config.h"
+#include "plugin_log.h"
+#include "bay_rounds.h"
+#include "plugin_body.h"
 
 namespace crew {
 namespace jet {
@@ -146,8 +151,8 @@ constexpr float kImpactDrop=2.0f;
 // The drill tank's charge (DrillCharge, drill.cpp): tools/make_drill.py's EDF6VC_DRILL_CHARGE.SGO, the impact charges'
 // recipe with a small blast (pylib/vcobjects.py DRILL_CHARGE: 4 m, at least the 3 m from which a blast breaks buildings,
 // docs/drill-re.md §3) and a short flight (from the drill's base along its axis, it meets what the drill touches).
-const wchar_t kDrillChargeSgo[]=L"app:/object/edf6vc_drill_charge.sgo";
-const wchar_t kDrillChargeFile[]=L"EDF6VC_DRILL_CHARGE.SGO";
+using pyconst::kDrillChargeSgo;
+using pyconst::kDrillChargeFile;
 bool drillReady=false;                    // preloaded this mission (PreloadShells)
 // The EMC's rounds (emc.cpp, EmcFire; pylib/vcobjects.py EMC_*, tools/make_emc.py): its beam, its charge's glow, the
 // break charge it fires at each building on its line and the blast at its end; then the Sazabi's beams (sazabi.cpp;

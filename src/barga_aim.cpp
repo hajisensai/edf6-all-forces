@@ -7,7 +7,11 @@
 // Read on the game thread from the vehicle's input (crew.cpp InputHook, the 501's 0x60AEC0), published with the step it
 // was read in (step_fresh.h) and drawn by hud.cpp BargaAimMarks. Local state only: host and guests alike read their own
 // copy, nothing is sent.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "launchers.h"
 #include "barga_aim.h"
 #include "heli.h"
 #include "layout.h"

@@ -5,7 +5,11 @@
 #include "gpufx_gpu.h"
 #include "gpufx_layers.h"
 #include "gpufx_sim.h"
-#include "../crew.h"
+#include "../edf_layout.h"
+#include "../config.h"
+#include "../plugin_log.h"
+#include "../scene.h"
+#include "../infantryscope.h"
 #include "../support_call.h"
 #include "../memory.h"
 #include "../vhud.h"
@@ -1672,10 +1676,13 @@ std::vector<GlowHit> glowHits;
 std::vector<Instance> glowStaging;
 std::vector<std::uint32_t> glowStagingIds;
 std::atomic<unsigned> glowSeen{0},glowKept{0};   // the last frame's glowing rounds and the halos made of them (probe)
+std::atomic<unsigned> glowDead{0},glowUnlit{0};  // the last frame's declared rounds not drawn: dead (their trail fading), unlit
 
-// The glowing rounds on the list now into `hits` (at most `most`): their core and their declaration.
+// The glowing rounds on the list now into `hits` (at most `most`): their core and their declaration; only the live ones
+// with their flame lit (glow::Shines: a dead missile stays on the list while its trail fades, an unlit one is coasting).
 int WalkGlows(GlowHit* hits,int most,ULONGLONG now) noexcept {
     int n=0;
+    unsigned dead=0,unlit=0;
     __try {
         const unsigned char* system=At<const unsigned char*>(image,kBulletSystem);
         if(!system)return 0;
@@ -1699,16 +1706,21 @@ int WalkGlows(GlowHit* hits,int most,ULONGLONG now) noexcept {
                 e=glowCache.Put(key,now,ok ? &g : nullptr);
             }
             if(!e->glows || n>=most)continue;
+            const std::uint32_t flags=At<std::uint32_t>(core,glow::kCoreFlags);
+            if(!glow::Shines(flags,At<unsigned char>(core,static_cast<std::size_t>(glow::kCoreFlame)))){++(flags&glow::kDead ? dead : unlit);continue;}
             hits[n].core=core;hits[n].glow=e->glow;++n;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    glowDead.store(dead,std::memory_order_relaxed);
+    glowUnlit.store(unlit,std::memory_order_relaxed);
     return n;
 }
 
-// A glowing round's position and velocity (m/s) now; false: not readable or not finite.
-bool GlowAt(const unsigned char* core,float* pos,float* vel) noexcept {
+// A glowing round's position, velocity (m/s) and nose now; false: not readable or not finite.
+bool GlowAt(const unsigned char* core,float* pos,float* vel,float* nose) noexcept {
     __try {
         std::memcpy(pos,core+kCorePos,12);std::memcpy(vel,core+kCoreVel,12);
+        std::memcpy(nose,core+glow::kCoreNose,12);
     } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
     return std::isfinite(pos[0]+pos[1]+pos[2]);
 }
@@ -1725,9 +1737,9 @@ int BuildGlows(ULONGLONG now) {
     for(int i=0;i<hits && n<glow::kMostGlows;++i) {
         const GlowHit& h=glowHits[static_cast<std::size_t>(i)];
         const std::uint32_t id=glow::IdOf(reinterpret_cast<std::uintptr_t>(h.core));
-        float pos[3],vel[3];
-        if(!glow::Kept(id,share) || !GlowAt(h.core,pos,vel))continue;
-        glowStaging[static_cast<std::size_t>(n)]=glow::Make(h.glow,pos,vel,share);
+        float pos[3],vel[3],nose[3];
+        if(!glow::Kept(id,share) || !GlowAt(h.core,pos,vel,nose))continue;
+        glowStaging[static_cast<std::size_t>(n)]=glow::Make(h.glow,pos,vel,nose,share);
         glowStagingIds[static_cast<std::size_t>(n)]=id;
         ++n;
     }
@@ -2079,8 +2091,10 @@ void WorldEnd(ID3D11DeviceContext* context,const void* view) noexcept {
         Log("GPUFX   gpu by bucket (ms, instances): ours %.3f %d, stock %.3f %d, lit 0xC08 %.3f %d, lit 0xA40 %.3f %d, efs %.3f %d, trails %.3f %d",
             st.bucketMs[0],st.bucketDrawn[0],st.bucketMs[1],st.bucketDrawn[1],st.bucketMs[2],st.bucketDrawn[2],st.bucketMs[3],st.bucketDrawn[3],
             st.bucketMs[4],st.bucketDrawn[4],st.bucketMs[5],st.bucketDrawn[5]);
-        Log("GPUFX   round glows: %u glowing rounds, %u halos published, %d drawn this view (the stock-kinds bucket)",
-            glowSeen.load(std::memory_order_relaxed),glowKept.load(std::memory_order_relaxed),static_cast<int>(renderGlow.size()));
+        Log("GPUFX   round glows: %u glowing rounds, %u halos published, %d drawn this view (the stock-kinds bucket); "
+            "not drawn: %u dead (trail fading), %u unlit (coasting)",
+            glowSeen.load(std::memory_order_relaxed),glowKept.load(std::memory_order_relaxed),static_cast<int>(renderGlow.size()),
+            glowDead.load(std::memory_order_relaxed),glowUnlit.load(std::memory_order_relaxed));
         {
             const double screen=st.viewport[2]>0.0f ? static_cast<double>(st.viewport[2])*st.viewport[3] : 3840.0*2160.0;
             Log("GPUFX   ours px by bucket (screens): ours %.2f, stock %.2f, lit 0xC08 %.2f, lit 0xA40 %.2f, efs %.2f, trails %.2f",

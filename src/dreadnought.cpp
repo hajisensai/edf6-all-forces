@@ -26,11 +26,12 @@
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "py_consts.inc"
 #include "dreadnought_deck.h"
 #include "dreadnought_net.h"
 #include "drill_net.h"
 #include "firstperson.h"
-#include "seat_net_transport.h"
+#include "object_net_transport.h"
 #include "seat_switch_logic.h"
 #include "heli.h"
 #include "layout.h"
@@ -42,11 +43,28 @@
 #include "hangar_recover.h"
 #include <cmath>
 #include <cstring>
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "dreadnought.h"
+#include "jet.h"
+#include "netprobe.h"
+#include "sidecar.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
+#include "march_pace.h"
+#include "bay_rounds.h"
+#include "boarding.h"
+#include "hud.h"
 
 namespace crew {
 namespace {
 using vec::Clamp;
-constexpr float kDreadnoughtMark=7601.0f;   // pylib/vcobjects.py DREADNOUGHT_MARK (tools/selftest.py dreadnought_agrees)
+constexpr float kDreadnoughtMark=pyconst::kDreadnoughtMark;   // pylib/vcobjects.py DREADNOUGHT_MARK (src/py_consts.inc)
 constexpr float kDnFighterMark=7041.0f;     // its first fighter's (jet_internal.h kBodies Body::dnFighter, then one a kind)
 constexpr std::size_t kBody=0x1650;
 constexpr std::size_t kContact=0x1580;   // heli.cpp: bit 2, the body rests on something
@@ -64,7 +82,7 @@ constexpr float kDeg=0.017453292f,kPi=3.14159265f;
 // (x left, z ahead), at its bow and stern kReach, its beams kBeam off its centre line. kLength: its bow to stern
 // (tools/prep_dreadnought.py SHIP_LENGTH: its fighters a fighter's size, the user 2026-10-21 「无畏舰太小了…飞机也小了」).
 constexpr float kLength=500.0f;
-constexpr float kKeel=55.25f,kReach=0.44f*kLength,kBeam=0.2f*kLength;   // kKeel: pylib/vcobjects.py DREADNOUGHT_KEEL
+constexpr float kKeel=pyconst::kDreadnoughtKeel,kReach=0.44f*kLength,kBeam=0.2f*kLength;   // kKeel: pylib/vcobjects.py DREADNOUGHT_KEEL
 constexpr float kProbeUp=2.0f;            // m over the keel the rays start (under what it rests on)
 constexpr float kSettleSpeed=8.0f;        // m/s down, nobody in it, to the ground
 constexpr float kSettleGap=0.5f;          // m: settled, its keel this far over the ground (the collision takes the rest)
@@ -111,12 +129,10 @@ struct Ship {
 constexpr int kMaxShips=4;
 Ship ships[kMaxShips]{};
 bool installed=false;
-bool netReady=false;   // the turrets' blocks (dreadnought_net.h) go over seat_net
+bool netReady=false;   // the turrets' blocks (dreadnought_net.h) go over object_net
 
 bool Live(const Ship& s) noexcept {
-    const auto ctrl=static_cast<const unsigned char*>(s.ref.ctrl);
-    return s.vehicle && Readable(ctrl,12) && At<std::int32_t>(ctrl,8)>0 && s.ref.Is(s.vehicle) && !(s.vehicle[0x18]&4) &&
-           !s.vehicle[kDead];
+    return s.vehicle && s.ref.obj==s.vehicle && objref::Alive(s.ref);
 }
 Ship* Find(const unsigned char* v) noexcept {
     for(auto& s:ships)if(s.vehicle==v && s.ref.Is(v))return &s;
@@ -438,7 +454,7 @@ bool IsDreadnought(const void* vehicle) noexcept { return BodyOf(vehicle)==Plugi
 bool DreadnoughtBridgeClaims(const unsigned char* human,int vk) noexcept {
     if(!vk || !installed || !Cfg().dreadnought || (vk!=Cfg().dreadnoughtStrafeLeftKey && vk!=Cfg().dreadnoughtStrafeRightKey))return false;
     __try {
-        const auto v=At<unsigned char*>(human,0x1548);   // the vehicle it rides (crew.h kHumanVehicleCtrl - 8)
+        const auto v=At<unsigned char*>(human,0x1548);   // the vehicle it rides (edf_layout.h kHumanVehicleCtrl - 8)
         if(!v || !IsDreadnought(v) || SeatCount(v)==0)return false;
         const unsigned char* seat0=SeatAt(v,0);
         return At<const unsigned char*>(seat0,kSeatRider)==human && !Pad(seat0);
@@ -509,8 +525,8 @@ void ReceivedTurrets(unsigned char* v,const void* block,std::size_t size) noexce
 
 bool InstallDreadnought() noexcept {
     installed=Body506Ok();
-    netReady=installed && seat_net::Install() && seat_net::Register(dreadnought_net::kMagic,&ReceivedTurrets) &&
-             seat_net::ChainSlot(0x17DB4C8,"Dreadnought (506)");   // the 506's NetworkObject slot 17 (sazabi_net.cpp's)
+    netReady=installed && object_net::Install() && object_net::Register(dreadnought_net::kMagic,&ReceivedTurrets) &&
+             object_net::ChainClass(object_net::Class::v506);   // the 506 NetworkObject, shared with the Sazabi (object_net.h kClasses)
     Log("HOOK dreadnought body=%d network=%d (mark %.0f)",installed,netReady,kDreadnoughtMark);
     return installed;
 }

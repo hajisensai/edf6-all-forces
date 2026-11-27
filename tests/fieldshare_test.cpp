@@ -1,7 +1,7 @@
 // Production hooks with recording init/destruction and per-instance chunks. Optional EDF.dll mode executes the
 // real empty chunk constructor, shared_ptr destructor and deactivation in a DONT_RESOLVE_DLL_REFERENCES mapping.
 // No game process, GPU resources, render/culling, terrain decode or game-directory writes are involved.
-#include "../src/crew.h"
+#include <Windows.h>
 #include <atomic>
 #include <thread>
 #include <cstdio>

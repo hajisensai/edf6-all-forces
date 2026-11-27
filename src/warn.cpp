@@ -17,6 +17,11 @@
 #include "jetaudio.h"
 #include <cmath>
 #include <cstring>
+#include "config.h"
+#include "heli.h"
+#include "sound.h"
+#include "vhud.h"
+#include "playarea.h"
 
 namespace crew {
 namespace {
@@ -115,6 +120,10 @@ void WarnTick() noexcept {
     if(c.threat || c.stall || c.callouts || audio::Running())audio::Warn(c);
 }
 
+void ResetWarn() noexcept {
+    state=Warnings{};missilesSeen=0;missilesSeenAt=0;
+    Publish(false);
+}
 bool WarnLatest(Warnings* out) noexcept {
     AcquireSRWLockShared(&publishLock);
     const bool fresh=flown && stepfresh::Fresh(published.step);   // WarnTick ran in the last steps

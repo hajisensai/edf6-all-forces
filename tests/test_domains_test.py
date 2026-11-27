@@ -20,6 +20,38 @@ import test_domains as td  # noqa: E402
 BUILD = os.path.join(ROOT, 'build')
 
 
+_REPO: list = []
+
+
+def shared_repo() -> td.Repo:
+    """One Repo for the tests reading this repository as it is (OnTheBuild, BlindScans): a Repo only memoizes what it
+    reads from the files (each module's imports, closures), and building its closures again took a minute of this
+    test's (2026-11-27: OnTheBuild's test_deps, then the same selftest_deps from a fresh Repo)."""
+    if not _REPO:
+        _REPO.append(td.Repo())
+    return _REPO[0]
+
+
+@contextlib.contextmanager
+def scans_read_once():
+    """td.blind_scans of each (file, modules) parsed once while it lasts: what a file lists depends only on the file,
+    not on SCANNED, so blind_scan_problems' verdicts with each SCANNED entry taken out are the same as parsing anew
+    (each of its calls parsed every test script and tools/selftest.py again: 100 s of this test's)."""
+    real, memo = td.blind_scans, {}
+
+    def once(path: str, local_modules: set[str]):
+        key = (path, frozenset(local_modules))
+        if key not in memo:
+            memo[key] = real(path, local_modules)
+        return list(memo[key])
+
+    td.blind_scans = once
+    try:
+        yield
+    finally:
+        td.blind_scans = real
+
+
 def write(folder: str, name: str, text: str) -> str:
     path = os.path.join(folder, name)
     with open(path, 'w', encoding='utf-8') as f:
@@ -163,6 +195,23 @@ class CMakeEffects(unittest.TestCase):
             got, why = self.effects(new)
             self.assertTrue(why, new)
 
+    def test_a_call_of_the_file_s_own_function_is_placed(self) -> None:
+        """A new edf6_feedback_fixture(<target> <test> <source>) line selects its names, not every test (2026-11-26);
+        a change inside the function selects what every call of it names."""
+        nl = chr(10)
+        fn = nl.join(('function(fixture target test_name source)',
+                      '  add_executable(${target} ${source})',
+                      '  add_test(NAME ${test_name} COMMAND ${target})',
+                      'endfunction()',
+                      'fixture(a_check py_test tests/a.cpp)', ''))
+        self.OLD = CMakeEffects.OLD + fn   # this test's own
+        self.assertEqual(self.effects(self.OLD + 'fixture(c_check b_check tests/c.cpp)' + nl),
+                         ({'c_check', 'b_check'}, None))
+        self.assertEqual(self.effects(self.OLD.replace('COMMAND ${target})', 'COMMAND ${target} --x)')),
+                         ({'a_check', 'py_test'}, None))
+        got, why = self.effects(self.OLD + 'fixture(nothing_known x y)' + nl)
+        self.assertTrue(why)
+
     def test_commands_span_lines_and_quotes(self) -> None:
         cmds = td.cmake_commands('set(A\n  x "y z" # c\n  w)\nadd_test(NAME n COMMAND "a(b)")\n')
         self.assertEqual(cmds, [(1, 3, 'set', ['A', 'x', 'y z', 'w']), (4, 4, 'add_test', ['NAME', 'n', 'COMMAND', 'a(b)'])])
@@ -216,13 +265,40 @@ class Dependencies(unittest.TestCase):
         self.assertIn('tools/calls.py', deps)
 
 
+class Includes(unittest.TestCase):
+    """static_includes: a source's #include closure, the headers of an object ninja has no records for."""
+
+    def test_the_closure_takes_every_branch_and_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            for sub in ('src', 'common/edf', 'tests'):
+                os.makedirs(os.path.join(d, sub))
+            write(d, 'src/a.h', '#pragma once\n#include "b.h"\n')
+            write(d, 'src/b.h', '#if 0\n#include "c.inc"\n#endif\n')
+            write(d, 'src/c.inc', '')
+            write(d, 'common/edf/m.h', '#include "near.h"\n#include "from_src.h"\n')   # the last: the includer's folder
+            write(d, 'common/edf/near.h', '')
+            write(d, 'src/from_src.h', '')
+            write(d, 'tests/t.cpp', '#include "a.h"\n#include <edf/m.h>\n#include <vector>\n#include "../src/c.inc"\n')
+            got = td.static_includes(os.path.join(d, 'tests', 't.cpp'), [os.path.join(d, 'src'), os.path.join(d, 'common')])
+            self.assertIsNotNone(got)
+            names = {os.path.relpath(p, os.path.normcase(d)).replace(os.sep, '/') for p in got}
+            self.assertEqual(names, {'tests/t.cpp', 'src/a.h', 'src/b.h', 'src/c.inc', 'common/edf/m.h',
+                                     'common/edf/near.h', 'src/from_src.h'})
+
+    def test_an_include_of_a_macro_is_not_known(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            write(d, 'h.h', '#define H "x.h"\n')
+            write(d, 't.cpp', '#include "h.h"\n#include H\n')
+            self.assertIsNone(td.static_includes(os.path.join(d, 't.cpp'), []))
+
+
 @unittest.skipUnless(os.path.isfile(os.path.join(BUILD, 'CTestTestfile.cmake')), 'no configured build')
 class OnTheBuild(unittest.TestCase):
     """select_files on this repository's own tests and build."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.repo = td.Repo()
+        cls.repo = shared_repo()
         cls.deps = td.test_deps(BUILD, cls.repo)
         cls.cpp = td.cpp_files(BUILD)
         cls.labels = td.load()
@@ -247,6 +323,24 @@ class OnTheBuild(unittest.TestCase):
         built = [e for e in exes if e in self.repo.target_names]
         known = sum(1 for e in built if e in files)
         self.assertGreater(known, len(built) * 0.9, 'most built C++ tests have their sources known')
+
+    def test_the_include_closure_holds_what_ninja_recorded(self) -> None:
+        """The #include closure (an object ninja has no records for) takes every file the compiler took, object by
+        object of the targets the build has records of: never fewer tests than the records would select."""
+        files, links = self.cpp
+        if not links:
+            self.skipTest('not a ninja build')
+        closure, _ = td.cpp_files(BUILD, static=True)
+        self.assertIn('src/heli.cpp', closure['edf6vehiclecrew'])
+        for t, fs in files.items():
+            self.assertIn(t, closure)
+            self.assertLessEqual(fs, closure[t], t)
+
+    def test_a_cpp_test_is_labelled_by_what_it_compiles(self) -> None:
+        if not self.repo.compiles:
+            self.skipTest('not a ninja build')
+        self.assertIn('plugin-air', self.repo.domains_of({'#edf6vehiclecrew'}))
+        self.assertNotIn('plugin-air', self.repo.domains_of({'#edf6autoturret'}))
 
     def test_plugin_source_selects_the_cpp_tests_compiling_it_not_the_model_builds(self) -> None:
         r = td.select_files(['src/heli.cpp'], self.deps, self.cpp)
@@ -278,31 +372,116 @@ class OnTheBuild(unittest.TestCase):
 
 
 class Slot(unittest.TestCase):
-    def test_tests_are_chosen_after_the_check_slot_is_held_and_the_build(self) -> None:
-        import contextlib
-        import check
-        order: list[str] = []
-
-        @contextlib.contextmanager
-        def held(_who: str):
-            order.append('held')
-            yield
-
-        saved = check.checklock.held
-        check.checklock.held = held
-        try:
-            with tempfile.TemporaryDirectory() as root:
-                with checklock.worktree_once(root):   # the worktree's own slot chooses nothing
-                    self.assertEqual(order, [])
-            with check.slot() as waited:
-                self.assertEqual(order, ['held'])
-                self.assertGreaterEqual(waited, 0)
-        finally:
-            check.checklock.held = saved
+    def test_the_build_holds_a_build_slot_and_the_tests_are_chosen_after_it(self) -> None:
+        """2026-11-26 「特别是并发」: the build in one of the machine's build slots, not a slot the tests wait on too; the
+        tests chosen once the build is done (the code and the build they run), and run in the shared core slots."""
         with open(os.path.join(ROOT, 'tools', 'check.py'), encoding='utf-8') as f:
             body = f.read().split('def _main(', 1)[1]
-        self.assertLess(body.index('with slot() as waited'), body.index("results['build'] = run("))
+        self.assertLess(body.index('with checklock.build_slot('), body.index("results['build'] = run("))
         self.assertLess(body.index("results['build'] = run("), body.index('sel = plan(argv)'))
+        self.assertLess(body.index('sel = plan(argv)'), body.index('with checklock.running('))
+        self.assertNotIn('checklock.held', body)
+
+
+class MachineSlots(unittest.TestCase):
+    """pylib/checklock.py Slots: the machine's build and core slots, across processes."""
+
+    HOLD = ('import sys, time\n'
+            f'sys.path.insert(0, {os.path.join(ROOT, "pylib")!r})\n'
+            'import checklock\n'
+            's = checklock.Slots(sys.argv[1], int(sys.argv[2]))\n'
+            'i = s.take()\n'
+            'print(i, flush=True)\n'
+            'sys.stdin.readline()\n'   # held till told
+            'if sys.argv[3] == "give":\n'
+            '    s.give(i)\n'
+            '    print("given", flush=True)\n'
+            '    sys.stdin.readline()\n')
+
+    def holder(self, name: str, n: int, end: str = 'give') -> subprocess.Popen:
+        p = subprocess.Popen([sys.executable, '-c', self.HOLD, name, str(n), end], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait(), p.stdin.close(), p.stdout.close()))
+        return p
+
+    def test_n_slots_hold_n_and_a_dead_holders_slot_is_free_again(self) -> None:
+        name = f'test-{os.getpid()}'
+        a, b = self.holder(name, 2), self.holder(name, 2, 'die')
+        self.assertEqual({a.stdout.readline().strip(), b.stdout.readline().strip()}, {'0', '1'})
+        s = checklock.Slots(name, 2)
+        self.assertIsNone(s.take(0.2), 'a third took one of two held slots')
+        self.assertEqual(s.free(), 0)
+        b.kill()   # killed holding it: the system lets go of it
+        b.wait()
+        got = s.take(10)
+        self.assertIsNotNone(got)
+        a.stdin.write('\n')
+        a.stdin.flush()
+        self.assertEqual(a.stdout.readline().strip(), 'given')
+        import threading
+        seen: list[int] = []
+        t = threading.Thread(target=lambda: seen.append(checklock.Slots(name, 2).free()))   # another thread: ours is held
+        t.start()
+        t.join()
+        self.assertEqual(seen, [1])   # a's given back
+        s.give(got)
+        self.assertEqual(s.free(), 2)
+
+    def test_a_waiter_wakes_when_a_slot_is_let_go(self) -> None:
+        import time
+        name = f'test-wake-{os.getpid()}'
+        a = self.holder(name, 1)
+        self.assertEqual(a.stdout.readline().strip(), '0')
+        s = checklock.Slots(name, 1)
+        import threading
+        took: list[float] = []
+
+        def wait() -> None:
+            i = s.take(30)
+            took.append(time.monotonic())
+            s.give(i)
+        t = threading.Thread(target=wait)
+        t.start()
+        time.sleep(0.3)
+        self.assertEqual(took, [])
+        let_go = time.monotonic()
+        a.stdin.write('\n')
+        a.stdin.flush()
+        t.join(30)
+        self.assertEqual(len(took), 1)
+        self.assertLess(took[0] - let_go, 1.5, 'the waiter did not wake when the slot was let go')
+
+    def test_started_by_a_run_waits_for_no_slot(self) -> None:
+        saved = os.environ.get(checklock.HELD)
+        try:
+            os.environ[checklock.HELD] = str(os.getpid())   # this process's own run: it waits like anyone
+            self.assertFalse(checklock._inside())
+            os.environ[checklock.HELD] = str(os.getpid() + 1)   # a run that started this process
+            self.assertTrue(checklock._inside())
+            with checklock.build_slot('test') as waited:
+                self.assertEqual(waited, 0.0)
+        finally:
+            if saved is None:
+                os.environ.pop(checklock.HELD, None)
+            else:
+                os.environ[checklock.HELD] = saved
+
+
+class PoolLog(unittest.TestCase):
+    def test_the_pools_lines_read_as_ctests(self) -> None:
+        """pylib/testpool.py writes check-ctest.log in ctest's words: check.py and heartbeat read it as before."""
+        import check
+        import heartbeat
+        import testpool
+        j = testpool.Job('cockpit_build_0', 'ctest', 1, lambda: ('', ''), index=12)
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, 'check-ctest.log')
+            with open(log, 'w', encoding='utf-8') as f:
+                f.write(testpool.ctest_line(1, 3, j, testpool.Result(testpool.PASSED, 1.5, '')))
+                f.write(testpool.ctest_line(2, 3, testpool.Job('b', 'ctest', 1, lambda: ('', ''), index=2),
+                                            testpool.Result(testpool.SKIPPED, 0.1, '')))
+            self.assertEqual(check.ctest_outcomes(log), {'cockpit_build_0': 'Passed', 'b': 'Skipped'})
+            self.assertEqual(heartbeat.parts_progress({}, {'ctest': log}), 'ctest 2/3')
 
 
 class WorktreeOnce(unittest.TestCase):
@@ -547,7 +726,10 @@ def imported_glob_naming_a_folder():
                                 'git_in_one_string', 'git_grep_list'})
 
     def test_every_blind_listing_is_declared_or_runs_everything(self) -> None:
-        repo, labels = td.Repo(), td.load()
+        repo, labels = shared_repo(), td.load()
+        scans = scans_read_once()
+        scans.__enter__()
+        self.addCleanup(scans.__exit__, None, None, None)
         self.assertEqual(td.blind_scan_problems(repo, labels), [])
         for key in list(td.SCANNED):   # each declaration is needed: without it the guard fails
             saved = td.SCANNED.pop(key)
@@ -564,7 +746,7 @@ def imported_glob_naming_a_folder():
             del td.SCANNED['tests/nothing.py::gone']
 
     def test_a_declared_listing_is_a_dependency(self) -> None:
-        repo = td.Repo()
+        repo = shared_repo()
         self.assertIn('edf41port/outfits/MENUOBJECT/EDF41_P_RANGER.SGO',
                       repo.declared('tools/selftest.py', {'edf41_outfits_shipped'}))
         self.assertIn('CMakeLists.txt', repo.declared('tools/selftest.py', {'_cmake_plugins'}))

@@ -29,7 +29,20 @@
 //    gun may sit on the main turret) and whether the pose takes a hull that moved on after the aim step (then the
 //    stabilizer aims for the hull a step ahead). A seat whose gun does not move as its axes say is left stock (logged).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "plugin_body.h"
+#include "drill.h"
+#include "highcam.h"
+#include "playerjet.h"
+#include "sightzoom_api.h"
+#include "stab_api.h"
+#include "subcarrier.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "layout.h"
 #include "memory.h"
 #include "stab.h"

@@ -5,6 +5,13 @@
 #include "online_authority.h"
 #include "ownround.h"
 #include <atomic>
+#include "config.h"
+#include "plugin_log.h"
+#include "plugin_body.h"
+#include "booster.h"
+#include "netprobe.h"
+#include "shield.h"
+#include "sidecar.h"
 
 namespace crew {
 namespace jet {

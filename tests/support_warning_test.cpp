@@ -93,6 +93,24 @@ int main() {
            "the strip's sides");
      float mid[3]={0,0,0};for(auto& p:c)for(int i=0;i<3;++i)mid[i]+=p[i]*0.25f;
      Check(Flat(mid,target)<0.5f,"centred on the point");}
+    // A deployment's route as its lead flies it (RouteAhead; the user, 2026-11-27: 「飞机进场会有个红线停留在原地」): from the
+    // lead on, the points behind it dropped, gone once it has flown the whole route.
+    {const float way[3][3]={{-2000.0f,400.0f,0.0f},{0.0f,10.0f,0.0f},{900.0f,10.0f,0.0f}};
+     float ahead[4][3];
+     const float start[3]={-2000.0f,400.0f,0.0f};
+     Check(warning::RouteAhead(way,3,start,ahead)==3 && !std::memcmp(ahead[0],start,12) && !std::memcmp(ahead[1],way[1],12),
+           "at its entry: the whole route ahead");
+     const float midway[3]={-800.0f,300.0f,40.0f};
+     Check(warning::RouteAhead(way,3,midway,ahead)==3 && !std::memcmp(ahead[0],midway,12) && !std::memcmp(ahead[2],way[2],12),
+           "on its way in: the route starts where the lead is, not where it came in");
+     const float pass[3]={300.0f,60.0f,10.0f};
+     Check(warning::RouteAhead(way,3,pass,ahead)==2 && !std::memcmp(ahead[0],pass,12) && !std::memcmp(ahead[1],way[2],12),
+           "past the point: only its pass's end ahead");
+     const float out[3]={1200.0f,80.0f,0.0f};
+     Check(warning::RouteAhead(way,3,out,ahead)<2,"past the pass's end: nothing ahead (the warning goes)");
+     const float guard[2][3]={{-2000.0f,400.0f,0.0f},{0.0f,10.0f,0.0f}};
+     const float there[3]={5.0f,60.0f,300.0f};
+     Check(warning::RouteAhead(guard,2,there,ahead)<2,"a guard's route: gone once the lead reaches its point");}
     Check(warning::BarrageMs(30)==1000 && warning::BarrageMs(600)==10000,"a barrage's warning lasts its rounds, a moment at least");
     std::printf("support warning: %d checks passed\n",checks);
     return 0;

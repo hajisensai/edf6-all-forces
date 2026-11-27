@@ -29,7 +29,14 @@
 // kill count, the model's drawing and its animation clock.
 // Every game pointer goes through Readable; every EDF.dll function is fingerprinted (edf41classes.cpp); a failure is logged
 // once and the object is left as EventAnimationObject made it.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "edf41.h"
+#include "payload.h"
+#include "mapcmd.h"
+#include "npcai.h"
 #include "edf41classes.h"
 #include "edf41robo_ai.h"
 #include "edf41robo_body.h"
@@ -231,11 +238,11 @@ bool AreaDamage(void* owner,const float* centre,float radius,float damage,std::u
     char* o=static_cast<char*>(owner);
     if(!Ok() || !owner || !Readable(o+kWeakSelfAt,16) || !Readable(o+kTeamAt,4))return false;
     alignas(16) unsigned char gdi[0x90]={};
-    WeakRef self;
-    WeakSet(self,owner);
-    if(!self.control)return false;
-    std::memcpy(gdi+0x10,&self.object,8);
-    std::memcpy(gdi+0x18,&self.control,8);
+    WeakRef self=ObjRef::Of(owner);   // the GDI's own reference, held while the damage runs
+    if(!self.ctrl)return false;
+    const ObjRef weakSelf=self.Ref();
+    std::memcpy(gdi+0x10,&weakSelf.obj,8);
+    std::memcpy(gdi+0x18,&weakSelf.ctrl,8);
     std::memcpy(gdi+0x24,o+kTeamAt,4);
     const float c[4]={centre[0],centre[1],centre[2],1.0f},imp[4]={0.0f,0.0f,0.0f,1.0f};
     std::memcpy(gdi+0x30,c,16);
@@ -248,7 +255,7 @@ bool AreaDamage(void* owner,const float* centre,float radius,float damage,std::u
     std::memcpy(gdi+0x68,&one,4);
     bool any=false;
     At<void*(__fastcall*)(void*,bool*,void*,void*)>(kAreaDamage)(gdi,&any,nullptr,owner);
-    WeakReset(self);   // the GDI's own reference (the game's per-object copies took and dropped theirs)
+    self.Reset();   // the GDI's own reference (the game's per-object copies took and dropped theirs)
     if(hitAny)*hitAny=any;
     return true;
 }
@@ -265,16 +272,15 @@ void MetalHit(const float* pos,const float* normal,float size) noexcept {
 // weak_ptr second ({object, control}, one weak count for the caller: 0x84B8B..0x84B92) and puts the object in the scene itself
 // (0x1195A20 / 0x1197050).
 bool MakeCharge(const float* matrix,void* param,WeakRef& out) noexcept {
-    WeakReset(out);
+    out.Reset();
     void* mgr=Global(kManager);
     if(!Ok() || !mgr)return false;
     alignas(16) float m[16];
     std::memcpy(m,matrix,sizeof(m));
     alignas(16) void* weak[2]={nullptr,nullptr};
     At<void*(__fastcall*)(void*,void*,const float*,void*)>(kChargeCreate)(mgr,weak,m,param);
-    out.object=weak[0];
-    out.control=weak[1];
-    return out.object && out.control;
+    out=WeakRef::Adopt(weak[0],weak[1]);   // the out weak_ptr's count, the plugin's now
+    return out.obj && out.ctrl;
 }
 // 4.1's muzzle flash (EDF41 0x27C3F7..0x27C5A7): a ParticleObject at the muzzle with ParticleAlpha_6.dds (edf41c::Particle).
 bool MuzzleFlash(const float* pos,int life,float size,const float* colour) noexcept {
@@ -774,9 +780,9 @@ void Reroll(Robo& r) noexcept {
 void ChargeOff(Gun& g) noexcept {
     for(int i=0;i<g.muzzles;++i) {
         Muzzle& z=g.muzzle[i];
-        if(z.charge && WeakAlive(z.chargeRef))p6::Delete(z.charge);
+        if(z.charge && objref::Exists(z.chargeRef))p6::Delete(z.charge);
         z.charge=nullptr;
-        WeakReset(z.chargeRef);
+        z.chargeRef.Reset();
     }
 }
 void ChargeOn(Robo& r,Gun& g,int group) noexcept {
@@ -791,12 +797,12 @@ void ChargeOn(Robo& r,Gun& g,int group) noexcept {
         std::memcpy(param,&vt,8);
         std::memcpy(param+0x30,g.look.k,sizeof(g.look.k));
         for(std::size_t at=0x60;at<=0x80;at+=0x10)std::memcpy(param+at,g.look.colour,16);
-        z.charge=p6::MakeCharge(m,param,z.chargeRef) ? z.chargeRef.object : nullptr;
-        if(!z.charge || !WeakAlive(z.chargeRef)) {
+        z.charge=p6::MakeCharge(m,param,z.chargeRef) ? z.chargeRef.Obj() : nullptr;
+        if(!z.charge || !objref::Exists(z.chargeRef)) {
             static std::atomic<int> said{0};
-            if(said.fetch_add(1)<4)Log("EDF41ROBO %p the charge effect UfoRoboCanonChargeEffect was not made: object %p, weak control %p",r.obj,z.charge,z.chargeRef.control);
+            if(said.fetch_add(1)<4)Log("EDF41ROBO %p the charge effect UfoRoboCanonChargeEffect was not made: object %p, weak control %p",r.obj,z.charge,z.chargeRef.ctrl);
             z.charge=nullptr;
-            WeakReset(z.chargeRef);
+            z.chargeRef.Reset();
             continue;
         }
         if(made.fetch_add(1)<6)Log("EDF41ROBO %p %s gun charge effect %p at %ls (%.0f %.0f %.0f)",r.obj,kGunNames[group],z.charge,z.locator.c_str(),m[12],m[13],m[14]);
@@ -806,7 +812,7 @@ void ChargeTick(Robo& r,Gun& g) noexcept {
     for(int i=0;i<g.muzzles;++i) {
         Muzzle& z=g.muzzle[i];
         float m[16];
-        if(!z.charge || !WeakAlive(z.chargeRef) || !LocatorMatrix(z.loc,m))continue;
+        if(!z.charge || !objref::Exists(z.chargeRef) || !LocatorMatrix(z.loc,m))continue;
         p6::ChargeStep(z.charge,m,r.dt);
     }
 }
@@ -815,7 +821,7 @@ void GunEnter(Robo& r,Gun& g,int state) noexcept {
     if(g.state==kG1 && state==kG2) {   // the flash takes the charge's strength (4.1 0x27C043)
         const Muzzle& z=g.muzzle[0];
         const char* e=static_cast<const char*>(z.charge);
-        if(e && WeakAlive(z.chargeRef) && Readable(e+0x4E4,4))std::memcpy(&g.flashSize,e+0x4E4,4);
+        if(e && objref::Exists(z.chargeRef) && Readable(e+0x4E4,4))std::memcpy(&g.flashSize,e+0x4E4,4);
         if(!std::isfinite(g.flashSize) || g.flashSize<0.0f)g.flashSize=0.0f;
     }
     if(g.state==kG1) {
@@ -2137,7 +2143,7 @@ void CreateRobo(void* info) noexcept {
     if(!obj)return;
     // EventAnimationObject's constructor sets +0x380 bit 0 (0x5B6406: hits take no HP); 4.1's robot loses its durability.
     SetFlag(obj,kNoHpLoss,false);
-    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
+    edf41net::Install();   // online: its class's NetworkObject takes the host's events (edf41net, object_net)
     {
         std::lock_guard<std::mutex> hold(lock);
         Robo& r=robos[obj];

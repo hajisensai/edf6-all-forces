@@ -1,9 +1,13 @@
-// Optional read-only EDF.dll validation of the EDF4.1 classes' network layer (src/edf41net.cpp), as tests/drill_net_native_test.cpp
-// does for the drill: EDF.dll mapped WITHOUT its entry point, only its CRT imports resolved, and the production code run on
-// stand-in objects with the game's own stream writer / reader, its stock receiver 0x54D770 and its vtables. The game's send
-// (0x773DA0, which needs a live room) is the one stand-in on the path: it hands the bytes the game's writer wrote to the game's
-// reader, into the other copy's receiver. Never attaches to the game, writes no file. Run: edf41net_native_test <EDF.dll>.
+// Optional read-only EDF.dll validation of the EDF4.1 classes' network layer (src/edf41net.cpp, one kind of the object messages
+// of src/object_net.cpp), as tests/drill_net_native_test.cpp does for the drill: EDF.dll mapped WITHOUT its entry point, only its
+// CRT imports resolved, and the production code run on stand-in objects with the game's own stream writer / reader, its stock
+// receiver 0x54D770 and its vtables (the object message layer chains the mapped image's EventAnimationObject / UfoCarrier508
+// slot 17). The game's send (0x773DA0, which needs a live room) is the one stand-in on the path: it hands the bytes the game's
+// writer wrote to the game's reader, into the other copy's receiver. Never attaches to the game, writes no file. Run:
+// edf41net_native_test <EDF.dll>.
 #include "../src/edf41net.cpp"
+#include "../src/object_net.cpp"
+#include "../src/seat_net.h"
 #include "edf/host.h"
 
 #include <cstdarg>
@@ -26,30 +30,21 @@ bool InSession() noexcept { return session; }
 // online_authority's answer for a registered object that is not a vehicle: another machine's when bit 0 is set (online::RunsHere)
 bool OnlineRunsHere(const void* object) noexcept { return !session || (At<std::uint16_t>(object,0x128)&1)==0; }
 namespace edf41c {
-void WeakReset(WeakRef& w) noexcept {
-    if(w.control)reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(w.control)+0xC)->fetch_sub(1);
-    w=WeakRef{};
-}
-void WeakSet(WeakRef& w,const void* object) noexcept {
-    WeakReset(w);
-    if(!object)return;
-    w.object=At<void*>(object,0x28);
-    w.control=At<void*>(object,0x30);
-    if(w.control)reinterpret_cast<std::atomic<std::int32_t>*>(static_cast<char*>(w.control)+0xC)->fetch_add(1);
-}
-bool WeakAlive(const WeakRef& w) noexcept { return w.control && At<std::int32_t>(w.control,8)>0; }
+// edf41classes.cpp WeakOut: the object's own weak-this handed out with one weak count (crew::WeakRef, objref.h).
 bool WeakOut(const void* object,void* out) noexcept {
-    WeakRef w;
-    WeakSet(w,object);
-    if(!w.control)return false;
-    std::memcpy(out,&w.object,8);
-    std::memcpy(static_cast<char*>(out)+8,&w.control,8);
+    if(!object)return false;
+    WeakRef w=ObjRef::Of(object);
+    if(!w.ctrl)return false;
+    const ObjRef given=w.Give();
+    std::memcpy(out,&given.obj,8);
+    std::memcpy(static_cast<char*>(out)+8,&given.ctrl,8);
     return true;
 }
 }  // namespace edf41c
 }  // namespace crew
 
 namespace {
+namespace transport=crew::object_transport;
 int checks=0;
 void Check(bool ok,const char* what) {
     ++checks;
@@ -80,9 +75,18 @@ bool RuntimeImports(HMODULE module) {
     }
     return true;
 }
+// A vtable slot of the mapped image (.rdata) rewritten in this process's private copy.
+bool PatchSlot(unsigned rva,void* to) {
+    void** slot=reinterpret_cast<void**>(crew::image+rva);
+    DWORD old=0;
+    if(!VirtualProtect(slot,8,PAGE_READWRITE,&old))return false;
+    *slot=to;
+    VirtualProtect(slot,8,old,&old);
+    return true;
+}
 
-// A stand-in scene object: EventAnimationObject's size, its NetworkObject vtable at +0x120, the net word +0x128, its own weak
-// pointer +0x28 / +0x30 on a control block {vtable, use, weak}.
+// A stand-in scene object: EventAnimationObject's size, its class's NetworkObject vtable at +0x120 (the mapped image's, chained),
+// the net word +0x128, its own weak pointer +0x28 / +0x30 on a control block {vtable, use, weak}.
 struct Object {
     alignas(16) unsigned char bytes[0xC90]{};
     alignas(16) unsigned char control[16]{};
@@ -99,19 +103,25 @@ struct Object {
     unsigned char* net() { return bytes+0x120; }
 };
 
+// What the game calls on a received message: the object's NetworkObject slot 17 (its class's, chained by object_net).
+void Receive(unsigned char* net,void* reader) {
+    reinterpret_cast<transport::ReceiveFn>(crew::At<void* const*>(net,0)[17])(net,reader);
+}
+void ReaderOf(const void* written,void* reader) {
+    transport::Fn<void(__fastcall*)(void*,const void*,std::size_t)>(transport::kReaderFrom)(reader,
+        static_cast<const unsigned char*>(written)+transport::kStreamData,crew::At<std::size_t>(written,transport::kStreamSize));
+}
+
 Object* peer=nullptr;   // where the stand-in send delivers
 int sends=0;
 // The stand-in for 0x773DA0: the bytes the game's writer wrote, read back by the game's reader (0x12B4530), into the peer's
-// NetworkObject slot 17 through its vtable (the production receiver on a copy, the stock one otherwise).
+// NetworkObject slot 17 through its vtable.
 bool __fastcall StandInSend(void*,void* written) {
-    using namespace crew;
     ++sends;
     if(!peer)return false;
-    edf41net::RawStream reader;
-    edf41net::Fn<void(__fastcall*)(void*,const void*,std::size_t)>(0x12B4530)(reader.bytes,static_cast<unsigned char*>(written)+0x10,
-                                                                             At<std::size_t>(written,0x5F0));
-    void* const* vt=At<void* const*>(peer->net(),0);
-    reinterpret_cast<edf41net::ReceiveFn>(vt[17])(peer->net(),reader.bytes);
+    alignas(16) unsigned char reader[0x600]{};
+    ReaderOf(written,reader);
+    Receive(peer->net(),reader);
     return true;
 }
 
@@ -126,17 +136,24 @@ void Visit(void*,std::uint8_t kind,const unsigned char* data,std::size_t size) n
     std::memcpy(lastPayload,data,size);
 }
 
-// A stream of `tag` + `size` bytes of `fill` (the game's writer), as a reader.
-void Tagged(std::int8_t tag,unsigned char fill,std::size_t size,crew::edf41net::RawStream& reader) {
-    using namespace crew::edf41net;
-    RawStream w;
-    Construct(w);
+// `tag` + a block (the game's writer), as a reader.
+void Tagged(std::int8_t tag,const void* data,std::size_t size,unsigned char* reader) {
+    transport::Stream w;
+    transport::Fn<bool(__fastcall*)(void*,std::int8_t)>(transport::kWriteSmall)(w.bytes,tag);
+    transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(w.bytes,data,size);
+    ReaderOf(w.bytes,reader);
+}
+void Tagged(std::int8_t tag,unsigned char fill,std::size_t size,unsigned char* reader) {
     unsigned char data[64];
     std::memset(data,fill,sizeof(data));
-    Fn<bool(__fastcall*)(void*,std::int8_t)>(kWriteSmall)(w.bytes,tag);
-    Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(kWriteBlock)(w.bytes,data,size);
-    Fn<void(__fastcall*)(void*,const void*,std::size_t)>(kReaderFrom)(reader.bytes,w.bytes+0x10,crew::At<std::size_t>(w.bytes,0x5F0));
-    Destroy(w);
+    Tagged(tag,data,size,reader);
+}
+
+// A seat pick kind on the same objects (payload.cpp's on a vehicle; here beside E41N on one EventAnimationObject).
+int picks=0;
+crew::seat_net::Pick heardPick{};
+void PickReceived(unsigned char*,const void* block,std::size_t size) noexcept {
+    if(crew::seat_net::Decode(block,size,heardPick))++picks;
 }
 }  // namespace
 
@@ -151,25 +168,30 @@ int main(int argc,char** argv) {
     image=edf::IdentifyImage(mapped);
     Check(image!=nullptr,"supported image timestamp and size");
     Check(RuntimeImports(mapped),"resolve the codec's CRT imports in private memory");
-    for(unsigned vt:{0x17D4E90u,0x17C9F50u}) {
-        Check(At<void*>(image,vt+16*8)==image+0x773DA0,"EventAnimationObject / UfoCarrier508 NetworkObject send (slot 16) is 773DA0");
-        Check(At<void*>(image,vt+17*8)==image+0x54D770,"their receive (slot 17) is GameObjectBase's 54D770");
+    for(object_net::Class c:{object_net::Class::eventAnimationObject,object_net::Class::ufoCarrier508}) {
+        const object_net::ClassSlot& s=*object_net::ClassOf(c);
+        Check(At<void*>(image,object_net::SlotRva(s,object_net::kSendSlot))==image+object_net::kStockSend,
+              "EventAnimationObject / UfoCarrier508 NetworkObject send (slot 16) is 773DA0");
+        Check(At<void*>(image,object_net::SlotRva(s,object_net::kReceiveSlot))==image+s.stockReceive && s.stockReceive==0x54D770,
+              "their receive (slot 17) is GameObjectBase's 54D770 (the class table's row)");
     }
     config.edf41Net=true;
-    Check(edf41net::Enabled(),"production signatures, sender identity, vtable copies");
-    for(const auto& t:edf41net::tables) {
-        Check(t.block[0]==At<void*>(image,t.rva-8) && t.next==image+0x54D770 && t.block[18]==reinterpret_cast<void*>(&edf41net::Receive),
-              "the copy keeps the RTTI and the stock slots, slot 17 ours, the stock one next");
-        for(int i=0;i<22;++i)if(i!=17)Check(t.block[i+1]==At<void*>(image,t.rva+8*static_cast<unsigned>(i)),"the other slots are the live table's");
+    Check(edf41net::Enabled(),"production signatures, the object message layer, the classes chained");
+    int chainedClasses=0;
+    for(object_net::Class c:{object_net::Class::eventAnimationObject,object_net::Class::ufoCarrier508}) {
+        const object_net::ClassSlot& s=*object_net::ClassOf(c);
+        int entry=-1;
+        for(int i=0;i<transport::kMostClasses;++i)if(transport::ChainedTable(i)==image+s.table)entry=i;
+        Check(entry>=0 && At<void*>(image,object_net::SlotRva(s,object_net::kReceiveSlot))==reinterpret_cast<void*>(transport::HookAt(entry)) &&
+              transport::nextReceive[entry]==image+0x54D770,"the class's own slot 17 chained, GameObjectBase's receiver next");
+        ++chainedClasses;
     }
-    edf41net::tables[0].block[1+16]=reinterpret_cast<void*>(&StandInSend);   // the room's transport stands in from here
+    const int entries=transport::chained.load();
+    Check(chainedClasses==2 && edf41net::Install() && transport::chained.load()==entries,"a second install chains nothing again");
+    Check(PatchSlot(object_net::SlotRva(*object_net::ClassOf(object_net::Class::eventAnimationObject),object_net::kSendSlot),
+                    reinterpret_cast<void*>(&StandInSend)),"the room's transport stands in from here");
 
     Object host(2),guest(1);
-    edf41net::Attach(host.obj());
-    edf41net::Attach(guest.obj());
-    Check(At<void*>(host.net(),0)==&edf41net::tables[0].block[1] && At<void*>(guest.net(),0)==&edf41net::tables[0].block[1],"Attach swaps the NetworkObject vtable");
-    edf41net::Attach(host.obj());
-    Check(At<void*>(host.net(),0)==&edf41net::tables[0].block[1],"a second Attach leaves it");
     Check(!edf41net::Guest(host.obj()) && edf41net::Guest(guest.obj()) && edf41net::Decides(host.obj()),"the host decides, the guest copy follows");
 
     // the host's event, through the game's writer and reader, into the guest copy's queue
@@ -189,15 +211,14 @@ int main(int argc,char** argv) {
 
     // a repeated packet (the same sender and sequence) is refused by the watermark
     {
-        edf41net::RawStream w;
-        edf41net::Construct(w);
+        transport::Stream w;
         edf41net::Header h;
-        h.kind=3; h.sender=77; h.sequence=5;
+        h.kind=3; h.head.sender=77; h.head.sequence=5;
         unsigned char msg[edf41net::kMostMessage];
         std::size_t n=0;
         Check(edf41net::Encode(h,body,8,msg,sizeof(msg),&n),"encode");
-        edf41net::Fn<bool(__fastcall*)(void*,std::int8_t)>(edf41net::kWriteSmall)(w.bytes,edf41net::kTag);
-        edf41net::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(edf41net::kWriteBlock)(w.bytes,msg,n);
+        transport::Fn<bool(__fastcall*)(void*,std::int8_t)>(transport::kWriteSmall)(w.bytes,edf41net::kTag);
+        transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(w.bytes,msg,n);
         const edf41net::Stats before=edf41net::Counters();
         StandInSend(nullptr,w.bytes);
         StandInSend(nullptr,w.bytes);
@@ -208,51 +229,82 @@ int main(int argc,char** argv) {
         StandInSend(nullptr,w.bytes);
         Check(edf41net::Counters().refused==after.refused+1 && edf41net::Drain(host.obj(),&Visit,nullptr)==0,"the deciding copy takes no event");
         peer=&guest;
-        edf41net::Destroy(w);
     }
 
-    // other tags pass to the stock receiver with their read position; the stock receiver ignores ours
+    // other tags, and tag 15 blocks of a kind nobody registered, pass to the stock receiver with their read position
     for(std::int8_t tag:{std::int8_t(13),std::int8_t(14),std::int8_t(15)}) {
-        edf41net::RawStream reader;
+        alignas(16) unsigned char reader[0x600]{};
         Tagged(tag,0x5A,24,reader);
         unsigned char saved[sizeof(guest.bytes)];
         std::memcpy(saved,guest.bytes,sizeof(saved));
         const edf41net::Stats before=edf41net::Counters();
-        edf41net::Receive(guest.net(),reader.bytes);
-        Check(At<std::int64_t>(reader.bytes,8)==1 && !std::memcmp(saved,guest.bytes,sizeof(saved)),
-              "coop's 13 / 14 and the vehicles' 15 reach the stock receiver at their tag (it reads one value, changes nothing)");
+        Receive(guest.net(),reader);
+        Check(At<std::int64_t>(reader,8)==1 && !std::memcmp(saved,guest.bytes,sizeof(saved)),
+              "coop's 13 / 14 and an unregistered kind's 15 reach the stock receiver at their tag (it reads one value, changes nothing)");
         Check(edf41net::Counters().received==before.received && edf41net::Drain(guest.obj(),&Visit,nullptr)==0,"not queued here");
     }
     {
-        edf41net::RawStream reader;
+        alignas(16) unsigned char reader[0x600]{};
         Tagged(edf41net::kTag,0x11,40,reader);
-        Object plain(1);   // a machine without this layer (or Edf41Net=0): the stock table
+        Object plain(1);   // a machine without this layer (or Edf41Net=0): the stock receiver
         unsigned char saved[sizeof(plain.bytes)];
         std::memcpy(saved,plain.bytes,sizeof(saved));
-        edf41net::Fn<edf41net::ReceiveFn>(0x54D770)(plain.net(),reader.bytes);
-        Check(!std::memcmp(saved,plain.bytes,sizeof(saved)) && At<std::int64_t>(reader.bytes,8)==1,
-              "the stock receiver reads tag 12, changes nothing and returns");
+        transport::Fn<transport::ReceiveFn>(object_net::kObjectReceive)(plain.net(),reader);
+        Check(!std::memcmp(saved,plain.bytes,sizeof(saved)) && At<std::int64_t>(reader,8)==1,
+              "the stock receiver reads tag 15, changes nothing and returns");
     }
     {
-        edf41net::RawStream reader;
-        Tagged(edf41net::kTag,0x11,40,reader);   // a tag-12 block that is not this layer's (bad magic)
+        // E41N's magic on a block that is not a version-2 event (version 1's layout): taken by the kind, refused, nothing queued
+        edf41net::Header h;
+        h.kind=1; h.head.sender=5; h.head.sequence=1; h.head.version=1;
+        alignas(16) unsigned char reader[0x600]{};
+        Tagged(edf41net::kTag,&h,sizeof(h),reader);
         const edf41net::Stats before=edf41net::Counters();
-        edf41net::Receive(guest.net(),reader.bytes);
-        Check(edf41net::Counters().refused==before.refused+1 && edf41net::Drain(guest.obj(),&Visit,nullptr)==0 && At<std::int64_t>(reader.bytes,8)==0,
-              "another plugin's tag 12 is refused, nothing queued, the read position put back");
+        Receive(guest.net(),reader);
+        Check(edf41net::Counters().refused==before.refused+1 && edf41net::Drain(guest.obj(),&Visit,nullptr)==0 && At<std::int64_t>(reader,8)==0,
+              "an E41N block of another version is refused, nothing queued, the read position put back");
+    }
+
+    // two kinds on one object: a seat pick and the E41N events, one sender and one sequence counter, through the same slot
+    {
+        Check(object_net::Register(seat_net::kPickMagic,&PickReceived),"the pick kind registers beside E41N");
+        Check(!object_net::Register(edf41net::kMagic,&PickReceived),"E41N's magic is edf41net's: a second receiver refused");
+        seat_net::Pick p;
+        p.seat=1;p.holder=4;
+        Check(object_net::Stamp(&p,sizeof(p)) && object_net::Send(static_cast<unsigned char*>(host.obj()),&p,sizeof(p)) && sends==5,
+              "a pick goes through the host's slot 16");
+        Check(picks==1 && heardPick.holder==4 && heardPick.seat==1 && edf41net::Drain(guest.obj(),&Visit,nullptr)==0,
+              "the pick reaches the pick kind only, nothing on the E41N queue");
+        const edf41net::Stats before=edf41net::Counters();
+        Check(edf41net::Send(host.obj(),2,body,4) && edf41net::Counters().received==before.received+1 && picks==1,
+              "an event after it: the E41N queue only, the pick kind untouched");
+        Check(edf41net::Drain(guest.obj(),&Visit,nullptr)==1 && lastKind==2 && lastSize==4,"the event drained");
+        // The pick's sequence is newer than an E41N event stamped before it: each kind's gate orders its own messages alone.
+        edf41net::Header early;
+        early.kind=4;
+        Check(object_net::Stamp(&early,sizeof(early)),"stamp an event");
+        seat_net::Pick later;
+        later.seat=1;later.holder=5;
+        Check(object_net::Stamp(&later,sizeof(later)) && later.head.sequence>early.head.sequence &&
+              object_net::Send(static_cast<unsigned char*>(host.obj()),&later,sizeof(later)) && picks==2 && heardPick.holder==5,
+              "the later pick arrives first");
+        unsigned char msg[edf41net::kMostMessage];
+        std::size_t n=0;
+        Check(edf41net::Encode(early,nullptr,0,msg,sizeof(msg),&n) && object_net::Send(static_cast<unsigned char*>(host.obj()),msg,n),"then the event");
+        Check(edf41net::Drain(guest.obj(),&Visit,nullptr)==1 && lastKind==4 && picks==2,
+              "the earlier event is still taken (the pick's newer sequence does not hold it back), the pick kind untouched");
     }
 
     // the development loopback (offline): the game's writer and reader, into the mirror's receiver
     session=false;
     config.edf41NetMirror=true;
     Object original(0),mirror(0);
-    edf41net::Attach(original.obj());
-    edf41net::Attach(mirror.obj());
     Check(!edf41net::Guest(mirror.obj()),"offline an unregistered copy decides");
     edf41net::Loopback(original.obj(),mirror.obj());
     Check(edf41net::Guest(mirror.obj()) && edf41net::IsMirror(mirror.obj()) && !edf41net::Guest(original.obj()),"the mirror is a guest copy");
     const unsigned char state[64]={3,3,3};
-    Check(edf41net::Send(original.obj(),3,state,sizeof(state)),"the original sends through the loopback");
+    const int sentBefore=sends;
+    Check(edf41net::Send(original.obj(),3,state,sizeof(state)) && sends==sentBefore,"the original sends through the loopback, not the room");
     Check(edf41net::Drain(mirror.obj(),&Visit,nullptr)==1 && lastKind==3 && lastSize==sizeof(state) && lastPayload[2]==3,"the mirror gets it");
     Check(edf41net::Counters().looped>=1,"counted as looped");
     config.edf41NetMirror=false;

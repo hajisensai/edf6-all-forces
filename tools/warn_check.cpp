@@ -15,6 +15,9 @@
 #include <cstdarg>
 #include <cstdio>
 #include <string>
+#include "../src/edf_layout.h"
+#include "../src/scene.h"
+#include "../src/heli.h"
 
 namespace crew {
 unsigned char* image=nullptr;

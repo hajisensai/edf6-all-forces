@@ -20,7 +20,11 @@
 // join (0x8EC659) for one of our ids is told which pack this machine lacks.
 // Another plugin may have redirected a site first (EDF6Coop logs the lobby join's 0x8EC659 and loads before us, by
 // name): its call is chained, ours asking it instead of 0xD92B0. A site redirected inside EDF.dll is another build.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "campaign.h"
+#include "vecmath.h"
 #include "memory.h"
 #include "edf/host.h"
 #include "debug_spawn.h"
@@ -149,6 +153,14 @@ bool Chainable(const unsigned char* target) noexcept {
 // not installed here.
 const packs::Pack* InstalledMissionPack(std::int64_t id) noexcept {
     return packs::Reserved(id) ? Installed(Cfg(),static_cast<int>(id)) : nullptr;
+}
+
+// Whether the mission-pack dialog would let the player pick content `id` (its site 0x8BEF48's answer: the native
+// ownership, and ours while the hooks are in), for the HQ's pack switch (pack_switch.cpp). False when 0xD92B0 is not
+// the function the hooks were made for.
+bool MissionPackSelectable(std::uintptr_t mgr,int id) noexcept {
+    if(campaignReady)return OwnedHook<0>(mgr,id);
+    return Matches(kOwned,kOwnedSig,sizeof(kOwnedSig)) && reinterpret_cast<OwnedFn>(image+kOwned)(mgr,id);
 }
 
 // All or nothing: a pack enabled in the dialog but refused where another call asks is worse than stock.

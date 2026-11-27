@@ -1,7 +1,9 @@
 // Compatibility boundary for old installer data, not a weapon capability guess.
 // These files belonged only to this plugin and no longer describe a supported mount.
 #pragma once
-#include "crew.h"
+#include <Windows.h>
+#include "stores.h"
+#include "plugin_log.h"
 #include <cwchar>
 
 namespace crew {

@@ -3,6 +3,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/plugin_body.h"
+#include "../src/strikes.h"
+#include "../src/mapbounds.h"
+#include "../src/proteus.h"
 
 namespace fixture {
 using namespace crew;
@@ -47,6 +53,7 @@ void Jump(unsigned rva,const void* target) {
 }
 namespace crew {
 const JetWeaponRow* JetWeapon(int) noexcept {return nullptr;}   // stores.cpp (not linked here): no jet weapons to preload
+const StoreSpec* StoreSpecOfPrefix(const wchar_t*) noexcept {return nullptr;}   // stores.cpp (not linked here): no stores
 unsigned char* image=nullptr;
 const Config& Cfg() noexcept {return fixture::config;}
 void Log(const char*,...) noexcept {}

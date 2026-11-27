@@ -3,6 +3,7 @@
 #include "../src/sightzoom.cpp"
 #include <cstdio>
 #include <array>
+#include "../src/jet.h"
 namespace crew {
 bool observing=false;
 bool VehicleLookActive(const void*) noexcept { return observing; }

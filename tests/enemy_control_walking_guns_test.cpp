@@ -6,7 +6,7 @@
 #include <cwchar>
 #include <limits>
 #include "../src/enemy_control_walking_guns.h"
-#include "../src/crew.h"
+#include "../src/netprobe.h"
 #include "../src/memory.h"
 namespace crew {unsigned char* image=nullptr;}
 #include "../src/enemy_control_walking_guns.cpp"

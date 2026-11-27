@@ -1,6 +1,6 @@
 // The plugins' keys in the game's own key config (keyconfig.cpp; common/edf/keybind.h, docs/keyconfig-re.md §7).
 #pragma once
-#include "crew.h"
+#include "config.h"
 
 namespace crew {
 // The pages 11..16 put into the game's key config (HQ -> settings -> key config, the top list's 「插件」 items): every

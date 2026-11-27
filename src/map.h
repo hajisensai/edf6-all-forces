@@ -1,7 +1,6 @@
 // map.cpp: the map view (README 地图, docs/camera-re.md §8): M (ini MapKey) or a pad button (MapButton, XInput bits)
 // lifts the player's camera into an overhead view of the real 3D world that the mouse / stick pans and turns and the
 // wheel zooms (200 m to 3 km), the player's controls held while it is open; hud.cpp draws its marks over it.
-// Included by crew.h.
 #pragma once
 #include <Windows.h>
 #include <cstdint>
@@ -56,4 +55,13 @@ bool MapHoldsHumanKeys(const unsigned char* human) noexcept;
 bool MapOwnsView() noexcept;
 // The map holds this camera's stock HUD off in the current mission: only its follower gauge bars give way too.
 bool MapHidesStockHud(const void* camera) noexcept;
+}  // namespace crew
+
+namespace crew {
+// map.cpp: the game window's mouse wheel for the magnified sight's range (`hold` while it is up: the wheel's notches are
+// swallowed and counted, up +; the count since the last call), and the first XInput pad's buttons now (false: none).
+int TakeScopeWheel(bool hold) noexcept;
+bool MapPadButtons(std::uint16_t* buttons) noexcept;
+// The same pad with its analog triggers (0..255), for the controlled enemy's attack keys.
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept;
 }  // namespace crew

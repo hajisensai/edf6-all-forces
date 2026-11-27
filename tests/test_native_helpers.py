@@ -1,5 +1,5 @@
-"""native/crilayla.cpp, lzss_greedy.cpp and aabb_tree.cpp against their pure Python references (crilayla.decompress_py,
-fmb_build.cmpl_fast_py, hkcms_build._section_tree_py / simd_tree_py): the same bytes for every input, the same errors
+"""native/crilayla.cpp, lzss_greedy.cpp, aabb_tree.cpp and png.cpp against their pure Python references (crilayla.decompress_py,
+fmb_build.cmpl_fast_py, hkcms_build._section_tree_py / simd_tree_py, texfile._unfilter_py): the same bytes for every input, the same errors
 where the native one hands an input back. No game needed; with EDF6 found (pylib/gamedir.py), some of its real CPK
 entries too."""
 from pathlib import Path
@@ -8,6 +8,7 @@ import random
 import struct
 import sys
 import unittest
+import unittest.mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
 import numpy as np
@@ -17,6 +18,7 @@ import edf6native
 import fmb_build
 import hkcms_build
 import mdb
+import texfile
 
 
 def cri_stream(tokens: list) -> tuple[bytes, bytes]:
@@ -248,6 +250,71 @@ class NativeSectionTreeTests(unittest.TestCase):
         self.assertEqual(outcome(hkcms_build.simd_tree, nan, list(range(6))), outcome(hkcms_build.simd_tree_py, nan, list(range(6))))
         empty = np.zeros((0, 2, 3))
         self.assertEqual(outcome(hkcms_build.simd_tree, empty, [])[0], outcome(hkcms_build.simd_tree_py, empty, [])[0])
+
+
+def filtered(rng: random.Random, width: int, height: int, bpp: int, filters: list[int]) -> bytes:
+    """`height` random scanlines, each behind one of `filters`' types (cycled)."""
+    stride = width * bpp
+    return b''.join(bytes([filters[y % len(filters)]]) + bytes(rng.randrange(256) for _ in range(stride))
+                    for y in range(height))
+
+
+class NativePngUnfilterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.assertIsNotNone(edf6native.lib(), 'build/pylib/edf6cmpl.dll missing: run build.cmd first')
+
+    def test_matches_reference(self) -> None:
+        rng = random.Random(7)
+        for bpp in (1, 2, 3, 4, 6, 8):
+            for width, height in ((1, 1), (1, 9), (7, 5), (33, 17)):
+                for filters in ([0], [1], [2], [3], [4], [0, 1, 2, 3, 4], [4, 3, 2, 1, 0, 2, 4]):
+                    raw = filtered(rng, width, height, bpp, filters)
+                    with self.subTest(bpp=bpp, width=width, height=height, filters=filters):
+                        self.assertEqual(texfile._unfilter(raw, width, height, bpp),
+                                         texfile._unfilter_py(raw, width, height, bpp))
+        # every byte value against every neighbour (the wraps of the sums and of Paeth's choice)
+        raw = bytes([4]) + bytes(range(256)) + bytes([3]) + bytes(range(255, -1, -1)) + bytes([1]) + bytes(range(256))
+        self.assertEqual(texfile._unfilter(raw, 64, 3, 4), texfile._unfilter_py(raw, 64, 3, 4))
+
+    def test_unknown_filters_and_short_streams_behave_as_the_reference(self) -> None:
+        rng = random.Random(8)
+        for bad in (5, 6, 255):
+            raw = bytearray(filtered(rng, 8, 4, 3, [1, 2]))
+            raw[2 * (8 * 3 + 1)] = bad
+            with self.subTest(filter=bad):
+                self.assertEqual(outcome(texfile._unfilter, bytes(raw), 8, 4, 3),
+                                 outcome(texfile._unfilter_py, bytes(raw), 8, 4, 3))
+                self.assertEqual(outcome(texfile._unfilter, bytes(raw), 8, 4, 3)[0], 'TextureError')
+        raw = filtered(rng, 8, 4, 3, [4])
+        for cut in (0, 1, len(raw) - 1):
+            with self.subTest(cut=cut):
+                self.assertEqual(outcome(texfile._unfilter, raw[:cut], 8, 4, 3),
+                                 outcome(texfile._unfilter_py, raw[:cut], 8, 4, 3))
+        self.assertEqual(texfile._unfilter(b'', 9, 0, 4), texfile._unfilter_py(b'', 9, 0, 4))
+
+    def test_encoder_streams(self) -> None:
+        # A real encoder's streams (libpng's adaptive choice of filter per line, via Pillow) of every colour type
+        # decode_png reads, through decode_png both ways.
+        import io
+        from PIL import Image
+        rng = np.random.default_rng(9)
+        y, x = np.mgrid[0:96, 0:80]
+        smooth = ((x * 3 + y * 2) % 256).astype(np.uint8)
+        for mode in ('L', 'LA', 'RGB', 'RGBA', 'P'):
+            bands = len(mode) if mode != 'P' else 1
+            noise = rng.integers(0, 256, (96, 80, bands), dtype=np.uint8)
+            pixels = np.where(rng.random((96, 80, 1)) < 0.3, noise, smooth[..., None]).astype(np.uint8)
+            image = Image.fromarray(pixels[..., 0] if bands == 1 else pixels, 'L' if mode == 'P' else mode)
+            if mode == 'P':
+                image = image.convert('P')
+            buffer = io.BytesIO()
+            image.save(buffer, 'PNG')
+            data = buffer.getvalue()
+            with self.subTest(mode=mode):
+                native = texfile.decode_png(data)
+                with unittest.mock.patch.object(texfile, '_unfilter', texfile._unfilter_py):
+                    reference = texfile.decode_png(data)
+                self.assertEqual((native.width, native.height, native.rgba), (reference.width, reference.height, reference.rgba))
 
 
 if __name__ == '__main__':

@@ -37,6 +37,7 @@ void Make(Object& o,int team,unsigned vtable,float x=0.0f,float y=0.0f,float z=0
     o=Object{};
     edf::Put<const void*>(o.bytes,0,crew::image+vtable);
     edf::Put<void*>(o.bytes,edf::kSelf,o.bytes);edf::Put<void*>(o.bytes,edf::kSelfCtrl,o.control);
+    edf::Put<std::int32_t>(o.control,edf::kCtrlUses,1);   // a live object: use count 1 (objref::Exists)
     edf::Put<int>(o.bytes,edf::kTeam,team);
     edf::Put<float>(o.bytes,edf::kMatrix+0x14,1.0f);
     edf::Put<float>(o.bytes,crew::kHp,1000.0f);edf::Put<float>(o.bytes,crew::kHpMax,1000.0f);

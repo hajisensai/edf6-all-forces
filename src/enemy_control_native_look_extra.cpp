@@ -1,7 +1,7 @@
 // Persistent semantic aim -> each native family's actual pad protocol.
 // Only read native target state; native input/locomotion owns pose integration.
 #include "enemy_control_native.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

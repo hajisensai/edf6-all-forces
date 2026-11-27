@@ -10,6 +10,11 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import gen_config  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
+
 checks = 0
 
 
@@ -22,11 +27,11 @@ def check(ok: object, why: str) -> None:
 
 
 def read(*parts: str) -> str:
-    return open(os.path.join(ROOT, *parts), encoding='utf-8').read()
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    return gen_config.expand(open(os.path.join(ROOT, *parts), encoding='utf-8').read())
 
 
-def code(text: str) -> str:
-    return re.sub(r'//[^\n]*', '', text)   # comments may name anything
+code = srcscan.code
 
 
 ini = read('EDF6VehicleCrew.ini')
@@ -41,7 +46,7 @@ src_dir = os.path.join(ROOT, 'src')
 names = sorted(n for n in os.listdir(src_dir) if n.endswith(('.cpp', '.h')))
 for name in names:
     check(not re.search(r'frameRateDev|FrameRateDev', code(read('src', name))), f'src/{name} reads no FrameRateDev')
-check(re.search(r'\bint frameRateCap=0;', read('src', 'crew.h')), 'Config::frameRateCap defaults to 0 (the game\'s rate, as the shipped ini)')
+check(re.search(r'\bint frameRateCap=0;', read('src', 'config.h')), 'Config::frameRateCap defaults to 0 (the game\'s rate, as the shipped ini)')
 check(re.search(r'(?m)^FrameRateCap=0$', ini), 'the shipped ini has FrameRateCap=0 (1 waits for the maintainer\'s checklist)')
 
 fr = code(read('src', 'frame_rate.cpp'))
@@ -64,7 +69,7 @@ check(callers['InstallSwapFlip('] == ['frame_rate.cpp', 'swap_flip.cpp', 'swap_f
 # The flip model is a developer switch: the shipped ini has no FrameRateFlip, the Config defaults it off, and the
 # creation's hook goes in only when it is asked for (the review of #386, 1 and 2).
 check(not re.search(r'(?im)^\s*;?\s*FrameRateFlip\s*=', ini), 'the shipped ini has no FrameRateFlip key')
-check(re.search(r'\bbool frameRateFlip=false;', read('src', 'crew.h')), 'Config::frameRateFlip defaults to off')
+check(re.search(r'\bbool frameRateFlip=false;', read('src', 'config.h')), 'Config::frameRateFlip defaults to off')
 check(re.search(r'InstallSwapFlip\(c\.frameRateFlip\)', body), 'InstallFrameRate passes the developer switch to InstallSwapFlip')
 sf = code(read('src', 'swap_flip.cpp'))
 check(re.search(r'if\(!flipModel\)return true;\s*return callTo\(kCreateCall', sf), 'the creation hook only with flipModel, after the Present')
@@ -87,6 +92,8 @@ check(callers['InstallInputMove()'] == ['frame_rate.cpp'], f"InstallInputMove on
 check(set(callers['SwapFlipUseWaitable(']) <= {'frame_rate.cpp', 'swap_flip.cpp', 'swap_flip.h'}, 'the waitable object only with the frame gate')
 check(re.search(r'if\(gateOn && flip && c\.maxFrameLatency>0\)SwapFlipUseWaitable\(', body), 'the waitable object only with the gate on')
 check(re.search(r'viewOn=framerateview::Install\(\);\s*gateOn=viewOn && InstallGate\(\);', body), 'no interpolation, no gate (#394 review b)')
-plugin = code(read('src', 'plugin.cpp'))
-check(plugin.count('InstallFrameRate();') == 1, 'plugin.cpp installs the frame rate once')
+installs = code(read('src', 'module_table.h'))
+installs = installs[installs.index('constexpr InstallEntry kInstalls[]={'):]
+installs = installs[:installs.index('\n};')]
+check(installs.count('&Install<&InstallFrameRate>}') == 1, 'the load installs the frame rate once (module_table.h kInstalls)')
 print(f'frame rate off switch: {checks} checks ok')

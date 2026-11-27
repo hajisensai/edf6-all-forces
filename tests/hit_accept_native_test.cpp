@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include "../src/config.h"
 
 // live_set.cpp: nothing handed over by the game here, so every ask goes to Readable as before.
 namespace liveset { bool Has(const void*) noexcept { return false; } }

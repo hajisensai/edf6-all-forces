@@ -5,7 +5,10 @@
 // their NetId, so a target that is a player (a teammate grabbed by the gravity gun, marked, attacked by a controlled enemy)
 // is found on every machine, and a player that died is still named (a show its caller started plays on).
 // Returned references and PUIDs are borrowed for immediate synchronous use, never retained or queued.
-#include "crew.h"
+#include "objref.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "net_object_ref.h"
 #include <cstdint>
 

@@ -297,7 +297,8 @@ static void Layers() {
         for(int i=0;same && i<na;++i)same=Near(a[static_cast<std::size_t>(i)].size,b[static_cast<std::size_t>(i)].size,1e-3f);
         CHECK(same);
     }
-    // The short-lived layers' sizes grow linearly with the radius; residual and bigDust by BlastScale. 24 m and 40 m
+    // The short-lived layers' sizes (fireball, dirt) grow linearly with the radius; the long-lived smoke (black column,
+    // residual, bigDust) by BlastScale; debris not at all. 24 m and 40 m
     // make the same counts (the count factor is clamped at 2), so the same seed spawns the same puffs, only scaled.
     {
         const BlastEvent r24{{0.0f,0.0f,0.0f},24.0f},r40{{0.0f,0.0f,0.0f},40.0f};
@@ -315,12 +316,12 @@ static void Layers() {
         pool.Clear();
         CHECK(na==nb);
         // Build's order is the spawn order (fresh pool): fireball, dirt, black, debris (size not scaled), residual, bigDust.
-        const int nearEnd=c24.fireball+c24.dirt+c24.black,debrisEnd=nearEnd+c24.debris;
+        const int nearEnd=c24.fireball+c24.dirt,blackEnd=nearEnd+c24.black,debrisEnd=blackEnd+c24.debris;
         const float lin=40.0f/24.0f,slow=BlastScale(40.0f)/BlastScale(24.0f);
         bool ok=na==nb && na==debrisEnd+c24.residual+c24.bigDust;
         for(int i=0;ok && i<na;++i) {
             const float ratio=b[static_cast<std::size_t>(i)].size/a[static_cast<std::size_t>(i)].size;
-            const float want=i<nearEnd ? lin : i<debrisEnd ? 1.0f : slow;
+            const float want=i<nearEnd ? lin : i<blackEnd ? slow : i<debrisEnd ? 1.0f : slow;
             ok=Near(ratio,want,1e-3f);
         }
         CHECK(ok && slow<lin);

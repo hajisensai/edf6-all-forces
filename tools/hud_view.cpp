@@ -1,4 +1,4 @@
-// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp included whole, its draw run on a
+// The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp and its parts included whole, its draw run on a
 // stand-in "EDF.dll" image whose quad and text functions (the RVAs hud.cpp calls) jump to recorders here, for a few
 // scenes of the warnings (warn.h) on a jet (one low on fuel: the fuel readout that replaces the stock FUEL gauge, LOW
 // FUEL lit), a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the drill tank, a Nix, the Proteus
@@ -29,16 +29,36 @@
 //   hud_view [--out DIR] [--lang en|zh-CN|zh-TW|ja]      (default %TEMP%\edf6_hud_view, every language), then:
 //   python tools/hud_view.py DIR
 #include "../src/turretcam.h"
-#include "../src/hud.cpp"
+#include "../src/hud.cpp"   // the HUD whole: hud.cpp and its parts (src/hud_internal.h)
+#include "../src/hud_text.cpp"
+#include "../src/hud_vehicle.cpp"
+#include "../src/hud_air.cpp"
+#include "../src/hud_map.cpp"
+#include "../src/hud_scope.cpp"
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
 #include <array>
+#include <cstdarg>
 #include <cstdio>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
+#include "../src/edf_layout.h"
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/scene.h"
+#include "../src/debug_spawn_api.h"
+#include "../src/ground.h"
+#include "../src/highcam.h"
+#include "../src/sightzoom_api.h"
+#include "../src/strikes.h"
+#include "../src/subcarrier.h"
+#include "../src/damagestats.h"
+#include "../src/mapcmd.h"
+#include "../src/qmark.h"
+#include "../src/infantryscope.h"
 
 namespace crew {
 bool VehicleLookHint(bool*) noexcept { return false; }
@@ -113,6 +133,7 @@ float Width(const wchar_t* text) {
 struct Drew { float x0,y0,x1,y1; std::wstring text; bool world=false; std::uint64_t key=0; };
 std::vector<Drew> drew;
 std::set<std::pair<wchar_t,int>> glyphs;
+std::set<std::string> fitCuts;   // the lines FitLine cut with "..." ("<language> <text>", UTF-8): a slot's too-long text
 
 // The recorders the stand-in image's functions jump to.
 struct PanelBox { float x0,y0,x1,y1; };
@@ -210,6 +231,14 @@ void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar
         owedRestore=false;
     }
     if(rgba[3]<=0.0f)return;   // the world lines' restore (hud.cpp RestoreOrtho): nothing to see
+    if(recording) {   // a line FitLine cut (past kMinScale, "..." after it): listed in the summary, by language
+        const std::size_t n=std::wcslen(text);
+        if(n>3 && !std::wcscmp(text+n-3,L"...")) {
+            char narrow[256];
+            WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
+            fitCuts.insert(std::string(hudtext::Name(hudtext::InUse()))+" "+narrow);
+        }
+    }
     tallest=std::fmax(tallest,y1-y0);
     if(boxing){++drawn;Grow(x0,y0);Grow(x1,y1);}
     if(recording) {
@@ -230,7 +259,13 @@ void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
 }
 }  // namespace
 const Config& Cfg() noexcept { return config; }
-void Log(const char*,...) noexcept {}
+// The HUD losing text (LineSink: its lines full; TextWritten: a line cut at its characters): printed, a failure (lineLosses).
+static int lineLosses=0;
+void Log(const char* format,...) noexcept {
+    if(std::strncmp(format,"HUD lines full",14)!=0 && std::strncmp(format,"HUD a line's text cut",21)!=0)return;
+    va_list args;va_start(args,format);std::vprintf(format,args);va_end(args);
+    std::printf("\n");++lineLosses;
+}
 ULONGLONG GameMs() noexcept { return GetTickCount64(); }
 bool GamePaused() noexcept { return paused; }
 bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return hasJet; }
@@ -354,7 +389,10 @@ bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
 // The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
 bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
+namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.
+bool AuraViewNow(AuraView*) noexcept { return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
 bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
@@ -432,8 +470,9 @@ void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n)
 }
 // The support bar's rows and chips as drawn (hud.cpp MapSupportBar).
 float sceneSupportHits[kMapSupports*2][4]{};int sceneSupportEntry[kMapSupports*2]{},sceneSupportHitCount=0;
-void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept {
-    sceneSupportHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
+int sceneSupportTop=0,sceneSupportRows=0,sceneSupportFit=0;
+void MapCommandSupportButtons(const float* r,const int* entries,int n,int top,int rows,int fit) noexcept {
+    sceneSupportHitCount=n;sceneSupportTop=top;sceneSupportRows=rows;sceneSupportFit=fit;for(int i=0;i<n;++i){std::memcpy(sceneSupportHits[i],r+i*4,16);sceneSupportEntry[i]=entries[i];}
 }
 // The support composition panel's seats and kinds as drawn (hud.cpp MapComposePanel).
 float sceneComposeHits[mapbtn::kComposeItems][4]{};int sceneComposeCode[mapbtn::kComposeItems]{},sceneComposeHitCount=0;
@@ -783,15 +822,15 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<sceneCmd.supports;++i){sceneCmd.support[i].price=1800+(i*1300)%13200;sceneCmd.support[i].afford=sceneCmd.support[i].price<=sceneCmd.points;}
     sceneCmd.support[sceneCmd.supports-1].price=15000;sceneCmd.support[sceneCmd.supports-1].afford=false;
     sceneWarnings=!pad;
-    // Their tabs (support_call.h SupportTab): the strikes by their icons, the infantry and vehicles on the ground, the
-    // sorties by their names (no "·"), the rest in the air.
+    // Their tabs (support_call.h SupportTab): the strikes by their icons, the infantry and vehicles on the ground, every
+    // flown one in the sortie tab.
     for(int i=0;i<sceneCmd.supports;++i) {
         const SupportIcon ic=sceneCmd.support[i].icon;
         sceneCmd.support[i].tab=ic==SupportIcon::barrage || ic==SupportIcon::satellite ? SupportTab::strike :
             ic==SupportIcon::squad || ic==SupportIcon::platoon || ic==SupportIcon::tank || ic==SupportIcon::apc || ic==SupportIcon::truck ?
-            SupportTab::ground : !mapbtn::VariantOf(sceneCmd.support[i].name) && ic!=SupportIcon::sub ? SupportTab::sortie : SupportTab::air;
+            SupportTab::ground : SupportTab::sortie;
     }
-    sceneCmd.supportTab=static_cast<int>(SupportTab::air);
+    sceneCmd.supportTab=static_cast<int>(SupportTab::sortie);
     sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
     // The payload scenes arm the platoon row and open its composition (map_buttons.h ComposePanel): two squads in, a
     // Wing Diver and a Fencer one, of its twelve seats.
@@ -901,10 +940,23 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 }
             }
         } else if(sceneComposeHitCount){++textFailed;std::printf("FAIL composition clickable with none armed: %d\n",sceneComposeHitCount);}
-        // Every entry of the tab shown reachable, every tab too (support_call.h SupportTab, map_buttons.h SupportTabHit).
-        int reached=0,onTab=0;
-        for(int i=0;i<sceneCmd.supports;++i)if(static_cast<int>(sceneCmd.support[i].tab)==sceneCmd.supportTab){++onTab;reached+=reach[i];}
-        if(reached!=onTab){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,onTab);}
+        // Every entry of the tab's rows in the window shown reachable (map_buttons.h ColumnWindow: the wheel scrolls to
+        // the rest), at least one row in it, and every tab (support_call.h SupportTab, map_buttons.h SupportTabHit).
+        {
+            const wchar_t* tabNames[kMapSupports];int tabIdx[kMapSupports];int onTab=0;
+            for(int i=0;i<sceneCmd.supports;++i)
+                if(static_cast<int>(sceneCmd.support[i].tab)==sceneCmd.supportTab){tabNames[onTab]=sceneCmd.support[i].name;tabIdx[onTab++]=i;}
+            mapbtn::Group tabRows[kMapSupports];
+            const int rows=mapbtn::GroupSupport(tabNames,onTab,tabRows,kMapSupports);
+            int reached=0,windowed=0;
+            for(int k=sceneSupportTop;k<rows && k<sceneSupportTop+sceneSupportFit;++k)
+                for(int e=tabRows[k].first;e<tabRows[k].first+tabRows[k].count;++e){++windowed;reached+=reach[tabIdx[e]];}
+            if(rows!=sceneSupportRows || sceneSupportFit<1 || reached!=windowed || (rows<=sceneSupportFit && windowed!=onTab)) {
+                ++textFailed;
+                std::printf("FAIL support entries clickable: %d of %d in rows %d..%d of %d\n",reached,windowed,sceneSupportTop,
+                            sceneSupportTop+sceneSupportFit,rows);
+            }
+        }
         int tabs=0;for(int i=0;i<sceneSupportHitCount;++i)tabs+=mapbtn::SupportTabOfHit(sceneSupportEntry[i])>=0;
         if(tabs!=kSupportTabs){++textFailed;std::printf("FAIL support tabs clickable: %d\n",tabs);}
         for(int i=0;i<sceneButtons;++i) {
@@ -2639,7 +2691,7 @@ int Scenes(const std::wstring& dir) {
         bool named=false,apart=true;
         for(std::size_t i=0;i<drew.size();++i) {
             const Drew& p=drew[i];
-            if(p.text.find(FormationText(sceneFormation))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
+            if(p.text.find(FormationText(sceneFormation,false))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
                 named=p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f;
             for(std::size_t k=i+1;k<drew.size();++k) {
                 const Drew& q=drew[k];
@@ -2877,6 +2929,10 @@ int wmain(int argc,wchar_t** argv) {
     std::printf(textFailed ? "text: %d FAILED\n" : "text: on the screen, inside its panels, no overlap English lacks, in every language\n",textFailed);
     std::printf("glyphs: at most %zu in one scene (%s)\n",mostGlyphs,mostGlyphsAt.c_str());
     failed+=textFailed;
+    std::printf(lineLosses ? "lines: %d lost (LineSink / TextWritten above)\n" : "lines: none lost\n",lineLosses);
+    failed+=lineLosses;
+    std::printf("fit: %zu texts cut with ... by FitLine (past kMinScale in their slot)\n",fitCuts.size());
+    for(const std::string& c:fitCuts)std::printf("      %s\n",c.c_str());
     config.hudLanguage=1;hudtext::Use(hudtext::Lang::en);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     // The HUD's scale (src/hudscale.h).

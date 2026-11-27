@@ -1,5 +1,4 @@
 // hud.cpp: the vehicle HUD (docs/hud-re.md), drawn from the follower gauge's call (subcarrier.cpp GaugeHook).
-// Included by crew.h.
 #pragma once
 namespace crew {
 bool InstallHud() noexcept;                         // at load: checks the draw and text functions it calls
@@ -29,4 +28,16 @@ bool HudScopeHoldsCrosshair(const void* soldier) noexcept;
 // them (the 整备 vehicle page's fire keys, armory.cpp). 0: "unbound".
 void ControlKeyName(int vk,wchar_t* out,int size) noexcept;
 void ControlPadName(int mask,wchar_t* out,int size) noexcept;
+}  // namespace crew
+
+namespace crew {
+void ResetHud() noexcept;         // hud.cpp
+// The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
+bool LastViewProj(float* out) noexcept;
+// The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.
+bool CameraRay(float* eye,float* dir) noexcept;
+// Split screen: each local player's own view (player_view.h). KeepPlayerViewProj from each HUD pass with the camera it
+// draws for (subcarrier.cpp GaugeHook); CameraRayOf the ray of the view last drawn for `human`, false with none fresh.
+void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept;
+bool CameraRayOf(const void* human,float* eye,float* dir) noexcept;
 }  // namespace crew

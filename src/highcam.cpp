@@ -10,7 +10,20 @@
 //  - The choice is kept from vehicle to vehicle in the mission; the view goes back when the player gets out, the vehicle
 //    is wrecked, HighCam or the plugin is switched off in the ini, and on a new mission.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf/input_source.h"
+#include "objref.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "highcam.h"
+#include "map.h"
+#include "sightzoom_api.h"
+#include "turretcam_api.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "firstperson.h"
 #include "seat_switch_logic.h"
 #include "layout.h"

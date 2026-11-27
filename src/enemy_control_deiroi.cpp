@@ -5,7 +5,7 @@
 #include "enemy_control_deiroi_net.h"
 #include "enemy_control_deiroi_entity_aim.h"
 #include "enemy_control_action_native.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "edf41classes.h"
 #include "memory.h"
 #include <cmath>

@@ -29,7 +29,10 @@
 // -> 0x5765E0 RideVehicle). So a player needs this on their own machine to board; a peer without it still sees them
 // ride. The pose is each machine's own: a peer without it shows a Wing Diver or Fencer on a bike in their on-foot pose.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "patches.h"
 #include "memory.h"
 #include "seat_class.h"
 

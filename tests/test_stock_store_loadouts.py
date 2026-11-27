@@ -74,7 +74,8 @@ class LoadoutTableTests(unittest.TestCase):
         self.assertEqual(h['AmmoIsPenetration'], 0.0, 'a shaped charge stops on what it hits')
         self.assertTrue(0.0 < h['AmmoExplosion'] < 8.0, 'a burst smaller than the howitzer round')
         self.assertGreater(h['AmmoDamage'], 350.0, 'more than the stock rounds on its one target')
-        self.assertTrue(10.0 <= h['AmmoSpeed'] < 18.0, 'fast and flat, slower than the APFSDS (18 m a frame)')
+        self.assertAlmostEqual(h['AmmoSpeed'] * 60.0, 1140.0, delta=1.0, msg='the M830: slower than the APFSDS')
+        self.assertLess(h['AmmoSpeed'] * 60.0, vc.MUZZLE_VELOCITY[vc.STORES['AP'].weapon.template][0])
         self.assertLessEqual(h['AmmoGravityFactor'], 0.2)
         self.assertNotIn('AmmoExplosion', c)
         self.assertGreater(c['FireCount'], 1.0)
@@ -254,6 +255,12 @@ class WithGameTests(unittest.TestCase):
                     changed.add('AmmoColor')
                 if store.weapon.flash is not None:
                     changed.add('MuzzleFlash_CustomParameter')
+                real = vc.MUZZLE_VELOCITY.get(store.weapon.template)
+                if real is not None and 'AmmoSpeed' not in dict(store.weapon.extra):   # the stock gun's real speed
+                    changed |= {'AmmoSpeed', 'AmmoAlive'}
+                    self.assertAlmostEqual(got['AmmoSpeed'] * 60.0, real[0], delta=0.1)
+                    reach = stock['AmmoSpeed'] * stock['AmmoAlive']
+                    self.assertTrue(reach <= got['AmmoSpeed'] * got['AmmoAlive'] < reach + got['AmmoSpeed'] + 1e-3)
                 if store.weapon.ammo_class == 'RocketBullet01':   # its smoke trail made a tracer (vc.wt_tracer)
                     changed.add('Ammo_CustomParameter')
                     want = list(stock['Ammo_CustomParameter'])
@@ -277,6 +284,30 @@ class WithGameTests(unittest.TestCase):
                         self.assertGreater(got['AmmoDamage'], stock['AmmoDamage'])
                         self.assertLess(got['AmmoExplosion'], stock['AmmoExplosion'])
                         self.assertGreater(got['AmmoSpeed'], stock['AmmoSpeed'])
+
+    def test_stock_guns_leave_at_their_real_speed_as_far_as_before(self) -> None:
+        # The user, 2026-11-26: 「真实初速」, the stock vehicles' guns with the stores: 「一块改」.
+        for name, (mps, _, tracer) in vc.MUZZLE_VELOCITY.items():
+            with self.subTest(gun=name):
+                stock = dsgo.to_py(dsgo.parse(self.game.read('WEAPON', name)).root)
+                got = dsgo.to_py(dsgo.parse(vc.stock_gun_sgo(self.game, name)).root)
+                self.assertAlmostEqual(got['AmmoSpeed'] * 60.0, mps, delta=0.1)
+                self.assertGreater(got['AmmoSpeed'], stock['AmmoSpeed'], 'every stock gun here was slower than real')
+                reach = stock['AmmoSpeed'] * stock['AmmoAlive']
+                self.assertTrue(reach <= got['AmmoSpeed'] * got['AmmoAlive'] < reach + got['AmmoSpeed'] + 1e-3)
+                changed = {'AmmoSpeed', 'AmmoAlive'} | ({'Ammo_CustomParameter'} if tracer == 'he' else set()) | (
+                    {'AmmoColor'} if tracer == 'ap' else set())
+                self.assertEqual({k: v for k, v in got.items() if k not in changed},
+                                 {k: v for k, v in stock.items() if k not in changed}, 'nothing else of the gun changes')
+                if tracer == 'ap':
+                    self.assertEqual(got['AmmoExplosion'], 0.0)
+                    self.assertEqual(tuple(got['AmmoColor']), vc.AP_TRACER)
+                elif tracer == 'he':
+                    self.assertGreater(got['AmmoExplosion'], 0.0)
+                    # The flame a tracer; the smoke the stock's, so it stays and fades after the burst (vc.wt_tracer).
+                    self.assertEqual(got['Ammo_CustomParameter'][1], vc.SHELL_TRACER_CP[1])
+                    self.assertEqual(got['Ammo_CustomParameter'][2], stock['Ammo_CustomParameter'][2])
+                    self.assertGreater(got['Ammo_CustomParameter'][2], 0.0, 'a smoke trail that outlives the round')
 
     def test_flak_templates_preserve_native_fuse_and_penetration(self) -> None:
         rows = stores._read_any(self.game.read('OBJECT', 'V603_FLAK.SGO'))['vehicle_weapon_setting']

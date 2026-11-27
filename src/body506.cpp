@@ -14,6 +14,14 @@
 #include "subcarrier.h"
 #include "vecmath.h"
 #include <cwchar>
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "plugin_body.h"
+#include "dreadnought.h"
+#include "heli.h"
+#include "jet.h"
+#include "sazabi.h"
 
 namespace crew {
 namespace {

@@ -14,7 +14,15 @@
 // Online every move is told to the peers too (gravity_net.h): each machine carries and throws its own copy the same way, the
 // damage dealt here alone (this machine's player is the thrower). The player's own Laser Guide Kit is never touched.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "gravity.h"
 #include "gravity_net.h"
 #include "memory.h"

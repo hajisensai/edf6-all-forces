@@ -24,7 +24,11 @@
 #include "armory.h"
 #include "armory_presets.h"
 #include "worldmap_tiles.h"
-#include "crew.h"
+#include "edf/input_source.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "infantryscope.h"
 #include "loadout_store.h"
 #include "room_sync.h"
 #include "memory.h"
@@ -1294,14 +1298,10 @@ int DrawTiles(const View& v,const Screen& screen,int* xy) noexcept {
 
 float Seconds() noexcept { return static_cast<float>(GetTickCount64()%1000000ull)/1000.f; }
 
-// A label at (x, y) (its top left), shadowed; at most `maxW` wide (cut at its right); its width.
-float Text(const wchar_t* text,float x,float y,float size,bool bold,std::uint32_t argb,float maxW=4000.f) noexcept {
-    const uitext::Label l=labels->Get(*renderer,text,size,bold,drawn.lang,frame);
-    if(!l.view)return 0.f;
-    const float w=l.w<maxW ? l.w : maxW,u1=l.w>0.f ? w/l.w : 1.f;
-    renderer->Image(l.view,x+1.5f,y+1.5f,x+1.5f+w,y+1.5f+l.h,0.f,0.f,u1,1.f,0xC0000000u);
-    renderer->Image(l.view,x,y,x+w,y+l.h,0.f,0.f,u1,1.f,argb);
-    return w;
+// A label at (x, y) (its top left), shadowed; at most `maxW` wide (0: any), fitted as text_fit.h's shrink says (smaller,
+// then cut with an ellipsis; ui_text.h Labels::Draw); its width as drawn.
+float Text(const wchar_t* text,float x,float y,float size,bool bold,std::uint32_t argb,float maxW=0.f) noexcept {
+    return labels->Draw(*renderer,text,x,y,size,argb,uitext::Align::left,bold,drawn.lang,frame,maxW,true).w;
 }
 void Sprite(ID3D11ShaderResourceView* view,Pixel c,float r,std::uint32_t argb) noexcept {
     if(view)renderer->Image(view,c.x-r,c.y-r,c.x+r,c.y+r,0.f,0.f,1.f,1.f,argb);
@@ -1668,7 +1668,13 @@ std::uint64_t __fastcall DrawHook(unsigned char* self,unsigned char* ctx) {
         if(mapped)DrawMap(self,ctx);
     }
     const std::uint64_t result=nextDraw(self,ctx);
-    if(mapped && Still(self))DrawOver(ctx);
+    if(ctx) {   // 整备 held drawn on its screen since it asked for the map: given up once the select is in place
+        armoryui::MapDrawn();
+        if(Still(self)) {
+            armoryui::MapShown();
+            if(mapped)DrawOver(ctx);
+        }
+    }
     return result;
 }
 

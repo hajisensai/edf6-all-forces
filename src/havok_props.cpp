@@ -3,7 +3,8 @@
 // and frees every dispatcher.
 #include "havok_props.h"
 #include "havok_props_logic.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
 
 namespace crew {
 namespace {

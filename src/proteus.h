@@ -1,4 +1,4 @@
-// proteus.cpp: the Proteus rework (README 普罗透斯, docs/proteus-re.md; ini Proteus*). Included by crew.h.
+// proteus.cpp: the Proteus rework (README 普罗透斯, docs/proteus-re.md; ini Proteus*).
 #pragma once
 #include <Windows.h>
 #include <cstdint>

@@ -3,7 +3,18 @@
 // helpers it calls (TimeDateStamp 0x678CCB46).
 #define _CRT_RAND_S
 #include <cstdlib>
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "heli.h"
+#include "hud.h"
+#include "playerjet.h"
+#include "sound.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "qmark.h"
 #include "qmark_protocol.h"
 #include "qmark_ray.h"

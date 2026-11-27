@@ -12,12 +12,14 @@
   - 结果：远端玩家选了 AP / HEAT / 霰弹 / 导弹，本机的这辆车副本仍按原版主炮开火；主机 NPC 选的弹在客机上也是原版的。
 - 钻头（`drill_net`）、普罗透斯（`proteus_net`）、沙扎比（`sazabi_net`）各自复制了一份完全相同的传输：签名、`Stream`、`Peek`、接收钩子、发送、ReferenceId、发送者 / 序号、去重 `Gate`。
 
-## 传输：`src/seat_net.h`、`src/seat_net.cpp`
+## 传输：对象消息层 `src/object_net.h`、`src/object_net_transport.h`、`src/object_net.cpp`
+
+2026-11-27（设计审查 1126 第 7 步）：原 `seat_net.cpp`（载具 tag 15）与 `edf41net.cpp` 自带的 tag 12 传输（复制虚表）合成这一层；`seat_net.h` 只剩座位选弹 `Pick` 这一种消息。
 
 - 载具自己的 NetworkObject（车辆 `+0x120`）：slot 16（`+0x80`，`0x773DA0`）发送，原版对象描述符把消息送到每台机器上的同一辆车；slot 17（原版 `0x6325B0`）接收。逆向依据见 `docs/drill-re.md` §8.5（H，`drill_net_native_test` 在映射的 EDF.dll 上实跑）。
-- 所有种类共用 **tag 15**（coop 占 13 伤害、14 RNG），块头相同（`seat_net::Head`：magic、version、sender、sequence、controller，24 字节，偏移与钻头 / 普罗透斯 / 沙扎比原有布局一致，旧块格式不变）。接收钩子按 magic 分发给登记的处理函数（`seat_net::Register`）；不认识的 magic 与其它 tag 原样交给下一个接收函数。
-- 一个发送者身份（`rand_s`）、一个单调序号（跳过 0）；去重 `seat_net::BasicGate<N>`（原 `drill_net::Gate` 抽出）：每个发送者的水位、序号回绕、控制纪元（座位当前注册乘员的 ReferenceId，空座 / 主机 NPC 为 -1）、本机运行该流时不收自己的。
-- 钻头 / 普罗透斯 / 沙扎比照旧在安装时链各自类的 slot 17（`0x17DB0D0` / `0x17DEE98` / `0x17DB4C8`）；其它原版载具类在它的车第一次参与选弹同步时按车辆 `+0x120` 的表链上（`ChainVehicle`，只链 send / receive 仍是原版 `0x773DA0` / `0x6325B0` 的类）。
+- 所有种类共用 **tag 15**（coop 占 13 伤害、14 RNG），块头相同（`object_net::Head`：magic、version、sender、sequence、controller，24 字节，偏移与钻头 / 普罗透斯 / 沙扎比原有布局一致，旧块格式不变）。接收钩子按 magic 分发给登记的处理函数（`object_net::Register`，种类登记表 `object_net::Kinds`，最多 `kMostKinds` 种；同一 magic 换处理函数拒绝）；不认识的 magic 与其它 tag 原样交给下一个接收函数。现有种类：`DRIL` 钻头 / `PRNT` 普罗透斯 / `SZBI` 沙扎比 / `DNTR` 无畏舰炮塔 / `SPCK` 座位选弹 / `AFUZ` 安德留沙引信 / `STUR` 座位炮塔 / `E41N`（EDF4.1 类事件，32 字节头 = 共用头 + 种类、长度、保留），`tests/object_net_test.cpp` 校验 magic 互异。
+- 一个发送者身份（`rand_s`）、一个单调序号（跳过 0）；去重 `object_net::BasicGate<N>`（原 `drill_net::Gate` 抽出）：每个发送者的水位、序号回绕、控制纪元（座位当前注册乘员的 ReferenceId，空座 / 主机 NPC 为 -1）、本机运行该流时不收自己的。
+- 要链的类写在类表 `object_net::kClasses`（类、NetworkObject 表基址、原版接收：505 `0x17DB048`、BigBegaruta `0x17DEE10`、506 `0x17DB440` 的 slot 17 原为 `0x6325B0`；EventAnimationObject `0x17D4E90`、UfoCarrier508 `0x17C9F50` 的 slot 17 原为 `0x54D770`，它不验指纹，因为 EDF6Coop 钩了它的第一条指令）。钻头 / 普罗透斯 / 沙扎比 / EDF4.1 类在安装时 `object_net::ChainClass(Class::…)` 链各自的类，不再各写 `kReceiveSlot`；其它原版载具类在它的车第一次参与选弹同步时按车辆 `+0x120` 的表链上（`ChainVehicle`，只链 send / receive 仍是原版 `0x773DA0` / `0x6325B0` 的类）。
 - 普罗透斯的「别的版本」判定（同 magic 不同 version → 还原原版）保留在它的处理函数里。
 
 ## 座位选弹：`seat_net::Pick`（magic `SPCK`，40 字节）
@@ -36,7 +38,8 @@
 
 ## 验证
 
+- `object_net_test`：种类登记表（同 magic 换函数拒绝、满额拒绝）、全部 magic 互异、类表的基址与 slot 17 地址、唯一 tag、同一对象上座位选弹与 `E41N` 两种消息交错序号互不干扰（各自的 Gate 只排自己的、一种的块不会被另一种解出、没登记的种类原样交下一个）。
 - `seat_net_test`：块头偏移、各 magic 互异、选弹编解码与每个越界字段、Gate 的去重 / 乱序 / 纪元 / 回绕 / 满员不驱逐、发送时机。
 - `payload_runtime_test`（生产 `payload.cpp` + 假传输 `tests/seat_net_fake.inc`）：上车即发、刷新、LB 切换立即发、离线不发；远端玩家座位：未收到前原版、收到后扳机落到所选挂载、旧序号 / 别的纪元 / 畸形块被拒、过期回到原版、本机玩家接管时不用远端选择；NPC：运行机器发带 kNpc 的选择、副本照它重定向、离开会话作废。
-- `drill_net_native_test` / `proteus_net_native_test` / `sazabi_net_native_test`（`EDF.dll` 只读映射，不运行游戏）：迁移后三种照旧往返，选弹块经原生编解码到它自己的处理函数，原版接收忽略它。
-- 未实机：两台机器上远端玩家 / 主机 NPC 的选弹是否在副本上打出对应的弹（需要双机房间）。
+- `drill_net_native_test` / `proteus_net_native_test` / `sazabi_net_native_test` / `edf41net_native_test`（`EDF.dll` 只读映射，不运行游戏）：迁移后各种照旧往返，选弹块经原生编解码到它自己的处理函数，原版接收忽略它；EDF4.1 两类的 slot 17 被链上（下一个是 `0x54D770`，再装不重复链），`E41N` 与选弹在同一对象上各进各的处理函数。
+- 未实机：两台机器上远端玩家 / 主机 NPC 的选弹是否在副本上打出对应的弹；EDF4.1 类事件改走 tag 15 后的双机表现（需要双机房间）。

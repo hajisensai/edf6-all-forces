@@ -1,7 +1,12 @@
 // Native pose fallback: canonical semantic wire, preflighted writes, and retained rollback journals.
 #include "enemy_control_native_pose.h"
 #include "enemy_control_pose_codec.h"
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
+#include "scopereticle.h"
 #include "memory.h"
 #include "lazy_rows.h"
 #include <cmath>
@@ -55,13 +60,11 @@ template<class T>T Fn(unsigned rva) noexcept {
 #endif
 }
 bool Identity(const NativeLease& l) noexcept {
-    return l.object && l.profile && l.control && Readable(l.profile,sizeof(*l.profile)) && Readable(l.object,0x358) &&
-        Readable(l.control,16) && At<LONG>(l.control,8)>0 && At<const void*>(l.object,0x30)==l.control &&
-        !(l.object[0x18]&4) && !l.object[0x2E8];
+    return l.profile && Readable(l.profile,sizeof(*l.profile)) && objref::Alive(ObjRef{l.object,l.control}) &&
+        Readable(l.object,0x358);
 }
 bool AliveIdentity(const void* object,const void* control) noexcept {
-    return object && control && Readable(control,16) && At<LONG>(control,8)>0 && Readable(object,0x38) &&
-        At<const void*>(object,0x30)==control && !(At<unsigned char>(object,0x18)&4);
+    return objref::Exists(ObjRef{object,control});
 }
 bool KindOf(const NativeLease& l,PoseKind* kind,unsigned* secondary=nullptr) noexcept {
     if(!l.profile)return false;unsigned net=0;

@@ -4,7 +4,6 @@
 // site is redirected through the stub, and a stand-in caller with the mission select's frame (the rows' vector at
 // [rsp+0x48]) gets every row opened only in a ported story pack with the key on, and a pack's placeholder rows
 // (EDF6VehicleCrew.packs.ini Missing) locked and never cleared, the key on or off.
-#include "../src/crew.h"
 #include "../src/memory.h"
 #include <algorithm>
 #include <cstdio>

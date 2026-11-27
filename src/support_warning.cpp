@@ -2,9 +2,14 @@
 // under them (MapRay: terrain or a roof) once, when they are made; the HUD copies them under the lock.
 #include "support_warning.h"
 #include "support_warning_logic.h"
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "jet.h"
 #include "heli.h"            // MapRay
 #include "memory.h"
+#include "objref.h"
 #include "support_aircraft.h"
 #include "support_call.h"
 #include "support_net.h"
@@ -17,7 +22,8 @@ namespace {
 using warning::Look;
 constexpr int kRingPoints=48;
 constexpr int kKept=16;
-constexpr unsigned long long kRouteMs=30000;     // a deployment's route shows this long (it is on its way by then)
+constexpr unsigned long long kRouteMs=30000;     // a deployment's ring shows this long (its route: while its lead flies it)
+constexpr int kWayPoints=4;                      // a deployment's route as laid (warning::Route, a marked run's line)
 constexpr unsigned long long kPreviewMs=250;     // the map's preview lasts while asked again within this
 constexpr float kGroundReach=400.0f;             // m over and under a point its ground is looked for
 constexpr float kMarkRing=40.0f;                 // m: the ring at a jet's or a vehicle's point (no circle of its own)
@@ -28,6 +34,11 @@ struct Kept {
     wchar_t name[28]{};
     ULONGLONG until=0;       // GameMs
     bool timed=true;         // its words count down
+    // A deployment's: its lead aircraft or vehicle (gone: the warning goes), and its route as laid (`ways` points, 0 for a
+    // ring), drawn each frame from where the lead is on along what is still ahead of it (warning::RouteAhead).
+    ObjRef lead{};
+    float way[kWayPoints][3]{};
+    int ways=0;
 };
 SRWLOCK lock=SRWLOCK_INIT;
 Kept kept[kKept];
@@ -158,7 +169,7 @@ void WarnUltimate(const float* at,unsigned long long ms) noexcept {
     Put(Claim(),made);
 }
 
-void WarnDeployment(const support_net::Plan& plan) noexcept {
+void WarnDeployment(const support_net::Plan& plan,const ObjRef& lead) noexcept {
     if(!plan.count)return;
     const auto& unit=plan.units[0];
     const float* from=unit.matrix+12;
@@ -185,6 +196,15 @@ void WarnDeployment(const support_net::Plan& plan) noexcept {
     }
     route.until=ring.until=GameMs()+kRouteMs;
     ring.timed=ring.view.look==Look::strike;
+    // Both the lead's (the user, 2026-11-27: 「飞机进场会有个红线停留在原地」): laid from where it was made and kept a
+    // fixed 30 s, the route stood at the entry, its words there, while the aircraft flew on. Now its route runs from the
+    // lead on (SupportWarningTick) and goes once the lead has flown it or is gone; its ring goes with the lead too.
+    route.lead=ring.lead=lead;
+    if(lead) {
+        route.until=~0ull;
+        route.ways=route.view.points<kWayPoints ? route.view.points : kWayPoints;
+        for(int i=0;i<route.ways;++i)std::memcpy(route.way[i],route.view.pt[i],12);
+    }
     Name(route,name);Name(ring,L"");
     Put(Claim(),route);
     if(ring.on)Put(Claim(),ring);
@@ -233,7 +253,7 @@ void WarnPreview(int catalog,const float* target,const float* strikeHeading,cons
     } else {
         SupportAircraft spec;
         float from[3];
-        if(SupportCatalogAir(catalog) && AirSpec(catalog,&spec) && SupportPreviewEntry(catalog,target,from)) {
+        if(SupportCatalogAir(catalog) && AirSpec(catalog,&spec) && SupportPreviewEntry(catalog,target,from,strikeHeading)) {
             Kept ring;
             const bool both=FlownOutline(spec,from,target,made,ring);
             // One outline at a time: the route, and the ring it ends in folded into the same points where they fit.
@@ -263,6 +283,18 @@ void SupportWarningTick() noexcept {
     for(Kept& k:kept) {
         if(!k.on)continue;
         if(now>=k.until){k.on=false;continue;}
+        if(k.lead) {
+            if(!objref::Exists(k.lead)){k.on=false;continue;}
+            if(k.ways>=2) {
+                const float* at=reinterpret_cast<const float*>(static_cast<const unsigned char*>(k.lead.obj)+kPosition);
+                float ahead[kWayPoints][3];
+                const int n=std::isfinite(at[0]+at[1]+at[2]) ? warning::RouteAhead(k.way,k.ways,at,ahead) : 0;
+                if(n<2){k.on=false;continue;}
+                k.view.points=n;
+                for(int i=0;i<n;++i)std::memcpy(k.view.pt[i],ahead[i],12);
+                std::memcpy(k.view.label,ahead[0],12);
+            }
+        }
         const unsigned long long left=(k.until-now+999)/1000;
         if(k.timed && k.name[0])_snwprintf_s(k.view.text,_countof(k.view.text),_TRUNCATE,L"%ls %llus",k.name,left);
         else _snwprintf_s(k.view.text,_countof(k.view.text),_TRUNCATE,L"%ls",k.name);

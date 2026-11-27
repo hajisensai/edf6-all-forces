@@ -218,23 +218,85 @@ class Bomb:
 
 
 ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
-# War Thunder's gun rounds (the user, 2026-11-26: 「抄抄战雷」; docs/feature-projectile-look.md): a bright tracer, no smoke
-# trail. A RocketBullet01 round (the stock bursting tank and autocannon shells) trails white smoke, CP[2] frames a node
-# (the stock 105 mm's 100; white whatever AmmoColor, 0x17A3B60), behind a flame CP[1] frames long in AmmoColor
-# (docs/missile-re.md, RocketBullet01): the smoke off, the flame a short hot streak, its tracer. A SolidBullet01 round's
-# tracer is a 12-point streak of AmmoColor as long as its frame's travel (0x28B6A0): AP_TRACER over the stock's blue.
-SHELL_TRACER_CP = {1: 14.0, 2: 0.0}
+# War Thunder's gun rounds (the user, 2026-11-26: 「抄抄战雷」; docs/feature-projectile-look.md): a bright tracer. A
+# RocketBullet01 round (the stock bursting tank and autocannon shells) trails white smoke, CP[2] frames a node (the stock
+# 105 mm's 100; white whatever AmmoColor), behind a flame CP[1] frames long in AmmoColor (docs/missile-re.md,
+# RocketBullet01): the flame made a short hot streak, its tracer; the smoke kept as the stock's. The smoke is what stays
+# after the burst (the user, 2026-11-27: 「炮弹爆炸以后尾烟会秒消失」): a dead round is kept until both rings are empty
+# (0x287E40: +0x10A0 and +0x1290 before 0x118A1B0) and its nodes fade on their own life, so with the smoke off (CP[2] 0,
+# the emitter never made: the ctor's enable is CP[2] != 0) the only trail left was the 14-frame flame, gone a quarter
+# second after the burst. A SolidBullet01 round's tracer is a 12-point streak of AmmoColor as long as its frame's travel
+# (0x28B6A0): AP_TRACER over the stock's blue.
+SHELL_TRACER_CP = {1: 14.0}
 AP_TRACER = (3.6, 1.4, 0.5, 1.0)
 
 
 def wt_tracer(r: dsgo.Node, where: str) -> None:
-    """A RocketBullet01 round's smoke trail off and its flame a tracer (SHELL_TRACER_CP), in place; ValueError when `r`
-    is not one of the stock four-entry RocketBullet01 rounds."""
+    """A RocketBullet01 round's flame made a tracer (SHELL_TRACER_CP), its smoke trail the stock's, in place; ValueError
+    when `r` is not one of the stock four-entry RocketBullet01 rounds or has no smoke trail to keep (CP[2] 0)."""
     cp = r.get('Ammo_CustomParameter')
     if r.get('AmmoClass') != 'RocketBullet01' or not isinstance(cp, dsgo.Node) or len(cp.items) != 4:
         raise ValueError(f'{where} 不是四项 CP 的 RocketBullet01 弹')
+    if not cp.items[2] > 0:
+        raise ValueError(f'{where} 的 CP[2]（尾烟寿命）不是正数：{cp.items[2]!r}')
     for i, value in SHELL_TRACER_CP.items():
         cp.items[i] = value
+
+
+# Real muzzle velocities (the user, 2026-11-26: 「真实初速」, the stock vehicles' own guns too: 「一块改」). The stock guns of
+# the vehicles with a real prototype (docs/feedback-2026-10-19-vehicle-ammo.md) leave at the speed of the real round of
+# their class; the setting's own weapons (lasers, the railgun, acid, napalm, the Titan, the Varius' EfsBullet gun, the
+# DLC grenade cannons) keep theirs. Each round keeps its reach (AmmoSpeed x AmmoAlive: the AI's fire gates and the sights
+# read it) and its gravity: it gets there sooner and flatter. {the stock WEAPON file: (m/s, the real round, its tracer:
+# 'ap' AP_TRACER, 'he' wt_tracer, None the stock's)}. The stock files are written over in Mods/WEAPON (stock_gun_sgo,
+# tools/make_stock_stores.py), so every one of these vehicles fires them, a mission's own and a call's; the stores of the
+# same gun take the same speed (_shell_sgo). EDF6AutoTurret's flak guns are its own (autoturret/tools/build.py).
+_TANK_HE = (1140.0, '120 mm M830 HEAT-MP-T (M256)', 'he')
+_TANK_AP = (1575.0, '120 mm M829A1 APFSDS-T (M256)', 'ap')
+_M134 = (853.0, '7.62 mm M80 ball (M240 / M134)', None)
+MUZZLE_VELOCITY: dict[str, tuple[float, str, str | None]] = {
+    **{f'V_505TANK_{g}.SGO': _TANK_HE for g in ('CANNON01', 'CANNON02', 'CANNON02L', 'CANNON03', 'CANNON03L',
+                                                 'CANNON04', 'CANNON04L', 'DLC_CANNON04L')},
+    'V_505_TANK_AI_CANNON01.SGO': _TANK_HE,
+    'V_505TANK_CANNON01S.SGO': _TANK_AP, 'V_505TANK_CANNON02S.SGO': _TANK_AP,
+    # The Grape (an M242 25 mm IFV): M792 HEI-T, M791 APDS-T.
+    'V_401STRIKER_CANNON.SGO': (1100.0, '25 mm M792 HEI-T (M242)', 'he'),
+    'V_401STRIKER_CANNON02.SGO': (1100.0, '25 mm M792 HEI-T (M242)', 'he'),
+    'V_401STRIKER_CANNONS01.SGO': (1345.0, '25 mm M791 APDS-T (M242)', 'ap'),
+    'V_401STRIKER_CANNONS02.SGO': (1345.0, '25 mm M791 APDS-T (M242)', 'ap'),
+    'V_403TANK_MACHINEGUN.SGO': _M134,
+    'V_409HELI_GATLING01.SGO': _M134,
+    'V_506HELI_GATLING01_L.SGO': _M134, 'V_506HELI_GATLING01_R.SGO': _M134,
+    'V_602HELI_GATLING01_L.SGO': _M134, 'V_602HELI_GATLING01_R.SGO': _M134,
+    'V_503_BIKE_GUN_L.SGO': _M134, 'V_503_BIKE_GUN_R.SGO': _M134,
+}
+
+
+def real_muzzle(r: dsgo.Node, mps: float, where: str) -> None:
+    """Weapon root `r` made to leave at `mps` (m/s), in place: AmmoSpeed that a frame, AmmoAlive the frames to its old
+    reach (rounded up); ValueError without the two."""
+    speed, alive = r.get('AmmoSpeed'), r.get('AmmoAlive')
+    if not isinstance(speed, float) or not isinstance(alive, float) or speed <= 0.0:
+        raise ValueError(f'{where} 缺少 AmmoSpeed / AmmoAlive')
+    step = round(mps / 60.0, 3)
+    r.set('AmmoSpeed', step)
+    r.set('AmmoAlive', float(math.ceil(speed * alive / step - 1e-6)))
+
+
+def stock_gun_sgo(game: Game, name: str) -> bytes:
+    """Stock WEAPON file `name` (MUZZLE_VELOCITY) at its real muzzle velocity and with its War Thunder tracer."""
+    mps, _, tracer = MUZZLE_VELOCITY[name]
+    doc = dsgo.parse(game.read('WEAPON', name))
+    r = doc.root
+    real_muzzle(r, mps, name)
+    if tracer == 'he':
+        wt_tracer(r, name)
+    elif tracer == 'ap':
+        colour = r.get('AmmoColor')
+        if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
+            raise ValueError(f'{name} 的 AmmoColor 不是 4 个数')
+        colour.items[:] = list(AP_TRACER)
+    return dsgo.write(doc)
 
 
 @dataclass(frozen=True)
@@ -510,12 +572,14 @@ STORES: dict[str, Store] = {
                  burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, spread=0.006, guided=False),
                  per_pylon=19, pylon_mass=40.0, pylon_drag=0.0247),
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
-    # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
-    # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
+    # A main battle tank's armour-piercing round: the Blacker A's smooth-bore round (V_505TANK_CANNON01S:
+    # SolidBullet01Rail, a tenth of gravity, penetrating, no blast, 350): the stock A series; at the M829A1's 1575 m/s
+    # (MUZZLE_VELOCITY: the stock's 18 m a frame was 1080).
     'AP': Store('APFSDS', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'ap', colour=AP_TRACER),
                 _local('APFSDS', 'APFSDS（徹甲弾）', 'APFSDS（穿甲彈）', 'APFSDS（穿甲弹）', 'APFSDS（철갑탄）')),
-    # Its high-explosive round: the Blacker E's 105 mm round (V_505TANK_CANNON01: RocketBullet01, 3 m a frame rising to
-    # its top speed, full gravity, an 8 m blast, 350): the stock E series.
+    # Its high-explosive round: the Blacker E's round (V_505TANK_CANNON01: RocketBullet01, no motor (CP[0] 1), full
+    # gravity, an 8 m blast, 350): the stock E series; at the M830's 1140 m/s (MUZZLE_VELOCITY: the stock's 3 m a frame
+    # was 180).
     'HE': Store('HE', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'he'),
                 _local('HE', 'HE（榴弾）', 'HE（高爆彈）', 'HE（高爆弹）', 'HE（고폭탄）')),
     # --- rounds the tanks' real prototypes fire and the stock game lacks (the user, 2026-10-19: 「坦克好像还有串联破甲弹
@@ -525,23 +589,24 @@ STORES: dict[str, Store] = {
     # HEAT-MP: the multi-purpose shaped-charge round of a 120 mm smooth-bore (the Abrams' M830 / M830A1, the Type 10's
     # JM12A1). The Blacker E's bursting round (RocketBullet01) made one: a shaped charge's jet stops on the one thing
     # it hits (no penetration through a line of enemies as the APFSDS), so it puts more on that target (450 to the
-    # stock rounds' 350) with a small fragmentation burst (3 m to the howitzer's 8-18); it leaves at 780 m/s (M830
-    # 1140 against M829's 1575: 0.72 of the APFSDS' 18 m a frame), flat (gravity 0.15 against the howitzer's 1),
-    # reaching as far as the APFSDS (140 frames: 1820 m); a contact sphere of 0.8 m (the HE's 1.6); orange-red.
+    # stock rounds' 350) with a small fragmentation burst (3 m to the howitzer's 8-18); it leaves at the M830's
+    # 1140 m/s (19 m a frame; the M829A1 APFSDS' 1575), flat (gravity 0.15 against the howitzer's 1), reaching as far
+    # as before (96 frames: 1824 m); a contact sphere of 0.8 m (the HE's 1.6); orange-red.
     'HEAT': Store('HEAT-MP', 'gun', 0.0, 0.0,
                   Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'heat',
-                        (('AmmoSpeed', 13.0), ('AmmoGravityFactor', 0.15), ('AmmoAlive', 140.0), ('AmmoDamage', 450.0),
+                        (('AmmoSpeed', 19.0), ('AmmoGravityFactor', 0.15), ('AmmoAlive', 96.0), ('AmmoDamage', 450.0),
                          ('AmmoExplosion', 3.0), ('AmmoIsPenetration', 0.0), ('AmmoHitSizeAdjust', 0.5)),
                         colour=(3.2, 1.3, 0.5, 1.0)),
                   _local('HEAT-MP', 'HEAT-MP（多目的対戦車榴弾）', 'HEAT-MP（多用途破甲彈）', 'HEAT-MP（多用途破甲弹）',
                          'HEAT-MP（다목적 대전차고폭탄）')),
     # Canister (the Abrams' M1028: about 1100 tungsten balls, against infantry in the open at up to ~500 m): the
     # Blacker A's penetrating round made a cloud: 12 pellets a shot in a 0.07 cone, 40 each (480 on a big target at
-    # close range), 840 m/s, gone after 36 frames (~500 m), penetrating soft targets as the template does; no blast.
+    # close range), the M1028's 1410 m/s, gone after 22 frames (~520 m), penetrating soft targets as the template does;
+    # no blast.
     # Only the Blacker's: the Type 10 (the 601's prototype) has no canister round.
     'CANISTER': Store('Canister', 'gun', 0.0, 0.0,
                       Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'canister',
-                            (('FireCount', 12.0), ('FireAccuracy', 0.07), ('AmmoSpeed', 14.0), ('AmmoAlive', 36.0),
+                            (('FireCount', 12.0), ('FireAccuracy', 0.07), ('AmmoSpeed', 23.5), ('AmmoAlive', 22.0),
                              ('AmmoDamage', 40.0), ('AmmoGravityFactor', 0.5), ('AmmoSize', 0.5),
                              ('AmmoHitSizeAdjust', 0.6)),
                             colour=(2.6, 2.2, 1.4, 1.0)),
@@ -558,7 +623,7 @@ STORES: dict[str, Store] = {
                         'LAHAT（포발사 미사일）')),
     # An infantry fighting vehicle's autocannon belts (the Grape): its AP the Grape's own smooth-bore round
     # (V_401STRIKER_CANNONS01: SolidBullet01, penetrating, 40), its HE the Grape's own bursting round
-    # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32).
+    # (V_401STRIKER_CANNON: RocketBullet01, a 5 m blast, 32); at the M242's M791 / M792 speeds (MUZZLE_VELOCITY).
     'AC_AP': Store('AP belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNONS01.SGO', 'SolidBullet01', 'ap', colour=AP_TRACER),
                    _local('AP belt', 'AP弾帯（徹甲）', 'AP彈鏈（穿甲）', 'AP弹链（穿甲）', 'AP 탄띠（철갑）')),
     'AC_HE': Store('HE belt', 'gun', 0.0, 0.0, Shell('V_401STRIKER_CANNON.SGO', 'RocketBullet01', 'he'),
@@ -667,8 +732,8 @@ class Plume:
     """How a missile store's round looks in flight (the user, 2026-11-26: 「所有导弹、炮弹之类都换得了。抄抄战雷、皇牌空战之类的
     游戏」; docs/feature-projectile-look.md): Ace Combat's rail drop, white-hot motor and long white trail, on the stock
     class's own fields (docs/missile-re.md, MissileBullet01):
-      - `ignite`: frames off the rail before the motor lights (CP[7][0]; CP[7][1] 1: the launcher's velocity kept while
-        it drops). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
+      - `ignite`: frames an ejected round falls clear before its motor lights (CP[7][0]; CP[7][1] 1: the launcher's
+        velocity kept while it drops); 0 for a rail or tube launch, lit at once (PLUMES). The drop itself is src/missile.cpp kDrop (AmmoGravityFactor stays 0: its readers take it for the
         whole flight); the motor's flame and trail emitters open at ignition (0x26AA02).
       - `trail`: frames a trail node lives (CP[2], a single int: each node 0.9..1.1 of it, 0x268D31; the trail stays
         where it was laid, it does not drift).
@@ -685,21 +750,23 @@ class Plume:
 
 
 PLUME_IGNITE_MOST = 20.0   # frames: src/missile.cpp neither guides nor fuses-by-proximity it before ignition
-# A jet's (or a helicopter's) rail missile drops 0.2 s clear before it lights, its trail 5-8 s; a ground or ship launcher's
-# tube or cell kicks it out lit almost at once; a gun- or tube-launched anti-tank missile and a rocket light in the tube
-# and trail short and grey. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
+# When the motor lights is the real launcher's (the user, 2026-11-26: 「导弹不一定全是下坠的吧……至少应该和现实一样吧，有些可能
+#直接射出去」): a rail launcher (LAU-7 / LAU-127 / LAU-117 / M299, a rocket pod, a tube) lights the motor on the rail and
+# the round flies straight off it; a hot-launch cell or canister (Mk 41 for the ESSM, the PAC-3's, the 9M311's tube)
+# lights in it; only an ejector launcher (the AIM-54's LAU-93 under an F-14) kicks the round clear to fall before it
+# lights: AAM_L alone drops. The stock helicopter missile's: ignite 0, trail 300, (1, 1, 1, 0.5).
 _HOT = (1.5, 1.4, 1.3, 0.85)       # flame (6.0, 2.8, 1.3): white-hot; trail a bright white
 _SAM = (1.6, 1.5, 1.4, 0.9)
 _ATGM = (1.2, 1.1, 1.0, 0.6)       # flame (4.8, 2.2, 1.0), a thinner grey trail
 _ROCKET = (1.25, 1.15, 1.0, 0.7)
 PLUMES: dict[str, Plume] = {
-    'AAM_S': Plume(12.0, 420.0, _HOT), 'AAM_M': Plume(12.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
-    'AGM': Plume(12.0, 300.0, _HOT), 'AGM_L': Plume(10.0, 240.0, _HOT),
-    'ESSM': Plume(4.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(3.0, 360.0, _SAM), 'APOC_SAM': Plume(4.0, 420.0, _SAM),
-    'PATRIOT_SAM': Plume(4.0, 480.0, _SAM),
+    'AAM_S': Plume(0.0, 420.0, _HOT), 'AAM_M': Plume(0.0, 450.0, _HOT), 'AAM_L': Plume(14.0, 480.0, _HOT),
+    'AGM': Plume(0.0, 300.0, _HOT), 'AGM_L': Plume(0.0, 240.0, _HOT),
+    'ESSM': Plume(0.0, 420.0, _SAM), 'TUNGUSKA_SAM': Plume(0.0, 360.0, _SAM), 'APOC_SAM': Plume(0.0, 420.0, _SAM),
+    'PATRIOT_SAM': Plume(0.0, 480.0, _SAM),
     'GLM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGM': Plume(0.0, 180.0, _ATGM), 'BMPT_ATGMF': Plume(0.0, 180.0, _ATGM),
     'RKT': Plume(0.0, 150.0, _ROCKET),
-    'SAZABI_MISSILE': Plume(6.0, 240.0, _HOT),   # SAZABI_MISSILE below: the shield's missiles pop out, then light
+    'SAZABI_MISSILE': Plume(0.0, 240.0, _HOT),   # SAZABI_MISSILE below: from the shield's launcher, lit
 }
 
 
@@ -727,13 +794,17 @@ SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
 # (docs/missile-re.md §MissileBullet02): its CP[7] [frames, factor] the drop before ignition (the launcher's velocity
 # times factor each frame plus AmmoGravityFactor's gravity; own speed AmmoSpeed and no trail), then the motor (own
 # speed + CP[4] a frame to CP[6], the inherited velocity x0.9 a frame and no gravity).
+# Then after Ace Combat 7's Arsenal Bird (the user, 2026-11-26: 「天顶截击机 要 飞行要塞武库鸟 那种…发射的导弹感觉不对劲，发光也
+# 不对劲」; its rhythm only, none of its assets): a cold launch -- the rounds are let go dark, drift down clear of the jet
+# for 0.4 s with no flame, no smoke and no glow, then the motor lights bright and lays a long white trail.
 SALVO_LOCK_CONE = 1.40          # rad, LockonAngle both halves: about 80 deg off the nose (front hemisphere only, 0x22DF30)
-SALVO_EJECT = 0.6               # m a frame off the rail (AmmoSpeed): a push clear, not a shot
-SALVO_DROP = (9.0, 1.0)         # CP[7]: 0.15 s before the motor lights, the launcher's speed kept
-SALVO_DROP_GRAVITY = 12.0       # AmmoGravityFactor, felt only before ignition: ~2 m of drop, 26 m/s down when it lights
+SALVO_EJECT = 0.15              # m a frame off the rail (AmmoSpeed): let go, not pushed (9 m/s: it hangs by the jet)
+SALVO_DROP = (24.0, 1.0)        # CP[7]: 0.4 s dark before the motor lights, the launcher's speed kept
+SALVO_DROP_GRAVITY = 4.0        # AmmoGravityFactor, felt only before ignition: ~4.7 m of drop, 22 m/s down when it lights
 SALVO_FAN = 0.3                 # rad, FireAccuracy: the rounds leave in a 17 deg cone (polar angle uniform in [0, it])
-SALVO_ACCEL = 0.26              # m a frame per frame (CP[4]): own speed SALVO_CHILD_SPEED at the split
+SALVO_ACCEL = 0.27              # m a frame per frame (CP[4]): own speed SALVO_CHILD_SPEED at the split
 SALVO_TOP = 12.0                # m a frame (CP[6])
+SALVO_TURN = 0.1                # rad a frame (CP[5], the helicopter template's own): the PN's limit |own| x it a frame
 SALVO_HOMING_DELAY = 8.0        # frames after ignition before it steers (CP[8]): the fan opens first
 SALVO_SPLIT_AFTER = 40.0        # frames after ignition it splits (CP[12] = [1, it]: by time, the target alive or not)
 SALVO_SPLIT_CONE = 0.45         # rad, CP[13][2]: the children's cone off the carrier's heading
@@ -743,14 +814,19 @@ SALVO_CHILD_TURN = 0.15         # their CP[5] (the plugin's PN: lateral accelera
 SALVO_CHILD_TOP = 14.0          # their CP[6]
 SALVO_CHILD_HOMING_DELAY = 6.0  # their CP[8]: a second, smaller fan before they turn
 SALVO_CHILD_SPREAD = (0.9, 1.0)  # their CP[10]: top speed x U[0.9, 1], turn x U[1, 1] (MissileBullet01 ctor 0x267910)
-# AmmoColor, HDR like the stock glowing trails (AWEAPON148's [5, 5, 5, 0.25]): the smoke trail (噴射煙_01.dds) takes
-# it as is, the head flare (Particle3_k.dds) as (r x4, g x2, b) (ctor 0x26BEA4): a white-hot head, a blue-white trail.
-SALVO_COLOUR = (3.0, 3.2, 4.0, 0.4)
-SALVO_CHILD_COLOUR = (2.5, 2.5, 3.0, 0.3)    # CP[15][12]: the children's AmmoColor
-# The rounds' own glow (docs/round-glow.md, drawn by the plugin): (r, g, b, intensity, size m). The carrier white-hot,
-# the children blue-white, the same hues as their trails; the round's model untouched.
-SALVO_GLOW = (1.0, 0.95, 0.9, 6.0, 1.6)
-SALVO_CHILD_GLOW = (0.8, 0.9, 1.0, 4.0, 0.9)
+# AmmoColor: the smoke trail (噴射煙_01.dds) takes it as is, the head flare (Particle3_k.dds) as (r x4, g x2, b)
+# (ctor 0x26BEA4). Just over 1 like the other missiles' _HOT: an orange-white flame (5.0, 2.4, 1.15) and a thick white
+# smoke, not the old blue HDR trail (3, 3.2, 4), whose 300 frames of glowing smoke sat over the launch like a light.
+SALVO_COLOUR = (1.25, 1.2, 1.15, 0.8)
+SALVO_CHILD_COLOUR = (1.15, 1.1, 1.05, 0.55)    # CP[15][12]: the children's AmmoColor, a thinner trail
+# The smoke trails' life (CP[2], frames, each node x0.9..1.1): long white smoke hanging in the sky after the rain.
+SALVO_TRAIL = 360.0
+SALVO_CHILD_TRAIL = 240.0
+# The rounds' own glow (docs/round-glow.md, drawn by the plugin while each is alive with its motor lit): (r, g, b,
+# intensity, size m, back m). Small and orange-white on the flame, set back along the nose so it hugs the motor
+# instead of lighting the whole round; the round's model untouched.
+SALVO_GLOW = (1.0, 0.75, 0.45, 5.0, 1.0, 0.5)
+SALVO_CHILD_GLOW = (1.0, 0.8, 0.5, 3.5, 0.6, 0.3)
 STORES['SALVO'] = Store(
     'Salvo cluster missile', 'air', 16.0, 0.002,
     replace(STORES['AAM_L'].weapon, model='Salvo missile', look=Look('bullet_icbm01', 1.6),
@@ -1200,6 +1276,11 @@ ANDRYUSHA_ROCKETS = 'EDF6VC_ANDRYUSHA_ROCKETS.SGO'
 GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'sedan': GroundVehicle('EDF6VC_SEDAN', 'V512_KEITRUCK', 'EWEAPON401',
                            ('EWEAPON401',), (), 300., 'make_sedan', (.8, 30., .0075, .7, .075, .3, .6)),
+    # The aura trucks (tools/make_aura_vehicles.py, docs/feature-aura-vehicles.md): the stock kei truck, unarmed, its
+    # request the sedan's (the V512's handling).
+    **{key: GroundVehicle(f'EDF6VC_{key.upper()}', 'V512_KEITRUCK', 'EWEAPON401', ('EWEAPON401',), (), 1000.,
+                          'make_aura_vehicles', (.8, 30., .0075, .7, .075, .3, .6))
+       for key in ('aura_cmd', 'aura_rep', 'aura_amo')},
     'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
                               ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),
@@ -2384,6 +2465,8 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
     _check_round(shell, r, made=True)
+    if shell.template in MUZZLE_VELOCITY and 'AmmoSpeed' not in dict(shell.extra):   # the stock gun's real speed
+        real_muzzle(r, MUZZLE_VELOCITY[shell.template][0], shell.template)
     if shell.ammo_class == 'RocketBullet01':
         wt_tracer(r, shell.template)
     if shell.colour is not None:
@@ -2545,21 +2628,25 @@ def coax_model(game: Game, name: str) -> bytes:
 
 
 # A round's glow declaration (src/gpufx/gpufx_glow.h, docs/round-glow.md): one more Ammo_CustomParameter entry
-# [GLOW_MARK, r, g, b, intensity, size] at the first index the class's constructor never reads (GLOW_FIRST_FREE: the
+# [GLOW_MARK, r, g, b, intensity, size(, back)] at the first index the class's constructor never reads (GLOW_FIRST_FREE: the
 # stock never looks there). MissileBullet01's CP[12] is read only when present (a bool, 0 when absent): padded with 0.
 GLOW_MARK = 7146.0
 GLOW_FIRST_FREE = {'MissileBullet01': 13, 'MissileBullet02': 16}
 GLOW_PAD = {'MissileBullet01': {12: 0.0}}
 
 def declare_glow(cp: dsgo.Node, ammo_class: str, glow: tuple[float, ...]) -> None:
-    """Appends the glow declaration `glow` (r, g, b, intensity, size) to the Ammo_CustomParameter `cp` of a round of
-    `ammo_class`, padding it up to the class's first free index."""
+    """Appends the glow declaration `glow` (r, g, b, intensity, size, optionally back: m behind the position along the
+    nose) to the Ammo_CustomParameter `cp` of a round of `ammo_class`, padding it up to the class's first free index."""
     free = GLOW_FIRST_FREE.get(ammo_class)
     if free is None:
         raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 读法未核实，不能声明发光')
-    r, g, b, intensity, size = glow
+    if len(glow) not in (5, 6):
+        raise ValueError(f'发光声明应为 5 或 6 个数: {glow}')
+    r, g, b, intensity, size = glow[:5]
+    back = glow[5] if len(glow) == 6 else 0.0
     peak = max(r, g, b)
-    if min(r, g, b) < 0.0 or not 0.0 < peak <= 1.0 or not 0.0 < intensity <= 64.0 or not 0.0 < size <= 50.0:
+    if (min(r, g, b) < 0.0 or not 0.0 < peak <= 1.0 or not 0.0 < intensity <= 64.0 or not 0.0 < size <= 50.0
+            or not 0.0 <= back <= 50.0):
         raise ValueError(f'发光声明越界: {glow}')
     if len(cp.items) > free:
         raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 已有 {len(cp.items)} 项，超过首个空闲位 {free}')
@@ -2568,7 +2655,7 @@ def declare_glow(cp: dsgo.Node, ammo_class: str, glow: tuple[float, ...]) -> Non
         if len(cp.items) not in pad:
             raise ValueError(f'{ammo_class} 的 Ammo_CustomParameter 只有 {len(cp.items)} 项，缺原版读的参数')
         cp.items.append(pad[len(cp.items)])
-    cp.items.append(dsgo.Node([GLOW_MARK, float(r), float(g), float(b), float(intensity), float(size)]))
+    cp.items.append(dsgo.Node([GLOW_MARK, *(float(v) for v in glow)]))
 
 def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
     missile = store.weapon
@@ -2613,7 +2700,8 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
             raise ValueError('unexpected split missile template')
         child = split[3].items[13]
         if (len(split[3].items[12].items) != 4 or len(child.items) != 12 or len(child.items[10].items) != 2
-                or len(cp.items[7].items) != 2):
+                or len(cp.items[7].items) != 2 or not isinstance(cp.items[2], float)
+                or not isinstance(child.items[2], float)):
             raise ValueError('unexpected split missile template')
         split[0].items[:] = [1.0, SALVO_SPLIT_AFTER]   # Split after launch even when the target has already died.
         split[1].items[:] = [0.0, 0.0, SALVO_SPLIT_CONE]
@@ -2623,12 +2711,15 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         child.items[4], child.items[5], child.items[6] = SALVO_CHILD_ACCEL, SALVO_CHILD_TURN, SALVO_CHILD_TOP
         child.items[8] = SALVO_CHILD_HOMING_DELAY
         child.items[10].items[:] = list(SALVO_CHILD_SPREAD)
+        child.items[2] = SALVO_CHILD_TRAIL
         declare_glow(child, split[3].items[4], SALVO_CHILD_GLOW)
         r.set('AmmoClass', 'MissileBullet02')
         r.set('AmmoGravityFactor', SALVO_DROP_GRAVITY)
         r.get('AmmoColor').items[:] = list(SALVO_COLOUR)
         cp.items[7].items[:] = list(SALVO_DROP)
+        cp.items[2] = SALVO_TRAIL
         # Native guidance for the carrier (src/guidance.cpp's PN), not MissileBullet01's plugin mode.
+        cp.items[5] = SALVO_TURN
         cp.items[8], cp.items[9] = SALVO_HOMING_DELAY, 0.0
         cp.items.extend(split)
         declare_glow(cp, 'MissileBullet02', SALVO_GLOW)

@@ -11,7 +11,9 @@
 #include <cwchar>
 #include <iterator>
 
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
 #include "memory.h"
 #include "perf_probe.h"
 #include "sync_load_logic.h"

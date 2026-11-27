@@ -11,7 +11,10 @@
 // position is put back. A small target (surface beyond, or no hit) leaves the stock test as it was.
 // Each machine runs this test for its own copy of the round (no network ownership in 0x26CF00 or the split state;
 // docs/split-missile-re.md §5). Docs: docs/split-missile-re.md. All addresses are RVAs into EDF.dll 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "patches.h"
 #include "memory.h"
 #include "split_fuse.h"
 #include <cmath>

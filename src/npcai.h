@@ -1,5 +1,6 @@
-// npcai.cpp: the plugin's own AI for the friendly NPC soldiers (docs/npc-ai-design.md §3, §4). Included by crew.h.
+// npcai.cpp: the plugin's own AI for the friendly NPC soldiers (docs/npc-ai-design.md §3, §4).
 #pragma once
+#include <Windows.h>
 #include <cstdint>
 #include "mapcmd_logic.h"
 
@@ -89,7 +90,7 @@ bool NpcPickupHealthToggle() noexcept;
 bool NpcPickupHealthOn() noexcept;
 int NpcMarchShape() noexcept;
 bool PlayerSweepCue(SweepCue* out) noexcept;
-const wchar_t* FormationText(int shape) noexcept;   // hud.cpp: a shape's name as the HUD says it
+const wchar_t* FormationText(int shape,bool guard) noexcept;   // hud.cpp: a shape's name as the HUD says it (a guard's / the march's stock)
 // The mark key on foot (marking the enemy at the screen's centre, or sending the map's selection to the ground there) and
 // the mark kept while its enemy is in the game: every frame of the local player `human` (map.cpp MapHumanFrame, game
 // thread), `mapOpen` while the map view is (the key is the map's then).

@@ -3,9 +3,9 @@
 // hands it the map's view (MapCommandView) and draws its readout.
 // The orders themselves are the AI modules' state (heli.cpp, jet.cpp, ground.cpp): each takes a command at the one
 // place it picks what it works round (its anchor / post / leader), reusing its own flight, targeting and fight.
-// Included by crew.h.
 #pragma once
 #include "pvp_match.h"
+#include "objref.h"
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
@@ -41,6 +41,12 @@ struct CommandUnit { const void* v; const char* name; Command now; bool air; flo
     bool carries=false;          // a vehicle unit with a riding squad that takes orders aboard (mapcmd.cpp List): it takes them
     bool joinOnly=false;         // a script's squad the stock walk-up would have let in (VanillaRecruit=0, npcai.cpp
                                  // NativeJoinable): not locked, but it takes FOLLOW / RECRUIT alone
+    // The Broken Arrow orders' state and means (2026-11-27): `holdFire` HOLD FIRE switched on (mapcmd.cpp ListUnits, the
+    // table below), `high` an aircraft flying high (ALTITUDE), `sprints` it has a dash to unrest or an afterburner
+    // (SPRINT: a Wing Diver / Fencer squad, a jet), `decoys` it has decoys left (DECOY: a jet's flares). No unit has
+    // smoke of its own: SMOKE is taken by none (the card shows it unavailable, the key does nothing).
+    bool holdFire=false,high=false,sprints=false,decoys=false;
+    bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field
 };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
@@ -53,7 +59,7 @@ int GroundCommandUnits(CommandUnit* out,int most) noexcept;
 // what it did before any command). Game thread.
 // `focus`: a focus order's target (the enemy the player marked, as a squad's); the aircraft take it (mapcmd::AirOrder).
 bool HeliCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
-bool JetCommand(const void* v,const Command& c,const ObjRef& focus={}) noexcept;
+bool JetCommand(const void* v,const Command& c,const ObjRef& focus={},const ObjRef& requester={}) noexcept;
 bool GroundCommand(const void* v,const Command& c) noexcept;
 // npcai.cpp: the NPC soldiers' squads (one unit a squad, its leader's address; docs/npc-ai-design.md §5, §6), every one
 // the frame saw (a script's too, locked), and an order to one.
@@ -95,7 +101,8 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept;
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
 // hud.cpp: the support bar's rows and chips as drawn (`entries` each one's catalog index), for the clicks. Up to
 // kMapSupportHits (a row and a chip an entry).
-void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept;
+// ...and the window of its tab's rows it showed (map_buttons.h ColumnWindow): the first, of how many, how many fit.
+void MapCommandSupportButtons(const float* rects,const int* entries,int n,int top=0,int rows=0,int fit=0) noexcept;
 // hud.cpp: the support composition panel's seats and kinds as drawn (`codes`: map_buttons.h ComposeApply's), for the clicks.
 void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept;
 // Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
@@ -115,11 +122,16 @@ bool MapCommandPointerCaptured() noexcept;
 bool MapCommandBoxing() noexcept;
 // map.cpp Close: discard hover, pending presses and the rendered view immediately, preserving selected units.
 void SuspendMapCommands() noexcept;
-// The mark key (NpcMarkKey) pressed with the pointer on an enemy marks it instead of what the map does with that key (Q: the
-// camera's turn left): map.cpp Steer asks every frame before it reads its keys (`front`: the game window in front). True
-// while that press lasts; the enemy is the one under the pointer when it began (MapCommandFrame marks that one). Game
-// thread.
-bool MapCommandEats(bool front) noexcept;
+// HOLD FIRE (H on the map; mapcmd_logic.h HoldsFire): the units switched to it by their identity (a vehicle, a squad's
+// top), kept on the machine that is their authority and dropped with the mission (ResetMapCommands). UnitHoldsFire:
+// switched on and not hurt within kReturnFireMs (the unit's own health sampled each ask, UnitStruck for a squad's
+// member hurt) -- every module that fires for a unit asks it before a shot (npcai.cpp Drive, the drivers' and gunners'
+// payloads, heli.cpp, jet.cpp). Game thread. The table is its own unit (unit_hold_fire.cpp); ClearUnitHoldFire drops it.
+void SetUnitHoldFire(const void* unit,bool on) noexcept;
+bool UnitHoldFire(const void* unit) noexcept;
+void UnitStruck(const void* unit) noexcept;
+bool UnitHoldsFire(const void* unit) noexcept;
+void ClearUnitHoldFire() noexcept;
 // npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
 // on the map, in a formation round it). How many accepted it; -1 none selected. Authority is checked per unit.
 int MapCommandGuardAt(const float* at) noexcept;
@@ -212,6 +224,8 @@ struct MapCommandReadout {
     SupportReadiness supportReady;
     std::int32_t points=0,pointsMost=0;   // the map's support pt (support_points.h): the pool, its most
     int supportTab=0;          // the bar's tab shown (support_call.h SupportTab)
+    int supportTop=0;          // the first of its rows the wheel scrolled to (map_buttons.h ColumnWindow)
+    bool supportReveal=false;  // [ ] picked since: the window moves to show the pick
     wchar_t supportStatus[128];
     // The transports' pairs (transport.cpp TransportLinks): a squad on foot and its vehicle, a thin line between them.
     int links=0;
@@ -223,6 +237,20 @@ struct MapCommandReadout {
     int placeCategory=0,placePick=0,placeArmed=-1;
     int placeTop=0;            // the first row the shown category's list scrolled to (range_place.h Panel::top)
     debugspawn::RowState placeState[debugspawn::kEntryCount]{};
+    // Tab's sub-selection (mapcmd_logic.h NextSub): the kind the orders go to ("" every selected unit), of how many kinds.
+    char subKind[24]{};
+    int subKinds=0;
+    // A right drag laying a line (mapcmd_logic.h LineOf) from `lineFrom` to the pointer's ground point `lineTo`.
+    bool dragLine=false;
+    float lineFrom[3]{},lineTo[3]{};
+    // The selection's switches as the card lights them: HOLD FIRE on, flying high (any of the active units), the paced march.
+    bool holdFireOn=false,highOn=false,paced=false;
+    // The pings (F1-F4; command protocol v11 Kind::ping): this machine's and the room's, each shown kPingMs.
+    struct Ping { float at[3]; unsigned kind; std::uint64_t at_ms; bool mine; };
+    static constexpr int kPings=8;
+    static constexpr std::uint64_t kPingMs=6000;
+    int pings=0;
+    Ping ping[kPings]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 // hud.cpp: the 「摆放」 panel's click targets as drawn (`codes`: map_buttons.h-style codes, kPlace* below), for the clicks.
@@ -230,7 +258,7 @@ constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePag
 constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;
 // `window`: the list's rows drawn (with a pad too, where no click target is published): what a page is (range_place.h).
 void MapCommandPlaceButtons(const float* rects,const int* codes,int n,int window) noexcept;
-// map.cpp Steer, before the wheel zooms: a wheel over the 「摆放」 list scrolls it instead (`delta` WHEEL_DELTA units, +
+// map.cpp Steer, before the wheel zooms: a wheel over the support bar or the 「摆放」 list scrolls it instead (`delta` WHEEL_DELTA units, +
 // away from the user). True when taken. Game thread.
 bool MapCommandWheel(int delta) noexcept;
 // The legend's title row as drawn (hud.cpp MapLegend; null: none, a pad), and whether it is open (a click on it turns

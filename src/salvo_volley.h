@@ -6,12 +6,13 @@
 // Targets: the lock list's live nodes grouped by enemy in the order first locked; round n goes to enemy n % E (every
 // enemy one before any gets a second, the rest shared evenly), cycling through that enemy's own lock points.
 #pragma once
+#include "py_consts.inc"
 
 namespace crew {
 namespace salvo {
-constexpr int kRounds=256;     // pylib/vcobjects.py SALVO_ROUNDS (stores.h kSalvoLockLimit)
-constexpr int kVolley=8;       // pylib/vcobjects.py SALVO_VOLLEY: rounds a volley
-constexpr int kVolleyGap=3;    // pylib/vcobjects.py SALVO_VOLLEY_GAP: frames between volleys (FireBurstInterval)
+constexpr int kRounds=pyconst::kSalvoRounds;   // pylib/vcobjects.py SALVO_ROUNDS (stores.h kSalvoLockLimit)
+constexpr int kVolley=pyconst::kSalvoVolley;   // pylib/vcobjects.py SALVO_VOLLEY: rounds a volley
+constexpr int kVolleyGap=pyconst::kSalvoVolleyGap;   // pylib/vcobjects.py SALVO_VOLLEY_GAP: frames between volleys (FireBurstInterval)
 constexpr int kMuzzles=4;
 static_assert(kVolley%kMuzzles==0,"a volley leaves from every rail alike");
 

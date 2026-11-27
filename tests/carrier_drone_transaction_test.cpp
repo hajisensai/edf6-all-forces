@@ -3,6 +3,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "../src/config.h"
+#include "../src/plugin_log.h"
+#include "../src/plugin_body.h"
+#include "../src/playerjet.h"
+#include "../src/netprobe.h"
+#include "../src/strikes.h"
+#include "../src/mapbounds.h"
+#include "../src/proteus.h"
 
 namespace fixture {
 using namespace crew;
@@ -70,6 +78,7 @@ void Jump(unsigned rva,const void* target) {
 }
 namespace crew {
 const JetWeaponRow* JetWeapon(int) noexcept {return nullptr;}   // stores.cpp (not linked here): no jet weapons to preload
+const StoreSpec* StoreSpecOfPrefix(const wchar_t*) noexcept {return nullptr;}   // stores.cpp (not linked here): no stores
 unsigned char* image=nullptr;
 const Config& Cfg() noexcept {return fixture::config;}
 void Log(const char*,...) noexcept {}
@@ -143,6 +152,13 @@ void PreloadShells(void*,bool) noexcept {}
 void ResetShells() noexcept {}
 void Toward(const float* from,const float* to,float* out) noexcept {for(unsigned i=0;i<3;++i)out[i]=to[i]-from[i];Normalize(out);}
 void SetMode(Jet& j,Mode mode,ULONGLONG ms) noexcept {if(j.mode!=mode){j.mode=mode;j.modeAt=ms;}}
+bool EnterPhase(Jet& j,jetphase::Event e,ULONGLONG ms) noexcept {
+    const jetphase::Phase was=j.phase;
+    if(!jetphase::Transition(j.phase,e))return false;
+    j.phaseAt=ms;
+    if(jetphase::Leaving(j.phase) || jetphase::Leaving(was)){j.mode=Mode::patrol;j.modeAt=ms;}
+    return true;
+}
 void Publish(bool) noexcept {++fixture::publishes;fixture::lastPublish=++fixture::serial;}
 }
 }
@@ -196,10 +212,10 @@ int main() {
         Check(raw==0 ? c->carrier.ordered && !std::memcmp(c->carrier.order,anchor,12) && !d->t.target : !c->carrier.ordered,
               "only confirmed player order changes the mother anchor; NPC center behavior stays intact");
         Check(jet::Flown(*d,100000),"active native support remains flown after a remote seen clock expires");
-        d->mode=jet::Mode::patrol;host=false;
-        Check(jet::RecallDrones(parent,100)==1 && d->mode==jet::Mode::patrol && ApplyCarrierSupportRecall(parentRef)==0,
+        d->mode=jet::Mode::patrol;d->phase=jetphase::Phase::fly;host=false;
+        Check(jet::RecallDrones(parent,100)==1 && d->phase==jetphase::Phase::fly && ApplyCarrierSupportRecall(parentRef)==0,
               "guest recall queues an authenticated host action and never changes local AI");
-        host=true;Check(ApplyCarrierSupportRecall(parentRef)==1 && d->mode==jet::Mode::recover,
+        host=true;Check(ApplyCarrierSupportRecall(parentRef)==1 && d->phase==jetphase::Phase::recover,
               "host applies recall to the actual active child");
         Check(ConfirmCarrierSupportDrone(parentRef,2,token) && c->carrier.sorties==sorties-1,"duplicate apply never spends twice");
         Check((raw==2 && dollCreates==1) || (raw!=2 && dollCreates==0),"doll is created on every endpoint, only for actual doll body");

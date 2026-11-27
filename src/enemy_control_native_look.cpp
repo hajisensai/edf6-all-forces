@@ -2,7 +2,7 @@
 // pad input. Native target angles integrate every native frame; the smoothed
 // rendered angles must never be used as the feedback state (that overshoots).
 #include "enemy_control_native.h"
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>

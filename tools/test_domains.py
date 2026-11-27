@@ -11,9 +11,10 @@ How it works:
   them changed runs everything.
 - Each test's dependencies are found from the code itself, not by hand: a Python test's script and everything it
   imports (function-local and importlib imports too), transitively, and every string in them naming a repository path
-  ('src/crew.h', os.path.join(ROOT, 'edf5port'), f'tests/data/{x}', a sibling 'data' folder) or a built artifact
-  ('EDF6VehicleCrew.dll', a CMake target's exe); a C++ test: everything a C++ test can compile or read (src/,
-  autoturret/, third_party/, the C++ under tests/ and tools/, and every path a C++ test names); a selftest test:
+  ('src/config.h', os.path.join(ROOT, 'edf5port'), f'tests/data/{x}', a sibling 'data' folder) or a built artifact
+  ('EDF6VehicleCrew.dll', a CMake target's exe); a C++ test: the files its exe compiles (cpp_files: build.ninja's
+  sources, their headers from ninja's records or, for an object it has none for, the source's #include closure; the
+  libraries it links), and every path its own C++ under tests/ and tools/ names; a selftest test:
   the code reachable from its function (the functions, modules and values it names, followed through selftest.py),
   with the same rules. A test's domains are the domains of its dependencies: a change to a file of domain D runs
   every test labelled D. When in doubt it takes more: a bare 'src' string is all of src/, a string equal to a
@@ -54,7 +55,7 @@ FULL = (
     'cmake/', 'build.cmd', '.github/', '.gitattributes', '.gitignore',
     'tools/check.py', 'tools/test_domains.py', 'tools/msvc-x64-env.cmd',
     # the test runners and how they find the game: every test runs through them
-    'pylib/checklock.py', 'pylib/testshard.py', 'pylib/gamedir.py', 'pylib/gamelease.py',
+    'pylib/checklock.py', 'pylib/testshard.py', 'pylib/gamedir.py', 'pylib/gamelease.py', 'pylib/testpool.py',
 )
 # The CMake files cmake_effects reads; outside FULL (a line it cannot place runs everything).
 CMAKE_FILES = ('CMakeLists.txt', 'autoturret/CMakeLists.txt', 'common/CMakeLists.txt')
@@ -68,8 +69,35 @@ DOMAINS: list[tuple[str, str, tuple[str, ...]]] = [
      ('tests/*.py', 'tools/selftest.py', 'tools/*_check.py', 'tools/test_*.py', 'tools/primer_ballistics_test.py',
       'tools/append_log_test.py')),
     ('test-data', 'data files the tests read', ('tests/data/', 'tests/*.json', 'tests/*.inc')),
-    ('plugin-native', 'the game plugins\' C++ and what the C++ tests compile',
-     ('src/', 'common/', 'CMakeLists.txt', 'autoturret/src/', 'autoturret/CMakeLists.txt', 'autoturret/*.ini',
+    # The vehicle-crew plugin's src/ by subsystem (design-review-1126 step 5): a C++ test's labels are the subsystems
+    # of the files its exe compiles (cpp_files' #include closure), a change selects by those files themselves.
+    ('plugin-enemy', 'src/: the player\'s control of enemies, PvP', ('src/enemy*', 'src/pvp*', 'src/greyboss*')),
+    ('plugin-ports', 'src/: the EDF4.1 / EDF5 ports\' classes, outfits, maps and campaign',
+     ('src/edf41*', 'src/edf5*', 'src/outfit41*', 'src/nix*', 'src/legacymap*', 'src/bigworld*')),
+    ('plugin-support', 'src/: support calls, map commands, NPC squads, transports and drops',
+     ('src/support*', 'src/airdrop*', 'src/transport*', 'src/map*', 'src/command*', 'src/unit*', 'src/route*',
+      'src/formation*', 'src/march*', 'src/npc*', 'src/rescue*', 'src/ferry*', 'src/strikes*', 'src/qmark*', 'src/hq*',
+      'src/aiworld*', 'src/spot*')),
+    ('plugin-air', 'src/: aircraft: helicopters, jets, the player\'s jets, carriers and the craft\'s own weapons',
+     ('src/heli*', 'src/jet*', 'src/playerjet*', 'src/pjet*', 'src/air*', 'src/sortie*', 'src/subcarrier*',
+      'src/carrier*', 'src/dreadnought*', 'src/hangar*', 'src/bay*', 'src/rotor*', 'src/hover*', 'src/wing*',
+      'src/nacelle*', 'src/exhaust*', 'src/nozzles*', 'src/gear*', 'src/booster*', 'src/missile*', 'src/splitmissile*',
+      'src/emc*', 'src/barrage*', 'src/ultimate*', 'src/andryusha*', 'src/proteus*', 'src/sazabi*')),
+    ('plugin-hud', 'src/: the HUD, sights, scopes, first-person views, in-game menus and the world map',
+     ('src/hud*', 'src/vhud*', 'src/ui_*', 'src/glyphs*', 'src/text*', 'src/reticle*', 'src/scope*', 'src/sight*',
+      'src/gunsight*', 'src/infantryscope*', 'src/optic*', 'src/fp_*', 'src/firstperson*', 'src/cockpit*',
+      'src/thermal*', 'src/worldmap*', 'src/tvguide*', 'src/dmgnum*', 'src/killcount*', 'src/damagestats*',
+      'src/stockgauge*', 'src/warn*', 'src/armory*', 'src/keyconfig*', 'src/menu*', 'src/preview*', 'src/gpufx/')),
+    ('plugin-net', 'src/: online play: rooms, the plugin\'s channels, sync',
+     ('src/room*', 'src/net*', 'src/coop*', 'src/sync*', 'src/host*', 'src/online*', 'src/plugin_net*', 'src/member*',
+      'src/team*')),
+    ('plugin-sound', 'src/: sound', ('src/sound*', 'src/vehsound*', 'src/vsynth*', 'src/surround*', 'src/wt_*',
+                                     'src/blastsound*', 'src/vehmix*')),
+    ('plugin-core', 'src/: the rest of the plugin: boot, config, the game\'s layout and objects, vehicles, seats',
+     ('src/',)),
+    ('plugin-native', 'the plugins\' shared C++ (common/, third_party/), EDF6AutoTurret\'s, the build files and the '
+     'C++ tests',
+     ('common/', 'CMakeLists.txt', 'autoturret/src/', 'autoturret/CMakeLists.txt', 'autoturret/*.ini',
       'third_party/', 'tests/*.cpp',
       'tests/*.h', 'tests/*.hpp', 'tools/*.cpp', 'tools/*.h', 'EDF6VehicleCrew.ini', 'tests/autopilot/')),
     ('native-codec', 'native/: the installer\'s C++ codecs (edf6cmpl) pylib loads by ctypes', ('native/',)),
@@ -127,7 +155,8 @@ SCANNED: dict[str, tuple[str, ...]] = {
 SCANS = {'listdir', 'walk', 'glob', 'iglob', 'rglob', 'iterdir', 'scandir'}
 # A built artifact a test names -> the domains its sources are in.
 ARTIFACTS = {'edf6cmpl': ('native-codec',)}
-NATIVE = ('plugin-native',)
+# What a built plugin, or a C++ target whose sources are not known, can hold: every plugin domain.
+NATIVE = tuple(d for d, _, _ in DOMAINS if d.startswith('plugin-'))
 # Where the tools/gen_*.py generators write their C++.
 GEN_OUT = ('src/', 'common/', 'autoturret/src/')
 # A Python file named by a string ('pylib/vcobjects.py') is read as text unless the code naming it can run one: with
@@ -212,6 +241,9 @@ class Repo:
         self._cpp_file: dict[str, tuple[list[str], set[str]]] = {}
         self._strs: dict[tuple[str, str], frozenset[str]] = {}
         self._runs: dict[str, bool] = {}
+        # {C++ target: the repository files it compiles} (cpp_files(build, static=True): the #include closure, the
+        # same on a build of any age): a C++ test's labels. test_deps fills it; empty, every plugin domain.
+        self.compiles: dict[str, set[str]] = {}
 
     # --- a string -> the repository paths (or '@domain' markers) it may name
     def string_deps(self, s: str, base: str) -> set[str]:
@@ -407,8 +439,8 @@ class Repo:
 
     # --- C++
     def cpp_deps(self, target: str) -> set[str]:
-        """A C++ test exe's dependencies: the plugin sources (any of which it may compile, through the shared headers),
-        and every path its own sources under tests/ and tools/ (and the local headers they include) name. An exe
+        """A C++ test exe's dependencies: '#target' (the files it compiles: cpp_files, ninja's records or the
+        #include closure; its labels: the domains of those, Repo.compiles), and every path its own sources under tests/ and tools/ (and the local headers they include) name. An exe
         CMake does not list: every path any C++ test names."""
         if self._cpp is None:
             self._cpp = {}
@@ -436,7 +468,7 @@ class Repo:
                 continue
             seen.add(f)
             if not f.startswith(('tests/', 'tools/')):
-                continue   # the plugin's own sources: plugin-native already
+                continue   # the plugin's own sources: what an exe compiles is cpp_files' (its #include closure)
             if f not in self._cpp_file:
                 with open(os.path.join(ROOT, f), encoding='utf-8', errors='replace') as h:
                     text = h.read()
@@ -471,8 +503,10 @@ class Repo:
             d = _plain(d)
             if d.startswith('@'):
                 out.add(d[1:])
-            elif d.startswith(CPP):
-                out.update(ARTIFACTS.get(d[1:], NATIVE))
+            elif d.startswith(CPP):   # the domains of the files it compiles; not known: every plugin domain
+                compiled = self.compiles.get(d[1:]) if d[1:] not in ARTIFACTS else None
+                out.update(ARTIFACTS.get(d[1:], NATIVE) if compiled is None
+                           else {owner(f) for f in compiled if not is_full(f)})
             elif d.startswith(UNRESOLVED):
                 continue
             elif d.endswith('/*'):   # a module folder listed: its Python files too (its data files: 'dir/')
@@ -1041,6 +1075,8 @@ def test_deps(build: str, repo: Repo | None = None) -> dict:
     """Every configured test's dependencies, from the code as it is now: {'ctest': {name: deps}, 'selftest': {name:
     (deps, uses)}} (deps: Repo's atoms; EVERYTHING's tests given every domain)."""
     repo = repo or Repo()
+    if not repo.compiles:
+        repo.compiles = cpp_files(build, static=True)[0]
     every = {'@' + d for d in NAMES if d != SCRIPTS}
     ctest = {t['name']: ctest_deps(repo, t, build) | (every if t['name'] in EVERYTHING['ctest'] else set())
              for t in ctest_tests(build)}
@@ -1053,11 +1089,104 @@ def _ninja_split(text: str) -> list[str]:
     return [p.replace('$:', ':').replace('$ ', ' ').replace('$$', '$') for p in re.split(r'(?<!\$) ', text.strip()) if p]
 
 
-def cpp_files(build: str) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """What the build compiled, from its own records (build.ninja and ninja's header dependencies): {target: the
-    repository files its objects, and those of the libraries it links, were compiled from}, {target: the targets it
-    links, itself included}. A target with an object ninja has no valid dependencies for is left out of the first (it
-    falls back to its domains). Both empty without a ninja build."""
+_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*(?:"([^"\n]+)"|<([^>\n]+)>|([A-Za-z_]))', re.M)
+_PARSED: dict[str, tuple[list[str], list[str], bool] | None] = {}   # file -> (quoted, angled, a macro's #include)
+_FOUND: dict[str, bool] = {}
+_DIRECT: dict[tuple[str, tuple[str, ...]], list[str] | None] = {}
+
+
+def _isfile(path: str) -> bool:
+    if path not in _FOUND:
+        _FOUND[path] = os.path.isfile(path)
+    return _FOUND[path]
+
+
+def _parsed(path: str) -> tuple[list[str], list[str], bool] | None:
+    if path not in _PARSED:
+        try:
+            with open(path, encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            _PARSED[path] = None
+        else:
+            quoted, angled, macro = [], [], False
+            for m in _INCLUDE.finditer(text):
+                if m.group(1):
+                    quoted.append(m.group(1))
+                elif m.group(2):
+                    angled.append(m.group(2))
+                else:
+                    macro = True
+            _PARSED[path] = (quoted, angled, macro)
+    return _PARSED[path]
+
+
+def _direct(path: str, dirs: tuple[str, ...]) -> list[str] | None:
+    """The files `path` (absolute, normcased) #includes, in any #if branch, the folders a name is looked for in being
+    its own folder (quoted names) and `dirs`: every folder it is found in counts (more than the compiler takes, never
+    less). None: an #include of a macro (what it names is not known here)."""
+    key = (path, dirs)
+    if key not in _DIRECT:
+        p = _parsed(path)
+        if p is None or p[2]:
+            _DIRECT[key] = None
+        else:
+            quoted, angled, _ = p
+            own = os.path.dirname(path)
+            out: list[str] = []
+            for names, where in ((quoted, (own,) + dirs), (angled, dirs)):
+                for name in names:
+                    for d in where:
+                        c = os.path.normcase(os.path.normpath(os.path.join(d, name)))
+                        if _isfile(c):
+                            out.append(c)
+            _DIRECT[key] = out
+    return _DIRECT[key]
+
+
+def static_includes(source: str, dirs: list[str]) -> set[str] | None:
+    """Every file the source `source` (absolute) can include, itself too, transitively (_direct), the folders searched
+    being the -I folders `dirs` and the source's own (the compiler also looks in the folders of the files including
+    one; a name found nowhere else is looked for there last). None: an #include of a macro reached."""
+    look = tuple(os.path.normcase(os.path.normpath(d)) for d in [os.path.dirname(source)] + list(dirs))
+    seen: set[str] = set()
+    todo = [os.path.normcase(os.path.normpath(source))]
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        got = _direct(f, look)
+        if got is None:
+            return None
+        todo.extend(got)
+    # a name the includes so far found in no folder: the folders of the files including it (the compiler's search
+    # goes up the files open at the #include), here every folder the closure reached
+    while True:
+        folders = tuple(sorted({os.path.dirname(f) for f in seen} - set(look)))
+        more = [g for f in seen for g in (_direct(f, look + folders) or ()) if g not in seen]
+        if not more:
+            return seen
+        todo = more
+        while todo:
+            f = todo.pop()
+            if f in seen:
+                continue
+            seen.add(f)
+            got = _direct(f, look + folders)
+            if got is None:
+                return None
+            todo.extend(got)
+
+
+def cpp_files(build: str, static: bool = False) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """What the build compiles (build.ninja) and, of each object, the headers: ninja's own records of them (`ninja -t
+    deps`), or, for an object it has none for (not built yet, or out of date), its source's #include closure
+    (static_includes, with the object's own -I folders) — always the closure with `static` (the labels: the same on a
+    build of any age). {target: the repository files its objects, and those of the libraries it links, are compiled
+    from}, {target: the targets it links, itself included}. A target with an object whose headers are not known
+    either way (an #include of a macro) is left out of the first (it falls back to its domains). Both empty without a
+    ninja build."""
     try:
         with open(os.path.join(build, 'build.ninja'), encoding='utf-8', errors='replace') as f:
             ninja_text = f.read()
@@ -1066,11 +1195,12 @@ def cpp_files(build: str) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
         program = re.search(r'^CMAKE_MAKE_PROGRAM:\w+=(.*)$', cache, re.M)
         home = re.search(r'^CMAKE_HOME_DIRECTORY:\w+=(.*)$', cache, re.M)
         source = os.path.normcase(os.path.normpath(home.group(1).strip() if home else ROOT))
-        listing = subprocess.run([program.group(1).strip() if program else 'ninja', '-C', build, '-t', 'deps'],
-                                 capture_output=True, text=True, encoding='utf-8', errors='replace')
+        listing = None if static else subprocess.run(
+            [program.group(1).strip() if program else 'ninja', '-C', build, '-t', 'deps'],
+            capture_output=True, text=True, encoding='utf-8', errors='replace')
     except (OSError, ValueError):
         return {}, {}
-    if listing.returncode:
+    if listing is not None and listing.returncode:
         return {}, {}
 
     def key(path: str) -> str:
@@ -1084,7 +1214,7 @@ def cpp_files(build: str) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
 
     headers: dict[str, set[str] | None] = {}
     obj = None
-    for line in listing.stdout.splitlines():
+    for line in listing.stdout.splitlines() if listing is not None else ():
         m = re.match(r'^(\S.*?): #deps \d+, deps mtime \d+ \((\w+)\)', line)
         if m:
             obj = key(m.group(1))
@@ -1101,9 +1231,18 @@ def cpp_files(build: str) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
         explicit, _, implicit = rest.split(' || ')[0].partition(' | ')
         ins = _ninja_split(explicit)
         if kind == 'COMPILER':
-            h = headers.get(key(_ninja_split(outs)[0]))
+            o = key(_ninja_split(outs)[0])
+            h = headers.get(o)
             src = rel(ins[0]) if ins else None
-            objs[key(_ninja_split(outs)[0])] = None if h is None or src is None else h | {src}
+            if h is None and src is not None:   # no record of its headers: its #include closure
+                end = ninja_text.find('\n\n', m.end())
+                block = ninja_text[m.end():end if end >= 0 else len(ninja_text)]
+                inc = re.search(r'^[ \t]+INCLUDES = (.*)$', block, re.M)
+                dirs = [p.strip('"')[2:] for p in _ninja_split(inc.group(1))
+                        if p.strip('"')[:2] in ('-I', '/I')] if inc else []
+                closure = static_includes(key(ins[0]), dirs)
+                h = None if closure is None else {r for r in (rel(c) for c in closure) if r}
+            objs[o] = None if h is None or src is None else h | {src}
         else:
             entry = (tgt, [key(i) for i in ins if i.endswith('.obj')],
                      [key(i) for i in ins + _ninja_split(implicit) if i.endswith('.lib')])
@@ -1212,23 +1351,46 @@ def cmake_effects(old: str, new: str, old_lines: set[int], new_lines: set[int],
     command changed is one whose effect it cannot place: run everything. `old_lines` / `new_lines`: the lines changed
     on each side (diff_lines); `names`: the tests and targets there are (lower-case). A command changed is matched with
     its old self by its name and first argument; what it selects is that argument when it is a test or target, and the
-    tests and targets the change adds to or takes from its arguments (a name in a list of tests)."""
+    tests and targets the change adds to or takes from its arguments (a name in a list of tests).
+    A call of a function() or macro() the file defines is placed as a named command is (2026-11-26: a new
+    edf6_feedback_fixture(<target> <test> ...) line ran every test); a change inside its definition selects the tests
+    and targets every call of it names, on either side."""
     sides = []
     hit: set[tuple[str, str]] = set()
+    own: set[str] = set()                          # the functions and macros the file defines (either side)
+    bodies: set[str] = set()                       # those whose definition the diff touches
+    calls: dict[str, set[str]] = {}                # a defined function -> every argument its calls pass (either side)
     for text, lines in ((old, old_lines), (new, new_lines)):
         every: dict[tuple[str, str], list[str]] = {}
+        inside = None                              # the definition the commands are in
         for first, last, name, args in cmake_commands(text):
+            touched = any(first <= x <= last for x in lines)
+            if name in ('function', 'macro') and args:
+                inside = args[0].lower()
+                own.add(inside)
+            if inside is not None:
+                if touched:
+                    bodies.add(inside)
+                if name in ('endfunction', 'endmacro'):
+                    inside = None
+                continue
+            calls.setdefault(name, set()).update(a.lower() for a in args)
             entity = args[1] if name == 'add_test' and len(args) > 1 and args[0] == 'NAME' else (args or [''])[0]
             every.setdefault((name, entity), []).extend(args)
-            if any(first <= x <= last for x in lines):
+            if touched:
                 hit.add((name, entity))
         sides.append(every)
     out: set[str] = set()
+    for fn in sorted(bodies):
+        got = calls.get(fn, set()) & names
+        if not got:
+            return set(), f'a CMake {fn}() definition changed whose calls name no test or target'
+        out |= got
     for name, entity in sorted(hit):   # a command the diff touches, against all of its name and argument on each side
         a, b = sides[0].get((name, entity), []), sides[1].get((name, entity), [])
         if sorted(a) == sorted(b):
             continue   # moved, or only a comment or the spacing changed
-        if name not in CMAKE_NAMED:
+        if name not in CMAKE_NAMED and name not in own:
             return set(), f'a CMake {name}() changed'
         changed = {t.lower() for t in set(a + b) if a.count(t) != b.count(t)}
         got = ({entity.lower()} | changed) & names
@@ -1299,7 +1461,8 @@ def select_files(changed: list[str], deps: dict, cpp: tuple[dict, dict] = ({}, {
     def hits(d: set[str]) -> bool:
         if d & keys:
             return True
-        # a target the build has no records of (not built yet, or none of the build's): its domains
+        # a target build.ninja does not compile (none of this build's) or whose #include closure is not known: its
+        # domains (every plugin domain)
         return any(a[0] == CPP and a[1:] not in files and set(ARTIFACTS.get(a[1:], NATIVE)) & hit.keys() for a in d)
 
     res['hits'] = hits   # check.py's gen stage: which generators the change reaches

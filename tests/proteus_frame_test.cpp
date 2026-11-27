@@ -3,8 +3,11 @@
 // UserHook (the stock weapon phase), BarrierStep (the stock barrier's update) and the readouts. The EDF functions stay
 // uncalled in this fixture (fakes for activation, the holder pull and the axis apply); tests/proteus_weapon_test.cpp
 // runs the same production code against the real EDF.dll.
+#include <initializer_list>
 #include "../src/proteus.cpp"
 #include <cstdio>
+#include "../src/bay_rounds.h"
+#include "../src/hud.h"
 namespace crew {
 unsigned char* image=nullptr;PlayerFix player{};
 namespace {

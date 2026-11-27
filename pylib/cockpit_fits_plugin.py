@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import cockpit_kits_plugin as plugin_kits
 from cockpit_fits_air import FITS as _AIR
+from cockpit_fits_ground import FITS as _GROUND
 from cockpit_fits_mech import FITS as _MECH
 from cockpits import Fit
 import xm_units
@@ -71,6 +72,8 @@ _410_CABIN = (-0.15, 1.9, 0.3)
 
 FITS: dict[str, tuple[Fit, ...]] = {
     'EDF6VC_SEDAN': (Fit(0, 'body', (-.35, 1.19, .12), 'sedan_cab'),),
+    # The aura trucks (tools/make_aura_vehicles.py): the stock kei truck's model, its seats as the stock truck's.
+    **{stem: _GROUND['V512_KEITRUCK'] for stem in ('EDF6VC_AURA_CMD', 'EDF6VC_AURA_REP', 'EDF6VC_AURA_AMO')},
     # The player's and the NPC interceptors and the enemy fighter (BOMBER501's mesh at 0.65): the front seat of the
     # painted tandem canopy (room 0.77, 0.77, 0.35, 0.77, 3.15, 14.46). Every fighter sits in War Thunder's F-16A
     # Block 15 cockpit (cockpit_kits_plugin jet_f16; the user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧").

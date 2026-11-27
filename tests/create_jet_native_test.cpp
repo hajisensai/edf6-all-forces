@@ -13,6 +13,9 @@
 // World-service sentinels below never return, so optimized, unexercised flight paths are unreachable.
 #pragma warning(disable:4702)
 #include "../src/jet_spawn.cpp"
+#include "../src/plugin_body.h"
+#include "../src/strikes.h"
+#include "../src/proteus.h"
 #pragma warning(pop)
 
 // Whole-translation-unit linkage requires these world services. None belongs to CreateJet's
@@ -20,6 +23,8 @@
 namespace { [[noreturn]] void UnexpectedWorldCall() {std::fputs("FAIL unexpected aircraft world service\n",stderr);std::abort();} }
 namespace crew {
 ULONGLONG GameMs() noexcept {UnexpectedWorldCall();}
+const JetWeaponRow* JetWeapon(int) noexcept {UnexpectedWorldCall();}           // stores.cpp: SupportRunLoad, not reached here
+const StoreSpec* StoreSpecOfPrefix(const wchar_t*) noexcept {UnexpectedWorldCall();}
 float BodyMark(const void*) noexcept {UnexpectedWorldCall();}
 bool IsHelicopter(const void*) noexcept {UnexpectedWorldCall();}
 float MapRay(const float*,const float*,float*) noexcept {UnexpectedWorldCall();}

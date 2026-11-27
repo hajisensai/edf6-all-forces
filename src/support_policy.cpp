@@ -1,6 +1,6 @@
 // Read the same state as native Weapon::effective-condition (EDF.dll 0x690DB0), without pretending
 // NO_SUPPORT is a particular campaign or map name. Scripts can change it while a mission is running.
-#include "crew.h"
+#include "edf_layout.h"
 #include "memory.h"
 #include "support_policy.h"
 namespace crew {

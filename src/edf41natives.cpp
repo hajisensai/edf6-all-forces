@@ -18,7 +18,9 @@
 // continues at 0x2100C3: the stack falls by 2 slots, as 4.1's native's. The stub's page is above the image, inside the
 // table entry's 32-bit reach (the entry is an unsigned offset from the image base, 0x21000A..0x210011).
 // EDF.dll TimeDateStamp 0x678CCB46; every byte the patch relies on is checked first.
-#include "crew.h"
+#include "edf_layout.h"
+#include "plugin_log.h"
+#include "edf41.h"
 #include "memory.h"
 
 #include <cstdint>
@@ -58,34 +60,6 @@ std::size_t SizeOfImage() noexcept {
     return reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+dos->e_lfanew)->OptionalHeader.SizeOfImage;
 }
 
-// `code` in a fresh executable page above the image, its offset from the image base below 2 GB (a table entry is an
-// unsigned 32-bit offset).
-unsigned char* AllocateAboveImage(const unsigned char* code,std::size_t size) noexcept {
-    SYSTEM_INFO info{};
-    GetSystemInfo(&info);
-    const std::uintptr_t grain=info.dwAllocationGranularity ? info.dwAllocationGranularity : 0x10000;
-    const auto base=reinterpret_cast<std::uintptr_t>(image);
-    const std::uintptr_t first=(base+SizeOfImage()+grain-1)&~(grain-1);
-    for(std::uintptr_t at=first;at+0x1000-base<0x7FFF0000;at+=grain) {
-        auto* page=static_cast<unsigned char*>(VirtualAlloc(reinterpret_cast<void*>(at),0x1000,MEM_RESERVE|MEM_COMMIT,
-                                                            PAGE_READWRITE));
-        if(!page)continue;
-        if(reinterpret_cast<std::uintptr_t>(page)!=at) {
-            VirtualFree(page,0,MEM_RELEASE);
-            continue;
-        }
-        std::memcpy(page,code,size);
-        DWORD old=0;
-        if(!VirtualProtect(page,0x1000,PAGE_EXECUTE_READ,&old)) {
-            VirtualFree(page,0,MEM_RELEASE);
-            return nullptr;
-        }
-        FlushInstructionCache(GetCurrentProcess(),page,size);
-        return page;
-    }
-    return nullptr;
-}
-
 std::size_t BuildStub(unsigned char* out) noexcept {
     const auto setEncount=reinterpret_cast<std::uint64_t>(image+kSetEncount);
     const auto commonEnd=reinterpret_cast<std::uint64_t>(image+kCommonEnd);
@@ -122,23 +96,21 @@ bool InstallEdf41Natives() noexcept {
     }
     unsigned char code[64];
     const std::size_t size=BuildStub(code);
-    unsigned char* stub=AllocateAboveImage(code,size);
+    // Above the image, its offset from the image base below 2 GB (a table entry is an unsigned 32-bit offset).
+    auto* stub=static_cast<unsigned char*>(edf::AllocateCodeAbove(image+SizeOfImage(),image+0x7FFF0000,code,size));
     if(!stub) {
         Log("EDF41NATIVES off: no page above the image for the stub");
         return false;
     }
     const auto offset=static_cast<std::uint32_t>(stub-image);
     unsigned char* slot=image+kTable1Jumps+4*kSlot;
-    edf::ClaimCode(slot,4);   // a code write of its own (edf/code_owner.h)
-    DWORD old=0;
-    if(!VirtualProtect(slot,4,PAGE_EXECUTE_READWRITE,&old)) {
+    // The table entry, only while it still points at the common end (checked above; written through edf::PatchCode).
+    const auto stock=static_cast<std::uint32_t>(kCommonEnd);
+    if(!edf::PatchCode(slot,reinterpret_cast<const unsigned char*>(&stock),reinterpret_cast<const unsigned char*>(&offset),4)) {
         VirtualFree(stub,0,MEM_RELEASE);
         Log("EDF41NATIVES off: the jump table is not writable");
         return false;
     }
-    std::memcpy(slot,&offset,4);
-    edf::RestoreProtection(slot,4,old);
-    FlushInstructionCache(GetCurrentProcess(),slot,4);
     ready=true;
     Log("EDF41NATIVES table 1 id %u = SetEncountReportRadius (EDF+%zX), stub at EDF+%X",
         static_cast<unsigned>(kSetEncountId),kSetEncount,static_cast<unsigned>(offset));

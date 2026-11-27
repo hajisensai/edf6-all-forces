@@ -20,8 +20,30 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "keyconfig.h"
-#include "crew.h"
+#include "step_fresh.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "boarding.h"
+#include "plugin_body.h"
+#include "carrierlaser.h"
+#include "dreadnought.h"
+#include "ground.h"
+#include "helisight.h"
+#include "jet.h"
+#include "map.h"
+#include "seats.h"
+#include "sidecar.h"
+#include "sound.h"
+#include "subcarrier.h"
+#include "core.h"
+#include "vhud.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "perf_probe.h"
+#include "aura.h"
 #include "pvp.h"
 #include "enemy_control.h"
 #include "enemy_control_net.h"
@@ -53,6 +75,8 @@
 #include "support_points.h"
 #include "support_warning.h"
 #include "warn.h"
+#include "module.h"
+#include "crew_frame.h"
 #include <cmath>
 
 namespace crew {
@@ -727,52 +751,6 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
     Log("SLOW v=%p %s: stock input %.1f ms, plugin %.1f ms",v,kClasses[cls].name,s,p);
 }
 
-// The per-frame steps, each under its own guard: a fault in one (logged per step at most every kFaultLogMs,
-// with how many so far) skips that step for that vehicle this frame, not every step after it.
-enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
-            kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepBarrage, kStepFollowUp, kStepMapQueue, kStepDreadnought, kStepEmplacement, kStepBlastSound, kStepJetLever, kStepGpuFx, kStepBargaAim, kStepCount };
-const char* const kStepNames[]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
-                                          "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","barrage","follow-up","map queue","dreadnought","emplacement","blast sound","jet lever","gpufx","barga aim"};
-static_assert(sizeof(kStepNames)/sizeof(kStepNames[0])==kStepCount,"a name for every step, in the enum's order");
-constexpr ULONGLONG kFaultLogMs=10000;
-struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
-
-int StepFault(int step,const EXCEPTION_POINTERS* e) noexcept {
-    Faults& f=faults[step];
-    ++f.count;
-    const ULONGLONG now=GetTickCount64();
-    if(f.loggedAt && now-f.loggedAt<kFaultLogMs)return EXCEPTION_EXECUTE_HANDLER;
-    f.loggedAt=now;
-    const auto at=static_cast<const unsigned char*>(e->ExceptionRecord->ExceptionAddress);
-    const bool inGame=at>=image && at<image+0x22CE000;
-    Log("FAULT %s: %08lX at %s%llX (%u so far; the step is skipped, the others go on)",kStepNames[step],e->ExceptionRecord->ExceptionCode,
-        inGame ? "EDF+" : "",static_cast<unsigned long long>(inGame ? static_cast<std::uintptr_t>(at-image) : reinterpret_cast<std::uintptr_t>(at)),f.count);
-    return EXCEPTION_EXECUTE_HANDLER;
-}
-using VehicleStep=void(*)(unsigned char*);
-void Guarded(int step,VehicleStep run,unsigned char* v) noexcept {
-    __try { run(v); } __except(StepFault(step,GetExceptionInformation())) {}
-}
-// The vehicles' sounds and their recording at one "now", read once before both (vehsound.cpp stepMs): the recording's
-// time is the very one the step ran at.
-ULONGLONG soundMs=0;
-void TraceSoundStep(unsigned char* v) noexcept { TraceVehicleSound(v,soundMs); }
-void SoundStep(unsigned char* v) noexcept { VehicleSoundAt(v,soundMs); }
-void GuardedTick(int step,void(*run)()) noexcept {
-    __try { run(); } __except(StepFault(step,GetExceptionInformation())) {}
-}
-
-template<int I> void CrewStep(unsigned char* v) noexcept { Crew(v,I); }
-void JetReapStep(unsigned char* v) noexcept { JetReap(v); }
-void HeliReapStep(unsigned char* v) noexcept { HeliReap(v); }
-void HeliStep(unsigned char* v) noexcept { if(IsHelicopter(v))HeliFrame(v); }
-// The submarine carrier is the plugin's own (subcarrier.cpp's registry), driven whoever sits in it: not from
-// HeliFrame, which wants an NPC pilot in seat 0 and the heli profile.
-void SubStep(unsigned char* v) noexcept { if(BodyOf(v)==PluginBody::sub){SubFrame(v);CarrierLaserFrame(v);} }
-void GroundStep(unsigned char* v) noexcept { if(IsGroundRobo(v))GroundFrame(v); }
-
 // Once a game frame, from the first vehicle input of the frame: what is no one vehicle's (the sea rescue,
 // which needs no heli to exist yet; the HUD's publish of what it gathered last frame).
 ULONGLONG tickFrame=0;
@@ -916,121 +894,39 @@ void PerfTick() noexcept {
     perf.at=t;perf.worst=perf.sum=0.0;perf.steps=0;
 }
 
-void GpuFxTick() noexcept { gpufx::Tick(); }
-void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
-void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
-void GravityTick() noexcept { gravity::Frame(); GravityGunTick(); gravity::net::Frame(); FloatGunTick(); }
-
 void SharedFrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
     PerfTick();
     KeyConfigTick();   // the keys follow the game's key config (keyconfig.cpp): seeded once, republished when changed
-    GuardedTick(kStepUnderground,&UnderPlayer);
-    GuardedTick(kStepUnderground,&ExitGroundTick);   // off a vehicle: on the floor, not in it (exit_ground.h)
-    GuardedTick(kStepRescue,&RescueTick);
-    GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
-    GuardedTick(kStepThermal,&ThermalTick);
-    GuardedTick(kStepGpuFx,&GpuFxTick);
-    GuardedTick(kStepPvp,&PvpFrame);
-    GuardedTick(kStepEnemyControl,&EnemyControlFrame);
-    GuardedTick(kStepEnemyControl,&EnemyControlNetworkFrame);
-    GuardedTick(kStepHudPublish,&HudPublish);
-    GuardedTick(kStepUnderground,&BigWorldProbe);
-    GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)
-    GuardedTick(kStepRescue,&SupportDispatchTick);
-    GuardedTick(kStepPlayerJet,&PlayerEjectTick);
-    GuardedTick(kStepView,&ViewDiagTick);   // the grey-map diagnosis (viewdiag.cpp)
-    GuardedTick(kStepBoarding,&BoardingTick);
-    GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)
-    GuardedTick(kStepUltimate,&UltimateTick);       // the ultimate strike's show (ultimate.cpp), on with the plugin off too
-    GuardedTick(kStepBarrage,&BarrageTick);         // the long-range barrages' rounds (barrage.cpp)
-    GuardedTick(kStepBarrage,&AndryushaTick);       // the Andryusha's airburst fuses and bomblets (andryusha.cpp)
-    GuardedTick(kStepFollowUp,&SupportFollowUpTick); // the sorties' second waves (airstrike.cpp)
-    GuardedTick(kStepFollowUp,&SupportPointsTick);   // the map's support pt from the team score (support_points.cpp)
-    GuardedTick(kStepFollowUp,&SupportWarningTick);  // the supports' warnings on the ground (support_warning.cpp)
-    GuardedTick(kStepGravity,&GravityTick);         // what is thrown: its impacts and contacts (gravity.cpp)
-    // The listener (once a frame: a vehicle's input may have placed it already), then the explosions heard from it: on
-    // foot with no vehicle about too (blastsound.cpp).
-    GuardedTick(kStepJetSoundTick,&JetSoundTick);
-    GuardedTick(kStepBlastSound,&BlastSoundTick);
-    GuardedTick(kStepMapQueue,&MapCommandQueueTick);  // the Shift-queued points of this machine's units (mapcmd.cpp)
+    modules::RunTicks();   // the modules' ticks (modules.cpp kTicks), each under its module's guard
 }
 
+// The vehicle's input: the modules' vehicle steps (modules.cpp kVehicleSteps) at this hook's seams, each under its
+// module's guard; with the plugin off (ini Enabled=0) only those that give back what they changed.
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
+    using modules::VehiclePhase;
     LARGE_INTEGER t0,t1,t2;QueryPerformanceCounter(&t0);
-    VehicleLookInput observation(static_cast<unsigned char*>(vehicle));
-    // The drill tank's trigger is its drill's: taken off the seat before the stock input reads it (drill.cpp).
-    if(Cfg().enabled)Guarded(kStepDrill,&DrillInput,static_cast<unsigned char*>(vehicle));
-    // The EMC's trigger is its charge's (emc.cpp): the same, the stock burst never starts.
-    if(Cfg().enabled)Guarded(kStepEmc,&EmcInput,static_cast<unsigned char*>(vehicle));
-    // An NPC tank pushed off its post drives back: seat 0's stick written before the stock input reads it (npcpost.cpp).
-    if(Cfg().enabled)Guarded(kStepNpcPost,&NpcPostInput,static_cast<unsigned char*>(vehicle));
-    // The NPC soldiers in its gunner seats aim and fire, before the stock input reads the seats (npcai.cpp).
-    Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle)); // also releases our last inputs when disabled
-    // A Dreadnought's local rider's aim stick as the observation reads it, before the stock input (dreadnought_turrets.inc).
-    if(Cfg().enabled)Guarded(kStepDreadnought,&DreadnoughtInput,static_cast<unsigned char*>(vehicle));
-    // A gunner seat's own turret: its local rider's aim stick the same way (seat_turret.cpp).
-    if(Cfg().enabled)Guarded(kStepPayload,&SeatTurretsInput,static_cast<unsigned char*>(vehicle));
+    auto v=static_cast<unsigned char*>(vehicle);
+    VehicleLookInput observation(v);
+    modules::RunVehicle(VehiclePhase::kBeforeGears,v,I,Cfg().enabled);
     // The player driver's War Thunder gears on the keyboard (drivegear.cpp): the stock input reads the gear's stick, the
     // seat gets the keys' own back at the end of this traversal.
-    if(Cfg().enabled && Cfg().testDriveCycle)TestDriveInput(static_cast<unsigned char*>(vehicle));   // tests only, before the gears
-    DriveGearInput gears(static_cast<unsigned char*>(vehicle));
-    // A fixed emplacement never drives: its drive stick cleared last, over every writer before (emplacement.cpp).
-    if(Cfg().enabled)Guarded(kStepEmplacement,&EmplacementInput,static_cast<unsigned char*>(vehicle));
+    if(Cfg().enabled && Cfg().testDriveCycle)TestDriveInput(v);   // tests only, before the gears
+    DriveGearInput gears(v);
+    modules::RunVehicle(VehiclePhase::kBeforeStockInput,v,I,Cfg().enabled);
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
-    auto v=static_cast<unsigned char*>(vehicle);
     SeeFrame(v);               // the frame is a clock: it steps with the plugin off too (body506's steps test it)
-    GuardedTick(kStepJetSoundTick,&JetSoundTick);   // once a frame, the plugin off too: it stops the sounds then
-    Guarded(kStepTurretCam,&TurretCamFrame,v);      // the plugin off too: it lets the camera go then
-    Guarded(kStepProteus,&ProteusFrame,v);          // the plugin off too: a reworked Proteus gets its stock numbers back
-    Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: the high view goes then
-    soundMs=GameMs();                               // one "now" for the step and its recording (vehsound.cpp stepMs)
-    if(Cfg().traceFile[0])Guarded(kStepVehicleSound,&TraceSoundStep,v);   // its inputs, for the offline replay (trace_rec.cpp)
-    Guarded(kStepVehicleSound,&SoundStep,v);        // the plugin off too: the stock sounds are given back then
+    modules::RunVehicle(VehiclePhase::kAfterStockInput,v,I,Cfg().enabled);
+    modules::SoundNow(GameMs());   // one "now" for the step and its recording (vehsound.cpp stepMs)
+    modules::RunVehicle(VehiclePhase::kSound,v,I,Cfg().enabled);
     TraceEnd();
-    Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
-    GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
-    GuardedTick(kStepSazabi,&SazabiSoundTick);      // the plugin off too: the Sazabi's loops stop then (once a frame)
-    if(!Cfg().enabled){
-        Guarded(kStepAimLines,&AimLines,v); // restore only our saved native lines, including empty/NPC seats
-        Guarded(kStepSightZoom,&SightZoomStock,v);return;
-    }
+    modules::RunVehicle(VehiclePhase::kAfterSound,v,I,Cfg().enabled);
+    if(!Cfg().enabled){modules::RunVehicle(VehiclePhase::kFrame,v,I,false);return;}
     FrameTick();
-    Guarded(kStepCrew,&CrewStep<I>,v);
-    Guarded(kStepSeats,&SeatSwitchFrame,v);    // before the steps that read who sits where this frame
-    Guarded(kStepStab,&StabFrame,v);           // its seats' aims, for the stabilizer in the aim step after this input
-    Guarded(kStepAimLines,&AimLines,v);
-    Guarded(kStepSightZoom,&SightZoomStock,v);   // the player's seat's sight magnification (sightzoom.cpp)
-    Guarded(kStepJetReap,&JetReapStep,v);
-    Guarded(kStepHeliReap,&HeliReapStep,v);
-    Guarded(kStepPlayerJet,&PlayerJetFrame,v);
-    Guarded(kStepSazabi,&SazabiFrame,v);
-    Guarded(kStepDreadnought,&DreadnoughtFrame,v);
-    Guarded(kStepSub,&SubStep,v);
-    Guarded(kStepHeli,&HeliStep,v);
-    Guarded(kStepHeli,&HeliCueStep,v);
-    Guarded(kStepGround,&GroundStep,v);
-    Guarded(kStepDrill,&DrillFrame,v);
-    Guarded(kStepSidecar,&SidecarFrame,v);
-    Guarded(kStepRam,&VehicleRamFrame,v);       // after the drill and the sidecar: what the parts drove into this frame
-    Guarded(kStepHud,&HudSee,v);
-    Guarded(kStepLauncher,&LauncherFrame,v);
-    Guarded(kStepLauncher,&AndryushaFrame,v);    // after the fuse switch (LauncherFrame): the fuse to the copies
-    Guarded(kStepPayload,&PayloadFrame,v);       // before the sight: it marks the store the secondary fires
-    Guarded(kStepPayload,&SeatTurretsFrame,v);   // the gunner seats' own turrets: trained, the unmanned ones fired
-    Guarded(kStepPayload,&TwinBarrelFrame,v);    // after every pull of this frame (stock, store, NPC): twin barrels in turn
-    Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
-    Guarded(kStepStockHud,&StockHudFrame,v);
-    Guarded(kStepBargaAim,&BargaAimFrame,v);     // the player's Balam: its reach, hit spheres, cannon landing
-    Guarded(kStepJetSound,&JetSound,v);
-    Guarded(kStepJetLever,&JetLeverFrame,v);   // after its engine sound: online, a registered jet's lever sent / burnt here
-    Guarded(kStepLockSound,&LockSound,v);
-    Guarded(kStepUnderground,&UnderVehicle,v);
-    Guarded(kStepShield,&ShieldVehicle,v);
-    Guarded(kStepNet,&NetProbe,v);
+    modules::RunVehicle(VehiclePhase::kFrame,v,I,true);
     QueryPerformanceCounter(&t2);
     SlowLog(I,vehicle,t1.QuadPart-t0.QuadPart,t2.QuadPart-t1.QuadPart);
 }
@@ -1057,6 +953,21 @@ void InstallInputs() noexcept {
 // Both the local Soldier pre-update and vehicle inputs use this one scene-clock boundary. In a mission with no
 // vehicles, the local player still advances PVP, thermal cleanup, HUD publication and support; repeated actors do not.
 void FrameTick() noexcept { SharedFrameTick(); }
+
+// crew.cpp's own steps of the registry's passes (crew_frame.h).
+namespace frame {
+void CrewVehicle(unsigned char* v,int cls) noexcept { Crew(v,cls); }
+void AimLinesVehicle(unsigned char* v) noexcept { AimLines(v); }
+void JetReapVehicle(unsigned char* v) noexcept { JetReap(v); }
+void HeliReapVehicle(unsigned char* v) noexcept { HeliReap(v); }
+void HeliVehicle(unsigned char* v) noexcept { if(IsHelicopter(v))HeliFrame(v); }
+void SubVehicle(unsigned char* v) noexcept { if(BodyOf(v)==PluginBody::sub){SubFrame(v);CarrierLaserFrame(v);} }
+void GroundVehicle(unsigned char* v) noexcept { if(IsGroundRobo(v))GroundFrame(v); }
+void UnderPlayerTick() noexcept { UnderPlayer(); }
+void UnderVehicleStep(unsigned char* v) noexcept { UnderVehicle(v); }
+void UnderReset() noexcept { for(auto& w:underWatch)w=UnderWatch{}; }   // the last mission's objects: their addresses may be the new ones
+void ExitGroundWatchTick() noexcept { ExitGroundTick(); }
+}  // namespace frame
 
 // Not at load: another plugin (EDF6AutoTurret hooks 403/404/603) may patch the same input slots after us, and
 // ours must chain onto theirs. Once, from the first of the mission's start (mission.cpp), the on-foot prompt

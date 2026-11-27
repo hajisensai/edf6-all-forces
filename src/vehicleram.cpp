@@ -23,7 +23,17 @@
 //    an update hook of its own here while crew.cpp left it alone; crew.cpp chains it since 2026-10-07 (an NPC drives it),
 //    so it runs from there too, once.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "objref.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "scene.h"
+#include "bay_rounds.h"
+#include "heli.h"
+#include "vehicleram_api.h"
+#include "npcai.h"
+#include "support_call.h"
+#include "transport.h"
 #include "body506.h"
 #include "layout.h"
 #include "memory.h"

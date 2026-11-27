@@ -26,7 +26,10 @@
 // so the two do not add up. Machines that are neither add nothing. A local operator or no operator: 0x690420 fires the
 // copy itself (the stock recoil), nothing added here.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#include "crew.h"
+#include "edf_layout.h"
+#include "config.h"
+#include "plugin_log.h"
+#include "netprobe.h"
 #include "gunnerrecoil.h"
 #include "memory.h"
 

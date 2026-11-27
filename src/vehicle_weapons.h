@@ -6,7 +6,8 @@
 // offline and online alike (online the room's set decides the vehicles; every member runs the same build: the same lists).
 // Header-only: the files that preload vehicles are in several tests' builds.
 #include "vehicle_weapons_logic.h"
-#include "crew.h"
+#include "plugin_log.h"
+#include "lazy_rows.h"
 #include <windows.h>
 #include <cstdio>
 #include <cwchar>
@@ -17,7 +18,7 @@ namespace vehicle_weapons::detail {
 inline SRWLOCK lock=SRWLOCK_INIT;
 inline Queued queued;
 inline int vehicles=0,weapons=0;
-inline unsigned char sgo[2u<<20];   // a vehicle's SGO (its models are in their archives): well under 1 MB
+inline LazyRows<unsigned char,(2u<<20)> sgo;   // a vehicle's SGO (its models are in their archives): well under 1 MB; heap from the first read
 // <the game's directory>\Mods\OBJECT\NAME.SGO (the exe's directory: Mods sits beside EDF6.exe) into `path`; false when
 // it does not fit.
 inline bool ModsObjectPath(std::wstring_view name,wchar_t (&path)[MAX_PATH]) noexcept {
@@ -60,10 +61,11 @@ inline int QueueVehicleWeapons(void* mgr,VehicleWeaponPreloadFn preload,const wc
             static_cast<int>(name.size()),name.data());
         return 0;
     }
+    if(!sgo.Allocate("PRELOAD vehicle weapons SGO buffer"))return 0;
     AcquireSRWLockExclusive(&lock);
     std::size_t size=0;
-    const ModsRead read=ReadModsFile(file,sgo,sizeof(sgo),size,std::fread);
-    const int listed=WeaponsOf(name,read,sgo,size,[&](std::wstring_view w) noexcept {
+    const ModsRead read=ReadModsFile(file,&sgo[0],sgo.size(),size,std::fread);
+    const int listed=WeaponsOf(name,read,&sgo[0],size,[&](std::wstring_view w) noexcept {
         if(queued.Has(w))return;
         wchar_t path[kPathMost];
         const std::size_t len=w.size()<kPathMost ? w.size() : kPathMost-1;
