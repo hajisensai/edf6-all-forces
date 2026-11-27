@@ -56,7 +56,7 @@ struct Stream {
     static constexpr std::size_t kRawDescriptorBytes=0x260;
     unsigned char rawDescriptorStorage[kRawDescriptorBytes+15]{};
 };
-LazyRows<Stream,kBindings> streams;
+IncrementalRows<Stream,kBindings> streams;
 unsigned char* installedImage=nullptr;bool ready=false,redirected[18]{};
 
 template<class T>T Fn(unsigned rva) noexcept {

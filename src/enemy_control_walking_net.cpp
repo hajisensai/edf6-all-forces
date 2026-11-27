@@ -48,7 +48,7 @@ struct Stream {
     float point[3]{};unsigned action=0;std::uint64_t next=1,applied=0;unsigned head=0,count=0;
     Part guns[kGuns]{};Event queue[kQueued]{};Receipt receipts[kQueued]{};Replay replay{};
 };
-LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
+IncrementalRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
 using VoidFn=void(__fastcall*)(void*);
 template<class T>T Fn(unsigned rva) noexcept {
 #ifdef ENEMY_CONTROL_WALKING_NET_TEST

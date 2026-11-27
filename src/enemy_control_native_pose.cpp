@@ -48,7 +48,7 @@ struct Transaction {
     bool used=false,changed=false,pending=false;PoseKind kind=PoseKind::deiroi;void* stageRag=nullptr;
     Write write[kMostWrites]{};Body body[kMostBodies]{};Owner retained[kMostParts+1]{};
 };
-LazyRows<Transaction,kTransactions> transactions;
+IncrementalRows<Transaction,kTransactions> transactions;
 struct Part {unsigned char* object=nullptr;void* control=nullptr;void* model=nullptr;void* rag=nullptr;void* collision=nullptr;};
 struct DeiroiData {unsigned char* points=nullptr;unsigned char* previous=nullptr;std::size_t count=0,oldCount=0,parts=0;Part part[kMostParts]{};};
 

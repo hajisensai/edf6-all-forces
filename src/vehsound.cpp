@@ -150,7 +150,7 @@ struct Vehicle {
 Vehicle vehicles[kVehicles]{};
 // Each vehicle's past (vehicles[i]'s), for the speed of sound, 46 KB each: on the heap from the first engine heard,
 // not in the image (2.2 MB of .data committed for every player otherwise: tests/plugin_image_size_guard.py).
-LazyRows<engine::Trail,kVehicles> trails;
+IncrementalRows<engine::Trail,kVehicles> trails;
 // A report on its way (the sound's travel time, a case's fall): played when the game clock reaches `due`.
 // `wt`: a War Thunder recording's group (wt_clips.h), `variant` the one of it.
 struct Pending { int clip=-1; bool wt=false; int variant=0; audio::Heard heard{}; ULONGLONG due=0; };

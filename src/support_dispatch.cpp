@@ -125,7 +125,7 @@ struct Deployment {
     ULONGLONG tracedAt=0,deliveredAt=0;
     float traced[support_net::kMaxUnits][3]{};
 };
-LazyRows<Deployment,kDeployments> deployments;
+IncrementalRows<Deployment,kDeployments> deployments;
 // No cooldown after a delivery (the user, 2026-10-25: 「支援调度 30 秒的全局冷却 删掉」; a limit will be the calls' pt): a call
 // waits only for the one still being planned.
 bool offlinePending=false;std::uint64_t nextOffline=1;

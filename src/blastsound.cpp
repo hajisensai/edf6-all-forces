@@ -62,7 +62,7 @@ std::atomic<ULONGLONG> armedUntil{0};
 
 // A layer on its way: played when the game clock reaches `due`.
 struct Pending { int clip=-1; int variant=0; audio::Heard heard{}; ULONGLONG due=0; };
-LazyRows<Pending,kPending> pending;
+IncrementalRows<Pending,kPending> pending;
 wtevent::Rotation rotation{};
 // The tiers' budgets: each start's game ms and distance.
 struct Started { ULONGLONG at; float distance; };

@@ -33,11 +33,11 @@ struct Row {
     static void operator delete(void* p,const std::nothrow_t&) noexcept {operator delete(p);}
 };
 
-constexpr crew::LazyRows<Row,4> kConstantInit{};
+constexpr crew::IncrementalRows<Row,4> kConstantInit{};
 constexpr auto kFree=[](const Row& row){return row.held==0;};
 
 void GrowthAndReuse() {
-    crew::LazyRows<Row,2> table;
+    crew::IncrementalRows<Row,2> table;
     Check(kConstantInit.Size()==0 && !(table.begin()!=table.end()) && Row::made==0,"an unused table has no rows");
     const auto before=table.begin();
     auto* first=table.FindOrAppend("rows",kFree);
@@ -59,7 +59,7 @@ void GrowthAndReuse() {
 }
 
 void FailureKeepsExistingRows() {
-    crew::LazyRows<Row,8> table;
+    crew::IncrementalRows<Row,8> table;
     auto* first=table.Append("refused rows");
     Check(first!=nullptr,"allocation succeeds before growth failure");
     first->held=1;
@@ -73,7 +73,7 @@ void FailureKeepsExistingRows() {
 }
 
 void IndexedGrowth() {
-    crew::LazyRows<Row,8> table;
+    crew::IncrementalRows<Row,8> table;
     const int made=Row::made;
     Check(!table.Get(1) && !table.Ensure(8,"indexed rows") && table.Size()==0,"invalid indexed access allocates nothing");
     auto* const third=table.Ensure(2,"indexed rows");
@@ -87,7 +87,7 @@ void IndexedGrowth() {
 }
 
 void ConcurrentPublish() {
-    crew::LazyRows<Row,16> table;
+    crew::IncrementalRows<Row,16> table;
     std::vector<Row*> seen(16,nullptr);
     std::vector<std::thread> threads;
     for(std::size_t i=0;i<seen.size();++i)threads.emplace_back([&,i]{seen[i]=table.Append("concurrent rows");});

@@ -45,7 +45,7 @@ void ResetStream(Stream& s) noexcept {
     static_assert(std::is_trivially_destructible_v<Stream>);::new(static_cast<void*>(&s)) Stream{};
 }
 thread_local Scope* activeScope=nullptr;
-LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
+IncrementalRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
 struct Sig {unsigned rva;unsigned char bytes[16];};
 constexpr Sig kSigs[]={
     {0x6D05C0,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18,0x55,0x57,0x41,0x54,0x41}},

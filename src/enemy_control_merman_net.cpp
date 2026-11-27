@@ -61,7 +61,7 @@ void ResetStream(Stream& s) noexcept {
     // the game's Windows thread stack. Only a fully released slot may reset.
     std::memset(&s,0,sizeof(s));s.next=1;
 }
-LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;struct UpdateScope {void* battery=nullptr;UpdateScope* previous=nullptr;};thread_local UpdateScope* updating=nullptr;
+IncrementalRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;struct UpdateScope {void* battery=nullptr;UpdateScope* previous=nullptr;};thread_local UpdateScope* updating=nullptr;
 bool TrackBeam(Stream&,const Event&,Ref) noexcept;bool ActiveBeams(const Stream&) noexcept;bool ReleaseBeams(Stream&) noexcept;void ScanBeams(Stream&) noexcept;
 using VoidFn=void(__fastcall*)(void*);
 template<class T>T Fn(unsigned rva) noexcept {

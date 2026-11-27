@@ -47,7 +47,7 @@ struct Stream {
     Pending queue[kQueued]{};Receipt receipts[kReceipts]{};
     Meta stage{};Record parts[kParts]{};unsigned staged=0;bool finalStaged=false;std::uint64_t finalSerial=0,finalHash=0;
 };
-LazyRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
+IncrementalRows<Stream,kRoots> streams;unsigned char* admittedImage=nullptr;bool installed=false;
 using ShootFn=void(__fastcall*)(void*,int);using VoidFn=void(__fastcall*)(void*);
 ShootFn originalShoot=nullptr;unsigned char entryPatch[32]{};void* trampoline=nullptr;
 struct Scope {Stream* stream=nullptr;Meta meta{};unsigned queueBase=0,cursor=0,current=kParts;bool replay=false,failed=false;Scope* previous=nullptr;};
