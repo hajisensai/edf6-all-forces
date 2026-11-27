@@ -479,14 +479,39 @@ EDF.dll mapping; no live game or installation is modified. Actual two-machine ga
   - ChooseArm 的「目标旁有友军」（FriendNearNow）；
   - 主手 ShotOk 的视线射线（MapRay，只在缓存的射线到期时算）和挡枪胶囊（ShotClearNow）；
   - Veto 副手的挡枪胶囊。
-- **Apply（游戏线程，原顺序）**：Think、Drive 照旧跑。Drive 里每次询问都走一个包装（`PickTarget`、`ShotClearOf`、`FriendNear`、`MapRayQ`、`WastedFireQ`、`HoldFireQ`）：输入和 Intent 里存的逐位相同（memcmp）就用存的答案，否则当场在游戏线程上问（记为一次 miss，也就是「同步重新 Decide」）。所有写入（扳机、看向、换枪、移动、导航预算、wastedfire 簿、上车、拾取）仍然只在 Apply 里，顺序和以前一样。
+- **Apply（游戏线程，原顺序）**：Think、Drive 照旧跑。Drive 里每次询问都走一个包装（`PickTarget`、`ShotClearOf`、`FriendNear`、`MapRayQ`、`WastedFireQ`、`HoldFireQ`）。包装按「问的是什么」认答案：同一个目标对象、同一把武器（blast / 半径逐位相同；选目标还要求 scope / reach / 持有目标相同），起点和终点与 Decide 问时相差不超过 `mt::kNear`（0.5 m），就用存的答案；否则当场在游戏线程上问（记一次 miss），并按问题种类和原因计数（见下）。所有写入（扳机、看向、换枪、移动、导航预算、wastedfire 簿、上车、拾取）仍然只在 Apply 里，顺序和以前一样。
+
+**行为等价，不逐位一致（2026-11-27 起）**：用户明确允许根本性优化改变现有行为，只要求与 NpcParallelThink=0 行为等价。所以存的答案可以晚一步、输入可以有小偏差：
+
+- 计划类目标（运输船、锚、生成器、要塞部件这类 HoldFire 要走 PlanFor 的）：Decide 用 `WastedFirePeekFor` 读这一对（射手、目标、弹速、重力）上一次在游戏线程上做出的计划（150 ms 内的那份，最多晚一步），包括弱点 aim。计划还没做过才当场问（原因 plan）。
+- 主手 ShotOk 的射线和挡枪胶囊按 HoldFire 给出的锁定点（弱点 aim）来问，不再按 t.aim，和 Drive 实际问的点一致。
+- 只有语义变化才重问：目标对象变了（死了、换阵营后 Gather 不再列它、原版 Think 换了目标）、武器变了（换手）、持有目标变了、偏离超过 kNear，或 wastedfire 簿版本变了（stale：命中结算后存的 pick 和 hold 作废）。
+
+**重问的原因计数**（`mt::Cause`，进 PERF NPCMT 行的 `why:` 段）：
+
+- no answer：Decide 根本没算这种答案（没猜到的问题：射线没到期、那只手没扣扳机、Decide 判断瞄不上）；
+- other object：存了同类答案，但对象不同（原版 Think 换了目标、mark、原版目标）；
+- weapon：同一对象，换了武器（blast / 弹速 / 重力；选目标的 scope / reach）；
+- held：选目标时持有的目标不同；
+- drift：同一对象同一武器，起点或终点偏离超过 kNear；
+- plan：计划类目标的计划还没做过（peek 返回 −1）；
+- line：不关于任何对象的问题（原版扳机沿视线的挡枪测试），Decide 不猜；
+- stale 单独计（版本变了）。
+
+另外计「存了但 Drive 没用」的答案（`kept unused`，按问题种类），这些是 Decide 白做的功。
+
+**减少 Decide 白做的功**：
+
+- 选目标的结果已知时，只给 Drive 会打的那一行（选中的目标，否则持有的目标）算 hold / close / 射线 / 胶囊，不再给持有目标和新目标各算一套；
+- 射线和胶囊只在主手 ShotOk 的瞄准判断能通过时才算：视线（kViewPitch / kViewYaw，游戏自己缓动的，Drive 只写瞄准不写视线，所以 fork 到 Drive 之间不变）与目标的夹角不超过命中锥，加上 kNear 在目标处对应的角度；
+- Veto 只给上一次 Drive 真扣过扳机的手（`Guess::hands`，由 Veto 记下的 `mt::vetoed` 加上 fork 时的扳机字节）算胶囊；
+- held[0] < 0（不知道手里拿什么）或没有目标时，Veto 问的是原版目标：按 fork 时原版目标的行（`Intent::stockRow`）算。
 
 **一定在游戏线程当场问的情况**（触发条件）：
 
 - 新士兵，或 Guess 还没设（第一次被 Drive）；
-- Arms、锚点、眼睛位置、scope、reach 变了，或原版 Think 把它的目标换了（`s.target` 的行变了）；
-- `WastedFireVersion` 变了：WastedFireHit 结算了命中、Reset 或 Prime，这时存的 pick 和 hold 都作废（记为 stale）；
-- 特殊目标：Peek 返回 −1，HoldFire 要走 PlanFor，或要给出弱点 aim；
+- 上面列的语义变化（对象 / 武器 / 持有目标 / 偏离 / 版本）；
+- 计划类目标的计划还没做过；
 - 它自己的 Decide 出了故障（`done=false`）；
 - 超过 kStaleMs 没见到它，或对象换了（ref 的 ctrl 不同）；
 - fork 时它的锚点读不到；
@@ -509,27 +534,34 @@ Decide 只写它自己那份 `intents[index]`。它不读时钟（GameMs / GameF
 
 池里每个线程都继承调用者的 MXCSR，一个任务只写自己索引的结果，所以无论池里有几个线程，每个答案都逐位相同。
 
-### 12.3 确定性对照（离线）
+### 12.3 行为等价对照（离线）
 
-`npc_core_check`（`tools/npc_core_check.cpp`）的设置：24 个士兵、6 个敌人、26 个友军，连跑 6 帧。每帧依次出现：
+`npc_core_check`（`tools/npc_core_check.cpp`）的设置：24 个士兵、6 个敌人、26 个友军，连跑 8 帧。每帧依次出现：
 
 - 开火和 hold；
 - 第 5 号士兵从第 2 帧起换手（Arms 变了）；
 - 走向 combat spot；
+- 3 号敌人是计划类目标（桩里 HoldFire 为它做计划，`WastedFirePeekFor` 读上一步的计划）；
 - 第 3 帧 pass 进行到一半时 wastedfire 簿被写（版本 +1）；
 - 第 4 帧起 7 号士兵中途死亡、9 号换阵营；
-- 射线墙每隔一帧出现一次；
-- 目标每帧都在移动。
+- 4 号敌人第 5 帧起被打死、5 号第 6 帧起换阵营（从本帧列表里消失）；
+- fork 之后所有目标再挪 0.2 m（kNear 以内，答案照用），第 6 帧 0 号目标挪 1 m（超出，重问，原因 drift）；
+- 射线墙每隔一帧出现一次，第 6 帧在 fork 之后才立起来（存的射线答案是错的）。
 
-分三种模式跑：NpcParallelThink=0、=1 且池 1 线程、=1 且池 9 线程（本机），外加 Debug=1 的影子模式。逐位比较：两种池大小的 Intent（46,080 字节）、每帧所有士兵块（0x2200 字节）、条目（目标、手、视线缓存）、Plan。结果全部相同。
+分四种模式跑：NpcParallelThink=0、=1 且池 1 线程、=1 且池 9 线程（本机）、=1 且 Debug=1 影子模式。检查：
 
-kept answers 275（两种池大小一样），当场问 22，stale 22，故障 0，影子模式 mismatch 0。故意把一个存的 pick 改错时，影子比较能抓到：`NPCMT MISMATCH`，并改用游戏线程的答案。
+- 1 线程、池、影子三种的 Intent 逐位相同（73,920 字节），每帧所有士兵块、条目、Plan 也逐位相同（影子只计数，不改用答案，行为不依赖 Debug）；
+- on 与 off 的统计在容差 max(3, 10%) 以内：开火 2/2、换手 128/128、换枪写入 86/86、插件计划 142/142、移动 11/11、改选目标 2/2（这套帧里实际全部相等）；
+- 不变量：不向本帧列表里已经没有的目标（死了、换阵营）开火；fork 之后立起来的墙，每个士兵最多比 off 多射穿一步；
+- 命中率：kept 370 / 409（90%，两种池大小一样），当场问 39：pick 12、hold 10、close 17、ray 0、clear 0；原因 drift 17、stale 22，其余 0；没用上的存答案：射线 3、胶囊 7（改瞄准判断之前是 52 和 58）；
+- 影子模式：11 次抽查 0 次不一致（只计数，不再当 MISMATCH 错误）；故意改错一个存的 pick，影子计数 +1；
+- 计划类目标：第一帧计划还没做，pick 重问（原因 plan）；下一帧读到上一步的计划，pick 直接用存的。
 
-Debug=1 时，每 32 个存的答案抽 1 个在游戏线程上重问一遍做比较，不一致就打 `NPCMT MISMATCH <what>`（最多 2 s 一行）。Decide 里出故障会打 `NPCMT fault`（最多 10 s 一行），进程里第一次故障会写 minidump `<exe>.<pid>.npcmt.dmp`。
+Debug=1 时，每 32 个存的答案抽 1 个在游戏线程上重问一遍做比较。用的仍是存的答案，不一致只计数（`shadow differs`），并打 `NPCMT SHADOW <what>`（最多 2 s 一行）：这是「晚一步的答案和现在的答案不同」的比例，是统计量，不是错误。Decide 里出故障会打 `NPCMT fault`（最多 10 s 一行），进程里第一次故障会写 minidump `<exe>.<pid>.npcmt.dmp`。
 
 ### 12.4 计时与剩余风险
 
-PerfProbe=1 且 Debug=1 时，每个 PerfTick 周期打一行 `PERF NPCMT on|off, N threads: …`，内容有：每步 gather、decide（fork 总时间）、stock think、apply（Think 的其余部分）、apply 里当场询问花的时间，以及 kept / 当场问 / 无 intent / stale / mismatch 的计数。`tools/perf_report.py read_npc_parallel` 读这一行，生成「Soldiers' Think」一节。
+PerfProbe=1 且 Debug=1 时，每个 PerfTick 周期打一行 `PERF NPCMT on|off, N threads: …`，内容有：每步 gather、decide（fork 总时间）、stock think、apply（Think 的其余部分）、apply 里当场询问花的时间，以及 kept / 当场问 / 无 intent / stale / 影子不一致（differs of shadowed）的计数；当场问再按问题种类（pick / hold / close / ray / clear）和原因（no answer / other object / weapon / held / drift / plan / line）分开计，另计存了没用的答案（kept unused，按种类）。`tools/perf_report.py read_npc_parallel` 读这一行，生成「Soldiers' Think」一节。
 
 **实机对照（2026-11-27，`perfrun.py stress:30 stress:100`，Debug=1 PerfProbe=1）**：`python tools/perfrun.py stress:30 --ini NpcParallelThink=0` 和 `--ini NpcParallelThink=1` 各跑一次，stress:100 同样各跑一次。基线是单线程 stress:30 约 11 ms/步、stress:100 约 17.8 ms/步（2026-11-24）。结果填进下表。
 
@@ -540,7 +572,20 @@ PerfProbe=1 且 Debug=1 时，每个 PerfTick 周期打一行 `PERF NPCMT on|off
 | stress:100（3551 敌） | 0 | 13.85 ms | — | 7.30 ms | — |
 | stress:100（3707 敌） | 1 | 13.18 ms | 1.55 ms | 5.53 ms | 1,178,140 / 756,929 |
 
-每步 Think 合计 = gather + decide + stock think + apply（PERF NPCMT 的每步均值）。stress 场景每次刷出的敌人数不同，两档的敌人数已写在表里，同档前后不能逐毫秒对比。stress:100 的 apply 从 7.30 降到 5.53 ms，但 decide 多花 1.55 ms，合计只省约 0.7 ms/步（约 5%）。影子核对 0 次不一致，0 次 fault，没有崩溃。收益小的原因是命中率：约 39% 的询问在 apply 时输入已经变了（士兵或目标在 fork 之后移动），只能当场再问一次，decide 为这部分做的计算就白费了。要提高收益，需要让 fork 时的输入与 apply 时一致，比如在移动之后、或按本帧已定的位置 fork。
+每步 Think 合计 = gather + decide + stock think + apply（PERF NPCMT 的每步均值）。stress 场景每次刷出的敌人数不同，两档的敌人数已写在表里，同档前后不能逐毫秒对比。stress:100 的 apply 从 7.30 降到 5.53 ms，但 decide 多花 1.55 ms，合计只省约 0.7 ms/步（约 5%）。影子核对 0 次不一致，0 次 fault，没有崩溃。收益小的原因是命中率：约 39% 的询问只能在 apply 时当场再问一次，decide 为这部分做的计算就白费了。
+
+**命中率低的原因（按代码推断，2026-11-27；实机分布等新的 PERF NPCMT 行）**：AI pass 里士兵和目标都不动（物理在 pass 之后），所以「fork 之后移动」不是主因。旧版要求输入逐位相同，按代码看主要漏在：
+
+- 计划类目标：WastedFirePeek 返回 −1，pick、hold 全部作废；HoldFire 还会把 aim 换成锁定点，于是射线和胶囊的终点也和 Decide 用的 t.aim 对不上。stress 场景里运输船、锚、生成器很多，这一项应该最大；
+- Veto 在没有目标（或 held[0] < 0）时问的是原版目标，Decide 从来没给它算过答案；
+- Backpack 的射线 / 胶囊、mark 的 WastedFire 也没算过；
+- Decide 用的是上一次 Drive 的 Arms，换手当帧对不上。
+
+旧离线对照里这些情况都没出现（没有计划类目标），所以离线命中率高、实机低。
+
+**这次的修法**（12.1）：按语义认答案（同对象、同武器、kNear 以内）；计划类目标读上一步的计划；射线 / 胶囊按锁定点问；Veto 的原版目标按 fork 时的行算。同时砍掉 Decide 白做的功（只给会打的那一行算、瞄不上就不算射线和胶囊、只给扣过扳机的手算 Veto）。
+
+**预期实机命中率**：上面几项都修到了，计划类目标从第二步起就能命中，预期当场问降到 10–15%（离线 90% kept，剩下的是 stale 和 drift），decide 的时间也会随白做的功减少而下降。实际数字以下一次 `perfrun.py stress:100` 的 `why:` 段为准；如果 other object / no answer 仍然大，说明还有 Drive 的问题 Decide 没猜到（看 `asked at apply` 的种类分布）。
 
 **剩余风险**：
 
