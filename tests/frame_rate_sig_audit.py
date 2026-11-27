@@ -216,9 +216,8 @@ check(len(deletes) == 1, 'System::Update deletes its objects (0x1195F20) before 
 check(re.search(r'RedirectCall\(image\+kRecordCall,image\+kRecordDraw,reinterpret_cast<void\*>\(&RecordHook\)', record_src), 'RecordHook')
 check(re.search(r'Matches\(image,kRecordCall-14,kRecordSig,sizeof\(kRecordSig\)\)', record_src), 'kRecordSig checked before patching')
 check('renderrecord::SetProject(renderrecord::Slot::kFrameRate,&BeforeProject);' in view, 'the frame rate poses in its render_record projection turn')
-check(re.search(r'recordOpen=true;\s*void\* result=nullptr;\s*__try\s*\{\s*result=NativeRecord'
-                r'\(sys,a,b\);\s*\}\s*__finally\s*\{\s*recordOpen=false;', record_src),
-      'RecordHook closes the projection gate and releases its capture on every exit')
+check(re.search(r'recordOpen=true;\s*void\* const r=reinterpret_cast<RecordDrawFn>\(image\+kRecordDraw\)\(sys,a,b\);\s*recordOpen=false;', record_src),
+      'RecordHook opens the recording for its call only (closed when it returns)')
 check('scopelens::SetBeforeProject(&ProjectHook)' in record_src and 'SetBeforeProject' not in view,
       'the projection is shared by render_record.cpp alone')
 check(re.search(r'if\(first\)ProjectStart\(\);', view), 'the samples and poses at the recording\'s first projection only')
@@ -284,67 +283,4 @@ check(img[jr:jr + 5] == arrays['kLoadJobReadSig'] and img[jr - 3:jr] == bytes.fr
 check('if(LoadingNow())return pacing::CountsToBoundary(' in src and 'if(!framerate::LoadingRuns(gate,n))return 0;' in src,
       'while loading the gate counts first and waits to tick boundaries')
 check(re.search(r'constexpr int kGuards=8;', src) and 'guards!=kGuards' in src, 'the gate needs all 8 guards')
-# Pose snapshot markers share the native FIFO with the actual draw consumers.
-pose_src = open(os.path.join(ROOT, 'src', 'render_pose.cpp'), encoding='utf-8').read()
-pose_constants = {name: int(value, 16)
-                  for name, value in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)\b', pose_src)}
-pose_signatures = {name: bytes(int(byte, 16) for byte in re.findall(r'0x([0-9a-fA-F]{2})', data))
-                   for name, data in re.findall(r'\b(k\w+)Sig\[\]=\{([^}]*)\}', pose_src)}
-for site in ('kWrite', 'kPalette', 'kMesh', 'kDrawLod', 'kLodPaletteCall', 'kLodMeshTail',
-             'kShadowTest', 'kEmptyMeshTest', 'kAlloc', 'kCommit'):
-    at, sig = pose_constants[site], pose_signatures[site]
-    check(img[at:at + len(sig)] == sig, f'render pose: {site} entry matches')
-for site, prefix in (('kWrite', '33d24c8bc1'), ('kPalette', 'b878c00000'), ('kMesh', '4c894c2420'),
-                     ('kDrawLod', '48895c2408')):
-    check(pose_signatures[site][:5] == bytes.fromhex(prefix),
-          f'render pose: {site} trampoline copies complete position-independent instructions')
-check(img[0x11009CB:0x11009CF] == bytes.fromhex('4d8b5008'),
-      'render pose: skinning reads the matrix pointer from list+8')
-check(img[0x1103EC6:0x1103ED2] == bytes.fromhex('488b457748c1e10648034808'),
-      'render pose: the rigid mesh uses the same list+8, indexed by a 64-byte matrix')
-check(img[0x1100F2C:0x1100F30] == bytes.fromhex('498b4030'),
-      'render pose: the writer destinations are at instance+0x30')
-check(img[0x51D46:0x51D52] == bytes.fromhex('4863435048c1e00448034328'),
-      'render pose: each producer FIFO unit occupies 16 bytes')
-check(img[0x111B946:0x111B95B] ==
-      bytes.fromhex('488b38e8b265f3fe4885ff742a488bd3488bceffd7'),
-      'render pose: the dispatcher pops one unit, then calls its callback with context and read side')
-check(img[0x1100A18:0x1100A23] == bytes.fromhex('f3440f1048fcf30f1040f8') and
-      img[0x1100B01:0x1100B07] == bytes.fromhex('480510010000'),
-      'render palette: inverse bind starts at record+0x30, with 0x110 byte stride')
-check(rel_target(0x1100B72, 5) == 0x113F860 and
-      img[0x113F86A:0x113F86E] == bytes.fromhex('488b5108') and
-      img[0x113F883:0x113F886] == bytes.fromhex('488b12') and
-      img[0x113D240:0x113D24E] == bytes.fromhex('488b49084c8b1149ffa280010000'),
-      'render palette: native inst+0x50 leads to the buffer, and the context dispatches UpdateSubresource')
-check(rel_target(pose_constants['kLodPaletteCall'], 5) == pose_constants['kPalette'] and
-      rel_target(pose_constants['kLodMeshTail'], 5) == pose_constants['kMesh'],
-      'render palette: the LOD wrapper uploads first then tail-calls the mesh entry')
-check(rel_target(0x1103DCE, 6) == 0x110400D and rel_target(0x1103E1B, 6) == 0x1103FFD,
-      'render palette: a shadow-rejected or empty mesh list branches beyond all draws')
-umbra_path = os.path.join(os.path.dirname(path), 'umbra_sandlot.dll')
-if os.path.isfile(umbra_path):
-    umbra = pefile.PE(umbra_path)
-    umbra_img = umbra.get_memory_mapped_image()
-    umbra_base = umbra.OPTIONAL_HEADER.ImageBase
-    umbra_imports = {i.address-umbra_base:i.name for lib in umbra.DIRECTORY_ENTRY_IMPORT for i in lib.imports}
-    checked_exports = {e.name:e.address for e in umbra.DIRECTORY_ENTRY_EXPORT.symbols}
-    if checked_exports.get(b'?resolveVisibility@Camera@Umbra@@QEBAXXZ') == 0x2CF60:
-        def umbra_rel(at, size):
-            return at + size + struct.unpack_from('<i', umbra_img, at+size-4)[0]
-        check(umbra_rel(0x2CFFA, 5) == 0x81F0 and umbra_rel(0x81F9, 5) == 0x8260 and
-              umbra_rel(0x8206, 5) == 0x8210 and umbra_rel(0x8246, 5) == 0x30D00 and
-              umbra_imports.get(umbra_rel(0x30D07, 7)) == b'ReleaseSemaphore',
-              'Umbra resolve submits work and wakes its own worker')
-entry_sig = re.search(r'kDrawEntrySig\[\]=\{([^}]*)\}', record_src)
-entry = bytes(int(byte, 16) for byte in re.findall(r'0x([0-9a-fA-F]{2})', entry_sig[1]))
-check(img[0x11978D0:0x11978D0+len(entry)] == entry and entry[:5] == bytes.fromhex('48895c2410'),
-      'threaded recorder: native entry trampoline displaces just the full RBX home instruction')
-check(direct_callers(0x11978D0) == [0x93C3F, 0x9D8BA, 0x9DE91, 0xBB48B, 0x1198FA4],
-      'threaded recorder: the common original entry covers all five native callers')
-check('DispatchRecord(&RecordFrame,sys,a,b)' in record_src and
-      'DispatchRecord(&StandaloneRecord,sys,a,b)' in record_src,
-      'threaded recorder: the mission wrapper and stock entry share one work handoff')
-check(img[0x1198FA9:0x1198FB9] == bytes.fromhex('418bd5895424304585e40f847b070000'),
-      'threaded recorder: the simulation branch is reached after the original call returns')
 print(f'frame rate signatures: {checks} checks ok')

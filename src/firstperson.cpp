@@ -78,7 +78,6 @@
 #include "view.h"
 #include "vhud.h"
 #include "render_snapshot.h"
-#include "render_pose.h"
 #include "firstperson.h"
 #include "edf/weapon.h"
 #include "fp_view.h"
@@ -2093,20 +2092,16 @@ struct PoseRestore {
 // Arm/weapon poses through T, restored after the draw. Non-arm body bones stay native: fp_skin_gpu submits only
 // triangles owned by one visible arm, excluding mixed torso/shoulder and opposite-arm faces instead of stretching
 // their skinning weights. `t` is each hand's transform (a weapon uses its own hand's twice).
-bool Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpview::Frustum& frustum,const M4* otherBox,
-          float* buffer,PoseRestore* captured=nullptr,const float* frozen=nullptr) noexcept {
+void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpview::Frustum& frustum,const M4* otherBox,float* backup,PoseRestore* captured=nullptr) noexcept {
     const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
-    if(!pose || !bones || n<=0 || n>kMostBones)return false;
-    const auto bytes=static_cast<std::size_t>(n)*64;
-    std::memcpy(buffer,frozen ? frozen : pose,bytes);
-    const float* original=frozen ? frozen : buffer;
-    if(frozen)pose=buffer;
-    else if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
+    if(!pose || !bones || n<=0 || n>kMostBones)return;
+    std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
+    if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     ArmFit fit[2]{};
-    if(body && Cfg().fpArmIk && !d.riding && !d.nativeArms)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,original,t[hand],hand,camera,frustum,otherBox);
+    if(body && Cfg().fpArmIk && !d.riding && !d.nativeArms)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand,camera,frustum,otherBox);
     for(std::int32_t i=0;i<n;++i) {
         float* p=pose+i*16;
         const wchar_t* name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
@@ -2124,7 +2119,6 @@ bool Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpvie
                                     : std::wcsncmp(name,L"kawan",5)==0 ? fit[hand].fore : fit[hand].hand);
         std::memcpy(p,moved.m,64);
     }
-    return true;
 }
 
 void Unpose(unsigned char* inst,const float* backup,const PoseRestore* captured=nullptr) noexcept {
@@ -2185,15 +2179,14 @@ void AttitudeProbe(const wchar_t* name,const M4& original,const M4& moved,const 
         name,ready,r.flight,r.value[instruments::pitch],r.value[instruments::roll],turned,drop,sx,sy,len(original.m+8));
 }
 
-bool InstrumentPose(unsigned char* inst,float* buffer,PoseRestore* captured=nullptr,const float* frozen=nullptr) noexcept {
+void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=nullptr) noexcept {
     const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
-    if(!pose || !bones || n<=0 || n>kMostBones)return false;
-    std::memcpy(buffer,frozen ? frozen : pose,static_cast<std::size_t>(n)*64);
-    if(frozen)pose=buffer;
-    else if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
+    if(!pose || !bones || n<=0 || n>kMostBones)return;
+    std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
+    if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     for(int i=0;i<n;++i) {
         const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
         // A panoramic seat: the vehicle's own bones (its hull, its shell regions) folded; the kit rides vc_pan_.
@@ -2245,7 +2238,6 @@ bool InstrumentPose(unsigned char* inst,float* buffer,PoseRestore* captured=null
         std::memcpy(pose+i*16,moved.m,64);
         if(mode==L'g' && Cfg().debug)AttitudeProbe(name,original,moved,d,ready);
     }
-    return true;
 }
 
 void LogPass(Part part,int pass) noexcept {
@@ -2309,9 +2301,9 @@ fpview::Frustum DrawFrustum(const void* view,const M4& camera) noexcept {
 // frame, seen from this draw's camera: T = anchor_now^-1 * L * C_draw. So the hold neither follows the update steps the
 // game took after the camera step (the walk's and the jump's twitch) nor a camera the draw does not use. False: no
 // placement (the camera step's T is used).
-bool DrawTransforms(const unsigned char* inst,Part part,int hand,const M4& camera,M4* t,const float* frozen=nullptr) noexcept {
+bool DrawTransforms(const unsigned char* inst,Part part,int hand,const M4& camera,M4* t) noexcept {
     const DrawSnap& d=Snap();
-    const auto pose=frozen ? frozen : At<const float*>(inst,kInstPose);
+    const auto pose=At<const float*>(inst,kInstPose);
     if(!pose)return false;
     if(part==Part::inHand) {
         M4 inv;
@@ -2373,7 +2365,6 @@ __declspec(noinline) void DrawOwnedModel(void* model,void* ctx,int pass,void* vi
     // pose belongs to this invocation until it is returned; a global/thread-global scratch array cannot own it.
     alignas(16) float saved[kMostInsts][kMostBones*16];
     PoseRestore captured[kMostInsts]{};
-    renderpose::Override overrides[kMostInsts]{};
     int n=0;
     __try {
         const DrawSnap& d=Snap();
@@ -2391,32 +2382,18 @@ __declspec(noinline) void DrawOwnedModel(void* model,void* ctx,int pass,void* vi
             }
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
             for(int i=0;i<n;++i) {
-                auto* const inst=insts[i];
-                const auto* const parent=renderpose::OverrideOf(inst);
-                const auto* const frozen=parent ? parent->matrices :
-                    (renderpose::frozenPose ? renderpose::frozenPose(inst) : nullptr);
-                bool prepared=false;
-                if(part==Part::instruments)prepared=InstrumentPose(inst,saved[i],&captured[i],frozen);
-                else {
-                    M4 t[2];
-                    const bool drawn=!d.riding && DrawTransforms(inst,part,hand,camera,t,frozen);
-                    if(!drawn){t[0]=stepT[0];t[1]=stepT[1];}
-                    prepared=Pose(inst,t,part==Part::body,camera,frustum,otherBox,saved[i],&captured[i],frozen);
-                }
-                if(prepared)overrides[i]={inst,frozen ? saved[i] : nullptr};
+                if(part==Part::instruments){InstrumentPose(insts[i],saved[i],&captured[i]);continue;}
+                M4 t[2];
+                const bool drawn=!d.riding && DrawTransforms(insts[i],part,hand,camera,t);
+                if(!drawn){t[0]=stepT[0];t[1]=stepT[1];}
+                Pose(insts[i],t,part==Part::body,camera,frustum,otherBox,saved[i],&captured[i]);
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){RestoreCapturedPoses(insts,saved,captured,n);n=0;}
-    const renderpose::DrawOverrides overrideScope{overrides,n,renderpose::drawOverrides};
-    if(n)renderpose::drawOverrides=&overrideScope;
     if(part==Part::body)fpskin::Begin(fpskin::Mask{}); // the mesh draw selects its actual LOD palette
-    __try {
-        next(model,ctx,pass,view);
-    } __finally {
-        if(part==Part::body)fpskin::End();
-        renderpose::drawOverrides=overrideScope.parent;
-        RestoreCapturedPoses(insts,saved,captured,n);
-    }
+    next(model,ctx,pass,view);
+    if(part==Part::body)fpskin::End();
+    RestoreCapturedPoses(insts,saved,captured,n);
 }
 
 void DrawSelected(void* model,void* ctx,int pass,void* view) {

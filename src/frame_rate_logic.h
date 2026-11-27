@@ -141,57 +141,33 @@ inline double RigidSign(const float m[16],double tolerance=1e-3) noexcept {
     return det>0.0 ? 1.0 : -1.0;
 }
 
-// Work shared by all presentation frames between the same two simulation samples.
-enum class Refusal : int { kNone,kAlpha,kNotRigid,kMirrored,kMove,kTurn,kCount };
-struct RigidPair {
-    Quat a{},b{};
-    double sign=0.0,angle=0.0,sine=0.0;
-};
-
-inline Refusal PrepareRigid(const float previous[16],const float current[16],float maxMove,float maxTurn,
-                             RigidPair& pair) noexcept {
+inline bool InterpolateRigid(const float previous[16],const float current[16],float alpha,float out[16],
+                             float maxMove,float maxTurn) noexcept {
+    if(!(alpha>=0.0f && alpha<=1.0f))return false;
     const double sp=RigidSign(previous),sc=RigidSign(current);
-    if(sp==0.0 || sc==0.0)return Refusal::kNotRigid;
-    if(sp!=sc)return Refusal::kMirrored;
+    if(sp==0.0 || sp!=sc)return false;
     Quat a{},b{};
-    if(!RotationOf(previous,sp,a) || !RotationOf(current,sc,b))return Refusal::kNotRigid;
-    double move2=0.0;
-    for(int k=0;k<3;++k){const double d=static_cast<double>(current[12+k])-previous[12+k];move2+=d*d;}
-    if(move2>static_cast<double>(maxMove)*maxMove)return Refusal::kMove;
+    if(!RotationOf(previous,sp,a) || !RotationOf(current,sc,b))return false;
     double dot=a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w;
     if(dot<0.0){b={-b.x,-b.y,-b.z,-b.w};dot=-dot;}
     if(dot>1.0)dot=1.0;
-    const double angle=std::acos(dot);
-    if(2.0*angle>maxTurn)return Refusal::kTurn;
-    pair={a,b,sc,angle,dot>0.9995 ? 0.0 : std::sin(angle)};
-    return Refusal::kNone;
-}
-
-inline void BlendRigid(const RigidPair& pair,const float previous[16],const float current[16],float alpha,
-                       float out[16]) noexcept {
-    const auto& a=pair.a;
-    const auto& b=pair.b;
+    const double turn=2.0*std::acos(dot);
+    double move2=0.0;
+    for(int k=0;k<3;++k){const double d=static_cast<double>(current[12+k])-previous[12+k];move2+=d*d;}
+    if(turn>maxTurn || move2>static_cast<double>(maxMove)*maxMove)return false;
     const double t=alpha;
     Quat q{};
-    if(pair.sine==0.0) {   // nearly the same: a normalised straight line has no 0/0
+    if(dot>0.9995) {   // nearly the same: a normalised straight line is exact enough and has no 0/0
         q={a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t,a.w+(b.w-a.w)*t};
         const double n=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
         q={q.x/n,q.y/n,q.z/n,q.w/n};
     } else {
-        const double wa=std::sin((1.0-t)*pair.angle)/pair.sine,wb=std::sin(t*pair.angle)/pair.sine;
+        const double th=std::acos(dot),s=std::sin(th),wa=std::sin((1.0-t)*th)/s,wb=std::sin(t*th)/s;
         q={a.x*wa+b.x*wb,a.y*wa+b.y*wb,a.z*wa+b.z*wb,a.w*wa+b.w*wb};
     }
-    RowsOf(q,pair.sign,out);
+    RowsOf(q,sc,out);
     for(int k=0;k<3;++k)out[12+k]=static_cast<float>(previous[12+k]+(static_cast<double>(current[12+k])-previous[12+k])*t);
     out[3]=current[3];out[7]=current[7];out[11]=current[11];out[15]=current[15];
-}
-
-inline bool InterpolateRigid(const float previous[16],const float current[16],float alpha,float out[16],
-                             float maxMove,float maxTurn) noexcept {
-    if(!(alpha>=0.0f && alpha<=1.0f))return false;
-    RigidPair pair;
-    if(PrepareRigid(previous,current,maxMove,maxTurn,pair)!=Refusal::kNone)return false;
-    BlendRigid(pair,previous,current,alpha,out);
     return true;
 }
 
@@ -207,47 +183,43 @@ inline bool UnitRows(const float m[16],float out[16],double& scale) noexcept {
     scale=s;
     return true;
 }
-struct ScaledPair {
-    RigidPair rotation;
-    double previousScale=0.0,currentScale=0.0;
-};
-inline Refusal PrepareScaled(const float previous[16],const float current[16],float maxMove,float maxTurn,
-                              ScaledPair& pair) noexcept {
-    float p[16],c[16];
-    if(!UnitRows(previous,p,pair.previousScale) || !UnitRows(current,c,pair.currentScale))return Refusal::kNotRigid;
-    return PrepareRigid(p,c,maxMove,maxTurn,pair.rotation);
-}
-inline void BlendScaled(const ScaledPair& pair,const float previous[16],const float current[16],float alpha,
-                        float out[16]) noexcept {
-    BlendRigid(pair.rotation,previous,current,alpha,out);
-    const double scale=pair.previousScale+(pair.currentScale-pair.previousScale)*static_cast<double>(alpha);
-    for(int i=0;i<3;++i)for(int j=0;j<3;++j)out[i*4+j]=static_cast<float>(out[i*4+j]*scale);
-}
 inline bool InterpolateScaled(const float previous[16],const float current[16],float alpha,float out[16],
                               float maxMove,float maxTurn) noexcept {
-    if(!(alpha>=0.0f && alpha<=1.0f))return false;
-    ScaledPair pair;
-    if(PrepareScaled(previous,current,maxMove,maxTurn,pair)!=Refusal::kNone)return false;
-    BlendScaled(pair,previous,current,alpha,out);
+    float p[16],c[16];
+    double sp=0.0,sc=0.0;
+    if(!UnitRows(previous,p,sp) || !UnitRows(current,c,sc))return false;
+    if(!InterpolateRigid(p,c,alpha,out,maxMove,maxTurn))return false;
+    const double s=sp+(sc-sp)*static_cast<double>(alpha);
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j)out[i*4+j]=static_cast<float>(out[i*4+j]*s);
     return true;
 }
 
-// Diagnostics and rendering share the same matrix validation and cut decisions.
+// Why InterpolateRigid / InterpolateScaled refused a pair (the FRAMERATE log's summary): alpha out of [0, 1], not a
+// rotation (a squash, a shear, NaN, beyond RigidSign's 1e-3), mirrored one way and not the other, a move or a turn over
+// the cut; kNone when they take it.
+enum class Refusal : int { kNone,kAlpha,kNotRigid,kMirrored,kMove,kTurn,kCount };
 inline Refusal RigidRefusal(const float previous[16],const float current[16],float alpha,float maxMove,
                             float maxTurn) noexcept {
     if(!(alpha>=0.0f && alpha<=1.0f))return Refusal::kAlpha;
-    RigidPair pair;
-    return PrepareRigid(previous,current,maxMove,maxTurn,pair);
+    const double sp=RigidSign(previous),sc=RigidSign(current);
+    if(sp==0.0 || sc==0.0)return Refusal::kNotRigid;
+    if(sp!=sc)return Refusal::kMirrored;
+    Quat a{},b{};
+    if(!RotationOf(previous,sp,a) || !RotationOf(current,sc,b))return Refusal::kNotRigid;
+    double dot=std::fabs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w);
+    if(dot>1.0)dot=1.0;
+    double move2=0.0;
+    for(int k=0;k<3;++k){const double d=static_cast<double>(current[12+k])-previous[12+k];move2+=d*d;}
+    if(move2>static_cast<double>(maxMove)*maxMove)return Refusal::kMove;
+    if(2.0*std::acos(dot)>maxTurn)return Refusal::kTurn;
+    return Refusal::kNone;
 }
 inline Refusal ScaledRefusal(const float previous[16],const float current[16],float alpha,float maxMove,
                              float maxTurn) noexcept {
-    ScaledPair pair;
-    if(!(alpha>=0.0f && alpha<=1.0f)) {
-        float p[16],c[16];
-        return UnitRows(previous,p,pair.previousScale) && UnitRows(current,c,pair.currentScale)
-            ? Refusal::kAlpha : Refusal::kNotRigid;
-    }
-    return PrepareScaled(previous,current,maxMove,maxTurn,pair);
+    float p[16],c[16];
+    double sp=0.0,sc=0.0;
+    if(!UnitRows(previous,p,sp) || !UnitRows(current,c,sc))return Refusal::kNotRigid;
+    return RigidRefusal(p,c,alpha,maxMove,maxTurn);
 }
 
 // A pose's bones (`count` world matrices of 16 floats, row vectors) each times `d` on the right: bone * d.

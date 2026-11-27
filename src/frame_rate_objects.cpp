@@ -58,7 +58,6 @@
 // frame without ticks that does not fit leaves the rest as stepped and asks for more at the next tick. Online: only what
 // is drawn changes, on frames that send nothing.
 #include "frame_rate_objects.h"
-#include "render_pose.h"
 #include "fp_view.h"
 #include "thermal_models.h"
 #include "scene_object.h"
@@ -121,10 +120,7 @@ struct Body {
     bool fresh=false,moving=false,still=false;
     Left why=Left::kSamples;
     float prev[16]{},cur[16]{};
-    bool prepared=false;
-    Refusal refusal=Refusal::kNone;
-    framerate::ScaledPair pair;
-    fpview::M4 inverse,d;
+    fpview::M4 d;
 };
 std::vector<Body> bodies;
 edf::PtrIndex bodyIndex;    // object -> bodies index
@@ -321,7 +317,6 @@ bool PoseModel(const Who& who,const Part& part,const float* d) noexcept {
         std::uint64_t n=0;
         float* const pose=PoseOf(insts[i],&n);
         if(!pose || posedIndex.Find(pose)>=0)continue;
-        if(renderpose::stagePose && renderpose::stagePose(insts[i],d))continue;
         const std::size_t floats=static_cast<std::size_t>(n)*16;
         if(posed.size()>=posed.capacity() || posedBefore.size()+floats>posedBefore.capacity() ||
            posedAfter.size()+floats>posedAfter.capacity() || (posedIndex.Size()+1)*2>posedIndex.Capacity()) {
@@ -426,7 +421,6 @@ Sampled SampleOne(const unsigned char* obj,std::uint32_t tick,std::uint32_t gap)
     b.vtable=vt;b.inst=inst;b.tick=tick;
     std::memcpy(b.prev,b.cur,sizeof(b.prev));
     std::memcpy(b.cur,pose,sizeof(b.cur));
-    b.prepared=false;
     if(b.samples<2)++b.samples;
     return Sampled::kYes;
 }
@@ -499,25 +493,23 @@ void OwnState(Body& b,float alpha) noexcept {
         return;
     }
     b.why=Left::kRefused;
-    // A pair gap ticks apart: alpha is within the last tick of the gap.
+    float shown[16];
+    fpview::M4 cur,inverse,to;
+    std::memcpy(cur.m,b.cur,64);
+    // A pair `gap` ticks apart: the frame is alpha into the tick after the one before cur, (gap - 1 + alpha) / gap of the
+    // way from prev; one tick moves gap times less than the pair.
     const float gap=static_cast<float>(b.gap);
     const float along=(gap-1.0f+alpha)/gap;
-    if(!b.prepared) {
-        b.refusal=framerate::PrepareScaled(b.prev,b.cur,kCutMove*gap,kCutTurn*gap,b.pair);
-        if(b.refusal==Refusal::kNone) {
-            fpview::M4 cur;
-            std::memcpy(cur.m,b.cur,sizeof(b.cur));
-            if(!fpview::InverseAffine(cur,&b.inverse))b.refusal=Refusal::kNotRigid;
-        }
-        b.prepared=true;
-    }
-    if(b.refusal!=Refusal::kNone) {
-        ++counts.refused[static_cast<int>(b.refusal)];
+    if(!framerate::InterpolateScaled(b.prev,b.cur,along,shown,kCutMove*gap,kCutTurn*gap)) {
+        ++counts.refused[static_cast<int>(framerate::ScaledRefusal(b.prev,b.cur,along,kCutMove*gap,kCutTurn*gap))];
         return;
     }
-    fpview::M4 to;
-    framerate::BlendScaled(b.pair,b.prev,b.cur,along,to.m);
-    b.d=fpview::Mul(b.inverse,to);
+    if(!fpview::InverseAffine(cur,&inverse)) {
+        ++counts.refused[static_cast<int>(Refusal::kNotRigid)];
+        return;
+    }
+    std::memcpy(to.m,shown,64);
+    b.d=fpview::Mul(inverse,to);
     b.moving=true;
 }
 

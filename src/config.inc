@@ -82,8 +82,6 @@
     bool havokMultithread=true;     // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
     int frameRateCap=170;           // ini FrameRateCap (frame_rate_logic.h FixCap): 170 shipped (the maintainer, 2026-11-27), 0 the game's 59.94 Hz, 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool frameRateFlip=false;       // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
-    bool renderRecordThread=false;  // developer option, latched at plugin load
-    bool renderPoseSnapshots=false; // developer option, latched at plugin load
     int maxFrameLatency=0;          // ini MaxFrameLatency: IDXGIDevice1::SetMaximumFrameLatency after the device init (frame_pacing.cpp); 0 leaves DXGI's 3; read at start only
     bool splitMissileSurface=true;  // split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
     bool supportUnitOnAllies=true;  // support units (life vendors, power posts...) stick to allies, not through them (supportunit.cpp)
@@ -669,8 +667,6 @@
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
     n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
-    n.renderRecordThread=ReadBool(L"RenderRecordThread",n.renderRecordThread);
-    n.renderPoseSnapshots=ReadBool(L"RenderPoseSnapshots",n.renderPoseSnapshots);
     n.maxFrameLatency=ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency));
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);

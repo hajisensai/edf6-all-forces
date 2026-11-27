@@ -7,23 +7,20 @@
 
 namespace crew {
 namespace renderrecord {
-// On the recording owner, before the original routine. Each callback protects its native reads.
+// Game thread, right before the render recording of every frame (frames with ticks too); runs under nothing: each
+// callback keeps its own __try.
 using Before=void(*)() noexcept;
 // The order they run in (see render_record.cpp): the unlimited frame rate first (frame_rate_view.cpp: at the first
 // projection the samples and, on frames without ticks, the poses; each projection's camera blend), then the first person
 // (firstperson.cpp: its session before the recording, its Umbra boxes around the eye this frame draws at the first
 // projection).
-enum class Slot { kFrameRate,kViewDistance,kFirstPerson,kPoseSnapshot,kCount };
+enum class Slot { kFrameRate,kViewDistance,kFirstPerson,kCount };
 // At load, by each feature that registers: the call site checked and redirected once (later calls: whether it is in).
 // False (logged here once): the site is not as read or could not be redirected; nothing registers.
 bool Install() noexcept;
-// Route the entire stock entry and its existing mission callbacks to the recording thread.
-bool InstallThread() noexcept;
 // `before` runs in `slot`'s turn from now on (nullptr: no longer). Call after Install returned true.
 void Set(Slot slot,Before before) noexcept;
-// On the recording owner, after the native routine, to close its queued work.
-void SetAfter(Slot slot,Before after) noexcept;
-// On the projection caller, at every projection 0x1197B50 (scope_lens.cpp's hook, shared with the lens view: this frame's viewports
+// Game thread, at every projection 0x1197B50 (scope_lens.cpp's hook, shared with the lens view: this frame's viewports
 // and the projections of EDF.dll's four other callers of 0x11978D0), in Slot order, before the native projection.
 // `first`: the first projection inside the recording this module hooked, once a recording: after the recording's loop
 // 0x1197950 made the skeletons' poses and re-placed the models' Umbra boxes (model+0x110), before any draw. A recording

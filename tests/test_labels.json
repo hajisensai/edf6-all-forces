@@ -6696,9 +6696,18 @@
   },
   "render_pose": {
    "labels": [
+    "edf41",
+    "native-codec",
+    "plugin-air",
     "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
     "plugin-native",
-    "plugin-support"
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
    ],
    "scripts": []
   },
