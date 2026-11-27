@@ -579,7 +579,8 @@ struct Jet {
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     // The map's Broken Arrow orders (JetCommand): DECOY a pair of its flares dropped next frame (NpcFlares), ALTITUDE high
     // (kind.alt times mapcmd::kJetHighShare), SPRINT its afterburner until burnUntil (game ms; mapcmd::kAfterburnerSpeed).
-    bool flareNow=false,high=false;
+    // `heightOrdered` once an ALTITUDE order came: arriving (Entering) it flies that, not the height it came at.
+    bool flareNow=false,high=false,heightOrdered=false;
     ULONGLONG burnUntil=0;
     PrimerState primer;
     bool cmdMoving=false;       // reach a new map order before taking another target

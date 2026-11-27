@@ -312,7 +312,8 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
         break;
     }
     // Approach: at the target at height; dive once in the window with the lead in sight, else fly out and come round.
-    // Arriving (Entering) it comes straight on at the height it came at and its attack speed, never flying out first.
+    // Arriving (Entering) it comes straight on at the height it came at (or the one ALTITUDE gave it since: heightOrdered)
+    // and its attack speed, never flying out first.
     // Its arrival ends where it cannot come straight on: the target inside its turn (it would circle it), or too low to
     // dive (the height it came at kept, it never would): the approach's climb and fly-out as ever.
     bool entering=Entering(j,ms);
@@ -323,7 +324,7 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
     if(!entering && off>kDiveCone && InsideTurn(j,pos,lead)) {
         if(PlanExtend(j,pos,lead,vdir)){SetMode(j,Mode::extend,ms);FlyExtend(j,pos,height,want);return false;}
     }
-    Level(pos,to,entering ? pos[1] : height,want);
+    Level(pos,to,entering && !j.heightOrdered ? pos[1] : height,want);
     *speed=entering ? k.attack : k.cruise;
     return false;
 }

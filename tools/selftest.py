@@ -7754,6 +7754,13 @@ def soft_edge_wired() -> None:
     # A call's jet made off the map arrives in a box drawn in after it, not turned back at the edge (--entry-suite).
     assert 'j.m.arriving=!airbound::Inside(own,pos);' in soft_edge and 'airbound::Arrive(own,j.m.arrive,pos)' in soft_edge
     assert 'add_test(NAME jet_entry_suite COMMAND jet_obstacle_sim --entry-suite' in cm
+    # ALTITUDE reaches a jet on its way in (the user, 2026-11-27: 「入场的时候高度和速度应该都可以随意调整」): an arriving
+    # strike flies the ordered height, a sortie's run in takes mapcmd::JetOver (the missile rain's kRainAlt not yet).
+    assert 'Level(pos,to,entering && !j.heightOrdered ? pos[1] : height,want);' in combat and 'j->heightOrdered=true;' in jet
+    sortie = src('src/jet_sortie.cpp')
+    for alt in ('kMissilePassAlt', 'kCarpetAlt', 'kPopAlt'):
+        assert f'mark+sortie::{alt}' not in sortie and f'mark+mapcmd::JetOver(sortie::{alt},j.high)' in sortie, alt
+    assert 'mark+mapcmd::JetOver(sortie::StrafeHeight(run,preferred),j.high)' in sortie
     assert '#include "../src/airbound.h"' in src('tools/airbound_check.cpp')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):

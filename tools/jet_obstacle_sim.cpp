@@ -1210,11 +1210,13 @@ int EdgeSuite() {
 // box within a straight run's time (and a margin), its heading turned by no more than kEntryTurn on the way, never "back".
 // One more chases a target straight back out from its entry: it is held where it came in (arriving, its arrival box:
 // airbound::Arrive), never further out than kEntryOut past where it was made, and never past the play edge by more than
-// its entry was.
+// its entry was. And one ordered high (ALTITUDE) as it is made climbs to its height on its way in, not held level.
 namespace {
 constexpr float kEntryTurn=0.5f;    // rad (29 deg) its heading may turn in all on its way in (the log's: circles)
 constexpr float kEntryOut=150.0f;   // m past where it was made a jet chasing back out may go
-struct EntryCase { Role role; float x,z,markX,markZ; bool out; };   // role: replaced by each kind in turn
+// role: replaced by each kind in turn; `high`: ALTITUDE high given as it is made, from 300 m (mapcmd_logic.h JetOver)
+struct EntryCase { Role role; float x,z,markX,markZ; bool out; bool high=false; };
+constexpr float kEntryLow=300.0f,kEntryHeightTol=60.0f;   // m: the ordered one's start, and how near its height it must be
 int EntrySuite() {
     static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
     image=fakeImage.data();
@@ -1231,6 +1233,7 @@ int EntrySuite() {
         {Role::fighter,-5450.0f,1639.0f,1006.0f,-118.0f,false},
         {Role::strike,-5450.0f,3000.0f,2000.0f,2200.0f,false},
         {Role::strike,-5450.0f,1639.0f,-9000.0f,1639.0f,true},
+        {Role::fighter,-5450.0f,1639.0f,1006.0f,-118.0f,false,true},
     };
     int cases=0,fails=0;
     for(const EntryCase& shape:shapes)for(const Role role:{Role::fighter,Role::interceptor,Role::strike}) {
@@ -1244,7 +1247,8 @@ int EntrySuite() {
         nowMs=1000;j.bornAt=j.modeAt=j.seen=nowMs;
         float band=0.0f;
         const airbound::Box soft=JetSoftBox(j,&band),hard=PlayBox();
-        const float start[3]={c.x,600.0f,c.z},mark[3]={c.markX,600.0f,c.markZ};
+        const float start[3]={c.x,c.high ? kEntryLow : 600.0f,c.z},mark[3]={c.markX,600.0f,c.markZ};
+        const float fly=c.high ? mapcmd::JetOver(kEntryLow,true) : start[1];   // the height it is to fly in at
         float heading[3]={mark[0]-start[0],0.0f,mark[2]-start[2]};
         Normalize(heading);
         if(c.out){heading[0]=1.0f;heading[2]=0.0f;}   // made heading in, its target behind it
@@ -1264,7 +1268,7 @@ int EntrySuite() {
             const float g=-airbound::Gap(soft,start,i),in=-(heading[0]*airbound::kNormal[i][0]+heading[2]*airbound::kNormal[i][1]);
             if(g>0.0f && in>1e-3f)run=std::fmax(run,g/in);
         }
-        const float allowed=c.out ? 40.0f : run/(s0*0.8f)+5.0f;
+        const float allowed=c.out ? 40.0f : run/(s0*0.8f)+5.0f+(c.high ? 10.0f : 0.0f);
         bool back=false,inside=false;
         float turned=0.0f,inAt=-1.0f,mostOut=-1e9f,mostHard=-1e9f;
         float was=std::atan2(heading[2],heading[0]);
@@ -1282,7 +1286,7 @@ int EntrySuite() {
             const float clear=GroundClearance(pos);
             float want[3];
             Toward(pos,mark,want);
-            Level(pos,want,start[1],want);
+            Level(pos,want,fly,want);
             Wing(j,kind,v,pos,clear,nose,want,kind.attack,kDt,nowMs);
             HoldOffGround(j,pos,clear,kDt,nowMs);
             j.m.ready=true;
@@ -1298,14 +1302,16 @@ int EntrySuite() {
             mostOut=std::fmax(mostOut,start[0]-pos[0]);
             mostHard=std::fmax(mostHard,-airbound::Depth(hard,pos));
         }
+        const float endY=reinterpret_cast<const float*>(v+kPosition)[1];
         bool ok;
         if(c.out)ok=mostOut<=kEntryOut && mostHard<=-airbound::Depth(hard,start)+kEntryOut;
-        else ok=inside && turned<=kEntryTurn && !back;
+        else ok=inside && turned<=kEntryTurn && !back && (!c.high || std::fabs(endY-fly)<=kEntryHeightTol);
         fails+=!ok;++cases;
         std::printf("entry %-11s from (%5.0f,%5.0f) %s (%5.0f,%5.0f): band %4.0f, %5.0f m past its soft box | %s %5.1f s"
-                    " (allowed %4.1f), turned %5.1f deg, %s, most out %6.0f m, past the walls %6.0f m | %s\n",kind.name,c.x,c.z,
-                    c.out ? "chasing out from" : "at the mark",c.markX,c.markZ,band,toBox,inside ? "inside after" : "never inside",
-                    inAt,allowed,turned*180.0f/kPi,back ? "BACK" : "never back",mostOut,mostHard,ok ? "ok" : "FAIL");
+                    " (allowed %4.1f), turned %5.1f deg, %s, most out %6.0f m, past the walls %6.0f m, at %4.0f m (to fly %4.0f%s)"
+                    " | %s\n",kind.name,c.x,c.z,c.out ? "chasing out from" : "at the mark",c.markX,c.markZ,band,toBox,
+                    inside ? "inside after" : "never inside",inAt,allowed,turned*180.0f/kPi,back ? "BACK" : "never back",mostOut,
+                    mostHard,endY,fly,c.high ? ", ALTITUDE high" : "",ok ? "ok" : "FAIL");
     }
     std::printf("entry suite: %d cases, %d failed\n",cases,fails);
     if(logFile)std::fclose(logFile);
