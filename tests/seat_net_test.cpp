@@ -15,7 +15,7 @@ void Check(bool ok,const char* what) {
 }
 int main() {
     using namespace crew;
-    using seat_net::Head;using seat_net::Pick;
+    using object_net::Head;using seat_net::Pick;
     // Every kind's block starts with the common head at the same offsets (drill, Proteus, Sazabi: their old layouts).
     Check(offsetof(drill_net::State,sender)==offsetof(Head,sender) && offsetof(drill_net::State,controller)==offsetof(Head,controller) &&
           offsetof(proteus_net::State,sequence)==offsetof(Head,sequence) && offsetof(sazabi_net::State,controller)==offsetof(Head,controller),
@@ -24,13 +24,13 @@ int main() {
           "the old kinds' wire sizes are unchanged (older peers decode them)");
     const std::uint32_t magics[]={drill_net::kMagic,proteus_net::kMagic,sazabi_net::kMagic,seat_net::kPickMagic};
     for(int i=0;i<4;++i)for(int j=i+1;j<4;++j)Check(magics[i]!=magics[j],"every kind its own magic");
-    Check(drill_net::kTag==seat_net::kTag && proteus_net::kTag==seat_net::kTag && sazabi_net::kTag==seat_net::kTag && seat_net::kTag==15,
+    Check(drill_net::kTag==object_net::kTag && proteus_net::kTag==object_net::kTag && sazabi_net::kTag==object_net::kTag && object_net::kTag==15,
           "one tag (coop keeps 13 and 14)");
     drill_net::State drill;drill.sender=3;drill.sequence=7;drill.controller=42;
-    Check(seat_net::MagicOf(&drill,sizeof(drill))==drill_net::kMagic && seat_net::MagicOf(&drill,3)==0,"the magic picks the kind");
+    Check(object_net::MagicOf(&drill,sizeof(drill))==drill_net::kMagic && object_net::MagicOf(&drill,3)==0,"the magic picks the kind");
     Head h{};
-    Check(seat_net::ReadHead(&drill,sizeof(drill),&h) && h.sender==3 && h.sequence==7 && h.controller==42,"the head of a drill block");
-    Check(!seat_net::ReadHead(&drill,sizeof(Head)-1,&h),"a block shorter than a head has none");
+    Check(object_net::ReadHead(&drill,sizeof(drill),&h) && h.sender==3 && h.sequence==7 && h.controller==42,"the head of a drill block");
+    Check(!object_net::ReadHead(&drill,sizeof(Head)-1,&h),"a block shorter than a head has none");
 
     // The seat pick.
     Pick p;p.head.sender=17;p.head.sequence=1;p.head.controller=42;p.seat=1;p.holder=3;p.flags=seat_net::kNpc;
@@ -51,7 +51,7 @@ int main() {
     Pick none=p;none.holder=-1;Check(seat_net::Valid(none),"none picked is a pick");
 
     // The gate: duplicates, reorder, epochs, wrap, the authority's own messages, a full room.
-    seat_net::BasicGate<4> g;
+    object_net::BasicGate<4> g;
     Check(!g.Admit(p.head,false,false,42),"offline: nothing admitted");
     Check(!g.Admit(p.head,true,true,42),"the machine running the seat ignores picks for it");
     Check(!g.Admit(p.head,true,false,7),"another epoch (a rider who left) is refused");
@@ -65,7 +65,7 @@ int main() {
     Head fifth=p.head;fifth.sender=500;Check(!g.Admit(fifth,true,false,42),"a full gate evicts no watermark");
     later.sequence=4;Check(g.Admit(later,true,false,42),"a known sender still passes when full");
     std::uint32_t counter=0xFFFFFFFEu;
-    Check(seat_net::NextSequence(counter)==0xFFFFFFFFu && seat_net::NextSequence(counter)==1,"the sender's sequence skips 0");
+    Check(object_net::NextSequence(counter)==0xFFFFFFFFu && object_net::NextSequence(counter)==1,"the sender's sequence skips 0");
     // The old kinds' gates still order by their own head.
     drill_net::Gate dg;drill.phase=drill_net::Phase::home;
     Check(dg.Admit(drill,true,false,42) && !dg.Admit(drill,true,false,42),"the drill's gate over the common one");
@@ -73,7 +73,7 @@ int main() {
     // The streams' gates apart from their records (2026-10-20 review): kept until the object goes or the room's
     // members change; a full table takes a gone object's slot, never a live one's.
     {
-        seat_net::StreamGates<2,4> gates;
+        object_net::StreamGates<2,4> gates;
         int objs[3]{};bool alive[3]={true,true,true};
         const auto live=[&](const void* o,const void*) noexcept {for(int i=0;i<3;++i)if(o==&objs[i])return alive[i];return false;};
         auto* g0=gates.For({&objs[0],nullptr,1},live);
@@ -97,7 +97,7 @@ int main() {
     Check(seat_net::PickDue(false,1000,0) && seat_net::PickDue(true,1001,1000) && !seat_net::PickDue(false,1001,1000) &&
           seat_net::PickDue(false,1000+seat_net::kPickRefreshMs,1000),"at once on a change, else every refresh");
     Check(seat_net::kPickStaleMs>2*seat_net::kPickRefreshMs,"a receiver keeps a pick across a lost refresh or two");
-    Check(!seat_net::Replicated(false,2) && !seat_net::Replicated(true,0) && seat_net::Replicated(true,1),
+    Check(!object_net::Replicated(false,2) && !object_net::Replicated(true,0) && object_net::Replicated(true,1),
           "only a registered copy in a session sends");
     std::printf("seat_net_test: %d checks passed\n",checks);
 }

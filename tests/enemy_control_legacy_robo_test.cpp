@@ -126,7 +126,7 @@ float Random01(std::uint64_t& state) noexcept {state=state*0x5D588B656C078965ull
 }
 namespace crew::edf41net {
 bool Guest(const void*) noexcept {return fixture::guest;}
-void Attach(void*) noexcept {}
+bool Install() noexcept {return true;}
 int Drain(const void*,Visit,void*) noexcept {return 0;}
 bool Mirror() noexcept {return false;}
 void Loopback(void*,void*) noexcept {}

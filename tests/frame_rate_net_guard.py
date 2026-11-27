@@ -11,7 +11,7 @@ So:
   - the plugin's own channels (plugin_net) are pumped once per logic frame: RunSupportNetTick returns at once unless
     GameFrame() moved, GameFrame only moves when SeeFrame sees +0xCE0 move, and SeeFrame is called from per-tick hooks
     only; plugin_net::Update / Receive and the extension poll live in that pump alone;
-  - every file that sends (plugin_net::Send / Broadcast / SendHost, seat_net::Send, edf41net::Send) or pumps
+  - every file that sends (plugin_net::Send / Broadcast / SendHost, object_net::Send, edf41net::Send) or pumps
     (SupportNetTick) is a known one, reviewed as tick driven; the per-presented-frame hooks (render, HUD, Present, UI,
     window procedure, fps-9) send nothing and pump nothing;
   - periodic sends are paced by time (roster kRosterGapMs) or by logic frames (enemy control kSampleFrames), never by
@@ -155,7 +155,7 @@ PER_FRAME_FILES = ['dmgnum.cpp', 'firstperson.cpp', 'frame_pacing.cpp', 'frame_r
                    'infantryscope.cpp', 'map.cpp', 'perf_probe.cpp', 'room_preview.cpp', 'room_ui.cpp', 'scope_lens.cpp',
                    'sightzoom.cpp', 'swap_flip.cpp', 'thermal.cpp', 'thermal_gpu.cpp', 'thermal_models.cpp',
                    'worldmap.cpp', 'worldmap_gpu.cpp', 'worldmap_text.cpp', 'worldmap_tiles.cpp']
-NET = re.compile(r'plugin_net::|#include "plugin_net\.h"|\bSupportNetTick\(|seat_net::Send\(|edf41net::Send\(|'
+NET = re.compile(r'plugin_net::|#include "plugin_net\.h"|\bSupportNetTick\(|object_net::Send\(|edf41net::Send\(|'
                  r'\bSubmit(SupportRequest|MapCommand|PreparedSupportPlan)\(|\bMapCommandNetworkReady\(|'
                  r'\bSupport(StrikeAt|CallAt|CallUnpaidAt|CallComposedAt)\(|\bUltimateStart\(|\bBarrageStart\(|'
                  r'\bSupportPoints(KeepHeld|Refund)\(')
@@ -174,7 +174,8 @@ pumpers = {n for n, t in src.items() if re.search(r'(?<![\w:])SupportNetTick\(\)
 check(pumpers == PUMPERS, f'SupportNetTick callers are the reviewed ones: {sorted(pumpers)}')
 NATIVE_SENDERS = {'andryusha.cpp', 'dreadnought_turrets.inc', 'drill_net.cpp', 'edf41mother.cpp', 'edf41mother401.cpp', 'edf41robo.cpp', 'payload.cpp',
                   'proteus_net.cpp', 'sazabi_net.cpp', 'seat_turret.cpp'}   # vehicle input / object update hooks
-native = {n for n, t in src.items() if re.search(r'(seat_net|edf41net)::Send\(', t)}
+# edf41net.cpp is the EDF4.1 kind itself (its Send over object_net::Send): its senders are the classes listed above
+native = {n for n, t in src.items() if n != 'edf41net.cpp' and re.search(r'(object_net|edf41net)::Send\(', t)}
 check(native <= NATIVE_SENDERS, f'native object senders are the reviewed ones: new {sorted(native - NATIVE_SENDERS)}')
 
 # --- 4. Periodic traffic is paced by time or by logic frames, not by calls ---

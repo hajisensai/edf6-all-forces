@@ -2,6 +2,7 @@
 //   cmake --build build --target andryusha_check && build\andryusha_check.exe
 #include "../src/andryusha.h"
 #include "../src/andryusha_net.h"
+#include "../src/seat_net.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -118,7 +119,7 @@ int main() {
         Check(an::Due(2,1,100,90) && an::Due(1,0,100,0),"fuse: a switch or a new speaker sends at once");
         Check(!an::Due(1,1,500,100) && an::Due(1,1,100+an::kRefreshMs,100),"fuse: else the refresh");
         // The receiver's gate (seat_net.h): its speaker's blocks in the seat's epoch, newer ones only, never its own.
-        crew::seat_net::Gate gate{};
+        crew::object_net::Gate gate{};
         Check(gate.Admit(s.head,true,false,-1) && !gate.Admit(s.head,true,false,-1),"fuse: a block once");
         an::State next=s;next.head.sequence=2;
         Check(!gate.Admit(next.head,true,true,-1),"fuse: the speaker never applies a block");

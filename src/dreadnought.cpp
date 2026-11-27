@@ -30,7 +30,7 @@
 #include "dreadnought_net.h"
 #include "drill_net.h"
 #include "firstperson.h"
-#include "seat_net_transport.h"
+#include "object_net_transport.h"
 #include "seat_switch_logic.h"
 #include "heli.h"
 #include "layout.h"
@@ -111,7 +111,7 @@ struct Ship {
 constexpr int kMaxShips=4;
 Ship ships[kMaxShips]{};
 bool installed=false;
-bool netReady=false;   // the turrets' blocks (dreadnought_net.h) go over seat_net
+bool netReady=false;   // the turrets' blocks (dreadnought_net.h) go over object_net
 
 bool Live(const Ship& s) noexcept {
     const auto ctrl=static_cast<const unsigned char*>(s.ref.ctrl);
@@ -509,8 +509,8 @@ void ReceivedTurrets(unsigned char* v,const void* block,std::size_t size) noexce
 
 bool InstallDreadnought() noexcept {
     installed=Body506Ok();
-    netReady=installed && seat_net::Install() && seat_net::Register(dreadnought_net::kMagic,&ReceivedTurrets) &&
-             seat_net::ChainSlot(0x17DB4C8,"Dreadnought (506)");   // the 506's NetworkObject slot 17 (sazabi_net.cpp's)
+    netReady=installed && object_net::Install() && object_net::Register(dreadnought_net::kMagic,&ReceivedTurrets) &&
+             object_net::ChainClass(object_net::Class::v506);   // the 506 NetworkObject, shared with the Sazabi (object_net.h kClasses)
     Log("HOOK dreadnought body=%d network=%d (mark %.0f)",installed,netReady,kDreadnoughtMark);
     return installed;
 }

@@ -2137,7 +2137,7 @@ void CreateRobo(void* info) noexcept {
     if(!obj)return;
     // EventAnimationObject's constructor sets +0x380 bit 0 (0x5B6406: hits take no HP); 4.1's robot loses its durability.
     SetFlag(obj,kNoHpLoss,false);
-    edf41net::Attach(obj);   // online: its NetworkObject takes the host's events (edf41net)
+    edf41net::Install();   // online: its class's NetworkObject takes the host's events (edf41net, object_net)
     {
         std::lock_guard<std::mutex> hold(lock);
         Robo& r=robos[obj];

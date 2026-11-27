@@ -3087,15 +3087,15 @@ def andryusha_fuse_online() -> None:
     kind on the vehicles' tag 15 transport, every vehicle's frame runs AndryushaFrame after the switch, and the room
     protocol moved past 9 (an older build keeps its copy's impact fuse)."""
     cpp = src('src/andryusha.cpp')
-    assert 'seat_net::Register(andryusha_net::kMagic,&FuseReceived)' in cpp
-    assert 'gate->Admit(s.head,true,SpeaksHere(v),seat_net::SeatController(v,0))' in cpp, 'the speaker never applies its own'
+    assert 'object_net::Register(andryusha_net::kMagic,&FuseReceived)' in cpp
+    assert 'gate->Admit(s.head,true,SpeaksHere(v),object_net::SeatController(v,0))' in cpp, 'the speaker never applies its own'
     crew = src('src/crew.cpp')
     assert crew.index('&LauncherFrame,v);') < crew.index('&AndryushaFrame,v);'), 'the switch before its send'
     assert int(re.search(r'kAllForcesRoomProtocol=(\d+)', src('src/mod_room.h')).group(1)) >= 10
-    handlers = sum(src('src/' + f).count('seat_net::Register(') for f in os.listdir(os.path.join(ROOT, 'src'))
-                   if f.endswith('.cpp') and f != 'seat_net.cpp')
-    limit = int(re.search(r'kMostHandlers=(\d+)', src('src/seat_net_transport.h')).group(1))
-    assert handlers <= limit, f'tag 15 kinds {handlers} > seat_transport::kMostHandlers {limit}'
+    handlers = sum(src('src/' + f).count('object_net::Register(') for f in os.listdir(os.path.join(ROOT, 'src'))
+                   if f.endswith('.cpp') and f != 'object_net.cpp')
+    limit = int(re.search(r'kMostKinds=(\d+)', src('src/object_net.h')).group(1))
+    assert handlers <= limit, f'tag 15 kinds {handlers} > object_net::kMostKinds {limit}'
 
 
 @test
@@ -10929,9 +10929,10 @@ def edf41_robo_plugin_contract() -> None:
 @test
 def edf41_net_contract() -> None:
     """The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): the layer is built and switched by Edf41Net
-    (shipped 1; the development loopback Edf41NetMirror shipped 0); every EDF.dll function it calls is fingerprinted; its tag
-    is none the game, coop (13 / 14) or the plugin's vehicles (15) use; it asks online_authority, never the session functions
-    itself; each class attaches its objects, gives its parts and spawns the game's child identity, and its guest copies leave
+    (shipped 1; the development loopback Edf41NetMirror shipped 0); every EDF.dll function it and the object message layer
+    under it (object_net.cpp) call is fingerprinted; it is one kind (its own magic) of the object messages' tag 15, on the
+    EventAnimationObject / UfoCarrier508 rows of object_net's class table; it asks online_authority, never the session
+    functions itself; each class installs it, gives its parts and spawns the game's child identity, and its guest copies leave
     the decisions to the host (UfoRobo: no AI, no gun timer; 401: no attack start; 301: no cannon charge). The 401 runs on
     every machine (its ObjectAction reached EventAnimationObject's OnMessage on a guest, which throws without `action`)."""
     net, head = src('src/edf41net.cpp'), src('src/edf41net.h')
@@ -10940,27 +10941,38 @@ def edf41_net_contract() -> None:
     assert 'bool edf41Net=true;' in crew and 'bool edf41NetMirror=false;' in crew
     assert 'ReadBool(L"Edf41Net"' in plugin and 'ReadBool(L"Edf41NetMirror"' in plugin
     assert re.search(r'^Edf41Net=1$', ini, re.M) and re.search(r'^Edf41NetMirror=0$', ini, re.M)
-    assert 'bool Enabled() noexcept { return Cfg().edf41Net && Install(); }' in net
+    assert 'bool Enabled() noexcept { return Cfg().edf41Net && InstallOnce(); }' in net
+    assert 'bool Install() noexcept { return Enabled(); }' in net
     assert 'bool Mirror() noexcept { return Cfg().edf41NetMirror && Enabled() && !Online(); }' in net, 'the loopback is offline only'
-    tag = int(re.search(r'constexpr std::int8_t kTag=(\d+);', head).group(1))
-    assert tag not in (0, 1, 2, 3, 4, 5, 13, 14, 15) and -14 <= tag <= 15
-    for other in ('drill_net.h', 'proteus_net.h', 'sazabi_net.h'):
-        assert f'kTag={tag};' not in src('src/' + other), other
+    # one kind of the object messages: their tag (none the game, the vehicles or coop use), a magic of its own
+    onet, transport = src('src/object_net.h'), src('src/object_net.cpp')
+    assert 'constexpr std::int8_t kTag=object_net::kTag;' in head
+    tag = int(re.search(r'constexpr std::int8_t kTag=(-?\d+);', onet).group(1))
+    assert tag not in (0, 1, 2, 3, 4, 5, 13, 14) and -14 <= tag <= 15
+    magic = re.search(r'constexpr std::uint32_t kMagic=(0x[0-9A-Fa-f]+)u?;', head).group(1)
+    for other in ('drill_net.h', 'proteus_net.h', 'sazabi_net.h', 'andryusha_net.h', 'dreadnought_net.h', 'seat_turret_net.h', 'seat_net.h'):
+        assert not re.search(rf'=\s*{magic}u?\b', src('src/' + other), re.I), other
+    assert 'object_net::Register(kMagic,&Received)' in net
+    # the classes it lives on are rows of object_net's class table, chained by name (their stock receiver GameObjectBase's)
+    for cls, vt in (('eventAnimationObject', '0x17D4E90'), ('ufoCarrier508', '0x17C9F50')):
+        assert f'object_net::ChainClass(object_net::Class::{cls})' in net, cls
+        assert re.search(rf'\{{Class::{cls},{vt},kObjectReceive,', onet), cls
+    # every function called is fingerprinted: the child identity's here, the stream / send / receive in object_net.cpp; the
+    # stock receiver 0x54D770 is only called on (EDF6Coop hooks its entry, which turned the layer off on the real game when it
+    # was fingerprinted)
     rvas = {d.split('=')[0].strip() for line in re.findall(r'^constexpr unsigned (.*);$', net, re.M) for d in line.split(',')}
-    # vtables (read, not called: their slots are checked by the native test) and the stock receiver (only called on; EDF6Coop
-    # hooks its entry, which turned the layer off on the real game when it was fingerprinted)
-    rvas -= {'kEaoNet', 'kCarrierNet', 'kStockReceive'}
-    assert len(rvas) >= 12, rvas
-    assert '{kStockReceive,{' not in net
+    assert rvas == {'kRegisterChild', 'kGuestChild'}, rvas
     for name in rvas:
         assert re.search(rf'\{{{name},\{{0x', net), f'{name} has no fingerprint'
+    called = re.findall(r'^\s*\{(k\w+),\{0x', transport, re.M)
+    assert len(called) + len(rvas) >= 12 and 'kObjectReceive' not in called and '0x54D770' not in re.sub(r'//[^\n]*', '', transport), called
     code = re.sub(r'//[^\n]*', '', net)
     assert not re.search(r'0x7748F0|0x784210|0x630F90|0x630DF0', code), 'session / host / operator asked outside online_authority'
     assert 'OnlineRunsHere(object)' in code and 'InSession()' in code
     # the classes
     robo, m401, m301 = src('src/edf41robo.cpp'), src('src/edf41mother401.cpp'), src('src/edf41mother.cpp')
     for cpp in (robo, m401, m301):
-        assert '#include "edf41net.h"' in cpp and 'edf41net::Attach(obj);' in cpp
+        assert '#include "edf41net.h"' in cpp and 'edf41net::Install();' in cpp
     decision = robo.split('if(r.body<kS10 && !NetFollows(r)) {', 1)[1].split('\n    } else {', 1)[0]
     assert 'if(r.player.Active())PlayerTick(r);' in decision and 'else AiTick(r);' in decision
     assert '!NetFollows(r) && --g.autoCount<=0' in robo and 'NetBody(r);' in robo.split('void BodySet(', 1)[1].split('\n}\n', 1)[0]
