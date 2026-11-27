@@ -90,7 +90,7 @@ bool SupportCommandRequesterMatches(void*,const char*) noexcept{return false;}
 bool SubmitCarrierDroneNetworkRequest(const unsigned char*,unsigned,unsigned,const float*) noexcept{return false;}
 support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*,const float*,float) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&) noexcept{return false;}
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool,const sortie::RunSpec&,const spread::Place&) noexcept{return false;}
 bool DeleteSupportAircraft(const ObjRef&) noexcept{return false;}
 bool SupportSoldiersReady() noexcept{return true;}
 const wchar_t* SupportSoldierFailureText() noexcept{return L"";}

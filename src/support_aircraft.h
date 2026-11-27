@@ -2,6 +2,7 @@
 #include <cstdint>
 #include "support_entry.h"
 #include "sortie_plan.h"
+#include "flight_spread.h"
 namespace crew {
 struct ObjRef;
 struct SupportAircraft {
@@ -71,9 +72,10 @@ const wchar_t* SupportAircraftFile(const SupportAircraft&) noexcept;
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix,const wchar_t* variant=nullptr) noexcept;
 // Its seated real pilot authorizes the flight. `airborne`: it is in the air already: it flies on at once, a wing at its
 // kind's cruise along its nose (jet_spawn.cpp Launch's start), a helicopter with its rotor turning (HeliCalled); else
-// (a legacy plan's hull on the ground) it takes off.
+// (a legacy plan's hull on the ground) it takes off. `place`: its slot in its call's formation and how many fly it
+// (flight_spread.h: a sortie's lane and break).
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float* target,bool airborne,
-                             const sortie::RunSpec& run={}) noexcept;
+                             const sortie::RunSpec& run={},const spread::Place& place={}) noexcept;
 // Where a called aircraft is on its way in (ActivateSupportAircraft sent it to `target` under a guard order), as its own
 // flight control judges it: the dispatcher (support_dispatch.cpp) hands each one over on its own, never by a distance of
 // its own (2026-11-08: a 150 m test no fixed wing on its patrol ring ever passed, so a follow call never followed).

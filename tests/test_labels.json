@@ -3380,6 +3380,14 @@
    ],
    "scripts": []
   },
+  "flight_spread_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "formation_check": {
    "labels": [
     "plugin-native",
