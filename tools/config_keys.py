@@ -2090,6 +2090,13 @@ K('NpcFlankDeg', 'npcFlankDeg', FLOAT, '45',
 K('NpcWeaponSwitch', 'npcWeaponSwitch', BOOL, True,
   note=("...they switch weapons for the target's range and kind",),
   ini=('; 1 = 按目标距离和类型换武器（近距离霰弹、远距离长枪、对空用追踪、大型目标用爆炸，友军靠近目标时不用爆炸武器）',)),
+K('NpcParallelThink', 'npcParallelThink', INT, '1',
+  lo='0', hi='1',
+  note=("...the soldiers' combat queries (target pick, line of sight, friends in the shot) worked out on worker threads, "
+        "applied on the game thread (npcai.cpp, docs/npc-ai-design.md)",),
+  ini=(
+      '; 1 = 士兵 AI 的选目标、视线射线、友军挡枪检查在每帧开头由多个线程一起算好，再在游戏线程按原顺序逐个应用（结果与 0 完全相同，只是更快）',
+      '; 0 = 全部在游戏线程上逐个算（排查问题时对照用）')),
 K('NpcBackpack', 'npcBackpack', BOOL, True,
   note=('...a support soldier made with a backpack weapon uses it (npc_backpack.h, docs/npc-backpack-re.md)',),
   ini=(

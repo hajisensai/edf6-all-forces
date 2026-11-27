@@ -46,6 +46,19 @@ bool WastedFire(const void* shooter,const void* target) noexcept;
 // (optional) gets the point to aim at for the hit it would take (its weak spot's lock point, led).
 bool HoldFire(const void* shooter,const void* target,const float* from=nullptr,float speed=0.0f,float gravity=0.0f,
               float* aim=nullptr) noexcept;
+// The soldiers' parallel Decide (npcai.cpp, NpcParallelThink) asks the same questions off the game thread, read-only:
+//  - WastedFirePrime (game thread, before the fork): this frame's per-target answers made for `targets` (the memo
+//    WastedFire / HoldFire fill on their first ask in a frame, filled now with the same values) and the frame's clock.
+//  - WastedFirePeek (any thread, between the prime and the next write here): WastedFire's answer for an ordinary
+//    target (1 wasted / held, 0 not), which for such a target is HoldFire's too, whatever `from`, speed and gravity
+//    (its verdict is the invincible flag alone; `aim` is left as it is). -1: not known without the game thread (a
+//    target with a damage window or a lock-point override, whose plan the trigger's question makes and logs; one not
+//    primed this frame). The shooter is taken as readable (the soldier whose Think asks).
+//  - WastedFireVersion: changes with every write a peek could have read (a settled hit, a prime, a reset): a peek taken
+//    under another version is not the answer now.
+void WastedFirePrime(const void* const* targets,int count) noexcept;
+int WastedFirePeek(const void* shooter,const void* target) noexcept;
+std::uint64_t WastedFireVersion() noexcept;
 void ResetWastedFire() noexcept;      // mission.cpp MissionStart: the last mission's objects forgotten
 // The window and motion of `target` observed for this frame, once a frame whoever asks (a teleportation ship's hatch, an
 // anchor, a generator, a fortress part; an ordinary enemy has none): called on every enemy each frame by the walks that

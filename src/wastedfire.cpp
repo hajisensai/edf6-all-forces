@@ -245,6 +245,7 @@ SRWLOCK lock=SRWLOCK_INIT;
 // no, without the lock and the 256-pair scan (the AI asks a shooter and lock point at a time; nearly always no hold runs).
 // Apart from the book because it is reset by assignment (an atomic cannot be).
 std::atomic<std::uint64_t> latestHoldMirror{0};
+std::atomic<std::uint64_t> peekVersion{1};   // WastedFireVersion
 
 // Snapshot the first four valid points in registry order, with no native pointers to the point storage retained.
 struct Points {
@@ -447,6 +448,8 @@ memoepoch::Clock memoClock;
 struct TargetMemo { const void* target; ULONGLONG frame; bool readable; Kind kind; hitpredict::Verdict verdict; };
 TargetMemo targetMemo[4096];   // direct-mapped: 300 targets in 1024 slots shared a slot a quarter of the time
 struct ShooterMemo { const void* shooter; ULONGLONG frame; bool readable; } shooterMemo{};
+// The prime's epoch and clock (WastedFirePrime): what a peek reads the memo under.
+ULONGLONG primedEpoch=0,primedMs=0;
 const TargetMemo& TargetThisFrame(const void* target,ULONGLONG frame) noexcept {
     TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
     if(m.target==target && m.frame==frame)return m;
@@ -496,6 +499,7 @@ void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
     AcquireSRWLockExclusive(&lock);
     const bool held=wastedfire::Hit(book,shooter,target,hurt,ms);
     latestHoldMirror.store(book.latestHold,std::memory_order_relaxed);
+    peekVersion.fetch_add(1,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     // One line a hold (a few a minute at most per pair): the evidence in a player's log that the AI held its fire.
     if(held)Log("WASTEDFIRE %p: %d hits on %p hurt nothing: its fire at it held %.0f s",shooter,wastedfire::kWastedHits,target,
@@ -522,6 +526,7 @@ void ResetWastedFire() noexcept {
     AcquireSRWLockExclusive(&lock);
     book=wastedfire::Book{};
     latestHoldMirror.store(0,std::memory_order_relaxed);
+    peekVersion.fetch_add(1,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     watched.Clear();
     plans.Clear();
@@ -532,5 +537,35 @@ void ResetWastedFire() noexcept {
     planLog=planlog::Gate{};
     rayMeetsObjects=false;
     feedbackFrame=feedbackMs=0;
+    primedEpoch=0;primedMs=0;
 }
+
+namespace {
+void PrimeOne(const void* target,ULONGLONG epoch) noexcept {
+    __try { TargetThisFrame(target,epoch); } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+}  // namespace
+void WastedFirePrime(const void* const* targets,int count) noexcept {
+    primedEpoch=memoClock.Epoch(GameFrame(),WallMs());
+    primedMs=FeedbackMs();
+    for(int i=0;i<count;++i)if(targets[i])PrimeOne(targets[i],primedEpoch);
+    peekVersion.fetch_add(1,std::memory_order_relaxed);
+}
+int WastedFirePeek(const void* shooter,const void* target) noexcept {
+    if(!target)return 0;
+    if(!shooter)return 0;   // VerdictOf's fire, and Feedback has no shooter's hits to hold
+    const TargetMemo& m=targetMemo[(reinterpret_cast<std::uintptr_t>(target)>>4)*0x9E3779B97F4A7C15ull>>52];
+    if(m.target!=target || m.frame!=primedEpoch || !primedEpoch)return -1;
+    if(m.readable) {
+        if(m.kind!=Kind::none && m.kind!=Kind::yes)return -1;   // its plan: the game thread's (PlanFor)
+        if(m.verdict==hitpredict::Verdict::skip)return 1;
+    }
+    // Feedback at the frame's clock (FeedbackMs, read by the prime).
+    if(primedMs>=latestHoldMirror.load(std::memory_order_relaxed))return 0;
+    AcquireSRWLockShared(&lock);
+    const bool wasted=wastedfire::Wasted(book,shooter,target,primedMs);
+    ReleaseSRWLockShared(&lock);
+    return wasted ? 1 : 0;
+}
+std::uint64_t WastedFireVersion() noexcept { return peekVersion.load(std::memory_order_relaxed); }
 }  // namespace crew
