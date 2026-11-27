@@ -6768,7 +6768,14 @@ def map_commands_wired() -> None:
     reader = code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
     # The order keys are the ini's (map_keys.h, Broken Arrow's set: Tab the sub-selection among them), read in one loop.
     assert 'for(int i=0;i<mapkeys::count;++i)k.order[i]=keys.vk[i]>0 && Down(keys.vk[i]);' in reader
-    assert "int vk[count]={'Q','E','R','T','U','F','H','Z','X','C','V','B',0x09," in src('src/map_keys.h')
+    import config_keys
+    defaults = {k.name: k.default for k in config_keys.KEYS}
+    ba = (('MapAttackMoveKey', 'Q'), ('MapStopKey', 'E'), ('MapReverseMoveKey', 'R'), ('MapFireMissionKey', 'T'), ('MapUnloadKey', 'U'),
+          ('MapFastMoveKey', 'F'), ('MapHoldFireKey', 'H'), ('MapSprintKey', 'Z'), ('MapSmokeKey', 'X'), ('MapDecoyKey', 'C'),
+          ('MapAltitudeKey', 'V'), ('MapBackKey', 'B'), ('MapSubgroupKey', '	'), ('MapPing1Key', 'p'))
+    for name, key in ba:   # Broken Arrow's defaults (tools/config_keys.py -> Config::map<Name>Key -> map_keys.h Of)
+        assert int(defaults[name], 0) == ord(key), (name, defaults[name])
+    assert 'Keys Of(const C& c)' in src('src/map_keys.h')
     # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range; enemy placement also works online): on any other map
     # they stay the game's and never switch the input back from the pad.
     assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn();' in code
@@ -16281,7 +16288,10 @@ def heartbeat_keeps_watchers_cache() -> None:
                 raise e
             return '3/7 done'
         with heartbeat.beating('run', status, say=said.append):
-            time.sleep(0.4)
+            for _ in range(400):   # until three lines came (a loaded machine is slow to wake the beat), not a fixed time
+                if len(said) >= 3:
+                    break
+                time.sleep(0.025)
         assert len(said) >= 3, said
         assert all(line.startswith(heartbeat.PREFIX + ' run: ') for line in said), said
         assert 'status failed: boom' in said[0] and said[-1].endswith(', 3/7 done'), said
