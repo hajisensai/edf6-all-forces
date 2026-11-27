@@ -81,7 +81,15 @@ void PlayWt(int clip,int variant,const Heard& h) noexcept;
 // A looping voice of War Thunder's `group` (its first variant, the engines' layers: sound_engine.h), silent until
 // SetLoop, closed by CloseLoop; -1: not there (WtThere), or every loop voice in use.
 int OpenWtLoop(int group) noexcept;
+int OpenWtOnce(int group,int variant) noexcept;   // ...or once from its start (moved by SetLoop; closed by the caller)
+float WtSeconds(int group,int variant) noexcept;  // a variant's length (s); 0: not read
 int LoopsOpen() noexcept;                 // the loop voices in use (the log's voice count)
+int LoopsFree() noexcept;                 // ...and those still free (kLoopPool of them in all)
+// The loop voices (every engine's layers, the turrets' loops): 1024, from tools/jet_voice_bench.cpp (2026-11-27,
+// docs/feature-wt-sound.md 「声道的上限」): XAudio2 opened 2048 with no failure and no glitch; 1024 of them took 14% of
+// its mixing thread (one core of a Ryzen 7 9800X3D) and 0.3 ms a frame of SetLoop on the game's thread, 2048 twice
+// that. 1024 leaves a slower machine room; it is 250 jets at 4 layers each, more than a mission flies.
+constexpr int kLoopPool=1024;
 // Once a game frame: the game runs. With no beat for kQuietMs (paused, loading, a menu) the watchdog silences
 // everything until the next beat, at `volume` (the game's master and effect volume; each sound's own share is its
 // caller's: the engines' JetSoundVolume / VehicleEngineVolume in their Heard, the cockpit's Cfg().warnVolume here).

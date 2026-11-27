@@ -11,6 +11,9 @@
 // inverse), at the game's master and effect volume (GameStatus +0x2E8 / +0x2F0) times JetSoundVolume.
 // Doppler ratio (c - v_listener.u) / (c - v_source.u), u the unit line from the jet to the camera, c kSoundSpeed.
 // The same listener places the ground vehicles' sounds (SoundAt, vehsound.cpp).
+// Besides the engines, War Thunder's air (jet_air.h): another jet's passby whoosh as it goes by close (ducking the
+// other engines a moment), the own jet's wind and its airframe under g; each with its ini switch (JetSoundPassby,
+// JetSoundPassbyDuck, JetSoundWind, JetSoundOverload), read every frame.
 // The stock 506's rotor loop the jets were built on is silenced in their SGOs (tools/make_jets.py); the lock-on beeps
 // of NPC seats are silenced here (LockSound).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -34,8 +37,10 @@
 #include "memory.h"
 #include "sound_place.h"
 #include "sound_engine.h"
-#include "lazy_rows.h"
+#include <new>
 #include "surround.h"
+#include "jet_mix.h"
+#include "jet_air.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -55,8 +60,11 @@ constexpr float kFarAt=2500.0f;                  // the air's dulling at its ful
 constexpr float kJetTop=245.0f;                  // m/s: the fastest attack speed (jet.cpp kKinds' interceptor), a
                                                  // jet of no record's (another machine's) top: its speed_relative
 constexpr float kListenerJump=60.0f;             // a camera moving this far in a frame cut: no velocity from it
-constexpr ULONGLONG kStaleMs=200;                // a jet not seen this long (game ms) is gone: its sound stops
-constexpr int kSounds=32;
+constexpr ULONGLONG kStaleMs=200;                // a jet not seen this long (game ms) is gone: heard out, faded (Mix)
+// The jets heard at once: every one there is (an entry made for each as it comes, below), up to the voice pool
+// (audio::kLoopPool: each one heard takes a voice at least). 32 before 2026-11-27 (the user: 「全发声不行吗，为什么非得
+// 32 个」): a table of the plugin's own, no limit of the machine's (docs/feature-wt-sound.md 「声道的上限」).
+constexpr int kMostJets=audio::kLoopPool;
 
 struct Sound {
     ObjRef ref;
@@ -68,15 +76,60 @@ struct Sound {
     unsigned turn=0;                         // the one-shots' variants in turn
     float last[3]{},vel[3]{},speed=0.0f;
     ULONGLONG lastFrame=0,seen=0,logAt=0;
+    // The mix (Mix, jet_mix.h): what it is heard at, and whether at all.
+    float level=0.0f;                        // JetSoundVolume times its engine's gain (jetsound::For), set by Step
+    bool own=false;                          // the local player's (the player's event)
+    bool gone=false,dead=false;              // no longer stepped (deleted, stale, its engine off; a wreck): its trail
+                                             // played on until its last sample is heard (caught), then faded out
+    bool caught=false;
+    bool mixed=false,ranked=false;           // through Mix once; among the loudest heard (jetmix::Rank)
+    float presence=0.0f;                     // jetmix::Step: 0 unheard .. 1 at its level
+    float loud=0.0f;                         // its layers' sum as heard now, before its presence (the ranking's)
+    float distance=0.0f;                     // m from the camera, as heard (Mix): the farthest not heard gives way
+    float g=1.0f;                            // its load factor (jetair::LoadFactor), smoothed
+    float seed[2]{};                         // its pitch randomizers' picks (engine::kSeed, kSeed2), drawn as it comes
+    bool armed=true;                         // a passby may start (jetair::Fires; again once its closest is behind)
 };
-Sound sounds[kSounds]{};
-// Each sound's past (sounds[i]'s), 46 KB each: on the heap from the first jet heard, not in the image (1.5 MB of
-// .data committed for every player otherwise: tests/plugin_image_size_guard.py).
-LazyRows<engine::Trail,kSounds> trails;
+// What one jet is heard as now: from its trail, the sample whose sound reaches the camera now (engine::Retarded).
+struct Hearing {
+    const engine::Sample* r=nullptr;
+    SoundPlace p{};
+    float cone=0.0f,farGain=1.0f,doppler=1.0f;
+    engine::Inputs in{};                     // its sample's, with the listener's own (speed_relative, Direction)
+    float rel[3]{};                          // its velocity against the camera's (m/s)
+    int n=0;
+    engine::Heard h[engine::kMostEventLayers];
+};
+// One jet's entry: its sound, what it is heard as and its past (the trail, 46 KB of the entry's 48).
+struct Entry { Sound s; Hearing h; engine::Trail trail; };
+// One entry a jet, made on the heap as the jets come (none for a mission with no jet; not in the image: 1.5 MB of
+// .data committed for every player otherwise, tests/plugin_image_size_guard.py) and never freed: a jet gone leaves
+// its entry to the next one, a pointer to one stays good.
+Entry* rows[kMostJets]{};
+int rowCount=0;
+bool noHeap=false;
 bool sigOk=false,broken=false,started=false;
 float listener[kListenerFloats]{},listenerVel[3]{};
 bool hasListener=false;
 ULONGLONG listenerFrame=0;
+unsigned rng=0x9E3779B9u;
+
+// A passby playing (jetair): the jet it is of followed while its entry is that jet's, its tracks' voices.
+struct Passby {
+    bool on=false;
+    int row=-1;
+    ObjRef ref;
+    float age=0.0f,kmh=0.0f;
+    SoundPlace p{};
+    int voice[jetair::kTracks]{};            // jetaudio.h OpenWtOnce + 1, 0: none (yet, or ended)
+    int variant[jetair::kTracks]{};
+    bool started[jetair::kTracks]{};
+    float ends[jetair::kTracks]{};           // its age (s) as each track's recording ends
+};
+Passby passbys[jetair::kMostPassbys];
+unsigned passbyTurn=0;
+int airVoice[3]{};                           // the own jet's wind (low, high) and airframe loops + 1
+constexpr int kAirClip[3]={wt::k_jet_wind_low,wt::k_jet_wind_high,wt::k_jet_overload};
 
 struct Sig { unsigned rva; unsigned char bytes[12]; std::size_t size; };
 const Sig kSigs[]={
@@ -92,13 +145,29 @@ const unsigned char kLockDoneSig[]={0x48,0x8D,0x8B,0x40,0x0D,0x00,0x00};
 // Whether the game thread is inside a call on the jets' voices (jetaudio.cpp): a fault there may be the voices'
 // own (a voice gone bad, the engine under them), and then nothing of theirs may be called again (Recover).
 bool inAudio=false;
+int VoicesFree() noexcept { inAudio=true;const int n=audio::LoopsFree();inAudio=false;return n; }
 int OpenVoice(int group) noexcept { inAudio=true;const int l=audio::OpenWtLoop(group);inAudio=false;return l; }
 void SetVoice(int loop,const audio::Heard& h) noexcept { inAudio=true;audio::SetLoop(loop,h);inAudio=false; }
 void CloseVoice(int loop) noexcept { inAudio=true;audio::CloseLoop(loop);inAudio=false; }
 void ShotVoice(int group,int variant,const audio::Heard& h) noexcept { inAudio=true;audio::PlayWt(group,variant,h);inAudio=false; }
 bool There(int group) noexcept { inAudio=true;const bool t=audio::WtThere(group);inAudio=false;return t; }
+int OpenOnce(int group,int variant) noexcept { inAudio=true;const int l=audio::OpenWtOnce(group,variant);inAudio=false;return l; }
+float Seconds(int group,int variant) noexcept { inAudio=true;const float t=audio::WtSeconds(group,variant);inAudio=false;return t; }
 void CloseVoices(Sound& s) noexcept {
     for(int& l:s.voice){if(l)CloseVoice(l-1);l=0;}
+}
+void ClosePassby(Passby& b) noexcept {
+    for(int& l:b.voice){if(l)CloseVoice(l-1);l=0;}
+    b=Passby{};
+}
+void CloseAir() noexcept {
+    for(Passby& b:passbys)ClosePassby(b);
+    for(int& l:airVoice){if(l)CloseVoice(l-1);l=0;}
+}
+// A -0.5..0.5 pick (xorshift: the pitch randomizers', ours).
+float Pick() noexcept {
+    rng^=rng<<13;rng^=rng>>17;rng^=rng<<5;
+    return static_cast<float>(rng>>8)/16777216.0f-0.5f;
 }
 void BeatVoices(float volume) noexcept { inAudio=true;audio::Beat(volume);inAudio=false; }
 
@@ -121,7 +190,9 @@ int Fault(const EXCEPTION_POINTERS* e) noexcept {
 void Recover() noexcept {
     const bool voicesOk=!inAudio;
     inAudio=false;
-    for(auto& s:sounds){if(voicesOk)CloseVoices(s);s=Sound{};}
+    for(int i=0;i<rowCount;++i){Sound& s=rows[i]->s;if(voicesOk)CloseVoices(s);s=Sound{};}
+    if(voicesOk)CloseAir();
+    else{for(Passby& b:passbys)b=Passby{};for(int& l:airVoice)l=0;}
 }
 
 void Silence(Sound& s) noexcept {
@@ -129,18 +200,37 @@ void Silence(Sound& s) noexcept {
     s=Sound{};
 }
 
-// The jet's entry: its own, else a free one (a stale one silenced first); nullptr with every one a live jet's.
-Sound* EntryFor(const unsigned char* v,ULONGLONG ms) noexcept {
-    Sound* free=nullptr;
-    for(auto& s:sounds) {
-        if(s.ref.Is(v))return &s;
-        if(!free && (!s.ref || ms-s.seen>kStaleMs))free=&s;
+// A new entry on the heap (out of line: Step's guarded caller carries no allocation), or nullptr (logged once).
+__declspec(noinline) Entry* NewEntry() noexcept {
+    Entry* const e=new(std::nothrow) Entry{};
+    if(!e && !noHeap){noHeap=true;Log("SOUND jet engine sound: no heap for jet %d's entry: it and any after it stay silent",rowCount+1);}
+    return e;
+}
+
+// The jet's entry (`pos`: where it is now; its index in rows, -1 none): a free one, else a new one; with kMostJets
+// made (as many as the voices), that of the farthest not heard (ranked out, faded to nothing: taking it is silent) if
+// `pos` is nearer by the ranking's margin (no two jets out of the ranking taking each other's entry frame by frame,
+// each one's trail started over every time).
+int EntryFor(const unsigned char* v,const float* pos) noexcept {
+    int at=-1;
+    for(int i=0;i<rowCount;++i)if(!rows[i]->s.ref){at=i;break;}
+    if(at<0 && rowCount<kMostJets)if(Entry* const e=NewEntry()){rows[rowCount]=e;at=rowCount++;}
+    if(at<0 && hasListener) {
+        float d2=0.0f;
+        for(int i=0;i<3;++i)d2+=(pos[i]-listener[i])*(pos[i]-listener[i]);
+        const float d=std::sqrt(d2)*jetmix::kKeepMargin;
+        for(int i=0;i<rowCount;++i) {
+            const Sound& o=rows[i]->s;
+            if(o.mixed && !o.ranked && !(o.presence>0.0f) && o.distance>d && (at<0 || o.distance>rows[at]->s.distance))at=i;
+        }
     }
-    if(!free)return nullptr;
-    Silence(*free);
-    free->ref=ObjRef::Of(v);
-    trails[static_cast<std::size_t>(free-sounds)].count=0;   // EntryFor runs after trails.Allocate
-    return free;
+    if(at<0)return -1;
+    Sound& s=rows[at]->s;
+    Silence(s);
+    s.ref=ObjRef::Of(v);
+    s.seed[0]=Pick();s.seed[1]=Pick();
+    rows[at]->trail.count=0;
+    return at;
 }
 
 float Clamp01(float x) noexcept { return x<0.0f ? 0.0f : x>1.0f ? 1.0f : x; }
@@ -169,15 +259,99 @@ bool Own(unsigned char* v) noexcept {
     return false;
 }
 
-// `s`'s layers heard as `h` (n of them) from `p` at `gain`: a voice opened for each loud enough, closed once quiet.
+// `s`'s layers heard as `h` (n of them) from `p` at `gain`: a voice opened for each loud enough, closed once quiet (a
+// gain of 0 closes them all).
+// Each layer through its own WT low-pass where it has one (JetSoundWtLowpass), else the air's dulling.
 void Voices(Sound& s,const engine::Heard* h,int n,const SoundPlace& p,float gain,float doppler) noexcept {
-    const float spread=surround::SpreadAt(p.distance,kJetSize,0.0f),cutoff=audio::AirCutoff(p.distance/kFarAt);
-    for(int k=0;k<n;++k) {
+    const float spread=surround::SpreadAt(p.distance,kJetSize,0.0f),air=audio::AirCutoff(p.distance/kFarAt);
+    const bool wtLp=Cfg().jetSoundWtLowpass;
+    for(int k=0;k<engine::kMostEventLayers;++k) {
         int& l=s.voice[k];
-        const float g=gain*h[k].gain;
-        if(l && g<engine::kCloseGain){CloseVoice(l-1);l=0;continue;}
+        const float g=k<n ? gain*h[k].gain : 0.0f;
+        if(l && !(g>=engine::kCloseGain)){CloseVoice(l-1);l=0;continue;}
         if(!l && g>engine::kOpenGain)l=OpenVoice(h[k].clip)+1;   // none free (or not there): again next frame
+        const float cutoff=wtLp && h[k].cutoff>0.0f ? h[k].cutoff : air;
         if(l)SetVoice(l-1,audio::Heard{g,p.side,p.front,spread,h[k].ratio*doppler,cutoff,false});
+    }
+}
+
+// A passby of the jet in row `row` heard as `h` (jetair): a free one, else the furthest playing if farther (WT's
+// stealing; ours: a nearer one kept, the new one not played).
+void StartPassby(int row,const Hearing& h) noexcept {
+    int at=-1;
+    for(int i=0;i<jetair::kMostPassbys;++i)if(!passbys[i].on){at=i;break;}
+    if(at<0)
+        for(int i=0;i<jetair::kMostPassbys;++i)
+            if(passbys[i].p.distance>h.p.distance && (at<0 || passbys[i].p.distance>passbys[at].p.distance))at=i;
+    if(at<0)return;
+    Passby& b=passbys[at];
+    ClosePassby(b);
+    b.on=true;b.row=row;b.ref=rows[row]->s.ref;b.p=h.p;
+    b.kmh=std::sqrt(Dot(h.rel,h.rel))*3.6f;
+    const unsigned t=passbyTurn++;
+    constexpr int kClip[jetair::kTracks]={wt::k_jet_passby_close,wt::k_jet_passby_med,wt::k_jet_passby_far,
+                                          wt::k_jet_passby_fast};
+    for(int k=0;k<jetair::kTracks;++k) {
+        b.variant[k]=static_cast<int>(t%static_cast<unsigned>(wt::kVariants[kClip[k]]));
+        b.ends[k]=(k==jetair::kClose ? jetair::kCloseAt : 0.0f)+Seconds(kClip[k],b.variant[k]);
+    }
+    if(b.kmh<jetair::kFastFrom)b.started[jetair::kFast]=true;   // the speed sheet's: not below it
+    if(Cfg().debug)Log("SOUND jet passby at %.0f m, %.0f km/h (slot %d)",h.p.distance,b.kmh,at);
+}
+
+bool SameRef(const ObjRef& a,const ObjRef& b) noexcept { return a.obj && a.obj==b.obj && a.ctrl==b.ctrl; }
+
+// Every passby's frame (`dt` s): following its jet, its tracks opened as their time comes and closed as they end.
+void PassbyVoices(float dt) noexcept {
+    constexpr int kClip[jetair::kTracks]={wt::k_jet_passby_close,wt::k_jet_passby_med,wt::k_jet_passby_far,
+                                          wt::k_jet_passby_fast};
+    const float volume=Cfg().jetSoundVolume;
+    for(Passby& b:passbys) {
+        if(!b.on)continue;
+        if(!Cfg().jetSoundPassby){ClosePassby(b);continue;}   // switched off
+        b.age+=dt;
+        if(b.row>=0 && b.row<rowCount && SameRef(rows[b.row]->s.ref,b.ref) && rows[b.row]->h.r)b.p=rows[b.row]->h.p;
+        const jetair::Gains gains=jetair::PassbyAt(b.p.distance,b.kmh,b.variant[jetair::kFast]);
+        const float spread=surround::SpreadAt(b.p.distance,jetair::kPassbySize,jetair::kPassbyLeast);
+        const float cutoff=audio::AirCutoff(b.p.distance/kFarAt);
+        bool playing=false;
+        for(int k=0;k<jetair::kTracks;++k) {
+            int& l=b.voice[k];
+            if(!b.started[k] && b.age>=(k==jetair::kClose ? jetair::kCloseAt : 0.0f)) {
+                b.started[k]=true;
+                l=OpenOnce(kClip[k],b.variant[k])+1;   // none free: that track not heard
+            }
+            if(l && b.age>=b.ends[k]){CloseVoice(l-1);l=0;}
+            if(l)SetVoice(l-1,audio::Heard{volume*gains.g[k],b.p.side,b.p.front,spread,1.0f,cutoff,false});
+            playing=playing || l || !b.started[k];
+        }
+        if(!playing)b=Passby{};
+    }
+}
+// The other jets' engines' gain under the passbys playing (their snapshot; JetSoundPassbyDuck).
+float PassbyDuck() noexcept {
+    if(!Cfg().jetSoundPassbyDuck || !Cfg().jetSoundPassby)return 1.0f;
+    float most=0.0f;
+    for(const Passby& b:passbys)if(b.on){const float i=jetair::DuckAt(b.age);most=i>most ? i : most;}
+    return jetair::DuckGain(most);
+}
+
+// The own jet's wind and airframe (jetair), at the camera (all round), from `s` (nullptr: none flown now).
+void AirVoices(const Sound* s,const engine::Sample* x) noexcept {
+    float g[3]{};
+    if(s && x) {
+        const float k=Cfg().jetSoundVolume*Cfg().jetSoundAirVolume*jetmix::Gain(s->presence);
+        if(Cfg().jetSoundWind) {
+            const jetair::Wind w=jetair::WindAt(x->in.v[engine::kSpeedShare],x->in.v[engine::kSpeed]);
+            g[0]=k*w.low;g[1]=k*w.high;
+        }
+        if(Cfg().jetSoundOverload)g[2]=k*jetair::OverloadAt(x->in.v[engine::kG]);
+    }
+    for(int i=0;i<3;++i) {
+        int& l=airVoice[i];
+        if(l && !(g[i]>=engine::kCloseGain)){CloseVoice(l-1);l=0;continue;}
+        if(!l && g[i]>engine::kOpenGain)l=OpenVoice(kAirClip[i])+1;
+        if(l)SetVoice(l-1,audio::Heard{g[i],0.0f,1.0f,1.0f,1.0f,22000.0f,false});
     }
 }
 
@@ -188,6 +362,23 @@ const jet::Jet* LiveNpc(const unsigned char* v,ULONGLONG ms) noexcept {
     return j && !j->reap && j->lastStep && ms-j->lastStep<=kStaleMs ? j : nullptr;
 }
 
+// A jet no longer heard from here (its engine off, a wreck): its trail plays on (Mix) until caught up, then fades.
+void Stop(Sound& s,bool dead) noexcept {
+    if(!s.gone && Cfg().debug)Log("SOUND jet %s: %s, heard on for its sound's way here, then faded",s.own ? "own" : "ai",
+                                  dead ? "wrecked" : "engine off");
+    s.gone=true;s.dead=s.dead || dead;
+}
+
+jetmix::Params MixParams() noexcept {
+    jetmix::Params m{};
+    m.fadeIn=m.fadeOut=Cfg().jetSoundFade;
+    m.reach=Cfg().jetSoundFar;
+    const int most=Cfg().jetSoundMostHeard;
+    m.most=most<1 ? 0 : most>kMostJets ? kMostJets : most;   // 0: every jet
+    return m;
+}
+
+// The jet's frame: its engine, its velocity and its sample pushed on its trail. What is heard of it is Mix's.
 void Step(unsigned char* v) noexcept {
     const ULONGLONG ms=GameMs(),frame=GameFrame();
     jetsound::State state{};
@@ -207,8 +398,9 @@ void Step(unsigned char* v) noexcept {
         burner=!state.rotor && jet::wing::Burner(j->m.power);
     }
     state.occupied=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none;
-    Sound* known=nullptr;
-    for(auto& old:sounds)if(old.ref.Is(v)){known=&old;break;}
+    int at=-1;
+    for(int i=0;i<rowCount;++i)if(rows[i]->s.ref.Is(v)){at=i;break;}
+    Sound* const known=at>=0 ? &rows[at]->s : nullptr;
     jetsound::Lever heard{};
     if(!record && jetsound::HeardLever(v,&heard)) {
         // A registered jet another machine runs (online: no flight of ours): the lever that machine flies it at
@@ -221,79 +413,165 @@ void Step(unsigned char* v) noexcept {
     }
     const jetsound::Engine engine=v[kDead] ? jetsound::Engine{} : jetsound::For(state);
     if(engine.gain<=0.0f) {
-        // Parked exhibits must not consume the finite aircraft/voice tables.
-        if(known)Silence(*known);
+        // Off or wrecked: heard out and faded (Mix), then its entry free (parked exhibits must not keep one).
+        if(known)Stop(*known,v[kDead]!=0);
         return;
     }
-    if(!trails.Allocate("jet engine sound"))return;   // no heap for the trails: the engines stay silent (logged once)
-    Sound* const s=known ? known : EntryFor(v,ms);
-    if(!s)return;
+    if(at<0)at=EntryFor(v,reinterpret_cast<const float*>(v+kPosition));
+    if(at<0)return;
+    Sound* const s=&rows[at]->s;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     float dt=10.0f;   // a jet first heard: its engine already where its power is
     if(s->lastFrame && frame>s->lastFrame) {
         // The game moves a body 1/60 s of its velocity a frame: the frames between, not the clock, give its speed.
         const float k=60.0f/static_cast<float>(frame-s->lastFrame);
         dt=1.0f/k;
-        for(int i=0;i<3;++i)s->vel[i]+=((pos[i]-s->last[i])*k-s->vel[i])*0.3f;
+        float accel[3];
+        for(int i=0;i<3;++i) {
+            const float was=s->vel[i];
+            s->vel[i]+=((pos[i]-s->last[i])*k-s->vel[i])*0.3f;
+            accel[i]=(s->vel[i]-was)*k;
+        }
         const float speed=std::sqrt(Dot(s->vel,s->vel));
         s->speed=speed;
+        s->g+=(jetair::LoadFactor(accel)-s->g)*0.2f;   // ours: the overload's input smoothed over a few frames
     } else if(s->lastFrame==frame)return;   // heard this frame already
     std::memcpy(s->last,pos,12);s->lastFrame=frame;
     s->seen=ms;
-    const bool own=flown && Own(v);
-    const engine::Event& e=own ? engine::kJetPlayer : engine::kJetAi;
+    if(s->gone && Cfg().debug)Log("SOUND jet v=%p heard from again",v);
+    s->gone=s->dead=s->caught=false;
+    s->own=flown && Own(v);
+    const engine::Event& e=s->own ? engine::kJetPlayer : engine::kJetAi;
     if(s->event!=&e){CloseVoices(*s);s->event=&e;s->hasHeard=false;}   // got in / out: the other event's voices
+    // JetSoundVolume here, not on the master voice: the cockpit's warnings share that at their own WarnVolume.
+    s->level=Cfg().jetSoundVolume*engine.gain;
     engine::Step(s->spool,engine.power,burner,dt);
     engine::Sample x{};
     std::memcpy(x.pos,pos,12);std::memcpy(x.vel,s->vel,12);std::memcpy(x.nose,v+kMatrix+32,12);
     const float kmh=s->speed*3.6f;
-    x.in.v[engine::kRpm]=own ? s->spool.rpm : engine::AiRpm(s->spool.rpm);
+    x.in.v[engine::kRpm]=s->own ? s->spool.rpm : engine::AiRpm(s->spool.rpm);
     x.in.v[engine::kLoad]=s->spool.load;x.in.v[engine::kWep]=s->spool.wep;
     x.in.v[engine::kSpeed]=kmh;x.in.v[engine::kTurn]=0.0f;
     x.in.v[engine::kSpeedShare]=100.0f*s->speed/top;
+    x.in.v[engine::kG]=s->g;x.in.v[engine::kSeed]=s->seed[0];x.in.v[engine::kSeed2]=s->seed[1];
     x.ms=ms;
-    engine::Trail& trail=trails[static_cast<std::size_t>(s-sounds)];
-    engine::Push(trail,x);
-    const engine::Sample* r=engine::Retarded(trail,listener,ms);
-    SoundPlace p{};
-    if(!r || !Place(r->pos,r->vel,&p))return;
-    const float cone=engine::ConeAngle(r->nose,p.toCamera);
-    engine::Heard h[engine::kMostEventLayers];
-    const int n=engine::Hear(e,r->in,p.distance,cone,h);
-    // JetSoundVolume here, not on the master voice: the cockpit's warnings share that at their own WarnVolume.
-    const float gain=Cfg().jetSoundVolume*engine.gain,doppler=engine::Doppler(e,p.doppler,cone);
-    Voices(*s,h,n,p,gain,doppler);
-    if(s->hasHeard) {
-        const unsigned bits=engine::Crossed(e,s->heard,r->in);
-        for(int i=0;i<e.shots;++i) {
-            if(!(bits&(1u<<i)) || !There(e.s[i].clip))continue;
-            const float g=gain*engine::ShotGain(e,i,r->in,p.distance);
-            ShotVoice(e.s[i].clip,static_cast<int>(s->turn++%static_cast<unsigned>(wt::kVariants[e.s[i].clip])),
-                      audio::Heard{g,p.side,p.front,surround::SpreadAt(p.distance,kJetSize,0.0f),doppler,
-                                   audio::AirCutoff(p.distance/kFarAt),false});
-            if(Cfg().debug)Log("SOUND jet v=%p %s one-shot %d at %.0f m, gain %.3f",v,own ? "own" : "ai",e.s[i].clip,
-                               p.distance,g);
-        }
-    }
-    s->heard=r->in;s->hasHeard=true;
-    if((Cfg().verbose || (own && Cfg().debug)) && ms-s->logAt>=2000) {
-        s->logAt=ms;
-        char g[256];int at=0,open=0;
-        for(int k=0;k<n && at<200;++k) {
-            open+=s->voice[k] ? 1 : 0;
-            at+=std::snprintf(g+at,sizeof(g)-at,"%s%.3f",k ? "," : "",gain*h[k].gain);
-        }
-        Log("SOUND jet v=%p %s rpm %.0f load %.2f wep %.2f %.0f km/h, %.0f m cone %.0f late %.2f s doppler %.2f; layers [%s] "
-            "%d voice(s) of its %d, %d loop(s) open",v,own ? "own" : "ai",r->in.v[engine::kRpm],r->in.v[engine::kLoad],
-            r->in.v[engine::kWep],r->in.v[engine::kSpeed],p.distance,cone,static_cast<double>(ms-r->ms)/1000.0,doppler,g,open,n,
-            audio::LoopsOpen());
-    }
+    engine::Push(rows[at]->trail,x);
 }
 
-// Once a frame: the camera's place, matrix and velocity, the beat (at the game's volume), and every sound whose jet
-// is gone stopped.
-void Tick() noexcept {
+ULONGLONG mixFrame=0;
+// Mix's scratch, a row each (in .bss: 14 KB).
+float mixLoud[kMostJets];
+bool mixWas[kMostJets],mixIn[kMostJets];
+int mixNeed[kMostJets],mixOrder[kMostJets];
+
+// Once a frame, every jet heard together (jet_mix.h): each one's layers from its trail; every one heard (or the
+// loudest JetSoundMostHeard), as long as the voice pool has voices for them (the loudest first when it has not); each
+// one's presence faded toward being heard or not, its voices set; a gone one freed once heard out and faded.
+void Mix() noexcept {
     const ULONGLONG ms=GameMs(),frame=GameFrame();
+    if(frame==mixFrame)return;
+    float dt=mixFrame && frame>mixFrame ? static_cast<float>(frame-mixFrame)/60.0f : 0.0f;
+    if(dt>0.25f)dt=0.25f;   // a hitch (a load): no fade skipped through in one step
+    mixFrame=frame;
+    const jetmix::Params m=MixParams();
+    float* const loud=mixLoud;
+    bool* const was=mixWas;
+    bool* const in=mixIn;
+    int* const need=mixNeed;
+    int budget=VoicesFree();   // the pool's free voices and those the jets hold: theirs to share
+    for(int i=0;i<rowCount;++i) {
+        Sound& s=rows[i]->s;
+        Hearing& h=rows[i]->h;
+        h.r=nullptr;h.n=0;loud[i]=0.0f;was[i]=false;need[i]=0;
+        for(int l:s.voice)budget+=l ? 1 : 0;
+        if(!s.ref || !s.event)continue;
+        if(!s.gone && ms-s.seen>kStaleMs) {   // deleted, or gone with the mission: heard out, not cut
+            s.gone=true;
+            if(Cfg().debug)Log("SOUND jet %s: not seen for %llu ms, heard on for its sound's way here, then faded",
+                               s.own ? "own" : "ai",static_cast<unsigned long long>(ms-s.seen));
+        }
+        const engine::Trail& trail=rows[i]->trail;
+        h.r=engine::Retarded(trail,listener,ms);
+        if(!h.r || !Place(h.r->pos,h.r->vel,&h.p)){h.r=nullptr;Silence(s);continue;}
+        const bool caught=s.gone && h.r==&trail.s[trail.head];
+        if(caught && !s.caught && Cfg().debug)
+            Log("SOUND jet %s: its last sound heard (%.0f m), fading out",s.own ? "own" : "ai",h.p.distance);
+        s.caught=caught;
+        h.cone=engine::ConeAngle(h.r->nose,h.p.toCamera);
+        // The listener's own inputs (ours): speed_relative its velocity against the camera's (m/s), Direction where
+        // it is round the camera's facing (0 ahead .. 180 behind).
+        h.in=h.r->in;
+        for(int k=0;k<3;++k)h.rel[k]=h.r->vel[k]-listenerVel[k];
+        h.in.v[engine::kSpeedRel]=std::sqrt(Dot(h.rel,h.rel));
+        h.in.v[engine::kDirection]=std::atan2(std::fabs(h.p.side),h.p.front)*57.29578f;
+        h.n=engine::Hear(*s.event,h.in,h.p.distance,h.cone,h.h);
+        h.farGain=jetmix::FarGain(s.event->maxD,h.p.distance,m.reach);
+        h.doppler=engine::Doppler(*s.event,h.p.doppler,h.cone);
+        float sum=0.0f;
+        for(int k=0;k<h.n;++k)sum+=h.h[k].gain;
+        loud[i]=s.level*h.farGain*sum;
+        was[i]=s.ranked;
+        for(int k=0;k<h.n;++k)need[i]+=s.level*h.farGain*h.h[k].gain>=engine::kCloseGain ? 1 : 0;   // its voices, heard
+    }
+    jetmix::Rank(loud,was,need,rowCount,m.most,budget,engine::kOpenGain,mixOrder,in);
+    const float duck=PassbyDuck();
+    const Sound* own=nullptr;
+    const engine::Sample* ownNow=nullptr;
+    for(int i=0;i<rowCount;++i) {
+        Sound& s=rows[i]->s;
+        const Hearing& h=rows[i]->h;
+        if(!s.ref || !s.event || !h.r)continue;
+        if(in[i]!=s.ranked && s.mixed && Cfg().debug)
+            Log("SOUND jet %s at %.0f m %s (level %.4f)",s.own ? "own" : "ai",h.p.distance,
+                in[i] ? "ranked in" : "ranked out, fading",loud[i]);
+        s.loud=loud[i];s.distance=h.p.distance;s.ranked=in[i];s.mixed=true;
+        s.presence=jetmix::Step(s.presence,in[i] && !s.caught,m.fadeIn,s.dead ? jetmix::kDeadFade : m.fadeOut,dt);
+        if(s.caught && !(s.presence>0.0f)){Silence(s);continue;}   // heard out: its entry free
+        const float gain=s.level*h.farGain*jetmix::Gain(s.presence)*(s.own ? 1.0f : duck);
+        Voices(s,h.h,h.n,h.p,gain,h.doppler);
+        if(s.own && !s.gone){own=&s;ownNow=&rows[i]->trail.s[rows[i]->trail.head];}
+        if(!s.own && !s.gone && s.presence>0.0f && Cfg().jetSoundPassby) {
+            float r[3];
+            for(int k=0;k<3;++k)r[k]=h.r->pos[k]-listener[k];
+            const jetair::Approach a=jetair::Closest(r,h.rel);
+            if(s.armed && jetair::Fires(a,std::sqrt(Dot(h.rel,h.rel)))){s.armed=false;StartPassby(i,h);}
+            else if(!s.armed && jetair::Rearms(a))s.armed=true;
+        }
+        const engine::Event& e=*s.event;
+        if(s.hasHeard && !s.gone && gain>0.0f) {
+            const unsigned bits=engine::Crossed(e,s.heard,h.in);
+            for(int k=0;k<e.shots;++k) {
+                if(!(bits&(1u<<k)) || !There(e.s[k].clip))continue;
+                const float g=gain*engine::ShotGain(e,k,h.in,h.p.distance);
+                ShotVoice(e.s[k].clip,static_cast<int>(s.turn++%static_cast<unsigned>(wt::kVariants[e.s[k].clip])),
+                          audio::Heard{g,h.p.side,h.p.front,surround::SpreadAt(h.p.distance,kJetSize,0.0f),h.doppler,
+                                       audio::AirCutoff(h.p.distance/kFarAt),false});
+                if(Cfg().debug)Log("SOUND jet %s one-shot %d at %.0f m, gain %.3f",s.own ? "own" : "ai",e.s[k].clip,
+                                   h.p.distance,g);
+            }
+        }
+        s.heard=h.in;s.hasHeard=true;
+        if((Cfg().verbose || (s.own && Cfg().debug)) && ms-s.logAt>=2000) {
+            s.logAt=ms;
+            char g[256];int at=0,open=0;
+            for(int k=0;k<h.n && at<200;++k) {
+                open+=s.voice[k] ? 1 : 0;
+                at+=std::snprintf(g+at,sizeof(g)-at,"%s%.3f",k ? "," : "",gain*h.h[k].gain);
+            }
+            Log("SOUND jet %s rpm %.0f load %.2f wep %.2f %.0f km/h, %.0f m cone %.0f late %.2f s doppler %.2f far %.3f "
+                "presence %.2f%s%s; layers [%s] %d voice(s) of its %d, %d loop(s) open",s.own ? "own" : "ai",
+                h.r->in.v[engine::kRpm],h.r->in.v[engine::kLoad],h.r->in.v[engine::kWep],h.r->in.v[engine::kSpeed],
+                h.p.distance,h.cone,static_cast<double>(ms-h.r->ms)/1000.0,h.doppler,h.farGain,s.presence,
+                s.ranked ? "" : " ranked out",s.gone ? " gone" : "",g,open,h.n,audio::LoopsOpen());
+        }
+    }
+    PassbyVoices(dt);
+    AirVoices(own,ownNow);
+}
+
+// Once a frame: the camera's place, matrix and velocity, and the beat (at the game's volume).
+void Tick() noexcept {
+    const ULONGLONG frame=GameFrame();
     const unsigned char* const ss=At<const unsigned char*>(image,kSoundSystem);
     const float* cam=nullptr;
     if(ss && Readable(ss,kListenerCount+8) && At<std::uint64_t>(ss,kListenerCount)>0) {
@@ -310,8 +588,6 @@ void Tick() noexcept {
         std::memcpy(listener,cam,sizeof(listener));listenerFrame=frame;hasListener=true;
     } else hasListener=false;
     BeatVoices(GameVolume());
-    for(auto& s:sounds)
-        if(s.ref && ms-s.seen>kStaleMs)Silence(s);   // deleted, wrecked or gone with the mission
 }
 
 }  // namespace
@@ -415,20 +691,22 @@ void JetSoundTick() noexcept {
     tickFrame=GameFrame();
     __try {
         const bool jets=Cfg().enabled && Cfg().jetSound;
-        if(!jets)for(auto& s:sounds)if(s.ref)Silence(s);   // switched off
+        if(!jets){for(int i=0;i<rowCount;++i)if(rows[i]->s.ref)Silence(rows[i]->s);CloseAir();}   // switched off
         // The camera is the ground vehicles' and the explosions' listener too (vehsound.cpp, blastsound.cpp SoundAt):
         // kept while any sounds. The jets need it from their first jet on (started); the others from their switch alone,
         // a mission with no jet in it too.
         const bool others=Cfg().vehicleSound || Cfg().explosionVolume>0.0f || Cfg().flybyVolume>0.0f;
         if((jets && started) || (Cfg().enabled && others))Tick();
         else hasListener=false;   // not kept: never a stale camera's place for a consumer switched on later
+        if(jets && started && hasListener)Mix();   // every jet heard together (no camera: their voices held as they are)
     } __except(Fault(GetExceptionInformation())){Recover();}
 }
 
 // A new mission (mission.cpp MissionStart): the last mission's sounds stopped and their voices let go of.
 void ResetJetSound() noexcept {
-    for(auto& s:sounds)Silence(s);
-    hasListener=false;listenerFrame=0;
+    for(int i=0;i<rowCount;++i)Silence(rows[i]->s);
+    CloseAir();
+    hasListener=false;listenerFrame=0;mixFrame=0;
     listenerVel[0]=listenerVel[1]=listenerVel[2]=0.0f;
 }
 }  // namespace crew

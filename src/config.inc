@@ -398,6 +398,15 @@
     bool edf41NetMirror=false;      // development only, offline: a second UfoRobo follows the first through the game's own stream code (a guest copy)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    float jetSoundFade=1.5f;        // ...s: a jet newly heard fades in over this, one gone (its last sound heard) or ranked out fades out (jet_mix.h)
+    float jetSoundFar=8000.0f;      // ...m: past the AI event's positioning curve (2504 m) 1/d on, tapered to nothing by this (0: held there)
+    int jetSoundMostHeard=0;        // ...jets heard at once, the loudest (a margin for the ones heard: no swapping), the rest faded out; 0: every one
+    bool jetSoundPassby=true;       // ...a jet going by within 300 m whooshes (War Thunder's jet_plane_passby, jet_air.h): at most 3 at once
+    bool jetSoundPassbyDuck=true;   // ...a passby ducks the other jets' engines 23 dB for its 2 s (War Thunder's engines_ai snapshot)
+    bool jetSoundWind=true;         // ...the wind over the player's own jet (War Thunder's wind: two loops by the speed)
+    bool jetSoundOverload=true;     // ...the airframe's strain under g in the player's own jet (War Thunder's vibration_overload)
+    float jetSoundAirVolume=1.0f;   // ...the own jet's wind and airframe times this (ours; 1: War Thunder's mix, about 39 dB under the engine outside)
+    bool jetSoundWtLowpass=true;    // ...the engines' low-passes War Thunder's (their EQs over the distance, the cone, the load); 0: ours, the air's alone
     bool warnAudio=true;            // the cockpit's warnings heard (warn.cpp): PULL UP, stall horn, launch warble, callouts
     bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
@@ -923,6 +932,15 @@
     n.edf41NetMirror=ReadBool(L"Edf41NetMirror",n.edf41NetMirror);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
+    n.jetSoundFade=ReadFloat(L"JetSoundFade",n.jetSoundFade);
+    n.jetSoundFar=ReadFloat(L"JetSoundFar",n.jetSoundFar);
+    n.jetSoundMostHeard=ReadInt(L"JetSoundMostHeard",static_cast<DWORD>(n.jetSoundMostHeard));
+    n.jetSoundPassby=ReadBool(L"JetSoundPassby",n.jetSoundPassby);
+    n.jetSoundPassbyDuck=ReadBool(L"JetSoundPassbyDuck",n.jetSoundPassbyDuck);
+    n.jetSoundWind=ReadBool(L"JetSoundWind",n.jetSoundWind);
+    n.jetSoundOverload=ReadBool(L"JetSoundOverload",n.jetSoundOverload);
+    n.jetSoundAirVolume=ReadFloat(L"JetSoundAirVolume",n.jetSoundAirVolume);
+    n.jetSoundWtLowpass=ReadBool(L"JetSoundWtLowpass",n.jetSoundWtLowpass);
     n.warnAudio=ReadBool(L"WarnAudio",n.warnAudio);
     n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
     n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
@@ -1296,6 +1314,10 @@
     n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",n.edf41Mother401Dev,0,8388607));
     n.edf41Mother401DevAction=static_cast<int>(FixInt("Edf41Mother401DevAction",n.edf41Mother401DevAction,0,63));
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
+    Fix("JetSoundFade",n.jetSoundFade,0.0f,10.0f);
+    Fix("JetSoundFar",n.jetSoundFar,0.0f,30000.0f);
+    n.jetSoundMostHeard=static_cast<int>(FixInt("JetSoundMostHeard",n.jetSoundMostHeard,0,1024));
+    Fix("JetSoundAirVolume",n.jetSoundAirVolume,0.0f,30.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
     n.lockToneBeeps=static_cast<int>(FixInt("LockToneBeeps",n.lockToneBeeps,0,100));
     n.lockToneLockedMs=static_cast<int>(FixInt("LockToneLockedMs",n.lockToneLockedMs,0,60000));

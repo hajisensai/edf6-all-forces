@@ -16,7 +16,7 @@ One gain for the whole set: **0.680167** (set peak before gain 1.440824; scaled 
 
 Installed to `Mods/Plugins/EDF6VehicleCrew_wt/<name>_<i>.wav` by the installer.
 
-Files: 299, total size 116333892 bytes (110.94 MiB).
+Files: 313, total size 124122174 bytes (118.37 MiB).
 
 | file | source (under the project root) | channels | seconds | bytes |
 |---|---|---|---|---|
@@ -334,3 +334,29 @@ Files: 65, 41404546 bytes (39.49 MiB, limit 40 MiB).
 | su_99_1.wav | tanks_engines.assets.bank/1791_suspension_99.wav | 1 | 7.932 | 761554 |
 | su_load_1.wav | tanks_engines.assets.bank/2250_suspension_load-001.wav | 1 | 2.851 | 273766 |
 | su_load_2.wav | tanks_engines.assets.bank/1897_suspension_load-002.wav | 1 | 2.873 | 275856 |
+
+## The jets' air (src/jet_air.h)
+
+Source: War Thunder's own `sound/aircraft_effects.assets.bank` (the streams of the events jet_plane_passby, wind
+and vibration_overload), decoded by vgmstream and made as the engines are: mono, the same resampling and high-pass,
+loops (`jet_overload`, `jet_wind_high`, `jet_wind_low`) made seamless, the engines' gain (their levels are
+their events', against the engines'); peak after it 0.754098.
+
+Files: 14, 7788282 bytes (7.43 MiB, limit 10 MiB).
+
+| file | source | channels | seconds | bytes |
+|---|---|---|---|---|
+| jet_passby_close_1.wav | aircraft_effects.assets.bank/0013_jet_passby_close-001.wav | 1 | 2.400 | 230444 |
+| jet_passby_close_2.wav | aircraft_effects.assets.bank/0584_jet_passby_close-002.wav | 1 | 2.400 | 230444 |
+| jet_passby_close_3.wav | aircraft_effects.assets.bank/0181_jet_passby_close-003.wav | 1 | 2.400 | 230444 |
+| jet_passby_close_4.wav | aircraft_effects.assets.bank/0056_jet_passby_close-004.wav | 1 | 2.400 | 230444 |
+| jet_passby_med_1.wav | aircraft_effects.assets.bank/0200_jet_passby_med-002.wav | 1 | 3.600 | 345644 |
+| jet_passby_med_2.wav | aircraft_effects.assets.bank/0277_jet_passby_med-003.wav | 1 | 3.518 | 337746 |
+| jet_passby_med_3.wav | aircraft_effects.assets.bank/0376_jet_passby_med-005.wav | 1 | 3.466 | 332796 |
+| jet_passby_far_1.wav | aircraft_effects.assets.bank/0486_jet_passby_far-001.wav | 1 | 12.000 | 1152044 |
+| jet_passby_far_2.wav | aircraft_effects.assets.bank/0572_jet_passby_far-003.wav | 1 | 10.056 | 965430 |
+| jet_passby_fast_1.wav | aircraft_effects.assets.bank/0111_passby_jet_close-003.wav | 1 | 7.082 | 679942 |
+| jet_passby_fast_2.wav | aircraft_effects.assets.bank/0058_passby_jet_close-001.wav | 1 | 5.512 | 529234 |
+| jet_wind_low_1.wav | aircraft_effects.assets.bank/0470_wind_low.wav | 1 | 14.527 | 1394680 |
+| jet_wind_high_1.wav | aircraft_effects.assets.bank/0542_wind_hi_4.wav | 1 | 6.731 | 646242 |
+| jet_overload_1.wav | aircraft_effects.assets.bank/0567_plane_overload_loop.wav | 1 | 5.028 | 482748 |
