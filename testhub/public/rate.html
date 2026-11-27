@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EDF 全军出击 · 剧情大纲评分</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="wide">
+  <header class="top">
+    <h1 id="h1">EDF 全军出击 · 剧情大纲评分</h1>
+    <fieldset id="langs" class="chips" aria-label="Language" style="margin-left:auto"></fieldset>
+  </header>
+  <p id="error" class="err hide" role="alert"></p>
+  <section>
+    <p id="intro"></p>
+    <p class="muted hide" id="none"></p>
+    <div id="nav" class="row hide"><span id="count"></span><fieldset id="picks" class="chips"></fieldset>
+      <span class="row" style="margin-left:auto"><button class="btn ghost small" id="prev" type="button"></button><button class="btn ghost small" id="next" type="button"></button></span></div>
+  </section>
+  <section id="paper" class="hide">
+    <h2 id="title" style="margin:0"></h2>
+    <p class="muted" id="tnote"></p>
+    <div id="board" aria-live="polite"></div>
+  </section>
+  <section id="formBox" class="hide">
+    <form id="form">
+      <h2 id="formTitle"></h2>
+      <div class="choices" id="score" role="radiogroup"></div>
+      <label for="name" id="nameLabel"></label><input type="text" id="name" maxlength="30">
+      <label for="body" id="bodyLabel"></label><textarea id="body" maxlength="2000"></textarea>
+      <p id="formError" class="err" role="alert"></p>
+      <p class="row"><button class="btn ghost small danger hide" id="remove" type="button"></button>
+        <span class="muted" id="savedNote" role="status"></span>
+        <span class="row" style="margin-left:auto"><button class="btn" id="submit" type="submit"></button></span></p>
+    </form>
+  </section>
+  <section id="others" class="hide">
+    <h2 id="othersTitle"></h2>
+    <p class="muted" id="stats"></p>
+    <div id="comments"></div>
+  </section>
+</main>
+<script src="/rate.js"></script>
+</body>
+</html>
