@@ -22,15 +22,12 @@ import os
 import re
 import struct
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 
-def code_only(text: str) -> str:
-    return '\n'.join(line.split('//', 1)[0] for line in text.splitlines())
-
-
-def body(cpp: str, head: str) -> str:
-    parts = cpp.split(head, 1)
-    return parts[1].split('\n}\n', 1)[0] if len(parts) == 2 else ''
+code_only = srcscan.code
+body = srcscan.body
 
 
 def native_bytes(dll: str, rva: int, size: int) -> bytes:

@@ -3,13 +3,14 @@
 // that finds the buildings it passes through and the ground it ends on (docs/emc-re.md).
 #pragma once
 #include <cmath>
+#include "py_consts.inc"
 
 namespace crew {
 namespace emc {
 constexpr float kFrameSec=1.0f/60.0f;
 // m: the beam's reach, the stock round's (AmmoSpeed 8 m a frame x AmmoAlive 75: pylib/vcobjects.py EMC_BEAM_RANGE, which
-// tools/selftest.py holds equal and the installer checks against the stock SGO).
-constexpr float kBeamRange=600.0f;
+// src/py_consts.inc carries; the installer checks it against the stock SGO).
+constexpr float kBeamRange=pyconst::kEmcBeamRange;
 // Let go before it is full: the charge drains this many times as fast as it filled (a quick tap does not keep it).
 constexpr float kDrainShare=2.0f;
 // s after a beam before the trigger charges again: the stock weapon's FireInterval (120 frames) between its bursts.

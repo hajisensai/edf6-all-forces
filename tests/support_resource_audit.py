@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'pylib'))
 import rootcpk
+import srcscan
 import sgo
 from mdb import rab_read, mdb_read
 from jet_models import bind_positions, bbox
@@ -76,7 +77,7 @@ def main():
         checks += 6
         print(f'{name}: {seats} real seats; door/seat locators present; bound {low}..{high}; setup {setup_rva:#x}')
     # The spawn path must stay independent of the dummy constructor, including empty delivery.
-    executable_source = re.sub(r'//[^\n]*', '', source)
+    executable_source = srcscan.code(source)
     assert not re.search(r'\b(?:SeatNpcRider|kRideAi|kSlotRideAi)\b', executable_source)
     print(f'support_resource_audit: {checks + 1} checks passed (read-only resources/native bytes)')
     return 0

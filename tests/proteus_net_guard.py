@@ -9,7 +9,9 @@ refactor cannot quietly move a decision to the wrong machine:
   - the field writes only what this machine owns and keeps one contribution per source.
 """
 from pathlib import Path
-from online_gate_guard import body, code_only
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pylib"))
+from srcscan import body, code as code_only  # noqa: E402  (the one C++ reader)
 
 root = Path(__file__).resolve().parents[1]
 source = code_only((root / 'src/proteus.cpp').read_text(encoding='utf-8'))

@@ -14,6 +14,8 @@ src = open(os.path.join(ROOT, 'src', 'room_ui.cpp'), encoding='utf-8').read()
 logic = open(os.path.join(ROOT, 'src', 'room_ui_logic.h'), encoding='utf-8').read()
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import gen_config  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 # with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
 plugin = gen_config.read_expanded('src/plugin.cpp')
@@ -31,15 +33,11 @@ def check(ok: bool, why: str) -> None:
 
 
 def body(text: str, head: str) -> str:
-    """The braces-balanced body of the function whose definition starts with `head`."""
-    at = text.index(head)
-    start = text.index('{', at)
-    depth = 0
-    for i in range(start, len(text)):
-        depth += {'{': 1, '}': -1}.get(text[i], 0)
-        if depth == 0:
-            return text[start:i + 1]
-    raise AssertionError(head)
+    """The braces-balanced body of the function whose definition starts with `head` (srcscan.body)."""
+    found = srcscan.body(text, head)
+    if not found:
+        raise AssertionError(head)
+    return found
 
 
 install = body(src, 'bool InstallRoomUi() noexcept')

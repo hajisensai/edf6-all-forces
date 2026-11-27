@@ -20,6 +20,7 @@
 // kKillWindowMs counts as its kill (the charge's own kill is not reported to the plugin: the bite is the evidence).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "py_consts.inc"
 #include "body506.h"
 #include "exhaust_pose.h"
 #include "drill_net.h"
@@ -55,14 +56,14 @@ constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 // bone's parent (pylib/drill_model.py DRILL_PARENT): its world composes the spin bone's (local x parent.world).
 // The drill's length, base radius and base in the model (= the vehicle's frame: the 505's slot 45 0x61AD70 roots the
 // model at veh+0x60, SetWorld 0x1100B90), as built (m: pylib/drill_model.py DRILL_LENGTH / DRILL_RADIUS /
-// DRILL_BASE; tools/selftest.py holds them equal). The bone record layout is the engine's model instance (0x1110FC0
+// DRILL_BASE; src/py_consts.inc, tools/gen_py_consts.py). The bone record layout is the engine's model instance (0x1110FC0
 // builds it, 0x1100010 composes world = local x parent.world), no class's own: the 505's instance is at veh+0xEE0
 // like the 506's (0x61AE51).
-const wchar_t kDrillBone[]=L"edf6vc_drill";
-const wchar_t kSpinBone[]=L"catapi_body";
+using pyconst::kDrillBone;
+using pyconst::kSpinBone;
 const wchar_t kParentBone[]=L"body";
-constexpr float kDrillLength=6.55f,kDrillRadius=1.55f;
-constexpr float kDrillBaseY=4.21f,kDrillBaseZ=3.35f;
+constexpr float kDrillLength=pyconst::kDrillLength,kDrillRadius=pyconst::kDrillRadius;
+constexpr float kDrillBaseY=pyconst::kDrillBaseY,kDrillBaseZ=pyconst::kDrillBaseZ;
 constexpr std::size_t kModelInst=kModelInst506,kBoneLocal=kBoneLocal506,kBoneWorld=kBoneWorld506;
 constexpr std::size_t kRecIndex=0x0C,kInstPose=0x30,kInstPoseCount=0x40,kPoseStride=0x40;
 // The hull's front (m along the vehicle's forward: the model's hull vertices under the drill end at z 3.7; the
@@ -97,7 +98,7 @@ constexpr float kPi=3.14159265f;
 // frame the eye would see the flutes creep or flicker, not a drill turning. So the drawn turn takes at most
 // kSpinStepMost a frame (0.4 of the repeat: always seen turning forward), in proportion to the RPM; the RPM itself
 // (damage, the HUD) is not capped.
-constexpr float kSpinRepeat=2.0f*kPi/16.0f;
+constexpr float kSpinRepeat=2.0f*kPi/pyconst::kDrillFolds;
 constexpr float kSpinStepMost=0.4f*kSpinRepeat;
 // Heat (the user, 2026-10-05: the drill heats up and must stop when it overheats): per second +share x (1 + kBiteHeat
 // while biting) / DrillOverheatSec, -(1 - share) / DrillCoolSec (share = RPM / top RPM): the top RPM idling heats it

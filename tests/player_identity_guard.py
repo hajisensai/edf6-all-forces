@@ -26,6 +26,8 @@ import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 failures: list[str] = []
 
@@ -34,8 +36,8 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    return '\n'.join(line.split('//', 1)[0] for line in text.splitlines())
+code_only = srcscan.code
+body = srcscan.body
 
 
 def read(root: str, rel: str) -> str:
@@ -116,24 +118,6 @@ VERSIONS = [
     ('src/enemy_control_monster_net_codec.h', r'kVersion=(\d+)', 2),
     ('src/enemy_control_action_native.cpp', r'kRootVersion=(\d+)', 2),
 ]
-
-
-def body(text: str, signature: str) -> str:
-    """The braces-balanced body of the first definition starting with `signature` ('' when not found)."""
-    at = text.find(signature)
-    while at >= 0:
-        open_at = text.find('{', at)
-        if open_at < 0:
-            return ''
-        if ';' not in text[at:open_at]:
-            depth = 0
-            for i in range(open_at, len(text)):
-                depth += {'{': 1, '}': -1}.get(text[i], 0)
-                if depth == 0:
-                    return text[open_at:i + 1]
-            return ''
-        at = text.find(signature, at + 1)
-    return ''
 
 
 def main() -> int:

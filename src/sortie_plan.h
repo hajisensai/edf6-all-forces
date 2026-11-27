@@ -6,6 +6,7 @@
 // and the few numbers each pass is made of.
 #pragma once
 #include "salvo_volley.h"
+#include "py_consts.inc"
 #include <cmath>
 
 namespace crew {
@@ -41,7 +42,7 @@ constexpr bool SalvoLocked(int loaded,int locked) noexcept { return loaded>0 && 
 constexpr float kRainFireCone=0.8f;
 // What its rounds fly at, for the fire-or-hold check (wastedfire HoldFire): the children's launch speed, m/s
 // (SALVO_CHILD_SPEED x 60), with no gravity (the carrier's AmmoGravityFactor acts only in the drop before ignition).
-constexpr float kRainRoundSpeed=660.0f;
+constexpr float kRainRoundSpeed=pyconst::kSalvoChildSpeed;
 // The rain's hold before it opens fire (the user, 2026-11-26: 「不需要一进场就发射其实，可以稍微等一会」): its nose goes on the
 // target from kRainFrom out, but it fires only once inside kRainOpen of the mark (over the target area) and after its
 // nose has stayed within kRainSteadyCone of its aim for kRainHoldMs on end (a turn or a pull-up starts the count again);

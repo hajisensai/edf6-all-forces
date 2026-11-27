@@ -1563,6 +1563,8 @@ add_test(NAME range_tracked_reuse COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 add_test(NAME perfrun COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/perfrun_test.py")
 add_test(NAME test_domains COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_domains_test.py")
 add_test(NAME testpool COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/testpool_test.py")
+# pylib/srcscan.py: the source guards' one C++ reader (comments, literals, definitions, calls), on synthetic sources.
+add_test(NAME srcscan COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/srcscan_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 

@@ -21,6 +21,8 @@ from capstone.x86 import X86_OP_IMM
 import pefile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader)
 source = (ROOT / 'src/enemy_control_native_pose.cpp').read_text(encoding='utf-8-sig')
 pe = pefile.PE(sys.argv[1], fast_load=True)
 image = pe.get_memory_mapped_image()
@@ -48,11 +50,9 @@ def branch(rva, target, mnemonic='call'):
           and ins.operands[0].imm == target, f'{rva:#x}: {mnemonic} {target:#x}')
 
 
-def code_only(text):
-    # Reject actual call syntax. A comment, diagnostic string, or kSigs entry
-    # mentioning a forbidden update RVA is not an invocation.
-    return re.sub(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
-                  ' ', text, flags=re.S)
+# Reject actual call syntax: a comment, diagnostic string, or kSigs entry mentioning a forbidden update RVA is
+# not an invocation (srcscan.masked: comments out, literals blanked).
+code_only = srcscan.masked
 
 
 def native_calls(text):

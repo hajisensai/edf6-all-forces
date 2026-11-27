@@ -26,6 +26,8 @@ import collections
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAYERED_OK = {"src/perf_probe.cpp"}   # Chain: on top of whatever a site calls now, by design (perf_probe.h)
@@ -43,21 +45,7 @@ def read(rel):
         return f.read()
 
 
-def body(text, signature):
-    at = text.find(signature)
-    if at < 0:
-        return ""
-    start = text.find("{", at)
-    depth, i = 0, start
-    while i < len(text):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-        i += 1
-    return text[start:]
+body = srcscan.body
 
 
 memory = read("common/memory.cpp")

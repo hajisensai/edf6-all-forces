@@ -19,6 +19,7 @@ import calls
 import cockpit_fits
 import emplacement_model as em
 import rootcpk
+import srcscan
 import vcobjects as vc
 import xm_units
 
@@ -44,7 +45,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIn(f'kMarker[]=L"{em.MARKER}"', source)
         # cleared last before the stock input reads the seat: the last vehicle step before it (src/module_table.h
         # kVehicleSteps; crew.cpp InputHook runs kBeforeGears, then kBeforeStockInput, then the stock input)
-        table = re.sub(r'//[^\n]*', '', (ROOT / 'src' / 'module_table.h').read_text(encoding='utf-8'))
+        table = srcscan.code((ROOT / 'src' / 'module_table.h').read_text(encoding='utf-8'))
         steps = table[table.index(' kVehicleSteps[]={'):]
         steps = re.findall(r'\{VP::(k\w+),Id::k\w+,([^\n]*?)\},?\s*\n', steps[:steps.index('\n};')])
         before = [run for phase, run in steps if phase in ('kBeforeGears', 'kBeforeStockInput')]

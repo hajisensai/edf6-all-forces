@@ -10,10 +10,13 @@ a failure. What it holds in place:
 """
 from __future__ import annotations
 
+import functools
 import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
+import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 failures: list[str] = []
 
@@ -22,36 +25,14 @@ def fail(message: str) -> None:
     failures.append(message)
 
 
-def code_only(text: str) -> str:
-    """The text with // comments cut (no // inside the string literals these checks read)."""
-    return '\n'.join(line.split('//', 1)[0] for line in text.splitlines())
+code_only = srcscan.code
+body = functools.partial(srcscan.body, regex=True, braces=False)
+functions_calling = srcscan.callers
 
 
 def read(root: str, rel: str) -> str:
     with open(os.path.join(root, rel), encoding='utf-8') as f:
         return code_only(f.read())
-
-
-def body(text: str, signature: str) -> str:
-    """The braces-balanced body of the first definition whose header matches `signature` (a regex), '' when none."""
-    m = re.search(signature + r'[^;{]*\{', text)
-    if not m:
-        return ''
-    depth, i = 1, m.end()
-    while i < len(text) and depth:
-        depth += {'{': 1, '}': -1}.get(text[i], 0)
-        i += 1
-    return text[m.end():i - 1]
-
-
-def functions_calling(text: str, callee: str) -> set[str]:
-    """The names of the top-level definitions in `text` whose bodies call `callee`."""
-    names: set[str] = set()
-    for m in re.finditer(r'^[A-Za-z_][\w:<>,\s\*&]*?\b(\w+)\s*\([^;{]*\)\s*(?:const\s*)?noexcept\s*\{', text, re.M):
-        b = body(text[m.start():], re.escape(m.group(1)) + r'\s*\(')
-        if re.search(r'\b' + re.escape(callee) + r'\s*\(', b):
-            names.add(m.group(1))
-    return names
 
 
 def main() -> int:
