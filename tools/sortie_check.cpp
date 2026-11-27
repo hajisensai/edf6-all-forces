@@ -316,6 +316,16 @@ void RainTriggerCheck() {
     Check(off>0.8f && RainTrigger(pos,n,110.0f,aim),"rain: the log's open-fire point fires (past the 0.8 rad cone it had)");
     const float air[3]={-544.0f,900.0f,-294.0f},above[3]={-0.40f*0.6f,0.8f,-0.92f*0.6f};
     Check(RainTrigger(pos,above,110.0f,air),"rain: a flier above it, its nose on it, close in: fires");
+    // Its pick on its lane (RainAhead): the 2026-11-27 17:44 log's lane (-1950,-343) -> (113,-176) at 113 m/s, 423 m up;
+    // a target 600 m short of the mark is one to take from 1100 m before it, not from over it or past it.
+    const float from[3]={-1950.0f,0.0f,-343.0f},to2[3]={113.0f,0.0f,-176.0f};
+    float head[3]={to2[0]-from[0],0.0f,to2[2]-from[2]};crew::vec::Normalize(head);
+    const Line lane=LineThrough(to2,from,head);
+    const float under[3]={to2[0]-head[0]*600.0f,35.0f,to2[2]-head[2]*600.0f};
+    const auto at=[&](float before,float* p){for(int i=0;i<3;++i)p[i]=under[i]-head[i]*before;p[1]=423.0f;};
+    float early[3],over[3],past[3];at(1100.0f,early);at(0.0f,over);at(-300.0f,past);
+    Check(RainAhead(lane,early,113.0f,under) && !RainAhead(lane,over,113.0f,under) && !RainAhead(lane,past,113.0f,under),
+          "rain: on its lane a target ahead is one to take, one under it or passed is not (RainAhead)");
 }
 
 // The 2026-11-27 log's missile rain flown again (vc.log.1 15:34:28.670 - vc.log 15:35:08.134): a wing at 110 m/s (its

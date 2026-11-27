@@ -10,10 +10,10 @@
 //   carpet       level kCarpetAlt over the mark along its line, its bombs let go to land within kCarpetHalf of it either
 //                side, a gap apart over the run (SortieFire); a formation abreast lays parallel bands
 //   popUp        in low (kPopAlt) at the mark, two bombs onto it, then a steep climb away
-//   missileRain  approaches the mark level at kRainAlt and stays level (never diving at a ground target:
-//                sortie::RainWant), holds its fire until over the target area with its nose settled and the
-//                target at least kRainSlope under it (sortie::RainHoldStep, RainSteep), then releases its magazine
-//                on its first native lock.
+//   missileRain  flies its lane level at kRainAlt over the mark (never diving at a ground target, never turning
+//                after one: sortie::RainWant), holds its fire until over the target area with its nose settled and
+//                the target at least kRainSlope under it (sortie::RainHoldStep, RainSteep), then releases its
+//                magazine on its first native lock at a target still ahead on the lane (sortie::RainAhead).
 //   gunshipLap   the gunship's own circle round the mark and its shells, one lap counted (sortie::Lap), then away
 // Every pass that finds nothing to strike gives up after kSearchMs, or once past the mark on its line.
 #include "jet_internal.h"
@@ -282,10 +282,13 @@ bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const
             return true;
         }
         if(j.t.target && dist<sortie::kRainFrom && !outsideWindow && arms.missiles>0) {
-            // Level at kRainAlt toward it, the nose up on it only when it is above (sortie::RainWant: a dive at a ground
-            // target sends the fanned rounds into the ground short of it).
-            const float to[3]={j.t.aim[0]-pos[0],0.0f,j.t.aim[2]-pos[2]};
-            float level[3];Level(pos,to,mark+sortie::kRainAlt,level);
+            // Level at kRainAlt along its lane, the nose up on the target only when it is above (sortie::RainWant: a dive
+            // at a ground target sends the fanned rounds into the ground short of it). Not toward the target: the one it
+            // picked short of the mark (the nearest) went under it inside its turn, and steering level after it there
+            // S-turned it at 70-80 deg of bank over the field for 15 s, its window on it gone before its hold opened
+            // (2026-11-27 17:44:07-17:44:33 log, 「这个天顶飞机 飞行有问题吧」). The salvo's cone takes what is under the
+            // lane, and its pick prefers what is still ahead on it (jet_combat.cpp VisitTarget, sortie::RainAhead).
+            float level[3];Run(j,pos,mark+sortie::kRainAlt,600.0f,level);
             sortie::RainWant(level,pos,j.t.aim,want);
             // Held until it is over the target area with its nose settled and the target steep enough under it
             // (sortie::RainHoldStep, RainSteep).

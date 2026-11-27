@@ -302,6 +302,13 @@ inline void Ahead(const Line& l,const float* p,float lead,float* out) noexcept {
     for(int i=0;i<3;++i)out[i]=l.at[i]+l.dir[i]*a;
 }
 
+// The rain flies its lane level (jet_sortie.cpp): a target it can still let its burst go at from it, its nose along the
+// line (RainTrigger with that nose). One it has passed, or is too near to for the burst's run, scores kRainPassedScore
+// farther in its pick (jet_combat.cpp VisitTarget), so a target ahead on the lane is taken before it.
+constexpr float kRainPassedScore=2000.0f;
+inline bool RainAhead(const Line& l,const float* pos,float speed,const float* aim) noexcept {
+    return RainTrigger(pos,l.dir,speed,aim);
+}
 // The carpet's window: a bomb landing within kCarpetHalf of the mark along the line.
 inline bool InCarpet(const Line& l,const float* impact) noexcept { return std::fabs(Along(l,impact))<=kCarpetHalf; }
 // The gap between bombs that spreads `bombs` over the carpet at `speed` m/s (ms).
