@@ -119,7 +119,7 @@ def main() -> int:
     drive = body(npcai, 'Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,')
     scripted = body(npcai, 'Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const float* pos) noexcept')
     checks += 1
-    if 'if(a.held[0]>=0){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}' not in drive or 'Backpack(' in scripted:
+    if 'if(a.held[0]>=0 && !silent){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}' not in drive or 'Backpack(' in scripted:
         fail('Backpack runs outside Drive (a script\'s unit), or without the held weapon known')
     checks += 1
     if npcai.count('Backpack(s,h,') != 1:

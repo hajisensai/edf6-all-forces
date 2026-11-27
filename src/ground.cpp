@@ -270,7 +270,8 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     const float pitch=Pitch(r,v,ref,aim,ms);
     // Fire: one map ray per frame from the reference barrel.
     bool fire[kGuns]{};
-    if(aim && Cfg().groundFire && ref) {
+    // HOLD FIRE (the map's H; mapcmd.h UnitHoldsFire): it aims as ever, and fires only once hurt.
+    if(aim && Cfg().groundFire && ref && !UnitHoldsFire(v)) {
         float hit[3];
         const float d=Dist(ref->pos,aim);
         const float wall=MapRay(ref->pos,aim,hit);
@@ -327,6 +328,8 @@ int GroundCommandUnits(CommandUnit* out,int most) noexcept {
 bool GroundCommand(const void* vehicle,const Command& c) noexcept {
     for(auto& r:robos) {
         if(r.ref.obj!=vehicle || !Commandable(r,GameMs()))continue;
+        // Its one post (mapcmd_logic.h VehicleCommandOf): guard, follow, release; HOLD FIRE is the table's (mapcmd.cpp Give).
+        if(c.order!=Order::none && c.order!=Order::guard && c.order!=Order::follow)return false;
         r.cmd=c;
         Log("GROUND v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
             c.at[0],c.at[1],c.at[2]);

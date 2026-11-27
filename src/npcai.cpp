@@ -217,6 +217,7 @@ struct Soldier {
     npc::mobility::VehicleLook mobLook;
     // Its keeping up in the march (formation.h Keep: its eased slot, the goal its route was given, stranded since).
     npc::formation::Keep keep;
+    float hpSeen;            // its health last frame: hurt since, its squad's HOLD FIRE returns fire (mapcmd.h UnitStruck)
 };
 // Every soldier the plugin has driven this mission (a deque: Soldier* stays valid as it grows) and their index by object.
 std::deque<Soldier> soldiers;
@@ -1129,6 +1130,9 @@ struct Squad {
     // Riding along with the player it follows (ride_along.h; test site #45): the vehicle that player rides, the one the
     // squad was sent into with them, whether a map order has taken the ride over.
     ridealong::Follow along{};
+    // SPRINT (the map's Z, mapcmd_logic.h kSprintMs): until then its Wing Divers' and Fencers' dashes rest
+    // kSprintRestShare of their gap (Mobility).
+    ULONGLONG sprintUntil=0;
 };
 // Every squad counted this mission, growing with the battle (a deque: Squad* stays valid), and their index by top.
 std::deque<Squad> squads;
@@ -1157,6 +1161,7 @@ Squad* FindSquad(const void* top) noexcept {
 }
 // `q`'s top changed to `top` (a hand-over, or none): the index follows.
 void Retop(Squad& q,const ObjRef& top) noexcept {
+    if(q.top && top && !top.Is(q.top.obj) && UnitHoldFire(q.top.obj)){SetUnitHoldFire(q.top.obj,false);SetUnitHoldFire(top.obj,true);}
     std::size_t at=squads.size();
     if(q.top) {
         const int i=squadIndex.Find(q.top.obj);
@@ -1715,7 +1720,7 @@ void MobilityOutcome(Soldier& s,const unsigned char* h,npc::mobility::Outcome o,
 // overheat), out of a crowd, else along the straight run of the route of a long walk (npc_mobility.h WingDecide);
 // NpcWingDashSec between two, taken or not. Debug: a walk long enough for a dash that is not dashed says why, once in
 // kLogMs for each soldier (WDDASH skip).
-void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
+void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms,float restShare) noexcept {
     using namespace npc::mobility;
     const Config& c=Cfg();
     const ULONGLONG frame=GameFrame();
@@ -1746,7 +1751,7 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
     }
     if(!WingDashOn() || s.mobOff || h[kJumpPress])return;
     const unsigned mask=At<std::uint32_t>(h,kControlMask);
-    if(!(mask&kMaskMove) || !Rested(ms-s.mobAt,c.npcWingDashSec))return;
+    if(!(mask&kMaskMove) || !Rested(ms-s.mobAt,c.npcWingDashSec*restShare))return;
     const WingState st{(mask&kMaskDash)!=0,(At<std::uint32_t>(h,kActionLimits)&4)!=0,(At<std::uint32_t>(h,kHumanState)&~2u)!=0,
                        At<std::int32_t>(h,kOverheat)!=0,
                        WingLocked(At<const void*>(h,kActionHolder)!=nullptr,At<std::int32_t>(h,kActionLevel)),h[kSupport]!=2,
@@ -1807,7 +1812,7 @@ void WingDash(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLO
 // stick points), then one of dash-jump / dash / boost chosen for the way (npc_mobility.h Choose) and pressed, the
 // dash-jump's boost in the dash's carry window. Nothing pressed while a weapon holds the action lock (a reload), in the
 // action cancel window, or on a hand whose trigger is held.
-void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
+void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms,float restShare) noexcept {
     using namespace npc::mobility;
     const Config& c=Cfg();
     if(!fencerMoveOk || !c.npcFencerMobility || s.mobOff)return;   // left stock
@@ -1847,7 +1852,7 @@ void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONG
     if(!w.walking)s.mobPosAt=0;
     else if(!s.mobPosAt || npc::Horiz(pos,s.mobPos)>=kStuckLeast){std::memcpy(s.mobPos,pos,12);s.mobPosAt=ms;}
     else stuck=Stuck(npc::Horiz(pos,s.mobPos),ms-s.mobPosAt);
-    if(!Rested(ms-s.mobAt,static_cast<float>(kFencerGapMs)/1000.0f))return;
+    if(!Rested(ms-s.mobAt,static_cast<float>(kFencerGapMs)/1000.0f*restShare))return;
     Situation sit{};
     sit.evade=s.evadeFrame==frame && s.evadeMove==npc::Move::back && Rested(ms-s.rollAt,c.npcRollSec);
     sit.landed=h[kSupport]==2;
@@ -1884,9 +1889,10 @@ void FencerMove(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONG
                    sit.wayDist,sit.rise,sit.clear,std::isfinite(sit.vehicle) ? sit.vehicle : -1.0f,stuck,sit.threatNear);
 }
 
-void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
-    if(c.agility==Agility::wingDash)WingDash(s,h,pos,p,ms);
-    else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms);
+// `restShare`: of each dash's rest (1; its squad's SPRINT: mapcmd_logic.h kSprintRestShare).
+void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms,float restShare) noexcept {
+    if(c.agility==Agility::wingDash)WingDash(s,h,pos,p,ms,restShare);
+    else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms,restShare);
 }
 
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
@@ -1900,6 +1906,9 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     // On the way under a move / attack-move it looks for targets round itself (its leash), not round the point ahead.
     const mapcmd::Pursuit pursuit=mapcmd::PursuitOf(q ? q->cmd.order : Order::none);
     if(pursuit.forced || pursuit.fightFirst){o.anchor=pos;o.leash=Cfg().npcLeash;o.hold=false;}
+    // Nothing leaves it (it aims as ever): its squad under HOLD FIRE (mapcmd.h UnitHoldsFire: till it is hurt), or on a
+    // FAST MOVE's way (Pursuit::quiet).
+    const bool silent=pursuit.quiet || (q && UnitHoldsFire(q->top.obj));
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
     Pick t=engage>0.0f ? PickTarget(s,h,eye,anchor,o.leash+engage,LongestReach(a)) : Pick{nullptr,0.0f};
@@ -1942,7 +1951,8 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         h[kTrigger]=0;
         Veto(h,StockTarget(h),eye,a);
     }
-    if(a.held[0]>=0){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}
+    if(a.held[0]>=0 && !silent){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}
+    if(silent){for(int k=0;k<kHands;++k)h[kTrigger+k]=0;p.fire=false;}
     const bool holds=pursuit.fightFirst && AttackMoveSee(*q,t.e!=nullptr,p.fire,ms);
     if(!(mask&kMaskMove))return p;
     // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's while its
@@ -2059,8 +2069,13 @@ void Think(unsigned char* h,int cls) noexcept {
         return;
     }
     s->unarmedSaid=false;
+    // A member hurt: its squad under HOLD FIRE returns fire (mapcmd.h UnitStruck; the table asks only the top's own health).
+    const float hpNow=At<float>(h,kHumanHp);
+    if(q && mapcmd::Hurt(s->hpSeen,hpNow))UnitStruck(q->top.obj);
+    s->hpSeen=hpNow;
     const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
-    if(!npc::Scripted(control))Mobility(*s,h,kSoldiers[cls],pos,p,ms);   // a script's unit keeps its stock moves
+    if(!npc::Scripted(control))   // a script's unit keeps its stock moves
+        Mobility(*s,h,kSoldiers[cls],pos,p,ms,q && ms<q->sprintUntil ? mapcmd::kSprintRestShare : 1.0f);
     if(Cfg().verbose && ms-s->loggedAt>kLogMs) {   // every soldier every 2 s: the bulk of a Debug=1 log, so Debug=2
         s->loggedAt=ms;
         Log("NPCAI %s %p %s pos=(%.0f,%.0f,%.0f) arms=%d held=%d arm=%d reach=%.0f target=%p move=%s fire=%d",kSoldiers[cls].name,h,
@@ -3012,6 +3027,7 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
                            SquadRiding(q),SquadRecruitable(q),q.control==npc::Control::recruited,TransportOf(q.top.obj)!=nullptr,
                            SquadRiding(q) ? At<const void*>(q.top.obj,kHumanRiding) : nullptr};
         out[n].joinOnly=joinOnly;
+        out[n].sprints=kSoldiers[q.cls].agility!=Agility::roll;   // Wing Divers' and Fencers' dashes (Mobility)
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
     }
     for(int i=0;i<remoteSquadCount && n<most;++i) {
@@ -4125,9 +4141,15 @@ NpcCommandResult NpcMapCommandForRequester(const ObjRef& selected,const mapcmd::
         if(npc::Scripted(ControlOf(top,root)))return CommandResult(Reason::scripted);
         const auto* q=FindSquad(top);
         if(!q || !q->top.Is(top) || GameMs()-q->seen>kOrderSeenMs)return CommandResult(Reason::stale);
-        // HOLD: the post where the vehicle is now (the authority's own reading of it).
+        // HOLD FIRE: the vehicle's state in the map's table (its driver and gunners ask it: DriverPayloadAim, NpcGunnersInput).
+        if(c.order==Order::holdFire) {
+            if(!mapcmd::OrderParamValid(c.order,c.param))return CommandResult(Reason::unsupported);
+            SetUnitHoldFire(v,c.param!=0);return CommandResult(Reason::none,1);
+        }
+        // HOLD: the post where the vehicle is now (the authority's own reading of it). REVERSE MOVE stays itself (TankCommand
+        // backs onto its point).
         const float* at=c.order==Order::hold ? Pos(v) : c.at;
-        const Command order{mapcmd::VehicleCommandOf(c.order),{at[0],at[1],at[2]}};
+        const Command order{mapcmd::VehicleCommandOf(c.order,true),{at[0],at[1],at[2]},c.param};
         if(!mapcmd::VehicleOrder(order.order) && order.order!=Order::focus)return CommandResult(Reason::unsupported);
         const bool accepted=TankCommand(v,order,focus,requester);
         return CommandResult(accepted ? Reason::none : Reason::failed,accepted ? 1u : 0u);
@@ -4169,9 +4191,19 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             npcmark::Assign(q->commandFocus,{});q->routeActive=false;q->routeCancelled=true;
             return CommandResult(Reason::none,static_cast<unsigned>(count));
         }
-        if(c.order==Order::withdraw) {
+        if(c.order==Order::withdraw && TransportOf(top)) {
             const Reason why=TransportWithdraw(top);
             return why==Reason::none ? CommandResult(Reason::none,1) : CommandResult(why);
+        }
+        // The Broken Arrow states (mapcmd_logic.h): HOLD FIRE the squad's in the map's table (by its top: Retop carries it),
+        // SPRINT its dashes unrested for kSprintMs (Mobility). Its order, trip, boarding stay as they are.
+        if(c.order==Order::holdFire) {
+            if(!mapcmd::OrderParamValid(c.order,c.param))return CommandResult(Reason::unsupported);
+            SetUnitHoldFire(top,c.param!=0);return CommandResult(Reason::none,static_cast<unsigned>(count>0 ? count : 1));
+        }
+        if(c.order==Order::sprint) {
+            if(kSoldiers[q->cls].agility==Agility::roll)return CommandResult(Reason::unsupported);
+            q->sprintUntil=ms+mapcmd::kSprintMs;return CommandResult(Reason::none,static_cast<unsigned>(count>0 ? count : 1));
         }
         if(mapcmd::PlaceOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {
             affected=0;
@@ -4183,6 +4215,8 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
         case Order::guard:
         case Order::move:
         case Order::attackMove:   // the guard's point and formation; Drive walks there first (Pursue)
+        case Order::fastMove:     // ...without a shot on the way (Pursuit::quiet)
+        case Order::reverseMove:  // on foot: a move (backing off is walking there)
             if(!std::isfinite(c.at[0]+c.at[1]+c.at[2]))return CommandResult(Reason::noTarget);
             GuardOrder(*q,c,caller);break;
         case Order::engage:
@@ -4207,6 +4241,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             // stretch), so it takes its slot in the march afresh.
             for(int i=0;i<count;++i)if(Soldier* m=FindSoldier(members[i]))m->keep=npc::formation::Keep{};
             q->cmd={};break;
+        case Order::withdraw:   // a recruited squad's BACK TO BASE with no transport: dismissed (released where it stands)
         case Order::dismiss:
             if(!recruited)return CommandResult(Reason::notOwner);
             q->autoFollow=top[kAutoFollow];top[kAutoFollow]=0;Follow(top,nullptr);
@@ -4464,6 +4499,9 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
     const auto vt=At<void* const*>(v,0);
     const auto native=reinterpret_cast<SeatFireFn>(vt[kSlotSeatFire]);
     // Preserve the original virtual dispatch on unmodified classes and occupants.
+    // HOLD FIRE (the map's H; mapcmd.h UnitHoldsFire, the vehicle's): its driver's gun aims at nothing (the stock's own
+    // null-target call, 0x6617DB) until it is hurt.
+    if(ok && index==0 && target && UnitHoldsFire(v))target=nullptr;
     if(!driverPayloadReady || !ok || index!=0 || native!=reinterpret_cast<SeatFireFn>(image+kSeatFire) || !RealPayloadDriver(v)) {
         native(v,index,target);return;
     }
@@ -4547,6 +4585,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         if(m && npc::Dist(Pos(v),m->aim)<=reach && !WastedFire(v,m->object)){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else NearestEnemyThisStep(v,p.from,reach,&GunnerUsable,v,p.best,p.bestD);   // the side's points of this frame (enemy_points.h)
         if(p.best && HoldFire(v,p.best)){p.best=nullptr;step=GunnerStep::holdFire;}   // no round would hurt it now (HoldFire): the seat idles
+        if(p.best && UnitHoldsFire(v)){p.best=nullptr;step=GunnerStep::holdFire;}     // the map's HOLD FIRE on its vehicle
         if(p.best) {
             if(Cfg().stockStores || NativePayloadControl(v,i)) {
                 const bool airborne=GunnerAirTarget(p.best);

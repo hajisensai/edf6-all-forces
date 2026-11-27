@@ -20,6 +20,8 @@
 namespace crew {
 extern unsigned char* image;
 
+#include "map_keys.h"
+
 struct Config {
     // The ini's keys (tools/config_keys.py; tools/gen_config.py writes them): members and defaults.
 #define EDF6_CONFIG_FIELDS

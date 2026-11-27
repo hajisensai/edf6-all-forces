@@ -409,12 +409,15 @@ int FaultLog(const char* where,const EXCEPTION_POINTERS* e) noexcept {
 // has pairs (Jet::flares); its burning flares are drawn (booster.cpp FlareFlames).
 constexpr ULONGLONG kNpcFlareLookMs=500,kNpcFlareGapMs=1500;
 constexpr float kNpcFlareReact=0.6f,kNpcFlareRadius=20.0f,kNpcFlareBack=8.0f,kNpcFlareSide=12.0f,kNpcFlareKeep=0.6f;
+// A map DECOY order (Jet::flareNow, JetCommand) drops a pair the next frame, missile or not, while it has pairs.
 void NpcFlares(Jet& j,unsigned char* v,const float* pos,const float* nose,ULONGLONG ms) noexcept {
     static unsigned seed=0x85EBCA6Bu;
-    if(j.flares>0 && ms-j.flareLook>=kNpcFlareLookMs && ms-j.flareAt>=kNpcFlareGapMs) {
+    const bool ordered=j.flareNow && j.flares>0;
+    j.flareNow=false;
+    if(ordered || (j.flares>0 && ms-j.flareLook>=kNpcFlareLookMs && ms-j.flareAt>=kNpcFlareGapMs)) {
         j.flareLook=ms;
         seed=seed*1664525u+1013904223u;
-        if(MissileHoming(pos,kNpcFlareRadius) && static_cast<float>(seed>>8)/16777216.0f<kNpcFlareReact) {
+        if(ordered || (MissileHoming(pos,kNpcFlareRadius) && static_cast<float>(seed>>8)/16777216.0f<kNpcFlareReact)) {
             j.flares--;j.flareAt=ms;
             const float* m=reinterpret_cast<const float*>(v+kMatrix);
             float right[3]={m[0],m[1],m[2]};
@@ -424,7 +427,8 @@ void NpcFlares(Jet& j,unsigned char* v,const float* pos,const float* nose,ULONGL
                 for(int i=0;i<3;++i){at[i]=pos[i]-nose[i]*kNpcFlareBack;vel[i]=j.m.vel[i]*kNpcFlareKeep+right[i]*kNpcFlareSide*static_cast<float>(side);}
                 FlareDrop(v,at,vel,nose,side<0);
             }
-            if(Cfg().debug)Log("JET v=%p flares at a missile (%d pairs left)",v,j.flares);
+            if(ordered)Log("JET v=%p flares by a map order (%d pairs left)",v,j.flares);
+            else if(Cfg().debug)Log("JET v=%p flares at a missile (%d pairs left)",v,j.flares);
         }
     }
     float at[8][3],vel[8][3];
@@ -472,7 +476,13 @@ int JetCommandUnits(CommandUnit* out,int most) noexcept {
         const ULONGLONG ms=GameMs();
         for(const auto& j:jets)
             if(n<most && Commandable(j,ms) &&
-               ReadCommandUnit(j.ref,KindOf(j).name,j.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : j.cmd,true,&out[n]))++n;
+               ReadCommandUnit(j.ref,KindOf(j).name,j.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : j.cmd,true,&out[n])) {
+                out[n].high=j.high;
+                out[n].sprints=KindOf(j).flight!=FlightModel::rotor;   // a wing's afterburner (a rotor carrier has none)
+                out[n].decoys=j.flares>0;
+                out[n].withdraws=j.launched;   // a call's (JetLaunch): WITHDRAW flies it off (SupportWithdrawVehicle)
+                ++n;
+            }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     return n;
 }
@@ -606,6 +616,25 @@ bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus,const O
             Log("JET v=%p map command: focus %p",vehicle,focus.obj);
             return true;
         }
+        // The Broken Arrow states (mapcmd_logic.h): each its own, the order it works round kept.
+        if(c.order==Order::altitude) {
+            if(c.param>mapcmd::kAltitudeHigh)return false;
+            j->high=c.param==mapcmd::kAltitudeHigh;
+            Log("JET v=%p map command: altitude %s",vehicle,j->high ? "high" : "low");
+            return true;
+        }
+        if(c.order==Order::sprint) {
+            if(KindOf(*j).flight==FlightModel::rotor)return false;
+            j->burnUntil=GameMs()+mapcmd::kSprintMs;
+            Log("JET v=%p map command: afterburner for %llu ms",vehicle,static_cast<unsigned long long>(mapcmd::kSprintMs));
+            return true;
+        }
+        if(c.order==Order::decoy) {
+            if(j->flares<=0)return false;
+            j->flareNow=true;
+            return true;
+        }
+        if(c.order!=Order::none && c.order!=Order::guard && c.order!=Order::follow)return false;
         ApplyMapCommand(*j,c,GameMs());
         SetFollow(*j,remote ? requester : ObjRef{});
         Log("JET v=%p map command: %s%s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
@@ -742,18 +771,23 @@ void JetFrame(unsigned char* v) noexcept {
     // Guidance, then the flight its kind flies.
     const float clear=GroundClearance(pos);
     const float base=j->t.target && !j->t.flyer ? j->t.aim[1] : anchor[1];
-    const float height=base+(j->phase==jetphase::Phase::ferry ? kFerryAlt : kind.alt);
+    const float height=base+(j->phase==jetphase::Phase::ferry ? kFerryAlt : kind.alt*(j->high ? mapcmd::kJetHighShare : 1.0f));
     float want[3]={nose[0],0,nose[2]},speed=kind.cruise;
     bool gunsOk=false,missileOk=false;
     Guide(*j,kind,arms,mother,pos,nose,anchor,viewer,lead,height,clear,walled,ms,want,&speed,&gunsOk,&missileOk);
+    // SPRINT (the map's Z): its afterburner -- the speed it asks for raised past its saturated thrust (Wing: JetFlames burns).
+    if(ms<j->burnUntil && kind.flight!=FlightModel::rotor)speed*=mapcmd::kAfterburnerSpeed;
     if(kind.flight==FlightModel::rotor)Rotor(*j,kind,v,mother,pos,anchor,want,height,hp,hpMax,dt,ms);
     else Wing(*j,kind,v,pos,clear,nose,want,speed,dt,ms);
     HoldOffGround(*j,pos,clear,dt,ms);
     j->m.ready=true;
     BayFrame(*j,pos);
-    if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
+    // HOLD FIRE (the map's H; mapcmd.h UnitHoldsFire): it flies and aims as ever, and nothing of its own leaves it until
+    // it is hurt -- guns, missiles, rockets, bombs, shells, drones, a sortie's stores.
+    const bool holding=!gunner && UnitHoldsFire(v);
+    if(gunner || holding){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
     else Arm(*j,kind,v,pos,nose,j->sortie.strafing ? j->sortie.shotPoint : lead,gunsOk,missileOk,arms,ms);
-    if(!gunner && j->phase!=jetphase::Phase::withdraw)SortieFire(*j,v,pos,arms,ms);   // a sortie's bombs (jet_sortie.cpp)
+    if(!gunner && !holding && j->phase!=jetphase::Phase::withdraw)SortieFire(*j,v,pos,arms,ms);   // a sortie's bombs (jet_sortie.cpp)
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000) {
         j->loggedAt=ms;
