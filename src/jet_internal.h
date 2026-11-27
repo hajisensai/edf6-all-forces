@@ -765,6 +765,11 @@ float Ferry(Jet& j,const float* pos,float height,float* want) noexcept;
 // m/s a ferry of kind `k` flies at, and m: its turn's radius there (the room its line's ends keep: support_entry.h PassEnd).
 float FerrySpeed(const Kind& k) noexcept;
 float FerryTurn(const Kind& k) noexcept;
+// The bombing run's line (jet_bay.cpp BombRun): level at `height` toward the point `lead` m on along the line through `at`
+// (unit horizontal `dir`) from where it is, as Ferry follows its line; BombLead: that lead at `speed`, its turn's radius at
+// kBombG (at least ferry::kLeadLeast): the lead no shorter than the turn, the turn onto the line never overshoots it.
+void BombLine(const float* pos,const float* at,const float* dir,float lead,float height,float* want) noexcept;
+float BombLead(float speed) noexcept;
 // `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
 // `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,

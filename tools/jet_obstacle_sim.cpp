@@ -938,18 +938,20 @@ int PlayerRotorSuite() {
 // body's roll about its nose) is sampled every frame: after `settle` s, the largest bank and the bank's reversals (a sign
 // change past kWobbleBank each way) and, on a line, its cross-track swing. A level flight settled holds its wings level.
 constexpr float kWobbleBank=0.035f;   // rad (2 deg): a roll past this either way is a bank, not trim
-struct WobbleResult { float bank=0.0f,off=0.0f,heading=0.0f;int reversals=0; };
+struct WobbleResult { float bank=0.0f,off=0.0f,heading=0.0f,over=0.0f;int reversals=0; };
 float BankOf(const unsigned char* v) {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     return -std::asin(Clamp(m[1],-1.0f,1.0f));
 }
-WobbleResult WobbleCase(Role role,float stepDeg,float cross,SortiePass pass,bool sortie,float seconds,float settle,FILE* csv) {
+// `bombSpeed` > 0: a bombing run (Mode::bomb, BombLine at BombLead) along the line x = 0 from `cross` m aside, at that speed.
+WobbleResult WobbleCase(Role role,float stepDeg,float cross,SortiePass pass,bool sortie,float seconds,float settle,FILE* csv,
+                        float bombSpeed=0.0f) {
     boxes.clear();
     const Kind& k=KindOf(role);
-    const float speed=role==Role::gunship ? k.cruise : k.attack;
+    const float speed=bombSpeed>0.0f ? bombSpeed : role==Role::gunship ? k.cruise : k.attack;
     const float alt=sortie ? (pass==SortiePass::carpet ? sortie::kCarpetAlt : sortie::kMissilePassAlt) : 400.0f;
     const float off=stepDeg*kPi/180.0f;
-    const float at[3]={cross,alt,-9000.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
+    const float at[3]={cross,alt,bombSpeed>0.0f ? -30000.0f : -9000.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
     const float mark[3]={0.0f,0.0f,0.0f},heading[3]={0.0f,0.0f,1.0f};
     std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
     unsigned char* v=mem.data();
@@ -958,6 +960,7 @@ WobbleResult WobbleCase(Role role,float stepDeg,float cross,SortiePass pass,bool
     j.launched=true;j.burden=Burden{1.0f,0.0f};
     Arms arms{};arms.pick=-1;
     if(sortie)SortieBegin(j,pass,mark,at,heading,nowMs,sortie::RunSpec{0.0f,1.0f,0.0f});
+    if(bombSpeed>0.0f)j.mode=Mode::bomb;
     WobbleResult r;
     int sign=0;
     for(int f=0;f<static_cast<int>(seconds*60.0f);++f) {
@@ -970,7 +973,9 @@ WobbleResult WobbleCase(Role role,float stepDeg,float cross,SortiePass pass,bool
         Sense(j,pos,nowMs);
         const float clear=GroundClearance(pos);
         float want[3]={0.0f,0.0f,1.0f},go=speed;
-        if(sortie) {
+        if(bombSpeed>0.0f) {
+            BombLine(pos,mark,heading,BombLead(speed),alt,want);
+        } else if(sortie) {
             bool gunsOk=false,missileOk=false;
             SortieGuide(j,k,arms,pos,nose,mark,mark[1]+k.alt,nowMs,want,&go,&gunsOk,&missileOk);
         } else {
@@ -981,6 +986,7 @@ WobbleResult WobbleCase(Role role,float stepDeg,float cross,SortiePass pass,bool
         j.m.ready=true;
         const float t=static_cast<float>(f)*kDt,bank=BankOf(v);
         if(csv)std::fprintf(csv,"%.3f,%.1f,%.1f,%.1f,%.4f,%.4f\n",t,pos[0],pos[1],pos[2],bank,std::atan2(j.m.vel[0],j.m.vel[2]));
+        if(cross>0.0f)r.over=std::fmax(r.over,-pos[0]);   // across its line to the other side
         if(t>=settle && pos[2]<-200.0f) {   // settled, and short of the mark (a sortie's pass ends past it)
             r.bank=std::fmax(r.bank,std::fabs(bank));
             r.off=std::fmax(r.off,std::fabs(pos[0]));
@@ -1020,6 +1026,16 @@ int WobbleSuite(const char* out) {
         failures+=!ok;++cases;
         std::printf("wobble %-12s %-32s settled: bank <= %5.1f deg, %2d reversals, off <= %5.1f m, heading <= %4.1f deg (%s)\n",ro.name,c.name,
                     r.bank*180.0f/kPi,r.reversals,r.off,r.heading*180.0f/kPi,ok ? "ok" : "FAIL");
+    }
+    // The bombing run (jet_bay.cpp BombRun: the stock bomber taken over flies it at its run's speed, kBombG): onto its line
+    // from aside without swinging across it, settled level on it. Before (its lead a fixed 250 m against a turn of 1.3 to
+    // 2.9 km at 1.5 g) it crossed the line and swung back.
+    for(const float bs:{120.0f,180.0f})for(const float cross:{150.0f,600.0f}) {
+        const WobbleResult r=WobbleCase(Role::strike,0.0f,cross,SortiePass::carpet,false,120.0f,60.0f,nullptr,bs);
+        const bool ok=r.reversals==0 && r.bank<0.09f && r.over<0.1f*cross && r.off<0.05f*cross;
+        failures+=!ok;++cases;
+        std::printf("wobble bomb run %3.0f m/s, line %4.0f m aside (lead %4.0f m): across it by %5.1f m, settled: bank <= %4.1f deg,"
+                    " %2d reversals, off <= %5.1f m (%s)\n",bs,cross,BombLead(bs),r.over,r.bank*180.0f/kPi,r.reversals,r.off,ok ? "ok" : "FAIL");
     }
     std::printf("wobble suite: %d cases, %d failed\n",cases,failures);
     return failures ? 1 : 0;

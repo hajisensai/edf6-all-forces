@@ -878,6 +878,14 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
 // over the map (2026-10-10).
 float FerrySpeed(const Kind& k) noexcept { return Clamp(k.minSpeed*kLoiterMin,k.minSpeed,k.cruise); }
 float FerryTurn(const Kind& k) noexcept { return TurnRadiusOf(k,1.0f,FerrySpeed(k)); }
+
+void BombLine(const float* pos,const float* at,const float* dir,float lead,float height,float* want) noexcept {
+    const float rel[3]={pos[0]-at[0],0.0f,pos[2]-at[2]};
+    const float along=Dot(rel,dir)+lead;
+    const float to[3]={at[0]+dir[0]*along-pos[0],0.0f,at[2]+dir[2]*along-pos[2]};
+    Level(pos,to,height,want);
+}
+float BombLead(float speed) noexcept { const float r=airbound::TurnRadius(speed,std::sqrt(kBombG*kBombG-1.0f));return r>ferry::kLeadLeast ? r : ferry::kLeadLeast; }
 float Ferry(Jet& j,const float* pos,float height,float* want) noexcept {
     const Kind& k=KindOf(j);
     float way[3];
