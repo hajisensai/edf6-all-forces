@@ -57,7 +57,8 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
         out[i]={static_cast<std::uint32_t>(result.reason),result.affected};
     }
 }
-void Backend() noexcept {commands.Configure({nullptr,&Send,executor ? &Execute : nullptr});}
+bool Speaks(void*,const char* puid,const unsigned char* requester) noexcept {return SenderIsPlayer(requester,puid);}
+void Backend() noexcept {commands.Configure({nullptr,&Send,executor ? &Execute : nullptr,&Speaks});}
 void Note(wchar_t* note,std::size_t count,const wchar_t* text) noexcept {if(note && count)swprintf_s(note,count,L"%ls",text);}
 // An object's reference for a request (net_object_ref.h): a unit, an NPC, by its NetId (`native`); the focus by whatever
 // it is (a player by its slot).
@@ -108,6 +109,21 @@ unsigned ReadMapCommandWays(const ObjRef& unit,mapcmd::Command* current,float (*
     const unsigned n=ways.n<most ? ways.n : most;
     for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=ways.at[i][c];
     return n;
+}
+bool SendMapPing(const ObjRef& requester,const float* at,unsigned kind) noexcept {
+    SupportNetTick();
+    if(!at || !commands.Ready())return false;
+    command_net::Ping p;p.kind=kind;std::memcpy(p.at,at,12);
+    return PlayerRequesterOf(requester,p.requester) && commands.SendPing(p,GetTickCount64());
+}
+bool TakeMapPing(MapPingHeard* out) noexcept {
+    if(!out)return false;
+    command_net::Ping p;
+    if(!commands.TakePing(&p))return false;
+    MarkIdentities who;const unsigned char none[32]{};
+    out->player=ResolveMarkIdentities(p.requester,none,&who) ? who.player.obj : nullptr;
+    std::memcpy(out->at,p.at,12);out->kind=p.kind;
+    return true;
 }
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {
     if(!out)return false;*out=commands.Result();return out->request!=0;

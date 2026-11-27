@@ -35,9 +35,20 @@ inline constexpr unsigned kMaxFormationUnits=96;
 // formation (2026-10-20, the map's T and its formation menu online: command protocol v7): a squad's formation set by the
 // order's `param` (FormationParam below): a guarding squad's defence cycled or set, the march of the requester's own
 // recruited squads set. No point; the authority reads each squad's state (guarding or marching) itself.
+// The Broken Arrow set (the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」; command protocol v11):
+//  - fastMove (F): a move that does not stop to fight -- no shot on the way (the squads' trigger off: PursuitOf quiet),
+//    a guard of its point once there as a move;
+//  - reverseMove (R): a move the tanks drive in reverse (npcpost.cpp: the tail onto the point, the front kept towards
+//    where it came from); the others take it as a move;
+//  - unloadAt (U + point): a move, then DISMOUNT ALL at the point (the queue's trailing order: Waypoints, Trail);
+//  - holdFire (H): `param` 1 on / 0 off -- the unit aims but fires only once hurt (HoldsFire), a state not a place;
+//  - altitude (V): `param` kAltitudeLow / kAltitudeHigh, the helicopters' and the jets' flight height;
+//  - sprint (Z): the soldiers' dashes without their rest (Wing Diver / Fencer), the jets' afterburner, for kSprintMs;
+//  - smoke (X), decoy (C): a unit's own smoke / decoys where it has them (a jet's flares); no unit fakes one.
 enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw,
-                                  dismountAll, hold, formation };
-inline constexpr Order kLastOrder=Order::formation;
+                                  dismountAll, hold, formation, fastMove, reverseMove, unloadAt, holdFire, altitude, sprint, smoke,
+                                  decoy };
+inline constexpr Order kLastOrder=Order::decoy;
 // The seats a dismount empties, by the seat's role (npcai.cpp SeatPriority: 0 the driver's, 1 an armed seat, 2 a
 // passenger's): DISMOUNT the passengers', DISMOUNT ALL every one.
 inline constexpr int kSeatDriver=0,kSeatGunner=1,kSeatPassenger=2;
@@ -63,18 +74,81 @@ inline bool DismountLeaves(int seatRole,bool all,std::uint32_t param,int cls) no
     return !classes || (cls>=0 && cls<4 && ((classes>>static_cast<unsigned>(cls))&1u));
 }
 // The orders that take the ground point under the pointer (and stand round it in a formation).
-inline bool PointOrder(Order o) noexcept { return o==Order::guard || o==Order::move || o==Order::attackMove; }
+inline bool PointOrder(Order o) noexcept {
+    return o==Order::guard || o==Order::move || o==Order::attackMove || o==Order::fastMove || o==Order::reverseMove ||
+           o==Order::unloadAt;
+}
+// The moves that walk / drive to their point and guard it once there (Arrive).
+inline bool MoveOrder(Order o) noexcept {
+    return o==Order::move || o==Order::attackMove || o==Order::fastMove || o==Order::reverseMove || o==Order::unloadAt;
+}
+// HOLD FIRE: a state of the unit (no place, no move): every kind of unit takes it.
+inline bool StateOrder(Order o) noexcept { return o==Order::holdFire; }
 // The orders that put a unit somewhere to stand: the point orders, and HOLD (its own spot).
 inline bool PlaceOrder(Order o) noexcept { return PointOrder(o) || o==Order::hold; }
 // Whether a vehicle unit (heli, jet, crawler, tank) takes `o`: the point orders, hold, follow and release; the squads take all.
-inline bool VehicleOrder(Order o) noexcept { return o==Order::none || o==Order::follow || PlaceOrder(o); }
-// A vehicle's modules know one point order (their post / anchor): move, attack-move and hold (its own spot) reach it as guard.
-inline Order VehicleCommandOf(Order o) noexcept { return PlaceOrder(o) ? Order::guard : o; }
+inline bool VehicleOrder(Order o) noexcept { return o==Order::none || o==Order::follow || PlaceOrder(o) || StateOrder(o); }
+// A vehicle's modules know one point order (their post / anchor): move, attack-move and hold (its own spot) reach it as
+// guard. `reverses`: the module drives a reverse move as one (npcpost.cpp TankCommand): REVERSE MOVE reaches it as itself.
+inline Order VehicleCommandOf(Order o,bool reverses=false) noexcept {
+    return o==Order::reverseMove && reverses ? o : PlaceOrder(o) ? Order::guard : o;
+}
 // Whether an aircraft unit (heli, jet) takes `o`: a vehicle's orders and focus fire on the marked enemy (the user,
 // 2026-10-09: "飞机没办法指定攻击目标"; jet.cpp / heli.cpp JetCommand / HeliCommand take it as a squad's focus).
-inline bool AirOrder(Order o) noexcept { return VehicleOrder(o) || o==Order::focus; }
+inline bool AirOrder(Order o) noexcept { return VehicleOrder(o) || o==Order::focus || o==Order::altitude; }
+// ALTITUDE's param, and the heights it sets: an aircraft's own height times the share (heli.cpp HeliHeightOf, jet.cpp).
+inline constexpr std::uint32_t kAltitudeLow=0,kAltitudeHigh=1;
+inline constexpr float kHeliHighShare=2.5f,kJetHighShare=2.0f;
+// SPRINT: how long it lasts; the soldiers' dash rest share meanwhile (npcai.cpp WingDash / FencerMove), the jets' speed.
+inline constexpr unsigned long long kSprintMs=12000;
+inline constexpr float kSprintRestShare=0.2f,kAfterburnerSpeed=1.5f;
+// HOLD FIRE (H): a unit holding fire aims as ever and fires only within kReturnFireMs of being hurt (its health down
+// since the frame before: Hurt) -- "fire only when fired upon".
+inline constexpr unsigned long long kReturnFireMs=10000;
+inline bool Hurt(float hpWas,float hpNow) noexcept { return hpWas>0.0f && hpNow<hpWas; }
+inline bool HoldsFire(bool on,unsigned long long sinceHurt) noexcept { return on && sinceHurt>=kReturnFireMs; }
 // at: the point of a point order (on the ground). param: the formation order's (FormationParam), 0 for every other order.
 struct Command { Order order; float at[3]; std::uint32_t param=0; };
+
+// --- The line (RTS: a right drag lays its units along it, facing across it; Broken Arrow's) ---
+// A point order's `param` (command protocol v11): 0 a ring formation round `at` (Formation), else kLineFlag with the
+// line's length (whole metres, 15 bits) and the way its units face (16 bits of a turn, 0 = +z, a quarter = +x).
+inline constexpr std::uint32_t kLineFlag=0x80000000u;
+inline constexpr float kLineLeast=6.0f;        // m between two units on a line at least (a short drag: the line grows)
+inline constexpr float kLineDragLeast=12.0f;   // m: a right drag shorter than this on the ground is a click
+inline std::uint32_t LineParam(float heading,float length) noexcept {
+    float t=heading/6.2831853f;t-=std::floor(t);
+    const std::uint32_t h=static_cast<std::uint32_t>(t*65536.0f+0.5f)&0xFFFFu;
+    const float l=length<1.0f ? 1.0f : length>32767.0f ? 32767.0f : length;
+    return kLineFlag|(static_cast<std::uint32_t>(l+0.5f)<<16)|h;
+}
+inline bool IsLine(std::uint32_t p) noexcept { return (p&kLineFlag)!=0; }
+inline float LineHeading(std::uint32_t p) noexcept { return static_cast<float>(p&0xFFFFu)*(6.2831853f/65536.0f); }
+inline float LineLength(std::uint32_t p) noexcept { return static_cast<float>((p>>16)&0x7FFFu); }
+// A point order's param: a line's (a length) or none.
+inline bool LineParamValid(std::uint32_t p) noexcept { return !p || (IsLine(p) && LineLength(p)>=1.0f); }
+// The line of a right drag from `a` to `b` (ground points), seen along `look` (the camera's level forward, x and z): its
+// middle into `mid`, its param. Its units face across it, away from the eye (the side the drag's normal and `look` share).
+inline std::uint32_t LineOf(const float* a,const float* b,const float* look,float* mid) noexcept {
+    for(int i=0;i<3;++i)mid[i]=(a[i]+b[i])*0.5f;
+    const float dx=b[0]-a[0],dz=b[2]-a[2],len=std::sqrt(dx*dx+dz*dz);
+    float nx=dz,nz=-dx;   // a normal of the drag
+    if(nx*look[0]+nz*look[1]<0.0f){nx=-nx;nz=-nz;}
+    return LineParam(std::atan2(nx,nz),len);
+}
+// The way a line's units face (x, z of a unit vector).
+inline void LineFacing(std::uint32_t p,float* fwd) noexcept { const float h=LineHeading(p);fwd[0]=std::sin(h);fwd[1]=std::cos(h); }
+// Slot `i` of `k` units on the line `param` through `at`: spread evenly along it end to end (at least kLineLeast apart,
+// the line longer then), one alone on its middle.
+inline void LineSlot(int i,int k,const float* at,std::uint32_t param,float* out) noexcept {
+    out[0]=at[0];out[1]=at[1];out[2]=at[2];
+    if(k<=1)return;
+    const float h=LineHeading(param),ax=std::cos(h),az=-std::sin(h);   // along the line: the facing turned a quarter
+    float gap=LineLength(param)/static_cast<float>(k-1);
+    if(gap<kLineLeast)gap=kLineLeast;
+    const float off=(static_cast<float>(i)-static_cast<float>(k-1)*0.5f)*gap;
+    out[0]+=ax*off;out[2]+=az*off;
+}
 
 // --- The formation order's parameter (Order::formation; command protocol v7 carries it in its own word) ---
 // Its low byte: a guarding squad's defence -- 0 left as it is, kFormationCycle the next one (T), 1 + shape set (the menu);
@@ -94,6 +168,15 @@ inline int FormationGuardShape(std::uint32_t p) noexcept {   // the defence set,
 inline int FormationMarchShape(std::uint32_t p) noexcept { const std::uint32_t m=(p>>8)&0xFFu; return m ? static_cast<int>(m)-1 : -1; }
 // A formation order's param says something (a defence or a march) and nothing past its two bytes.
 inline bool FormationParamValid(std::uint32_t p) noexcept { return !(p>>16) && (p&0xFFFFu)!=0 && ((p>>8)&0xFFu)!=kFormationCycle; }
+// Any order's param valid for it (command_protocol.cpp ValidRequest): the formation's, DISMOUNT ALL's, a line's, the two
+// switches' (HOLD FIRE on / off, ALTITUDE low / high); none for the rest.
+inline bool OrderParamValid(Order o,std::uint32_t p) noexcept {
+    if(o==Order::formation)return FormationParamValid(p);
+    if(o==Order::dismountAll)return DismountParamValid(o,p);
+    if(PointOrder(o))return LineParamValid(p);
+    if(o==Order::holdFire || o==Order::altitude)return p<=1u;
+    return p==0;
+}
 
 // --- The squads' moves under an order (npcai.cpp Drive), the player's command over the soldiers' own fight ---
 // The user, 2026-10-09: "一个移动攻击是全消灭再走。一个移动攻击是先走次要消灭" -- the two RTS moves:
@@ -104,8 +187,12 @@ inline bool FormationParamValid(std::uint32_t p) noexcept { return !(p>>16) && (
 //    (AttackMoveHolds), not each soldier on its own target, so it does not string out between those fighting and
 //    those walking on;
 //  - neither: the order's anchor as before (guard holds its point's radius, engage / focus their reach).
-struct Pursuit { bool forced,fightFirst; };
-inline Pursuit PursuitOf(Order o) noexcept { return Pursuit{o==Order::move,o==Order::attackMove}; }
+// quiet (FAST MOVE): forced, and no shot on the way (the trigger off till it is there).
+struct Pursuit { bool forced,fightFirst,quiet; };
+inline Pursuit PursuitOf(Order o) noexcept {
+    return Pursuit{o==Order::move || o==Order::fastMove || o==Order::reverseMove || o==Order::unloadAt,o==Order::attackMove,
+                   o==Order::fastMove};
+}
 // An attack-move's squad holds to fight while any member had a target last frame or this one (`target`: what it looks
 // for round itself, its leash plus its weapons' reach) -- the ground round it is clear when none has. A target none of
 // them can shoot at (behind a wall, out of every weapon's reach) would hold it for ever: so it holds only while it fights,
@@ -121,17 +208,19 @@ inline bool Pursues(Pursuit p,bool holds) noexcept { return p.forced || (p.fight
 // A move / attack-move whose squad has reached its point (its top within `radius`, level) is a guard of that point from
 // then on: the members hold round it and fight what comes, as a guard order does. Others stay as they are.
 inline Order Arrive(Order o,float distance,float radius) noexcept {
-    return (o==Order::move || o==Order::attackMove) && distance<=radius ? Order::guard : o;
+    return MoveOrder(o) && distance<=radius ? Order::guard : o;
 }
-// The right mouse button let go without a drag on the map (RTS, by what is under the pointer): with units selected, an
-// enemy is attacked (focus fire on it), the player's own mark is followed (FOLLOW), else the ground is the move's point;
-// nothing selected or nothing there: none (Order::none with `issue` false). An armed button's targeting is cancelled by it
-// instead (mapcmd.cpp). With Shift the move is queued after the ones before it (Waypoints).
+// The right mouse button let go without a drag on the map (RTS, Broken Arrow's, by what is under the pointer): with units
+// selected, an enemy is attacked (focus fire on it), the player's own mark is followed (FOLLOW: an unrecruited squad is
+// recruited by it, mapcmd.cpp), a friendly vehicle boarded (BOARD), else the ground is the move's point; nothing selected
+// or nothing there: none (Order::none with `issue` false). An armed button's targeting is cancelled by it instead
+// (mapcmd.cpp). With Shift the move is queued after the ones before it (Waypoints).
 struct RightClick { bool issue; Order order; };
-inline RightClick RightClickOrder(int selected,bool enemyUnder,bool pointOk,bool onPlayer=false) noexcept {
+inline RightClick RightClickOrder(int selected,bool enemyUnder,bool pointOk,bool onPlayer=false,bool onVehicle=false) noexcept {
     if(selected<=0)return RightClick{false,Order::none};
     if(enemyUnder)return RightClick{true,Order::focus};
     if(onPlayer)return RightClick{true,Order::follow};
+    if(onVehicle)return RightClick{true,Order::board};
     return RightClick{pointOk,Order::move};
 }
 
@@ -338,7 +427,10 @@ inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float 
 // The keys' presses this frame (edges).
 // guard (G, pad Y) is an attack-move since 2026-10-09 (the user: "看看还有什么指令能砍一砍"): an attack-move turns
 // into a guard of its point once there, so the two buttons were one; the key is kept.
-struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove,dismountAll,withdraw,hold; };
+// The Broken Arrow keys (2026-11-27) after them: F fast move, R reverse move, U unload at a point (unloadNow: U twice,
+// DISMOUNT ALL where it is), H hold fire, V altitude, Z sprint, X smoke, C decoys, B back to base (WITHDRAW).
+struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit,move,attackMove,dismountAll,withdraw,hold,
+               fastMove,reverseMove,unloadAt,unloadNow,holdFire,altitude,sprint,smoke,decoy,back; };
 enum class Refusal : std::uint8_t { none, noUnit, noPoint, online, noMark };
 // What a frame's presses come to: a command to the selection (issue), or why not (why). The cycle (next / prev) has
 // already moved the selection (Cycle).
@@ -348,6 +440,9 @@ struct Step { bool issue; Command cmd; Refusal why; };
 inline bool Wanted(const Press& p,Order* o) noexcept {
     if(p.move)*o=Order::move;
     else if(p.attackMove || p.guard)*o=Order::attackMove;
+    else if(p.fastMove)*o=Order::fastMove;
+    else if(p.reverseMove)*o=Order::reverseMove;
+    else if(p.unloadAt)*o=Order::unloadAt;
     else if(p.hold)*o=Order::hold;
     else if(p.follow)*o=Order::follow;
     else if(p.release)*o=Order::none;
@@ -358,7 +453,13 @@ inline bool Wanted(const Press& p,Order* o) noexcept {
     else if(p.dismount)*o=Order::dismount;
     else if(p.dismiss)*o=Order::dismiss;
     else if(p.recruit)*o=Order::recruit;
-    else if(p.withdraw)*o=Order::withdraw;
+    else if(p.withdraw || p.back)*o=Order::withdraw;
+    else if(p.unloadNow)*o=Order::dismountAll;
+    else if(p.holdFire)*o=Order::holdFire;
+    else if(p.altitude)*o=Order::altitude;
+    else if(p.sprint)*o=Order::sprint;
+    else if(p.smoke)*o=Order::smoke;
+    else if(p.decoy)*o=Order::decoy;
     else return false;
     return true;
 }
@@ -454,6 +555,20 @@ inline int SelectKind(Selection& s,const Mark* m,const char* const* kind,const i
     return k;
 }
 
+// --- Tab: the sub-selection (Broken Arrow's) ---
+// The selection's kinds (its units' kind names folded by SameKind, in the selection's order); Tab steps the active one
+// through them and back to all (-1). The orders go to the active kind's units alone (mapcmd.cpp), the card shows it.
+inline int NextSub(int active,int kinds) noexcept { return kinds<=1 ? -1 : active+1>=kinds ? -1 : active+1; }
+inline int SubKinds(const char* const* kind,int n,const char** out,int most) noexcept {
+    int k=0;
+    for(int i=0;i<n;++i) {
+        bool seen=false;
+        for(int j=0;j<k && !seen;++j)seen=SameKind(out[j],kind[i]);
+        if(!seen && k<most)out[k++]=kind[i];
+    }
+    return k;
+}
+
 // --- Shift-queued waypoints (RTS: Shift + right click, Shift + Z) ---
 // A unit's points after the one it is on its way to: `issued` the order given it last (the Shift's, or the one it was on
 // its way to when the first Shift came), the rest in `next`. Kept where the unit's AI runs, its authority (mapcmd.cpp
@@ -471,6 +586,14 @@ inline constexpr float kSamePoint=5.0f;   // m: a module's order at its point wi
 inline bool SameOrder(const Command& now,const Command& issued) noexcept {
     return PlaceOrder(issued.order) && PointOrder(now.order) && Level(now.at,issued.at)<=kSamePoint;
 }
+// UNLOAD AT's trailing order: once given (`w.issued` it), DISMOUNT ALL is next, before whatever was queued after it (a
+// full queue loses its last).
+inline void Trail(Waypoints& w) noexcept {
+    if(w.issued.order!=Order::unloadAt)return;
+    if(w.n==kWaypointsMost)--w.n;
+    for(int i=w.n;i>0;--i)w.next[i]=w.next[i-1];
+    w.next[0]=Command{Order::dismountAll,{w.issued.at[0],w.issued.at[1],w.issued.at[2]}};++w.n;
+}
 // Shift with `c` for a unit whose order now is `now` at `pos`: true when `c` is to be given now (nothing queued and the
 // unit not on its way anywhere); else it is queued (false; a full queue keeps its first kWaypointsMost).
 inline bool Enqueue(Waypoints& w,const Command& now,const float* pos,float reach,const Command& c) noexcept {
@@ -482,21 +605,28 @@ inline bool Enqueue(Waypoints& w,const Command& now,const float* pos,float reach
         w=Waypoints{};w.active=true;w.issued=now;w.next[w.n++]=c;
         return false;
     }
-    w=Waypoints{};w.active=true;w.issued=c;
+    w=Waypoints{};w.active=true;w.issued=c;Trail(w);
     return true;
 }
-// A plain order (no Shift): the queue gone. Nothing is registered for it: a later Shift finds the unit on its way by its
-// order now (Enqueue), so no unit sits in the table (and is looked up every frame) for an order with nothing after it.
-inline void Replace(Waypoints& w,const Command&) noexcept { w=Waypoints{}; }
+// A plain order (no Shift): the queue gone. Nothing is registered for it (but UNLOAD AT's trailing DISMOUNT ALL): a later
+// Shift finds the unit on its way by its order now (Enqueue), so no unit sits in the table (and is looked up every frame)
+// for an order with nothing after it.
+inline void Replace(Waypoints& w,const Command& c) noexcept {
+    w=Waypoints{};
+    if(c.order==Order::unloadAt){w.active=true;w.issued=c;Trail(w);}
+}
 enum class QueueStep : std::uint8_t { idle, wait, give, done, dropped };
 inline QueueStep Advance(Waypoints& w,const Command& now,const float* pos,float reach,Command* out) noexcept {
     if(!w.active)return QueueStep::idle;
-    if(!SameOrder(now,w.issued)){w=Waypoints{};return QueueStep::dropped;}
-    if(Level(pos,w.issued.at)>reach)return QueueStep::wait;
+    // An order given with no place (UNLOAD AT's DISMOUNT ALL) is done as it is given: the next at once.
+    if(PlaceOrder(w.issued.order)) {
+        if(!SameOrder(now,w.issued)){w=Waypoints{};return QueueStep::dropped;}
+        if(Level(pos,w.issued.at)>reach)return QueueStep::wait;
+    }
     if(!w.n){w=Waypoints{};return QueueStep::done;}
     *out=w.next[0];
     for(int i=1;i<w.n;++i)w.next[i-1]=w.next[i];
-    --w.n;w.issued=*out;
+    --w.n;w.issued=*out;Trail(w);
     return QueueStep::give;
 }
 
