@@ -587,13 +587,14 @@ struct Engine {
     // Debug：登记时游戏线程现算的一份（A）、提交前再现算的一份（B）都要和工作线程的（W）逐位相同；
     // 每个 part 的 T 还要和原版 0x6E9130 相同。
     void CheckShadow(Task& t) noexcept {
+        if(t.shadow->status==kOverflow)return;   // 影子结果区不够：这次不比
         ++stats.shadowed;
         const char* what=nullptr;
         if(!SameResult(t.r,*t.shadow,&what)){++stats.mismatches;if(onMismatch)onMismatch(t.c,what,"registration");return;}
         auto* const now=static_cast<Result*>(shadowArena.Take(sizeof(Result)));
         if(now) {
             now->status=Guarded(t.c,*now,shadowArena);
-            if(!SameResult(t.r,*now,&what)){++stats.mismatches;if(onMismatch)onMismatch(t.c,what,"commit");return;}
+            if(now->status!=kOverflow && !SameResult(t.r,*now,&what)){++stats.mismatches;if(onMismatch)onMismatch(t.c,what,"commit");return;}
         }
         for(unsigned i=0;i<t.r.actionCount;++i) {
             const Action& a=t.r.actions[i];
