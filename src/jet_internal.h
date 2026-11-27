@@ -842,7 +842,8 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
 void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms,
                  const sortie::RunSpec& run={},const spread::Place& place={}) noexcept;
 // Its way out after its pass (Away): its lane's break (flight_spread.h BreakAway).
-void SortieAway(const Jet& j,float* away) noexcept;
+// Inline: the flight code (jet_flight.cpp) calls it, and it is all the lane's own geometry (no sortie state machine).
+inline void SortieAway(const Jet& j,float* away) noexcept { spread::BreakAway(j.sortie.line,j.sortie.place,away); }
 // Its guidance this frame (Guide, before its kind's): true when it set `want` / `speed` (and the fire gates); false: its
 // kind's own (the gunship's circle) or done.
 bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,

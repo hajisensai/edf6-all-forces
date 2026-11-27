@@ -187,7 +187,6 @@ void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const
         kPassNames[static_cast<int>(pass)],mark[0],mark[1],mark[2],place.slot,place.count,s.line.at[0],s.line.at[2]);
 }
 
-void SortieAway(const Jet& j,float* away) noexcept { spread::BreakAway(j.sortie.line,j.sortie.place,away); }
 
 bool SortieStruck(const Jet& j,const void* object) noexcept {
     for(int i=0;i<j.sortie.struckCount;++i)if(j.sortie.struck[i]==object)return true;
