@@ -36,6 +36,7 @@ _PROTOTYPES = {
     'edf6_simd_tree': (ctypes.c_int, (ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p)),
     'edf6_dxt1_level': (ctypes.c_size_t, (ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p)),
     'edf6_bc7_level': (ctypes.c_size_t, (ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int)),
+    'edf6_png_unfilter': (ctypes.c_int, (ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p)),
 }
 
 
