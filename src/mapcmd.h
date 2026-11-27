@@ -9,6 +9,7 @@
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "mapcmd_cue.h"
 #include "npc_command.h"
 #include "range_place.h"
 #include "support_call.h"
@@ -171,7 +172,11 @@ constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 // the one it is on its way to (`way`, mapcmd_logic.h Waypoints).
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false;
     std::uint16_t groups=0; std::uint8_t ways=0; float way[mapcmd::kWaypointsMost][3]{};
-    std::uint64_t of=0; };   // `of`: the unit (its top's identity; the list is sorted by address, so not its index)
+    std::uint64_t of=0;      // `of`: the unit (its top's identity; the list is sorted by address, so not its index)
+    // An aircraft's altitude (ALTITUDE, V): `high` 1 high / 0 low / -1 unknown (another machine's: its authority alone
+    // knows); `agl` its height over the ground below, m (-1 none found); `altSince` ms since V switched it (mapcue::kSwitchMs
+    // and over: not lately).
+    std::int8_t high=-1; float agl=-1.0f; std::uint32_t altSince=0xFFFFFFFFu; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=64;
 constexpr int kMapSupportHits=kMapSupports*2;   // its rows and chips as hit (MapCommandSupportButtons)
@@ -245,6 +250,7 @@ struct MapCommandReadout {
     float lineFrom[3]{},lineTo[3]{};
     // The selection's switches as the card lights them: HOLD FIRE on, flying high (any of the active units), the paced march.
     bool holdFireOn=false,highOn=false,paced=false;
+    mapcue::Altitudes altitudes{};   // the active selection's aircraft by altitude (the ALTITUDE button's word and tip)
     // The pings (F1-F4; command protocol v11 Kind::ping): this machine's and the room's, each shown kPingMs.
     struct Ping { float at[3]; unsigned kind; std::uint64_t at_ms; bool mine; };
     static constexpr int kPings=8;

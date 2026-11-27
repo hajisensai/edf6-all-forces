@@ -80,6 +80,8 @@ void NextStep() noexcept { stepfresh::See(stepfresh::Now()+1); }
 bool mapEasing=false;   // the map's camera easing back to the player: its view, no readout (map.cpp Camera)
 MapReadout sceneMap{};
 bool hasMapPayload=false;PayloadReadout sceneMapPayload{};
+// The map scene's aircraft picked and just given ALTITUDE (MapScene: their tags, the stalks, the button's state, the note).
+bool sceneAirPick=false;
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
@@ -770,6 +772,15 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerHeli;
     cmdUnit(jet,true,"fighter",Order::follow,nullptr,false);
     sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerJet;
+    {   // Their altitude (mapcmd_cue.h): the heli low 80 m over the ground (online: another machine's, unknown), the jet high;
+        // picked, the jet just switched (its tag blinking) and both selected.
+        CmdMark& h=sceneCmd.unit[0];CmdMark& j=sceneCmd.unit[1];
+        h.high=online ? -1 : 0;h.agl=80.0f;j.high=1;j.agl=300.0f;
+        if(sceneAirPick) {
+            h.selected=j.selected=true;sceneCmd.selected+=2;j.altSince=0;
+            sceneCmd.altitudes={1,online ? 0 : 1,online ? 1 : 0};sceneCmd.highOn=true;
+        }
+    }
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
     sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
@@ -872,6 +883,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.squadTally=SquadTally{};sceneCmd.squadTally.total=sceneCmd.squads;
     for(int i=0;i<sceneCmd.squads;++i)sceneCmd.squadTally.scripted+=sceneCmd.squad[i].rank==3;
     sceneCmd.noteFresh=true;
+    if(sceneAirPick)std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdAltitudeResult),Tr(Tx::altHigh),1,L"");
     sceneCmd.placeOn=place>0;sceneCmd.placeOpen=place>=2;sceneCmd.placeOnline=place==3;
     sceneCmd.placeCategory=static_cast<int>(debugspawn::Category::enemy41);sceneCmd.placePick=14;
     sceneCmd.placeArmed=place>=2 && !pad ? debugspawn::RowOf(debugspawn::Category::enemy41,14) : -1;
@@ -2790,6 +2802,11 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
     MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
+    // ALTITUDE's feedback (V; the user, 2026-11-27: 「按v上下高度一点反馈没有」): the aircraft picked, one just switched high.
+    sceneAirPick=true;
+    MapScene(dir,L"map_air_altitude",700.0f,60.0f,20.0f,false);
+    MapScene(dir,L"map_air_altitude_online",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,true);
+    sceneAirPick=false;
     // The test range's 「摆放」 panel (range_place.h): shut, open (mouse, a pad, a narrow screen, the payload panel up),
     // online.
     MapScene(dir,L"map_place_shut",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,1);

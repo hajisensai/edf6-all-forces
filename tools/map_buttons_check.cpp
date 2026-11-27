@@ -4,6 +4,7 @@
 // a click on a button finds it and only it, a click in the gap between two finds none; no room for a row: fewer rows.
 //   cmake --build build --target map_buttons_check && build\map_buttons_check.exe      (exit code 1 on a failure)
 #include "../src/map_buttons.h"
+#include "../src/mapcmd_cue.h"
 #include <cmath>
 #include <cstdio>
 #include <cwchar>
@@ -246,8 +247,26 @@ void Compose() {
         }
     }
 }
+// The order cues and the selection's altitude (mapcmd_cue.h): a refused order the low cue whatever it was, ALTITUDE up /
+// down by its way, any other the short one; the button's state from the counts, another machine's alone unknown; V up
+// unless every one this machine knows is high; a switched tag blinks, then stays lit.
+void Cues() {
+    using namespace mapcue;
+    Check(ForOrder(false,false,0)==Cue::refuse && ForOrder(true,true,0)==Cue::refuse,"none took it: refused");
+    Check(ForOrder(true,true,2)==Cue::up && ForOrder(true,false,1)==Cue::down,"altitude up / down");
+    Check(ForOrder(false,true,3)==Cue::ack,"another order: the short cue");
+    Check(StateOf({})==AltState::none,"no aircraft: none");
+    Check(StateOf({2,0,0})==AltState::high && StateOf({0,1,0})==AltState::low,"all high / all low");
+    Check(StateOf({1,1,0})==AltState::mixed && StateOf({1,1,3})==AltState::mixed,"mixed");
+    Check(StateOf({0,0,2})==AltState::unknown && StateOf({1,0,2})==AltState::high,"another machine's alone: unknown");
+    Check(VGoesHigh({0,1,0}) && VGoesHigh({1,1,0}) && !VGoesHigh({2,0,0}),"V: up unless all high");
+    Check(!VGoesHigh({1,0,4}),"V: another machine's (not given it) do not keep it up");
+    Check(VGoesHigh({0,0,2}),"V: none known: up");
+    Check(TagLit(0) && !TagLit(kBlinkMs) && TagLit(2*kBlinkMs),"a switched tag blinks");
+    Check(TagLit(kSwitchMs) && TagLit(0xFFFFFFFFu),"then stays lit");
+}
 int main() {
-    Layouts();Card();Support();Menu();Compose();
+    Layouts();Card();Support();Menu();Compose();Cues();
     std::printf(failures ? "map_buttons_check: %d of %d FAILED\n" : "map_buttons_check: all %d ok\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

@@ -439,14 +439,15 @@ const wchar_t* const kClipName[kClipCount]={L"turret",L"turret_stop",L"gun_near"
                                             L"gun_medium_near",L"gun_medium_far",L"howitzer_near",L"howitzer_far",L"gun_heavy_near",L"gun_heavy_far",
                                             L"railgun_shot",L"railgun_far",L"railgun_charge",L"railgun_ready",L"grenade_shot",L"rocket_rail_launch",
                                             L"rocket_rail_load",L"case_medium",L"case_stub",L"case_grenade",L"reload_breech_open",L"reload_shell_ram",
-                                            L"reload_charge",L"reload_primer",L"mark_own",L"mark_team",L"mark_off",L"sazabi_shield_block"};
+                                            L"reload_charge",L"reload_primer",L"mark_own",L"mark_team",L"mark_off",L"sazabi_shield_block",
+                                            L"map_ack",L"map_up",L"map_down",L"map_refuse"};
 constexpr bool kClipLoops[kClipCount]={true,false,false,false,false,false,false,true,true,false,false,true,false,false,false,false,false,false,false,
                                        false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,
-                                       false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
+                                       false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
 // Peak of each clip as made, of full scale: the loops a little under (several play at once), the gun's report at the top.
 constexpr float kClipPeak[kClipCount]={0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.85f,0.85f,0.8f,0.95f,0.6f,0.8f,0.9f,0.95f,0.9f,0.8f,0.8f,0.8f,0.95f,
                                        0.98f,0.8f,0.85f,0.8f,0.95f,0.98f,0.9f,0.8f,0.7f,0.7f,0.98f,0.95f,0.98f,0.95f,0.98f,0.95f,0.95f,0.9f,0.75f,
-                                       0.7f,0.9f,0.9f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f};
+                                       0.7f,0.9f,0.9f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f,0.6f,0.6f,0.6f,0.6f};
 // The ultimate's (jetaudio.h UltClip): <dll name>_ult_<name>.wav, the player's recordings only.
 const wchar_t* const kUltClipName[kUltClipCount]={L"charge",L"circle",L"thunder",L"gather",L"beam",L"blast",L"shock"};
 constexpr int kLoops=256,kShots=160;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets, a cannon's
@@ -541,6 +542,10 @@ std::vector<float> MadeClip(int c) {
     case kClipMarkTeam: return s::MarkTeam();
     case kClipMarkOff: return s::MarkOff();
     case kClipSzShieldBlock: return s::ShieldBlock();
+    case kClipCmdAck: return s::CmdAck();
+    case kClipCmdUp: return s::CmdUp();
+    case kClipCmdDown: return s::CmdDown();
+    case kClipCmdRefuse: return s::CmdRefuse();
     default: return s::MissileLaunch();
     }
 }

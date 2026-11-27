@@ -58,6 +58,8 @@
 #include "npc_mark.h"
 #include "support_call.h"
 #include "support_aircraft.h"
+#include "jetaudio.h"
+#include "sound.h"
 #include "support_points.h"
 #include "support_warning.h"
 #include "barrage_plan.h"
@@ -113,6 +115,9 @@ struct Game {
     float bx,by,moved;
     wchar_t note[80];
     ULONGLONG noteAt;
+    // The last ALTITUDE given (the user, 2026-11-27: 「按v上下高度一点反馈没有」): the aircraft it switched (their tags blink
+    // mapcue::kSwitchMs), when.
+    mapcmd::UnitKey altSwitched[kCmdUnits];int altSwitchedN;ULONGLONG altSwitchedAt;
     int button;                 // the button a click let go on this frame (mapbtn::Id), -1 none
     // What the next left click on the ground is (one at a time: arming one disarms the other): a point order's point
     // (its button), a support call's point (its bar's row or chip); `armedClick` that click this frame.
@@ -517,6 +522,32 @@ int ActiveCount(const Game& g) noexcept {
     int n=0;
     for(int i=0;i<g.count;++i)n+=Active(g,g.list[i]) ? 1 : 0;
     return n;
+}
+// The active selection's aircraft by altitude: this machine's by their `high` (heli.cpp / jet.cpp set it as ALTITUDE is
+// given), another machine's unknown (its authority keeps it; ALTITUDE skips them: notAuthority).
+mapcue::Altitudes ActiveAltitudes(const Game& g) noexcept {
+    mapcue::Altitudes a;
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(!Active(g,e) || !Takes(e,Order::altitude))continue;
+        if(!IsOnlineAuthority(e.u.v))++a.unknown;
+        else if(e.u.high)++a.high;
+        else ++a.low;
+    }
+    return a;
+}
+// An order's cue (mapcmd_cue.h), heard from nowhere like the Q mark's (qmark.cpp PlayCues), at MapCueVolume.
+void PlayCue(mapcue::Cue cue) noexcept {
+    const float v=Cfg().mapCueVolume;
+    if(cue==mapcue::Cue::none || !(v>0.0f) || !Cfg().enabled)return;
+    const int clip=cue==mapcue::Cue::up ? audio::kClipCmdUp : cue==mapcue::Cue::down ? audio::kClipCmdDown :
+                   cue==mapcue::Cue::refuse ? audio::kClipCmdRefuse : audio::kClipCmdAck;
+    __try {
+        if(!audio::ClipsReady())return;   // made on their own thread from the first call: the first cue may be missed
+        audio::Beat(GameEffectVolume());
+        const audio::Heard h{1.41421356f*v,0.0f,1.0f,0.0f,1.0f,audio::AirCutoff(0.0f),false};
+        audio::PlayOnce(clip,h);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 // Whether any active unit takes `o` (a key for an order none of them has does nothing: its note says so).
 bool AnyTakes(const Game& g,Order o) noexcept {
@@ -1464,8 +1495,23 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     if(InSession())for(int i=0;i<g.count;++i)
         if(!queues[i] && !IsOnlineAuthority(g.list[i].u.v))
             hostWayCount[i]=ReadMapCommandWays(g.list[i].id,&hostNow[i],hostWays[i],mapcmd::kWaypointsMost);
+    // The aircraft's altitude (the map's tags): this machine's high / low and their height over the ground below.
+    const mapcue::Altitudes altitudes=ActiveAltitudes(g);
+    std::int8_t high[kCmdUnits];float agl[kCmdUnits];std::uint32_t altSince[kCmdUnits];
+    const ULONGLONG nowMs=GetTickCount64();
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        high[i]=-1;agl[i]=-1.0f;altSince[i]=0xFFFFFFFFu;
+        if(e.owner!=Owner::heli && e.owner!=Owner::jet)continue;
+        if(IsOnlineAuthority(e.u.v))high[i]=e.u.high ? 1 : 0;
+        float ground=0.0f;
+        if(MapGroundNear(e.u.pos[0],e.u.pos[2],e.u.pos[1],&ground) && std::isfinite(ground))agl[i]=(std::max)(0.0f,e.u.pos[1]-ground);
+        if(g.altSwitchedAt && nowMs-g.altSwitchedAt<mapcue::kSwitchMs)
+            for(int k=0;k<g.altSwitchedN;++k)if(mapcmd::SameKey(g.altSwitched[k],Key(e.id)))altSince[i]=static_cast<std::uint32_t>(nowMs-g.altSwitchedAt);
+    }
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
+    r.altitudes=altitudes;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
     r.allowedOrders=0;r.selectedSquads=0;
     r.holdFireOn=r.highOn=false;
@@ -1492,6 +1538,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
         m.of=reinterpret_cast<std::uintptr_t>(e.id.obj);
         m.groups=groups[i];m.ways=0;
+        m.high=high[i];m.agl=agl[i];m.altSince=altSince[i];
         if(const UnitQueue* q=queues[i])
             for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
         else if(hostWayCount[i]) {   // another machine's: its current order from its host (this machine lists it with none)
@@ -1723,7 +1770,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // Broken Arrow's keys (map_keys.h). Q F R U arm a point order (the next left click its point; again: not), U twice
     // unloads where they are; H V switch (the param from the active units' state); Z X C B at once. A key for an order
     // none of the active units has does nothing but say so.
-    const auto unavailable=[&](Order o){Note(g,hudtext::Tr(hudtext::Tx::cmdUnavailable),OrderText(o));};
+    const auto unavailable=[&](Order o){Note(g,hudtext::Tr(hudtext::Tx::cmdUnavailable),OrderText(o));PlayCue(mapcue::Cue::refuse);};
     const auto armKey=[&](mapkeys::Key key,Order o) {
         if(!edge(key))return;
         if(g.armedOrder && g.armed==o){Arm(g,false,Order::none,-1);Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdArmCancelled));}
@@ -1746,10 +1793,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && !g.list[i].u.holdFire)holdParam=1;   // any not holding: all hold
     }
     if(now1(mapkeys::altitude,Order::altitude)) {
-        p.altitude=true;altitudeParam=mapcmd::kAltitudeHigh;
-        bool low=false;
-        for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],Order::altitude) && !g.list[i].u.high)low=true;
-        if(!low)altitudeParam=mapcmd::kAltitudeLow;   // all high already: down
+        // Up unless every one this machine flies is high already (another machine's are not given it: notAuthority).
+        p.altitude=true;altitudeParam=mapcue::VGoesHigh(ActiveAltitudes(g)) ? mapcmd::kAltitudeHigh : mapcmd::kAltitudeLow;
     }
     p.sprint=now1(mapkeys::sprint,Order::sprint);
     p.smoke=now1(mapkeys::smoke,Order::smoke);
@@ -1837,8 +1882,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The Broken Arrow orders' buttons: the switches as their keys (the param from the active units), the rest at once.
     if(clicked(Id::holdFire)){p.holdFire=true;for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && !g.list[i].u.holdFire)holdParam=1;}
     if(clicked(Id::altitude)) {
-        p.altitude=true;altitudeParam=mapcmd::kAltitudeLow;
-        for(int i=0;i<g.count;++i)if(Active(g,g.list[i]) && Takes(g.list[i],Order::altitude) && !g.list[i].u.high)altitudeParam=mapcmd::kAltitudeHigh;
+        p.altitude=true;altitudeParam=mapcue::VGoesHigh(ActiveAltitudes(g)) ? mapcmd::kAltitudeHigh : mapcmd::kAltitudeLow;
     }
     if(clicked(Id::sprint)){if(AnyTakes(g,Order::sprint))p.sprint=true;else unavailable(Order::sprint);}
     if(clicked(Id::smoke)){if(AnyTakes(g,Order::smoke))p.smoke=true;else unavailable(Order::smoke);}
@@ -1954,9 +1998,16 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     else if(s.why==mapcmd::Refusal::noUnit)Note(g,L"%ls",Tr(Tx::cmdNoUnit));
     else if(s.why==mapcmd::Refusal::noPoint)Note(g,L"%ls",Tr(Tx::cmdNoGround));
     else if(s.why==mapcmd::Refusal::noMark)Note(g,L"%ls",Tr(Tx::cmdNoMark));
+    if(s.why!=mapcmd::Refusal::none)PlayCue(mapcue::Cue::refuse);
     if(s.issue) {
         int skipped=0;
         const bool queued=queue && mapcmd::PointOrder(s.cmd.order);
+        const bool altitude=s.cmd.order==Order::altitude,altitudeHigh=altitude && s.cmd.param==mapcmd::kAltitudeHigh;
+        mapcmd::UnitKey switching[kCmdUnits];int switchingN=0;   // the ones ALTITUDE reaches (this machine's aircraft)
+        if(altitude)for(int i=0;i<g.count;++i) {
+            const Entry& e=g.list[i];
+            if(Active(g,e) && Takes(e,Order::altitude) && IsOnlineAuthority(e.u.v))switching[switchingN++]=Key(e.id);
+        }
         const int given=Dispatch(g,s.cmd,&skipped,{queued,g.marchPace==1});
         wchar_t tail[40]{};
         if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
@@ -1966,7 +2017,13 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         else if(s.cmd.order==Order::board)Note(g,Tr(Tx::cmdBoardAssigned),g.affected,tail);
         else if(queued)Note(g,Tr(Tx::cmdQueued),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else if(mapcmd::PointOrder(s.cmd.order))Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
+        else if(altitude && given)Note(g,Tr(Tx::cmdAltitudeResult),Tr(altitudeHigh ? Tx::altHigh : Tx::altLow),given,tail);
         else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);
+        if(altitude && given) {
+            std::memcpy(g.altSwitched,switching,sizeof(switching[0])*static_cast<std::size_t>(switchingN));
+            g.altSwitchedN=switchingN;g.altSwitchedAt=GetTickCount64();
+        }
+        PlayCue(mapcue::ForOrder(altitude,altitudeHigh,given));
         Log("MAPCMD %s%s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it; not: %d script, %d riding, %d cannot take it, "
             "%d another machine's, %d refused (%s)",OrderName(s.cmd.order),queued ? " (queued)" : "",s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],active,given,g.count,
             g.skipScript,g.skipRiding,g.skipCannot,g.skipRemote,g.skipFailed,ReasonName(g.failure));

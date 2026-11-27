@@ -469,6 +469,18 @@ HUDTEXT(cmdHoverEnemy,L"RIGHT-CLICK: FOCUS FIRE",L"右键：集火",L"右鍵：�
 HUDTEXT(cmdCannot,L", %d CANNOT",L"，%d 个无法执行",L"，%d 個無法執行",L"、%d ユニットは実行不可")
 HUDTEXT(cmdGuardResult,L"%ls (%.0f, %.0f): %d UNIT(S)%ls",L"%ls（%.0f, %.0f）：%d 个单位%ls",L"%ls（%.0f, %.0f）：%d 個單位%ls",L"%ls（%.0f, %.0f）：%d ユニット%ls")
 HUDTEXT(cmdOrderResult,L"%ls: %d UNIT(S)%ls",L"%ls：%d 个单位%ls",L"%ls：%d 個單位%ls",L"%ls：%d ユニット%ls")
+// ALTITUDE's feedback (the user, 2026-11-27: 「按v上下高度一点反馈没有」; mapcmd_cue.h): its result, an aircraft's tag on
+// the map (high / low, another machine's unknown), the button's word by the selection's state and its tooltip.
+HUDTEXT(cmdAltitudeResult,L"ALTITUDE -> %ls: %d AIRCRAFT%ls",L"高度 → %ls：%d 架%ls",L"高度 → %ls：%d 架%ls",L"高度 → %ls：%d 機%ls")
+HUDTEXT(altHigh,L"HIGH",L"高空",L"高空",L"高空")
+HUDTEXT(altLow,L"LOW",L"低空",L"低空",L"低空")
+HUDTEXT(altUnknown,L"ALT ?",L"高度 ?",L"高度 ?",L"高度 ?")
+HUDTEXT(altBtnHigh,L"ALT: HIGH",L"高度：高",L"高度：高",L"高度：高")
+HUDTEXT(altBtnLow,L"ALT: LOW",L"高度：低",L"高度：低",L"高度：低")
+HUDTEXT(altBtnMixed,L"ALT: MIXED",L"高度：混合",L"高度：混合",L"高度：混在")
+HUDTEXT(altBtnUnknown,L"ALT: ?",L"高度：?",L"高度：?",L"高度：?")
+HUDTEXT(tipAltitude,L"%ls   key %ls; high %d, low %d, another machine's %d",L"%ls   按键 %ls；高空 %d、低空 %d、他人的 %d",
+        L"%ls   按鍵 %ls；高空 %d、低空 %d、他人的 %d",L"%ls   キー %ls；高空 %d、低空 %d、他人の %d")
 HUDTEXT(squadTitle,L"SQUADS",L"小队",L"小隊",L"分隊")
 HUDTEXT(squadTitleKeys,L"SQUADS (click pick, Shift add; [n] group)",L"小队（点击选择，Shift 追加；[n] 编队号）",L"小隊（點擊選擇，Shift 追加；[n] 編隊號）",L"分隊（クリックで選択、Shift 追加、[n] グループ）")
 // The map's command buttons (hud.cpp MapButtons; map_buttons.h).

@@ -278,6 +278,7 @@
     int mapButton=32;               // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
     bool mapMarchPace=false;        // ...a move / attack-move given together keeps to the slowest unit's pace (the card's pace button toggles; march_pace.h)
+    float mapCueVolume=0.8f;        // the M map's order cues (given / altitude up / down / refused; mapcmd_cue.h), 0: silent
     int mapAttackMoveKey=0x51;      // the map's order keys (map_keys.h, Broken Arrow's set; a virtual-key code, 0 none)
     int mapStopKey=0x45;            // ...MapStopKey
     int mapReverseMoveKey=0x52;     // ...MapReverseMoveKey
@@ -824,6 +825,7 @@
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
     n.mapMarchPace=ReadBool(L"MapMarchPace",n.mapMarchPace);
+    n.mapCueVolume=ReadFloat(L"MapCueVolume",n.mapCueVolume);
     n.mapAttackMoveKey=ReadInt(L"MapAttackMoveKey",static_cast<DWORD>(n.mapAttackMoveKey));
     n.mapStopKey=ReadInt(L"MapStopKey",static_cast<DWORD>(n.mapStopKey));
     n.mapReverseMoveKey=ReadInt(L"MapReverseMoveKey",static_cast<DWORD>(n.mapReverseMoveKey));
@@ -1230,6 +1232,7 @@
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
+    Fix("MapCueVolume",n.mapCueVolume,0.0f,2.0f);
     n.mapAttackMoveKey=static_cast<int>(FixInt("MapAttackMoveKey",n.mapAttackMoveKey,0,254));
     n.mapStopKey=static_cast<int>(FixInt("MapStopKey",n.mapStopKey,0,254));
     n.mapReverseMoveKey=static_cast<int>(FixInt("MapReverseMoveKey",n.mapReverseMoveKey,0,254));

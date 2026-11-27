@@ -809,8 +809,49 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
     MapCommandFormationButtons(rects,entries,placed);
 }
 
+// An aircraft's altitude by its mark (ALTITUDE, V; the user, 2026-11-27: 「按v上下高度一点反馈没有」): a triangle up (high)
+// or down (low) and the word with its height over the ground below, another machine's 「高度 ?」 (its authority alone knows);
+// just switched (mapcue::kSwitchMs) it blinks white. Selected: a dashed stalk from it down to the ground under it, a tick
+// there (Broken Arrow's altitude line), so the height reads on the map's slant view too.
+void MapAltitudeTag(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CmdMark& u,
+                    const float* body,float ux,float uy,Line* lines,int* at) noexcept {
+    const bool fresh=u.altSince<mapcue::kSwitchMs;
+    const float* rgba=u.high<0 ? kMapLocked : fresh ? (mapcue::TagLit(u.altSince) ? kWhite : kMapOrderDim) : u.high ? kMapOrder : kAmber;
+    const float tx=ux+19.0f*s,ty=uy+9.0f*s,half=4.5f*s;
+    if(u.high>0)Tri(drawer,ctx,tx,ty+4.0f*s,tx,ty-4.0f*s,half,rgba);
+    else if(u.high==0)Tri(drawer,ctx,tx,ty-4.0f*s,tx,ty+4.0f*s,half,rgba);
+    wchar_t word[40];
+    if(u.high<0)_snwprintf_s(word,_countof(word),_TRUNCATE,L"%ls",Tr(Tx::altUnknown));
+    else if(u.agl>=0.0f)_snwprintf_s(word,_countof(word),_TRUNCATE,L"%ls %.0fm",Tr(u.high ? Tx::altHigh : Tx::altLow),u.agl);
+    else _snwprintf_s(word,_countof(word),_TRUNCATE,L"%ls",Tr(u.high ? Tx::altHigh : Tx::altLow));
+    WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,u.of^0xA17u),u.high<0 ? 15.0f*s : 27.0f*s,9.0f*s,0,
+               kLineScale*0.65f,rgba,L"%ls",word);
+    if(!u.selected || !(u.agl>0.5f))return;
+    const float ground[3]={u.pos[0],u.pos[1]-u.agl,u.pos[2]};
+    float gx,gy,gd;
+    if(!Project(vp,ground,width,height,&gx,&gy,&gd))return;
+    const float dx=gx-ux,dy=gy-uy,length=std::sqrt(dx*dx+dy*dy);
+    if(!(length>14.0f*s))return;
+    const float dash=6.0f*s;
+    for(float d=13.0f*s;d<length;d+=2.0f*dash) {   // from the mark's ring down
+        const float e=std::fmin(d+dash,length);
+        Seg(drawer,ctx,ux+dx*d/length,uy+dy*d/length,ux+dx*e/length,uy+dy*e/length,1.5f*s,rgba);
+    }
+    Seg(drawer,ctx,gx-6.0f*s,gy,gx+6.0f*s,gy,2.0f*s,rgba);
+}
+
 // The command card as drawn this frame (MapButtons), for its formation menu (MapCommands draws it over every panel).
 float mapCardRects[mapbtn::kCount*4]{};int mapCardIds[mapbtn::kCount]{};int mapCardCount=0;
+// The ALTITUDE button's word: the active selection's altitude (mapcue::StateOf), the order's name with none flying.
+Tx AltitudeWord(const mapcue::Altitudes& a) noexcept {
+    switch(mapcue::StateOf(a)) {
+    case mapcue::AltState::high: return Tx::altBtnHigh;
+    case mapcue::AltState::low: return Tx::altBtnLow;
+    case mapcue::AltState::mixed: return Tx::altBtnMixed;
+    case mapcue::AltState::unknown: return Tx::altBtnUnknown;
+    default: return Tx::orderAltitude;
+    }
+}
 int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float s,bool pad,const MapCommandReadout& c,Line* lines,
                int* at) noexcept {
     using mapbtn::Id;
@@ -842,7 +883,7 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     for(const Id b:mapbtn::kCardOrder) {
         const int i=static_cast<int>(b);
         if(!mapbtn::Shown(b,orders,tools))continue;
-        word[shown]=b==Id::sweep && c.sweepOn ? Tr(Tx::btnSweepStop) : Tr(kWord[i]);
+        word[shown]=b==Id::sweep && c.sweepOn ? Tr(Tx::btnSweepStop) : b==Id::altitude ? Tr(AltitudeWord(c.altitudes)) : Tr(kWord[i]);
         Line probe{};Format(probe,L"%ls",word[shown]);probe.scale=scale;
         if(text)MeasureAll(*text,&probe,1);
         const float textW=text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s;
@@ -875,6 +916,8 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         else if(b==Id::health)_snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
         else _snwprintf_s(full,_countof(full),_TRUNCATE,L"%ls",word[k]);
         if(b==Id::move)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipRightClick),full);
+        else if(b==Id::altitude)MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipAltitude),Tr(Tx::orderAltitude),kKey[shownIds[k]],
+                                          c.altitudes.high,c.altitudes.low,c.altitudes.unknown);
         else if(mapbtn::Arms(b))MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipArms),full,kKey[shownIds[k]]);
         else MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::tipKey),full,kKey[shownIds[k]]);
         rects[placed*4]=q.x0;rects[placed*4+1]=q.y0;rects[placed*4+2]=q.x1;rects[placed*4+3]=q.y1;ids[placed++]=shownIds[k];
@@ -1697,6 +1740,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             wchar_t digits[16];MapGroupDigits(u.groups,digits,_countof(digits));
             WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,u.of),15.0f*s,-15.0f*s,0,kLineScale*0.55f,u.selected ? kWhite : kMapOrder,L"%ls",digits);
         }
+        if(u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet)MapAltitudeTag(drawer,ctx,text,vp,width,height,s,u,body,ux,uy,lines,at);
         if(u.now.order==Order::follow)WorldLabel(text,lines,at,vp,width,height,body,WorldKey(kWorldMapUnit,u.of),0.0f,22.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
         if(u.selected && c.selected==1) {
             wchar_t kind[48];
