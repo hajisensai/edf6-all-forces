@@ -59,8 +59,9 @@ check('kMaxNodes' not in tables, 'world_tables.h: no fixed node cap')
 for path in ('src/heli.cpp', 'autoturret/src/turret.h', 'autoturret/src/plugin.cpp'):
     text = (ROOT / path).read_text(encoding='utf-8')
     check('kMaxNodes' not in text and '0x20B2AB0' not in text, f'{path}: no registry address or node cap of its own')
-# The live walks and both snapshots are bounded by the registry count.
-for path, lists, walks in (('src/heli.cpp', 3, 1), ('autoturret/src/plugin.cpp', 1, 0), ('common/edf/enemy_points.h', 0, 1)):
+# Every walk is bounded by that count: heli.cpp's enemy walk and AutoTurret's snapshot are enemy_points.h's (heli's
+# ForEachEnemyOf hands LockList's count to Walk, RefreshWorld to Collect); heli's VisitLockPoints walks in place.
+for path, lists, walks in (('src/heli.cpp', 2, 1), ('autoturret/src/plugin.cpp', 1, 0), ('common/edf/enemy_points.h', 0, 1)):
     text = (ROOT / path).read_text(encoding='utf-8')
     check(text.count('edf::LockList(image,head,nodes)') == lists and
           len(re.findall(r'node!=head && n<nodes;', text)) == walks, f'{path}: every registry walk bounded by the count')
@@ -69,7 +70,5 @@ check('enemypoints::Collect(head,nullptr,worldPoints,nodes)' in plugin, 'autotur
 heli = (ROOT / 'src/heli.cpp').read_text(encoding='utf-8')
 check(heli.count('enemypoints::Walk(') == 1 and 'enemypoints::Walk(head,relation,v,static_cast<F&&>(f),nodes);' in heli,
       'src/heli.cpp: the shared walk given the registry count')
-check(heli.count('enemypoints::Collect(') == 1 and 'enemypoints::Collect(head,nullptr,stepRegistry,nodes)' in heli,
-      'src/heli.cpp: the AI scene-step snapshot given the registry count')
 
 print(f'lock_registry_native_audit: {checks} checks passed')

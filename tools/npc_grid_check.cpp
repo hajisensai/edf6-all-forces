@@ -175,52 +175,6 @@ int main() {
     visits=0;
     Check(g.AnyAround(start,100.0f,[&](int i){ ++visits;return i==0; }) && visits==1,
           "a match stops a box before subsequent rows");
-    {
-        constexpr int population=2603,maximum=64;
-        std::vector<P> crowd(population);
-        for(int i=0;i<population;++i) {
-            auto& p=crowd[static_cast<std::size_t>(i)];
-            p.p[0]=static_cast<float>((i*13)%31);
-            p.p[2]=static_cast<float>((i*19)%31);
-        }
-        crowd[2].p[0]=2e6f;   // the apart run must merge at its original index
-        g.Build(population,[&](int i){return crowd[static_cast<std::size_t>(i)].p;},8.0f);
-        const float centre[3]={15,0,15};
-        const auto eligible=[](int i){return i%4!=1;};
-        std::vector<int> expected,got;
-        for(int i=0;static_cast<int>(expected.size())<maximum;++i)if(eligible(i))expected.push_back(i);
-        int calls=0,last=-1;
-        bool ordered=true;
-        g.FirstAround(centre,40.0f,maximum,[&](int i) {
-            ordered=ordered && i>last;
-            last=i;
-            ++calls;
-            return eligible(i);
-        },got);
-        Check(g.Apart()==1 && ordered && got==expected && calls==expected.back()+1,
-              "dense capped lookup merges cells and outliers in registry order and stops at the 64th match",calls,population);
-        std::printf("dense threat query: %d -> %d exact predicate calls for %d results\n",population,calls,maximum);
-    }
-    {
-        const float sparse[][3]={{4,0,0},{0,0,80},{8,0,80},{0,0,160},{4,0,80},{4,0,0}};
-        g.Build(6,[&](int i){ return sparse[i]; },4.0f);
-        const float middle[3]={4,0,80};
-        std::vector<int> rows;
-        const auto visit=[&](int i){ rows.push_back(i); };
-        g.Around(middle,100.0f,visit);
-        Check(rows==std::vector<int>({0,5,1,4,2,3}),"box skips long empty spans in row and cell order");
-        rows.clear();
-        const float from[3]={4,0,160},to[3]={4,0,0};
-        g.Capsule(from,to,0.5f,visit);
-        Check(rows==std::vector<int>({0,5,1,4,3}),"reverse capsule keeps row order across empty spans and padded cells");
-        rows.clear();
-        g.NearFirst(4.0f,80.0f,{0,2,0,20},[](float){return false;},visit);
-        Check(rows==std::vector<int>({4,1,2,0,5}),"clipped rings keep center, sides and horizontal edges in order");
-        rows.clear();
-        g.Build(2,[&](int i){ return sparse[1+i]; },4.0f);
-        g.Around(middle,100.0f,visit);
-        Check(rows==std::vector<int>({0,1}),"occupied rows rebuilt when the grid shrinks");
-    }
     struct Case { const char* label; int n; float spread; bool outliers; float cell; };
     const Case kCases[]={{"crowd 4000 / 600 m",4000,600.0f,false,16.0f},{"crowd 3000 / 2 km, outliers",3000,2000.0f,true,16.0f},
                          {"few 7",7,300.0f,false,16.0f},{"one",1,10.0f,false,16.0f},{"empty",0,10.0f,false,16.0f},

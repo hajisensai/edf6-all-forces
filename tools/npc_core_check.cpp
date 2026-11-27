@@ -9,7 +9,6 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #define GetWindowThreadProcessId markinput::Process
 #include "../src/npcai.cpp"
 #undef GetWindowThreadProcessId
-#include "../tests/ground_ray_batch_fixture.h"
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -73,7 +72,7 @@ float arcWallZ=0.0f; // a finite map wall for production Backpack's segment quer
 bool flatFloor=false,completeRide=false;
 bool mapHeld=true,rayOn=false;
 const void* markEnemy=nullptr;
-// VisitEnemiesThisStep: gatherFoes enemies at (10 k, 0, 10 k) first, then with gatherFaults a point it cannot read (the walk
+// VisitEnemiesOf: gatherFoes enemies at (10 k, 0, 10 k) first, then with gatherFaults a point it cannot read (the walk
 // faulting part way through Gather).
 int gatherFoes=0;
 bool gatherFaults=false;
@@ -236,9 +235,6 @@ bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
     for(int k=0;k<gatherFoes;++k){const float at[3]={10.0f*static_cast<float>(k),0.0f,10.0f*static_cast<float>(k)};visit(ctx,reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x5000+k*0x10)),at);}
     if(gatherFaults)visit(ctx,reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x6000)),reinterpret_cast<const float*>(static_cast<std::uintptr_t>(0x10)));
     return true;
-}
-bool VisitEnemiesThisStep(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {
-    return VisitEnemiesOf(team,visit,ctx);
 }
 #ifdef SUPPORT_INFANTRY_NATIVE_TEST
 float MapFloorRay(const float* a,const float* b,float* at) noexcept {

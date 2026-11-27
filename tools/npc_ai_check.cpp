@@ -6,8 +6,6 @@
 #include "../src/npc_logic.h"
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <random>
 
 namespace {
@@ -45,44 +43,6 @@ void Intent() {
     Check(AimDelta(0.0f,3.1f,behind,1.0f,10.0f,d) && std::fabs(d[1])<0.1f,"the short way round (wrap)",d[1]);
     Check(AimDelta(0.0f,0.0f,right,1.0f,0.2f,d) && Near(d[1],0.2f,1e-6f),"clamped to most a frame",d[1]);
     Check(AimError(0.0f,0.0f,right)>1.5f && AimError(0.0f,1.5707963f,right)<1e-4f,"aim error");
-    const float infinity=std::numeric_limits<float>::infinity();
-    const float nan=std::numeric_limits<float>::quiet_NaN();
-    const auto same=[](float a,float b) {return std::memcmp(&a,&b,sizeof(a))==0 || (std::isnan(a)&&std::isnan(b));};
-    float early[2]{},legacy[2]{};
-    std::optional<AimAngles> shared;
-    std::mt19937 angles(0xE6);
-    std::uniform_real_distribution<float> space(-200.0f,200.0f),angle(-4.0f,4.0f);
-    for(unsigned i=0;i<12000;++i) {
-        float dir[3]={space(angles),space(angles),space(angles)};
-        if(i%16==0){dir[0]=-0.0f;dir[2]=0.0f;}
-        if(i%16==1){dir[0]=dir[1]=dir[2]=0.0f;}
-        if(i%16==2)dir[0]=nan;
-        if(i%16==3)dir[1]=infinity;
-        const float controlPitch=angle(angles),controlYaw=angle(angles);
-        const float viewPitch=angle(angles),viewYaw=angle(angles);
-        const float h=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
-        const float pitch=-std::atan2(dir[1],h),yaw=std::atan2(dir[0],dir[2]);
-        const bool turns=h>1e-6f || std::fabs(dir[1])>1e-6f;
-        if(turns) {
-            legacy[0]=Clamp(Wrap(pitch-controlPitch),-0.35f,0.35f);
-            legacy[1]=Clamp(Wrap((h>1e-6f ? yaw : controlYaw)-controlYaw),-0.35f,0.35f);
-        }
-        const bool didTurn=AimDelta(controlPitch,controlYaw,dir,1.0f,0.35f,early,&shared);
-        Check(didTurn==turns && (!turns || (same(early[0],legacy[0]) && same(early[1],legacy[1]))),
-              "shared aim gives the original turn");
-        Check(shared.has_value()==(h>1e-6f),"turn never reuses a yaw held for a vertical direction");
-        const float dp=Wrap(pitch-viewPitch),dy=Wrap(yaw-viewYaw)*std::cos(pitch);
-        const float error=shared ? AimError(viewPitch,viewYaw,*shared) : AimError(viewPitch,viewYaw,dir);
-        Check(same(error,std::sqrt(dp*dp+dy*dy)),"fire error uses the original view rather than the intended turn");
-        float distance=Len(dir);
-        if(i%16==4)distance=std::nextafter(30.0f,0.0f);
-        if(i%16==5)distance=30.0f;
-        if(i%16==6)distance=std::nextafter(30.0f,infinity);
-        const float cone=std::atan(1.5f/(distance>1.0f ? distance : 1.0f));
-        Check(same(FireCone(distance,1.5f,0.05f),cone>0.05f ? cone : 0.05f),"fire cone gives the original threshold");
-    }
-
-
     // Converging: applying the delta every frame brings the look onto the direction.
     float p=0.3f,y=-2.0f;
     const float tgt[3]={3.0f,-2.0f,-7.0f};

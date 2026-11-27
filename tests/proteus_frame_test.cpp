@@ -8,7 +8,6 @@
 #include <cstdio>
 #include "../src/bay_rounds.h"
 #include "../src/hud.h"
-#include <thread>
 namespace crew {
 unsigned char* image=nullptr;PlayerFix player{};
 namespace {
@@ -280,7 +279,9 @@ void WalkerNotProteus() {
     Check(IsProteus(vehicle),"the stock model (no marker): the Proteus");
     ResetProteus();
 }
-// Compare the published zone generation with the original lock-based read and scoring rules.
+// The allies' priority zone read without the lock while it is off (zoneOn): every write site (PublishZone on / off,
+// DropZone of this and another vehicle, ResetProteus) keeps the flag equal to zone.on, and Priority / ProteusPriorityZone
+// answer what the old reads (shared lock, whole Zone copied, then its `on`) answered.
 bool LockedPriority(const unsigned char* f,const unsigned char* cand,float* weight) {
     AcquireSRWLockShared(&zoneLock);
     const Zone z=zone;
@@ -303,33 +304,21 @@ bool LockedPriorityZone(ProteusZone* pz) {
     *pz=c.z;
     return true;
 }
-void __fastcall FixtureTargetScore(void* f,void* cand) {
-    const auto distance=At<float>(cand,0x20);
-    if(distance<At<float>(f,kSearchBest)) {
-        Put(f,kSearchBest,distance);
-        Put(f,kSearchFound,cand);
-    }
-    Put(f,0x20,At<unsigned>(f,0x20)+1);
-}
-
 void PriorityZoneFastPath() {
     ResetProteus();Setup();
-    alignas(16) static unsigned char functor[0x28]{},searcher[0x400]{},cands[4][0x600]{},other[0x40]{};
+    alignas(16) static unsigned char functor[0x20]{},searcher[0x400]{},cands[4][0x600]{},other[0x40]{};
     Put<const void*>(functor,kSearcher,searcher);
     // near and unaimed, far and unaimed, far and after the vehicle, far and after the player
     const float at[4][3]={{110,5,-50},{900,5,900},{900,5,900},{900,5,900}};
     const void* targets[4]={nullptr,nullptr,vehicle,observerHuman};
     for(int i=0;i<4;++i){std::memcpy(cands[i]+kPosition,at[i],12);Put<const void*>(cands[i],kEnemyTarget,targets[i]);}
-    const auto priority=[&](const unsigned char* f,const unsigned char* cand,float* weight) {
-        return Priority(f,cand,weight,zoneStamp.load(std::memory_order_acquire));
-    };
     auto same=[&](const char* state,bool expectOn) {
-        Check(bool(zoneStamp.load()&1u)==zone.on && zone.on==expectOn,state);
+        Check(zoneOn.load()==zone.on && zone.on==expectOn,state);
         for(const std::int32_t team:{player.team,player.team+1}) {
             Put<std::int32_t>(searcher,kTeam,team);
             for(auto& cand:cands) {
                 float wNew=-1.0f,wOld=-1.0f;
-                const bool a=priority(functor,cand,&wNew),b=LockedPriority(functor,cand,&wOld);
+                const bool a=Priority(functor,cand,&wNew),b=LockedPriority(functor,cand,&wOld);
                 Check(a==b && wNew==wOld,state);
             }
         }
@@ -343,27 +332,10 @@ void PriorityZoneFastPath() {
     same("zone published: on, both reads agree",true);
     {   // published and found: the near unaimed enemy and the ones after the vehicle / player weigh, the far one does not
         Put<std::int32_t>(searcher,kTeam,player.team);float w=0;
-        Check(priority(functor,cands[0],&w) && w==config.proteusPriority && !priority(functor,cands[1],&w) &&
-              priority(functor,cands[2],&w) && priority(functor,cands[3],&w),"active published zone preserves priority");
-        const auto original=nextSearch;
-        nextSearch=&FixtureTargetScore;
-        Put(cands[0],0x20,100.0f);
-        Put(functor,0x20,0u);
-        Put(functor,kSearchBest,(1.0f+config.proteusPriority)*50.0f);
-        SearchHook(functor,cands[0]);
-        Check(At<unsigned>(functor,0x20)==1 && At<float>(functor,kSearchBest)==100.0f*config.proteusPriority &&
-              At<const void*>(functor,kSearchFound)==cands[0],"active search uses the original callback and weight");
-        DropZone(vehicle);
-        Put(functor,kSearchBest,200.0f);
-        SearchHook(functor,cands[0]);
-        Check(At<unsigned>(functor,0x20)==2 && At<float>(functor,kSearchBest)==100.0f,
-              "inactive search calls the original callback with unweighted distance");
-        nextSearch=original;
-        PublishZone(u,vehicle,config);
+        Check(Priority(functor,cands[0],&w) && w==config.proteusPriority && !Priority(functor,cands[1],&w) &&
+              Priority(functor,cands[2],&w) && Priority(functor,cands[3],&w),"zone on: the lock path still weighs");
     }
-    const auto activeStamp=zoneStamp.load();
     DropZone(other);
-    Check(zoneStamp.load()==activeStamp,"unrelated vehicle does not invalidate the active snapshot");
     same("another vehicle's drop leaves the zone on",true);
     u.st.shieldOn=false;PublishZone(u,vehicle,config);
     same("shield down: the zone goes off",false);
@@ -379,53 +351,6 @@ void PriorityZoneFastPath() {
     ResetProteus();
     same("mission reset clears the zone and its flag",false);
 }
-void ConcurrentZonePublication() {
-    const auto publish=[](unsigned value) {
-        AcquireSRWLockExclusive(&zoneLock);
-        zone.on=value!=0;
-        zone.at=value;
-        zone.z.centre[0]=static_cast<float>(value);
-        zone.z.radius=static_cast<float>(value*2);
-        zone.team=static_cast<std::int32_t>(value%16);
-        ZoneWritten();
-        ReleaseSRWLockExclusive(&zoneLock);
-    };
-    publish(1);
-    std::atomic<bool> ready{false},changed{false},observedChange{false},done{false};
-    bool coherent=true;
-    std::thread reader([&] {
-        const auto observe=[] {return ReadZone(zoneStamp.load(std::memory_order_acquire));};
-        const Zone* const initial=observe();
-        coherent=initial && initial->at==1;
-        ready.store(true,std::memory_order_release);
-        while(!changed.load(std::memory_order_acquire))std::this_thread::yield();
-        coherent=coherent && initial->at==1 && initial->z.radius==2;
-        const Zone* const updated=observe();
-        coherent=coherent && updated && updated->at==2 && updated->z.radius==4;
-        observedChange.store(true,std::memory_order_release);
-        unsigned previous=2;
-        while(!done.load(std::memory_order_acquire)) {
-            if(const Zone* snapshot=observe()) {
-                const auto at=static_cast<unsigned>(snapshot->at);
-                coherent=coherent && at>=previous && snapshot->z.centre[0]==static_cast<float>(at) &&
-                         snapshot->z.radius==static_cast<float>(at*2) &&
-                         snapshot->team==static_cast<std::int32_t>(at%16);
-                previous=at;
-            }
-        }
-        coherent=coherent && !observe();
-    });
-    while(!ready.load(std::memory_order_acquire))std::this_thread::yield();
-    publish(2);
-    changed.store(true,std::memory_order_release);
-    while(!observedChange.load(std::memory_order_acquire))std::this_thread::yield();
-    for(unsigned i=3;i<4096;++i)publish(i);
-    publish(0);
-    done.store(true,std::memory_order_release);
-    reader.join();
-    Check(coherent,"concurrent readers see coherent generations and retain their prior snapshot");
-    ResetProteus();
-}
 }  // namespace
 
 int main() {
@@ -438,7 +363,6 @@ int main() {
     GiveBackAll();
     WalkerNotProteus();
     PriorityZoneFastPath();
-    ConcurrentZonePublication();
     std::printf("proteus_frame_test: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

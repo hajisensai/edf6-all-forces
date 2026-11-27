@@ -16,7 +16,6 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
-#include <optional>
 #include "npc_mobility.h"   // the soldiers' own dashes (Wing Diver dash, Fencer dash / boost / dash-jump)
 
 namespace npc {
@@ -62,36 +61,20 @@ inline float SegmentDist(const float* a,const float* b,const float* p,float* alo
 // The look a soldier is given towards world direction `dir` as the stock AI gives it (0x5A2B50 at 0x5A2FFB): 0x4E100
 // turns the direction into (pitch = -atan2(dy, horizontal), yaw = atan2(dx, dz)); d60 = wrap(pitch - cur pitch) x gain,
 // d64 = wrap(yaw - cur yaw) x gain, each clamped to `most` rad a frame. False for a zero direction.
-struct AimAngles { float pitch,yaw; };
-
-inline bool AimDelta(float curPitch,float curYaw,const float* dir,float gain,float most,float* out,
-                     std::optional<AimAngles>* shared=nullptr) noexcept {
-    if(shared)shared->reset();
+inline bool AimDelta(float curPitch,float curYaw,const float* dir,float gain,float most,float* out) noexcept {
     const float h=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
-    const bool turnsYaw=h>1e-6f;
-    if(!turnsYaw && !(std::fabs(dir[1])>1e-6f))return false;
-    const float pitch=-std::atan2(dir[1],h),yaw=turnsYaw ? std::atan2(dir[0],dir[2]) : curYaw;
-    // A vertical turn holds the previous yaw. The fire check still needs the direction's actual yaw.
-    if(shared && turnsYaw)*shared=AimAngles{pitch,yaw};
+    if(!(h>1e-6f) && !(std::fabs(dir[1])>1e-6f))return false;
+    const float pitch=-std::atan2(dir[1],h),yaw=h>1e-6f ? std::atan2(dir[0],dir[2]) : curYaw;
     out[0]=Clamp(Wrap(pitch-curPitch)*gain,-most,most);
     out[1]=Clamp(Wrap(yaw-curYaw)*gain,-most,most);
     return true;
 }
-// The aim's error (rad) between the view as it is and a direction's world angles.
-inline float AimError(float curPitch,float curYaw,AimAngles target) noexcept {
-    const float dp=Wrap(target.pitch-curPitch),dy=Wrap(target.yaw-curYaw)*std::cos(target.pitch);
-    return std::sqrt(dp*dp+dy*dy);
-}
+// The aim's error (rad) between the soldier's look (pitch, yaw) and world direction `dir`.
 inline float AimError(float curPitch,float curYaw,const float* dir) noexcept {
     const float h=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
-    return AimError(curPitch,curYaw,AimAngles{-std::atan2(dir[1],h),std::atan2(dir[0],dir[2])});
-}
-inline float FireCone(float distance,float radius,float minimum) noexcept {
-    const float ratio=radius/(distance>1.0f ? distance : 1.0f);
-    // For a nonnegative ratio atan(ratio) cannot increase the angle past this lower bound.
-    if(ratio>=0.0f && ratio<=minimum)return minimum;
-    const float cone=std::atan(ratio);
-    return cone>minimum ? cone : minimum;
+    const float pitch=-std::atan2(dir[1],h),yaw=std::atan2(dir[0],dir[2]);
+    const float dp=Wrap(pitch-curPitch),dy=Wrap(yaw-curYaw)*std::cos(pitch);
+    return std::sqrt(dp*dp+dy*dy);
 }
 // The local move stick (d50.x, d50.z) for world horizontal direction `dir` at `magnitude` (0..1), the soldier's yaw
 // `yaw`: the inverse of 0x56D350's world = x (cos, 0, -sin) + z (sin, 0, cos).

@@ -55,27 +55,6 @@ void CellIndex() {
     Check(s->FindCell(10,-20,0.0f)==-1 && s->FindCell(0,0,9.0f)==0 && s->count==1,
           "the next leg starts a fresh index at the end of the path");
 }
-void CentreGroundProbe() {
-    Point out{};
-    int floors=0,clearance=0,hulls=0;
-    Check(WalkEdge({0,0,0},{2,0,0},out,{},[&](Point,float,float& height) {
-        ++floors;height=0;return true;
-    },[&](Point,Point) { ++clearance;return true; },[&](Point,Point) { ++hulls;return true; }) &&
-          floors==12 && clearance==48 && hulls==16 && out.x==2.0f,
-          "on level ground only three floor probes per segment; terrain and hull sweeps stay the same");
-
-    const Profile p{};
-    bool reprobed=false;
-    const bool open=WalkEdge({0,0,0},{0.5f,0,0},out,p,[&](Point at,float step,float& height) {
-        const bool upper=at.z==0.0f && at.y>0.0f;
-        reprobed|=upper;
-        height=step*(upper ? 1.25f : 0.5f);
-        return true;
-    },[&](Point a,Point b) {
-        return !(a.z==0.0f && a.x==b.x && a.y>p.step);
-    });
-    Check(!open && reprobed,"a changed floor raises the centre probe window and can reveal blocked headroom");
-}
 void Routing() {
     auto s=std::make_unique<State>();World w;Point from{},to{12,0,0},next{};std::uint64_t ms=1;
     Check(Plan(*s,w,from,to,next,ms)==Result::moving,"wall has a route");
@@ -463,31 +442,6 @@ void Ahead() {
         Check(FinalLeft(s,{27,0,0})<0.0f,"FinalLeft: a leg's end is a corner, no ease");
     }
 }
-void GroupedClearance() {
-    const auto ground=[](Point,float,float& y) noexcept {y=0;return true;};
-    const auto hull=[](Point,Point) noexcept {return true;};
-    int vertical=0,horizontal=0,spans=0;
-    const auto clear=[&](Point from,Point to) noexcept {
-        ++vertical;
-        return from.x==to.x && from.z==to.z;
-    };
-    const auto sweep=[&](Point,Point,float,float) noexcept {
-        ++spans;
-        return [&](Point,Point) noexcept {++horizontal;return true;};
-    };
-    Point out;
-    Check(WalkEdge(Point{},Point{2,0,0},out,Profile{},ground,clear,hull,sweep) &&
-          spans==4 && vertical==12 && horizontal==36,
-          "one horizontal sweep context per half metre, independent of vertical headroom");
-    horizontal=0;
-    const auto blocker=[&](Point,Point,float,float) noexcept {
-        return [&](Point,Point) noexcept {return ++horizontal<5;};
-    };
-    Check(!WalkEdge(Point{},Point{2,0,0},out,Profile{},ground,clear,hull,blocker) && horizontal==5,
-          "a blocked horizontal probe still stops the edge in its original order");
-}
-
-
 void IndexedFrontier() {
     auto route=std::make_unique<RouteState>();
     route->ResetNodes({{},0,0,0,0,-1,true});
@@ -514,4 +468,4 @@ void IndexedFrontier() {
 }
 
 }
-int main(){CellIndex();IndexedFrontier();CentreGroundProbe();GroupedClearance();Routing();LongRoutes();Horizon();BoardFarSide();Ahead();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+int main(){CellIndex();IndexedFrontier();Routing();LongRoutes();Horizon();BoardFarSide();Ahead();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}

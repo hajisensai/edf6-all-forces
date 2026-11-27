@@ -1,13 +1,13 @@
 // The enemy lock points of a side (heli.cpp ForEachEnemyOf, VisitEnemies): the lock registry walk and its filter, and
-// the scene-step copy that soldier AI, helicopters and NPC gunner seats share. Pure logic over the registry's memory;
-// tools/enemy_points_check.cpp compares the shared copy with independent live walks.
+// the frame's copy of its result that the NPC gunner seats share (heli.cpp NearestEnemyThisStep). Pure logic over the
+// registry's memory; tools/enemy_points_check.cpp proves the copy's visits equal the live walk's.
 // Both plugins walk the registry through here: EDF6AutoTurret's world snapshot (autoturret/src/plugin.cpp RefreshWorld)
 // is Collect with no side (every team's points, each with its team). The registry's head and count, and a side's
 // relation row, are read by edf/world_tables.h.
 //
 // Until 2026-11-07 every AI gunner seat of every vehicle walked the whole registry each frame (stress:100: 3.7 ms a
-// frame in the walk alone, one cache miss per node and per target). Each reader selects its hostile teams and omits
-// itself from one captured registry, without touching the native linked list again in the same scene step.
+// frame in the walk alone, one cache miss per node and per target). The walk is the same for every seat of a side but
+// for the seat's own vehicle, so it is done once per side per frame and each seat visits the copy minus itself.
 #pragma once
 #include "edf/layout.h"
 #include <cmath>
@@ -61,27 +61,10 @@ inline std::uint64_t Collect(const unsigned char* head,const std::int32_t* relat
     },nodes);
 }
 
-// Each side keeps a mask over the same ordered registry capture rather than copying the points.
-using TeamMask=std::uint64_t;
-constexpr TeamMask kAllTeams=~TeamMask{0};
-static_assert(kMaxTeam==64);
-constexpr TeamMask TeamBit(int team) noexcept { return TeamMask{1}<<static_cast<unsigned>(team); }
-inline TeamMask EnemyTeams(const std::int32_t* relation) noexcept {
-    TeamMask mask=0;
-    for(int team=0;team<kMaxTeam;++team)
-        if(relation[team]==kEnemyRelation)mask|=TeamBit(team);
-    return mask;
-}
-
-inline bool StillOnSide(const Point& p,const void* self) noexcept {
-    const auto* object=static_cast<const unsigned char*>(p.object);
-    return object!=self && !object[edf::kDead] && edf::At<std::int32_t>(object,edf::kTeam)==p.team;
-}
-
-// Visit the sampled side in registry order, omitting self and objects that died or switched team afterward.
-template<class F> inline void Visit(const std::vector<Point>& points,const void* self,F&& f,TeamMask enemies=kAllTeams) noexcept {
+// The copy as `self`'s walk would give it: without `self`, and without one that has died since the copy was taken.
+template<class F> inline void Visit(const std::vector<Point>& points,const void* self,F&& f) noexcept {
     for(const Point& p:points) {
-        if(!(enemies&TeamBit(p.team)) || !StillOnSide(p,self))continue;
+        if(p.object==self || static_cast<const unsigned char*>(p.object)[edf::kDead])continue;
         f(p.object,p.aim);
     }
 }
@@ -92,13 +75,12 @@ template<class F> inline void Visit(const std::vector<Point>& points,const void*
 struct Pick { const void* object; float dist; };
 template<class Dist,class Usable>
 inline Pick Nearest(const std::vector<Point>& points,const void* self,const float* from,float reach,Dist&& dist,
-                    Usable&& usable,TeamMask enemies=kAllTeams) noexcept {
+                    Usable&& usable) noexcept {
     Pick best{nullptr,1e30f};
     for(const Point& p:points) {
-        if(!(enemies&TeamBit(p.team)))continue;
         const float d=dist(from,p.aim);
         if(!(d<=reach && d<best.dist))continue;
-        if(!StillOnSide(p,self) || !usable(p.object))continue;
+        if(p.object==self || static_cast<const unsigned char*>(p.object)[edf::kDead] || !usable(p.object))continue;
         best={p.object,d};
     }
     return best;

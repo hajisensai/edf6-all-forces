@@ -577,7 +577,7 @@ void Gather(std::int32_t team) noexcept {
     __try {
         w.player=player.at && GameMs()-player.at<kPlayerFixMs;
         if(w.player)std::memcpy(w.playerAt,player.pos,12);
-        VisitEnemiesThisStep(team,&SeeEnemy,&w);
+        VisitEnemiesOf(team,&SeeEnemy,&w);
         // The local player first: whatever the walk's order, no shot crosses them (B1).
         if(unsigned char* const me=PlayerHuman(); me && HumanOnFoot(me)) {
             const float* p=Pos(me);
@@ -834,11 +834,11 @@ constexpr float kAirborneProbe=80.0f;   // m under the soldier the floor its rou
 //  - with the next leg (and the route on to a goal that moved) searched from the end of the one it walks while it walks
 //    it (Profile::ahead; testhub #41 / #47: followers stood at every leg's end and whenever their point moved 16 m).
 npc::navigation::Profile SoldierRoute() noexcept { npc::navigation::Profile p;p.horizon=kRouteHorizon;p.ahead=true;return p; }
-void RouteStart(GroundRayBatch& rays,const float* pos,float* from) noexcept {
+void RouteStart(const float* pos,float* from) noexcept {
     from[0]=pos[0];from[1]=pos[1];from[2]=pos[2];
     const float above[3]={pos[0],pos[1]+0.3f,pos[2]},below[3]={pos[0],pos[1]-kAirborneProbe,pos[2]};
     float floor[3];
-    if(rays.Floor(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
+    if(MapFloorRay(above,below,floor)>=0.0f && std::isfinite(floor[1]) && floor[1]<pos[1])from[1]=floor[1];
 }
 // Both ends on the floor under them (RouteStart): a route is the ground's. A goal left in the air (a flying top followed,
 // a Wing Diver held where she hovers) is never reached from the floor: every search ran out its nodes, failed, and
@@ -872,9 +872,8 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
     // an attack-move's stand or a new order waits its turn standing.
     if(GroundNavigateDeferred(soldier->navigation))route=GroundCoast(soldier->navigation,pos,to,stop,ms,waypoint,hull);
     else {
-        GroundRayBatch rays;
-        RouteStart(rays,pos,from);RouteStart(rays,to,goal);
-        route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull,&rays);
+        RouteStart(pos,from);RouteStart(to,goal);
+        route=GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute(),hull);
     }
     if(route!=npc::navigation::Result::moving || !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     if(!(pace>0.0f)){Stand(h);return;}
@@ -894,13 +893,13 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,ULONGLO
                                                 npc::mobility::kRunSlack,soldier->moveRunDir);
     if(!(soldier->moveRun>0.0f))std::memcpy(soldier->moveRunDir,dir,12);
 }
-void Look(unsigned char* h,const float* dir,std::optional<npc::AimAngles>* shared=nullptr) noexcept {
+void Look(unsigned char* h,const float* dir) noexcept {
     // The native action may freeze look even while the script's control mask permits it.
     // 0x573B9F skips integration and 0x59FF65 sends zero in this state, but 0x5741E7
     // still feeds d64 into CAS. Never add our repeated turn intent to a frozen pose.
     if(At<std::uint32_t>(h,kActionLimits)&2)return;
     float d[2];
-    if(!npc::AimDelta(At<float>(h,kAimPitch),At<float>(h,kAimYaw),dir,1.0f,kLookMost,d,shared))return;
+    if(!npc::AimDelta(At<float>(h,kAimPitch),At<float>(h,kAimYaw),dir,1.0f,kLookMost,d))return;
     Put<float>(h,kLookPitch,d[0]);Put<float>(h,kLookYaw,d[1]);
 }
 
@@ -936,21 +935,20 @@ int ChooseArm(Soldier& s,unsigned char* h,const Arms& a,const Enemy* t,const flo
 
 // The trigger for target `t` with arm `i`: ready, in its true reach, the look on it, the map open, the round's line and
 // blast clear of friends.
-bool ShotOk(Soldier& s,unsigned char* h,const npc::Arm& arm,const Enemy& t,const float* eye,
-            const float* dir,const std::optional<npc::AimAngles>& shared) noexcept {
-    const float dist=npc::Len(dir);
-    if(dist>arm.reach || dist<npc::MinRange(arm))return false;
-    const float cone=npc::FireCone(dist,kHitRadius,kFireConeMin);
-    const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
-    const float error=shared ? npc::AimError(pitch,yaw,*shared) : npc::AimError(pitch,yaw,dir);
-    if(error>cone)return false;
+bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const float* eye) noexcept {
+    if(i<0 || i>=a.n || !a.arm[i].ready)return false;
+    const float dist=npc::Dist(eye,t.aim);
+    if(dist>a.arm[i].reach || dist<npc::MinRange(a.arm[i]))return false;
+    const float dir[3]={t.aim[0]-eye[0],t.aim[1]-eye[1],t.aim[2]-eye[2]};
+    const float cone=std::atan(kHitRadius/(dist>1.0f ? dist : 1.0f));
+    if(npc::AimError(At<float>(h,kViewPitch),At<float>(h,kViewYaw),dir)>(cone>kFireConeMin ? cone : kFireConeMin))return false;
     if(GameFrame()-s.losFrame>=kLosFrames || s.losObject!=t.object) {
         float hit[3];
         const float wall=MapRay(eye,t.aim,hit);
         s.los=wall<0.0f || wall>dist-2.0f;s.losFrame=GameFrame();s.losObject=t.object;
     }
     if(!s.los)return false;
-    return ShotClearOf(h,eye,t.aim,arm.blast);
+    return ShotClearOf(h,eye,t.aim,a.arm[i].blast);
 }
 
 // A pulled trigger taken off a shot at `t` that would hit a friend. Each hand is tested with the weapon its own WeaponSet
@@ -1949,10 +1947,8 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         const bool armed=p.arm>=0 && p.arm<a.n;
         const bool hold=HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm] : 0.0f,armed ? a.gravity[p.arm] : 0.0f,at.aim);
         const float dir[3]={at.aim[0]-eye[0],at.aim[1]-eye[1],at.aim[2]-eye[2]};
-        const bool checkShot=!hold && armed && a.arm[p.arm].ready;
-        std::optional<npc::AimAngles> shared;
-        if(mask&kMaskLook)Look(h,dir,checkShot ? &shared : nullptr);
-        p.fire=checkShot && ShotOk(s,h,a.arm[p.arm],at,eye,dir,shared) && (mask&kMaskTrigger);
+        if(mask&kMaskLook)Look(h,dir);
+        p.fire=!hold && ShotOk(s,h,a,p.arm,at,eye) && (mask&kMaskTrigger);
         h[kTrigger]=p.fire ? 1 : 0;
         // ShotOk already checked the primary weapon at its predicted impact. The stock offhand can still be firing
         // directly at the target's current position and needs its own check.

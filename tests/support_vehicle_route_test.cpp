@@ -24,7 +24,6 @@ float MapFloorRay(const float* from,const float* to,float* hit) noexcept {
 Sea SeaAt(float,float,float*) noexcept {return Sea::land;}
 }
 #include "../src/npcpost.cpp"
-#include "ground_ray_batch_fixture.h"
 #include "../src/ground_navigation.cpp"
 
 int main() {

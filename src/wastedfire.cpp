@@ -33,9 +33,9 @@
 #include "wasted_fire.h"
 #include "edf/hash_index.h"
 #include "edf/host.h"
+#include <atomic>
 #include <new>
 #include <vector>
-
 
 namespace crew {
 namespace {
@@ -238,7 +238,10 @@ bool rayMeetsObjects=false;
 wastedfire::Book book{};
 planlog::Gate planLog{};   // the WASTEDFIRE plan lines (a shooter and target kind every 3 s, 4 a second in all)
 SRWLOCK lock=SRWLOCK_INIT;
-wastedfire::HoldFilter holdFilter;
+// book.latestHold as stored under the lock, for Feedback to read without it: past it no pair is held and the answer is
+// no, without the lock and the 256-pair scan (the AI asks a shooter and lock point at a time; nearly always no hold runs).
+// Apart from the book because it is reset by assignment (an atomic cannot be).
+std::atomic<std::uint64_t> latestHoldMirror{0};
 
 // Snapshot the first four valid points in registry order, with no native pointers to the point storage retained.
 struct Points {
@@ -258,8 +261,8 @@ Points ScanPoints(const void* target) noexcept {
     return request.points;
 }
 
-// One boss is common: use its first scan for every shooter without building a table for unrelated objects. On a second
-// distinct target, index the whole registry once. Each target keeps its sample until the native scene step changes.
+// The first request of a scene step indexes the whole registry once; every later target of the step reads its row.
+// Each target keeps its sample until the native scene step changes.
 class TargetPointCache {
 public:
     Points Read(const void* target) noexcept {
@@ -272,13 +275,7 @@ public:
             Clear();
             step_=step;
         }
-        if(!first_) {
-            const Points sample=ScanPoints(target);
-            if(sample.n){first_=target;firstPoints_=sample;}
-            return sample;
-        }
-        if(first_==target)return firstPoints_;
-        const bool builtNow=state_==State::single;
+        const bool builtNow=state_==State::empty;
         if(builtNow)Build();
         if(state_==State::indexed) {
             const int i=rows_.Find(target);
@@ -291,14 +288,13 @@ public:
 
     void Clear() noexcept {
         step_={};
-        first_=nullptr;
-        state_=State::single;
+        state_=State::empty;
         rows_.Clear();
         points_.clear();
     }
 
 private:
-    enum class State { single,indexed,failed };
+    enum class State { empty,indexed,failed };
     void Add(const void* object,const float* aim) {
         const int i=rows_.Find(object);
         if(i>=0) {
@@ -314,16 +310,14 @@ private:
         struct BuildState { TargetPointCache& owner; bool complete; } build{*this,true};
         if(VisitLockPoints([](void* ctx,const void* object,const float* aim) {
             auto& build=*static_cast<BuildState*>(ctx);
-            if(!build.complete || object==build.owner.first_)return;
+            if(!build.complete)return;
             try { build.owner.Add(object,aim); }
             catch(const std::bad_alloc&) { build.complete=false; }
         },&build) && build.complete)state_=State::indexed;
     }
 
     SceneStep step_{};
-    const void* first_=nullptr;
-    Points firstPoints_;
-    State state_=State::single;
+    State state_=State::empty;
     edf::PtrIndex rows_;
     std::vector<Points> points_;
 };
@@ -434,7 +428,7 @@ ULONGLONG FeedbackMs() noexcept {
 }
 bool Feedback(const void* shooter,const void* target) noexcept {
     const ULONGLONG ms=FeedbackMs();
-    if(!holdFilter.MayHold(shooter,ms))return false;
+    if(ms>=latestHoldMirror.load(std::memory_order_relaxed))return false;
     AcquireSRWLockShared(&lock);
     const bool wasted=wastedfire::Wasted(book,shooter,target,ms);
     ReleaseSRWLockShared(&lock);
@@ -498,7 +492,7 @@ void WastedFireHit(const void* shooter,const void* target,bool hurt) noexcept {
     const ULONGLONG ms=GameMs();
     AcquireSRWLockExclusive(&lock);
     const bool held=wastedfire::Hit(book,shooter,target,hurt,ms);
-    if(held)holdFilter.Note(shooter,ms+wastedfire::kWastedHoldMs);
+    latestHoldMirror.store(book.latestHold,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     // One line a hold (a few a minute at most per pair): the evidence in a player's log that the AI held its fire.
     if(held)Log("WASTEDFIRE %p: %d hits on %p hurt nothing: its fire at it held %.0f s",shooter,wastedfire::kWastedHits,target,
@@ -524,7 +518,7 @@ bool HoldFire(const void* shooter,const void* target,const float* from,float spe
 void ResetWastedFire() noexcept {
     AcquireSRWLockExclusive(&lock);
     book=wastedfire::Book{};
-    holdFilter.Clear();
+    latestHoldMirror.store(0,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&lock);
     watched.Clear();
     plans.Clear();

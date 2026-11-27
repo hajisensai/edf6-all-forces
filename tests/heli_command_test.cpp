@@ -24,8 +24,7 @@ Config commandConfig{};
 const Config& Cfg() noexcept { return commandConfig; }
 ULONGLONG GameMs() noexcept { return 10000; }
 ULONGLONG GameFrame() noexcept { return 600; }
-SceneStep fixtureStep{};
-SceneStep SceneStepNow() noexcept { return fixtureStep; }
+SceneStep SceneStepNow() noexcept { return {}; }   // unreadable: NearestEnemyThisStep walks live
 void Log(const char*,...) noexcept {}
 const wchar_t* WeaponFile(const unsigned char*,std::size_t* length) noexcept {
     constexpr wchar_t file[]=L"V_410HELI_GATLING01.SGO";
@@ -239,61 +238,6 @@ int main() {
         RescueHeliDeployed(copy,mine,true,ObjRef{});
         bool flying=false;for(const auto& r:rescues)flying=flying || r.phase!=RescuePhase::none;
         check(!flying,"a rescue heli with no requester never stays to look for someone else");
-    }
-    // The production readers share the first capture, including a side first queried later in that scene step.
-    {
-        std::vector<unsigned char> nativeImage(edf::kLockRegistry+sizeof(void*));
-        unsigned char manager[0x40]{},teamRows[2*edf::kTeamStride]{};
-        std::int32_t relations[2][kMaxTeam]{};
-        relations[0][3]=relations[1][4]=enemypoints::kEnemyRelation;
-        Put<void*>(manager,edf::kTeamRows,teamRows);
-        Put<void*>(teamRows,edf::kTeamRelation,relations[0]);
-        Put<void*>(teamRows,edf::kTeamStride+edf::kTeamRelation,relations[1]);
-
-        unsigned char registry[0x20]{},head[0x20]{},nodes[2][0x20]{},targets[2][0x40]{},objects[2][0x400]{};
-        Put<void*>(registry,edf::kRegList,head);
-        Put<std::uint64_t>(registry,edf::kRegSize,2);
-        Put<void*>(head,0,nodes[0]);
-        Put<void*>(nodes[0],0,nodes[1]);
-        Put<void*>(nodes[1],0,head);
-        for(int i=0;i<2;++i) {
-            Put<void*>(nodes[i],kNodeTarget,targets[i]);
-            Put<void*>(targets[i],kTargetObject,objects[i]);
-            Put<float>(targets[i],kTargetAim,5.0f+5.0f*static_cast<float>(i));
-            targets[i][kTargetValid]=targets[i][enemypoints::kTargetLockable]=1;
-            Put<std::int32_t>(objects[i],edf::kTeam,3+i);
-        }
-        image=nativeImage.data();
-        Put<void*>(image,edf::kTeamManager,manager);
-        Put<void*>(image,edf::kLockRegistry,registry);
-        fixtureStep={head,1,1};
-        const auto aimOf=[](int team,bool live=false) {
-            float aim=-1;
-            const EnemyVisitor see=[](void* ctx,const void*,const float* point){ *static_cast<float*>(ctx)=point[0]; };
-            (live ? VisitEnemiesOf : VisitEnemiesThisStep)(team,see,&aim);
-            return aim;
-        };
-        check(aimOf(0)==5.0f,"first AI side captures the registry");
-        Put<float>(targets[0],kTargetAim,105.0f);
-        Put<float>(targets[1],kTargetAim,110.0f);
-        check(aimOf(1)==10.0f,"second AI side uses the capture taken by the first side");
-        check(aimOf(1,true)==110.0f,"immediate readers see the live registry");
-        Put<std::int32_t>(vehicle,edf::kTeam,0);
-        const float from[3]{};
-        const void* best=nullptr;float distance=0;
-        check(NearestEnemyThisStep(vehicle,from,200.0f,[](void*,const void*){return true;},nullptr,best,distance) &&
-              best==objects[0] && distance==5.0f,"the gunner reads the same captured aim as the AI visitor");
-        objects[0][edf::kDead]=1;
-        check(aimOf(0)<0.0f,"dead objects are skipped before the next capture");
-        ++fixtureStep.count;
-        check(aimOf(1)==110.0f,"next step captures updated lock points");
-        Put<float>(targets[1],kTargetAim,120.0f);
-        ++fixtureStep.mission;
-        check(aimOf(1)==120.0f,"a new mission invalidates a reused scene address and count");
-        Put<float>(targets[1],kTargetAim,130.0f);
-        fixtureStep={};
-        check(aimOf(1)==130.0f,"an unavailable step uses the live walk");
-        image=nullptr;
     }
     std::printf("heli_command_test: %d checks passed\n",checks);
     return 0;

@@ -340,21 +340,6 @@ int main() {
         Check(mapfloor::Near(top,bottom,5000.0f,Normals::own,levels,&h) && h==20.0f,"ground: high over a cave, its top floor",h);
         const Face flat[]={{3.0f,1.0f}};
         const Cave open{flat,1,false};
-        for(int scenario=0;scenario<3;++scenario) {
-            const auto& shape=scenario==0 ? open : own;
-            float ordinary[3],direct[3];
-            const float expected=mapfloor::Floor(top,bottom,Normals::own,shape,ordinary);
-            int local=0,world=0;
-            const float reused=mapfloor::FloorWithFirst(top,bottom,Normals::own,
-                [&](const float* a,const float* b,float* point,float* normal) {
-                    ++world;return shape(a,b,point,normal);
-                },[&](const float* a,const float* b,float* point,float* normal) {
-                    ++local;return scenario==2 ? -1.0f : shape(a,b,point,normal);
-                },direct);
-            Check(reused==expected && direct[0]==ordinary[0] && direct[1]==ordinary[1] && direct[2]==ordinary[2],
-                  "floor first-body hit or fallback matches the world",reused,expected);
-            Check(local==1 && world==scenario,"floor only consults the candidate for the first segment",local,world);
-        }
         Check(mapfloor::Near(top,bottom,50.0f,Normals::own,open,&h) && h==3.0f,"ground: open ground as before",h);
         // A building on open ground: its roof, its underside half a metre up, the ground under it. A slot asked for at
         // ground height but inside its footprint stands on the roof (the ground there has no room over it).

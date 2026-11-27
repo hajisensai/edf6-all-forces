@@ -98,17 +98,15 @@ void LockPointReuse() {
     const auto first=cache.Read(ship);
     locks[0].at[1]=91;
     Check(first.n==2 && cache.Read(ship).p[0][1]==90 && lockWalks==1,
-          "every shooter of the first target shares one scan and its first sample");
+          "the first request indexes the registry once and later shooters share the sample");
     const auto second=cache.Read(gen);
-    Check(second.n==4 && second.p[0][1]==10 && second.p[3][1]==40 && lockWalks==2,
-          "indexing a second target keeps registry order and the four-point cap");
-    Check(cache.Read(ship).p[0][1]==90 && cache.Read(gen).p[3][1]==40 && lockWalks==2,
-          "both targets resolve without another scan, including the first sample");
-    Check(!cache.Read(anchor).n && lockWalks==3,"an index miss checks the current registry");
+    Check(second.n==4 && second.p[0][1]==10 && second.p[3][1]==40 && lockWalks==1,
+          "a second target reads the same index: registry order and the four-point cap, no new scan");
+    Check(!cache.Read(anchor).n && lockWalks==2,"an index miss checks the current registry");
     locks.push_back({anchor,{0,5,0}});
-    Check(cache.Read(anchor).p[0][1]==5 && lockWalks==4,"a target registered mid-step is visible on a miss");
+    Check(cache.Read(anchor).p[0][1]==5 && lockWalks==3,"a target registered mid-step is visible on a miss");
     ++fixtureStep.count;
-    Check(cache.Read(ship).p[0][1]==91 && lockWalks==5,"a new step refreshes the first sample");
+    Check(cache.Read(ship).p[0][1]==91 && lockWalks==4,"a new step re-indexes the registry");
     ++fixtureStep.mission;
     lockRegistryReadable=false;
     Check(cache.Read(ship).n==0 && lockWalks==6,"a new mission drops the old sample even when the registry is down");
@@ -141,7 +139,7 @@ void BattleLockPoints() {
             const Points got=cache.Read(&objects[i%count]);
             equal=equal && got.n==expected[i].n && std::memcmp(got.p,expected[i].p,sizeof(got.p))==0;
         }
-        Check(equal && lockWalks==(count==1 ? 1u : 2u),"a busy step matches every independent registry walk");
+        Check(equal && lockWalks==1u,"a busy step matches every independent registry walk");
         std::printf("lock-point nodes for %d requests, %d targets: %u -> %u\n",requests,count,before,lockWalks*nodes);
     }
     fixtureStep={};

@@ -7874,9 +7874,7 @@ def air_chase_wired() -> None:
     assert srcscan.has(npcai, '[self](int k) noexcept { return !WastedFire(self,world.enemy[k].object); }')
     assert srcscan.has(npcai, 'HoldFire(h,t->object,eye,known ? a.speed[w]') and srcscan.has(npcai, 'bool GunnerUsable(void* self,const void* object) { return !WastedFire(self,object); }')
     assert srcscan.has(npcai, 'if(target && HoldFire(v,target))target=nullptr;') and srcscan.has(npcai, 'if(p.best && HoldFire(v,p.best))')
-    assert srcscan.has(npcai, 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]') and srcscan.has(npcai, 'p.fire=checkShot && ShotOk(')
-    assert srcscan.has(npcai, 'const bool checkShot=!hold && armed && a.arm[p.arm].ready;')
-    assert srcscan.has(npcai, 'Look(h,dir,checkShot ? &shared : nullptr);')
+    assert srcscan.has(npcai, 'HoldFire(h,t.e->object,eye,armed ? a.speed[p.arm]') and srcscan.has(npcai, 'p.fire=!hold && ShotOk(')
     # A cached plan is the same weapon's (its round's speed and gravity are in the plans' key) and the same muzzle's.
     wasted = src('src/wastedfire.cpp')
     assert 'speed==o.speed && gravity==o.gravity' in wasted and srcscan.has(wasted, 'const PlanKey key{shooter,target,speed,gravity};')
@@ -7891,10 +7889,8 @@ def air_chase_wired() -> None:
     assert wasted.count('hitpredict::Observe(') == 1
     gather = npcai.split('void Gather(std::int32_t team) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'for(int i=0;i<w.enemies;++i)WatchTarget(w.enemy[static_cast<std::size_t>(i)].object);' in gather
+    assert srcscan.has(src('src/heli.cpp'), 'for(const enemypoints::Point& p:s.points)WatchTarget(p.object);')
     heli = src('src/heli.cpp')
-    watch = heli.split('if(!s->watched) {', 1)[1].split('\n    }', 1)[0]
-    assert srcscan.has(watch, 's->watched=true;') and srcscan.has(watch, 'enemypoints::Visit(stepRegistry,nullptr,')
-    assert srcscan.has(watch, 'WatchTarget(object); },s->enemies);')
     assert srcscan.has(heli, 'f(o,a,0.0f,[&]() noexcept { return HoldFire(v,o); });') and heli.count('held())return;') >= 3
     assert srcscan.has(src('src/ground.cpp'), 'if(HoldFire(p.self,object))return;')
     hook = src('src/damagestats.cpp').split('std::uintptr_t __fastcall DamageHook(', 1)[1].split('\n}\n', 1)[0]

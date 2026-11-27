@@ -431,8 +431,8 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
 // centre is never inside such a body, so each of these segments starts outside it, while a side sample of an actor
 // pressed against it may start inside, where a ray finds no surface to tell, and every edge from there would read as
 // open or as shut. A route that passes a corner of it nearer than p.radius slides along it in the game's own collision.
-template<class Ground,class Clear,class Hull,class Sweep>
-bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear,Hull hull,Sweep sweep) noexcept {
+template<class Ground,class Clear,class Hull>
+bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear,Hull hull) noexcept {
     const float distance=Horizontal(a,b);
     if(!Finite(a)||!Finite(b)||distance>p.cell*3.0f)return false;
     const int steps=(std::max)(1,static_cast<int>(std::ceil(distance/0.5f)));
@@ -443,32 +443,22 @@ bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear,Hul
         const float t=static_cast<float>(i)/static_cast<float>(steps);
         Point at{a.x+(b.x-a.x)*t,previous.y,a.z+(b.z-a.z)*t};
         if(!ground(at,p.step,at.y)||std::fabs(at.y-previous.y)>p.step)return false;
-        auto horizontal=sweep(previous,at,rx,rz);
         for(int side=-1;side<=1;++side) {
             const float offset=static_cast<float>(side);
             Point foot{at.x+rx*offset,at.y,at.z+rz*offset};float floor{};
-            // On level ground the two centre probes have the same start and end heights. A step changes the probe
-            // window and may reveal a different floor for the headroom check, so that case still queries the map.
-            if(side==0 && at.y==previous.y && foot.x==at.x && foot.z==at.z)floor=at.y;
-            else if(!ground(foot,p.step,floor)||std::fabs(floor-at.y)>p.step)return false;
+            if(!ground(foot,p.step,floor)||std::fabs(floor-at.y)>p.step)return false;
             Point low{foot.x,floor+0.08f,foot.z},high{foot.x,floor+p.height,foot.z};
             if(!clear(low,high) || (side==0 && !hull(low,high)))return false;
             for(int level=0;level<3;++level) {
                 const float h=level==0 ? p.step+0.08f : level==1 ? p.height*0.65f : p.height;
                 Point start{previous.x+rx*offset,previous.y+h,previous.z+rz*offset};
                 Point end{foot.x,at.y+h,foot.z};
-                if(!horizontal(start,end) || (side==0 && !hull(start,end)))return false;
+                if(!clear(start,end) || (side==0 && !hull(start,end)))return false;
             }
         }
         previous=at;
     }
     out=previous;return true;
-}
-template<class Ground,class Clear,class Hull>
-bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear,Hull hull) noexcept {
-    return WalkEdge(a,b,out,p,ground,clear,hull,[&](Point,Point,float,float) {
-        return [&](Point start,Point end) {return clear(start,end);};
-    });
 }
 template<class Ground,class Clear>
 bool WalkEdge(Point a,Point b,Point& out,Profile p,Ground ground,Clear clear) noexcept {
@@ -503,13 +493,6 @@ inline npc::navigation::Profile GroundVehicleProfile() noexcept {
 // frame's turn as the call would (the same order after it); a caller that gets true may skip the call and its own
 // work for it (npcai.cpp MoveTo: the two floor rays of its ends) and take the pending.
 bool GroundNavigateDeferred(const npc::navigation::State& state) noexcept;
-
-struct GroundProbeStats {
-    unsigned batches=0,floor=0,clearance=0,water=0,dryWater=0;
-    unsigned bodyLists=0,bodyRays=0,bodyClear=0,bodyFloor=0;
-    unsigned bodyListQueries=0,bodyListReused=0;
-};
-GroundProbeStats TakeGroundProbeStats() noexcept;
 // The bodies the route must go round that the map ray (layer 22: terrain and buildings, no units or vehicles;
 // docs/raycast-re.md §3) does not see: the vehicles' (npcai.cpp HullClear, every soldier's route through MoveTo). Blind
 // to them, a route ran straight into a parked or driven vehicle in its way and the soldier stood pressed against its hull
@@ -525,10 +508,8 @@ struct Hull {
     const void* object=nullptr;
     float inside[3]{};float room=0.0f;
 };
-class GroundRayBatch;
-// An optional batch belongs to this call's endpoint projections and edge probes.
 npc::navigation::Result GroundNavigate(npc::navigation::State&,const float* from,const float* to,float stop,
-    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={},Hull hull={},GroundRayBatch* batch=nullptr) noexcept;
+    std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={},Hull hull={}) noexcept;
 npc::navigation::Result GroundNavigate(npc::navigation::RouteState&,const float* from,const float* to,float stop,
     std::uint64_t ms,float* waypoint,npc::navigation::Profile profile={}) noexcept;
 // A caller GroundNavigateDeferred keeps waiting this frame: npc::navigation::Coast with the arguments it would have
