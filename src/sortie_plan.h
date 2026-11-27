@@ -55,9 +55,34 @@ constexpr bool SalvoDraining(unsigned long long now,unsigned long long firedAt) 
 // One lock is enough (after the lock dwell, kLockMs): the burst fires the whole magazine whatever it was started with,
 // over every enemy locked by then and since (src/lockon.cpp SalvoVolley).
 constexpr bool SalvoLocked(int loaded,int locked) noexcept { return loaded>0 && locked>0; }
-// The salvo's AI trigger: the lock cone is 1.40 rad off the nose (pylib/vcobjects.py SALVO_LOCK_CONE) and its rounds
-// fan out and turn onto their locks themselves, so the jet fires with its aim this far off the nose.
-constexpr float kRainFireCone=0.8f;
+// The salvo's AI trigger: its rounds fan out and turn onto their locks themselves, so the jet fires with its aim as far
+// off the nose as the weapon locks (pylib/vcobjects.py SALVO_LOCK_CONE, 1.40 rad). Level over a ground target (RainWant)
+// the aim is atan(height / distance) under the nose: from 500 m up it is 0.8 rad off 486 m out. The 0.8 rad this was
+// while the rain still dived nose-on at the target (before 2026-11-27) shut the trigger from there in, wherever its hold
+// had opened: a rain held by the soft edge until 290 m out (2026-11-27 15:35:01 log, 「这个天顶根本没开火」) opened 719 m
+// from the mark, never had its aim inside 0.8 rad and took all 256 rounds home.
+constexpr float kRainFireCone=pyconst::kSalvoLockCone;
+// s the burst takes from its first volley to its last (salvo_volley.h).
+constexpr float kRainBurstS=static_cast<float>(salvo::VolleyFrames(salvo::kRounds))/60.0f;
+// m: the least a volley's rounds need from where they go to their target on the ground to turn down onto it.
+constexpr float kRainNear=400.0f;
+// The salvo's trigger from `pos` with its nose `nose` (unit), flying `speed` m/s (horizontal): the aim at `aim` inside
+// the cone, and, under it, where its last volley goes (the burst's run on, level along the nose) still short of the
+// target and kRainNear from it. Nearer, the last volleys go over it or too close to turn down onto it and come down past
+// or short (at 155 m/s from 500 m up 45 of 1024 wasted from 150 m out, from 300 m up 105 from 300 m out; every first
+// volley this lets go from 250 to 600 m up wastes at most 4: tools/sortie_check.cpp RainTriggerCheck).
+inline bool RainTrigger(const float* pos,const float* nose,float speed,const float* aim) noexcept {
+    const float to[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
+    const float l=std::sqrt(to[0]*to[0]+to[1]*to[1]+to[2]*to[2]);
+    const float hn=std::sqrt(nose[0]*nose[0]+nose[2]*nose[2]);
+    if(l<=1.0f || !(speed>=0.0f))return false;
+    if((to[0]*nose[0]+to[1]*nose[1]+to[2]*nose[2])/l<std::cos(kRainFireCone))return false;
+    if(aim[1]>=pos[1])return true;   // a flier above it: its rounds climb to it, away from the ground
+    if(hn<=1e-4f)return false;
+    const float run=speed*kRainBurstS,ux=nose[0]/hn,uz=nose[2]/hn;
+    const float last[3]={to[0]-ux*run,to[1],to[2]-uz*run};   // the target from where the last volley goes
+    return to[0]*ux+to[2]*uz>=run && last[0]*last[0]+last[1]*last[1]+last[2]*last[2]>=kRainNear*kRainNear;
+}
 // What its rounds fly at, for the fire-or-hold check (wastedfire HoldFire): the children's launch speed, m/s
 // (SALVO_CHILD_SPEED x 60), with no gravity (the carrier's AmmoGravityFactor acts only in the drop before ignition).
 constexpr float kRainRoundSpeed=pyconst::kSalvoChildSpeed;
@@ -72,6 +97,9 @@ constexpr unsigned long long kRainHoldMs=2500;
 static_assert(kRainOpen<kRainFrom && kRainOpen>kRainTo+kRainSpeed*(kRainHoldMs+kRainBurstMs)/1000.0f,
               "the hold and the burst fit between kRainOpen and the end of the window");
 static_assert(kRainSteadyCone<kRainFireCone,"settled is tighter than the fire cone");
+// Level at kRainAlt the trigger's cone holds the target until it is nearly under the jet: from where RainSteep opens
+// (kRainAlt / kRainSlope out) in to under kRainAlt / 4 (tan 1.4 = 5.8), not shut at 0.97 x the height as 0.8 rad was.
+static_assert(kRainFireCone>1.3f && kRainFireCone<1.5707963f,"the salvo fires on a target well under its level nose");
 // One step of the hold. `phase` 0 waiting, 1 settled since `since`, 2 open; true: it may fire now.
 inline bool RainHoldStep(int& phase,unsigned long long& since,float dist,float noseOff,bool steep,unsigned long long now) noexcept {
     if(phase==2)return true;

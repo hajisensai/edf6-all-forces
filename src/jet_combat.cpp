@@ -596,7 +596,8 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float tdist=Len(to),off=tdist>1.0f ? std::acos(Clamp(Dot(to,nose)/tdist,-1.0f,1.0f)) : 0.0f;
         const bool salvo=j.sortie.pass==SortiePass::missileRain;
         const float missileReach=salvo ? a.missileRange : MissileReach(k,a);
-        if(!missileOk || off>(salvo ? sortie::kRainFireCone : kMissileCone))t.lockAt=0;
+        const float level=std::sqrt(j.m.vel[0]*j.m.vel[0]+j.m.vel[2]*j.m.vel[2]);
+        if(!missileOk || !(salvo ? sortie::RainTrigger(pos,nose,level,t.aim) : off<=kMissileCone))t.lockAt=0;
         else if(!t.lockAt)t.lockAt=ms;
         missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=SortieLockMs(j,kLockMs) && tdist>kMissileMin &&
                 tdist<missileReach && ms-t.missileAt>SortieMissileGapMs(j,kMissileMs) && !FriendInLine(pos,t.aim,v);
