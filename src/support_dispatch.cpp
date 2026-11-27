@@ -1033,7 +1033,7 @@ constexpr ULONGLONG kRetireSettleFrames=30;
 // deleted. Deleting a seated one left its seat owned by a freed object: the hull then counted as occupied
 // (DeleteSupportVehicle refused it, the deployment let it go undriven) and the rider stood in its seat pose, updated by
 // nothing (2026-10-10 "我摇的人...成棍木了 / 卡车也跟着虚化了"). True: it is not in a seat now.
-constexpr std::size_t kSoldierVehicle=0x1548;   // Human: the vehicle it is in (crew.h, by kHumanVehicleCtrl)
+constexpr std::size_t kSoldierVehicle=0x1548;   // Human: the vehicle it is in (edf_layout.h, by kHumanVehicleCtrl)
 bool Unseat(const ObjRef& soldier) noexcept {
     __try {
         if(!Alive(soldier))return true;

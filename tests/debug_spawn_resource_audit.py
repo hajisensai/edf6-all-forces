@@ -48,7 +48,7 @@ def main() -> int:
     checks = 0
     sigs = dict(re.findall(r'const unsigned char (k\w+)Sig\[\]=\{([^}]+)\}', source))
     addresses = dict((k, int(v, 16)) for k, v in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)', source))
-    addresses['kSetTeam'] = 0x54EE70   # crew.h
+    addresses['kSetTeam'] = 0x54EE70   # seats.h SetObjectTeam
     assert len(sigs) == 19, sorted(sigs)
     for name, text in sigs.items():
         data = bytes(int(x.strip(), 16) for x in text.split(','))

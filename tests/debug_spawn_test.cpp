@@ -2,7 +2,7 @@
 // every native row its stock SGO, the plugin's rows an argument in their enum's range), the menu goes round as it says
 // (shut it reads only its toggle, one press is one step, picks kept per category, wrap both ways), a spawn lands on the
 // crosshair's point or ahead of the player, faces the way it should, and its matrix is a proper rotation. The tool is
-// off unless the ini says so (crew.h Config). Exit code 1 when one fails.
+// off unless the ini says so (config.h Config). Exit code 1 when one fails.
 // cmake --build build --target debug_spawn_test && build\debug_spawn_test.exe
 #include "../src/debug_spawn.h"
 #include "../src/support_call.h"

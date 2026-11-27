@@ -9,7 +9,7 @@ struct SupportAircraft {
     std::uint32_t fuelSeconds=0;
     bool follow=false;
     bool transportPlane=false; // the paratroop plane (jet_internal.h Body::transportPlane; jet and heli -1)
-    int sortie=0;              // a sortie call's pass (crew.h SortiePass; 0 none): one pass at the target, then away
+    int sortie=0;              // a sortie call's pass (jet.h SortiePass; 0 none): one pass at the target, then away
 };
 int SupportAirCallCount() noexcept;
 // A sortie's second wave's catalog entry (tools/calls.py `then`), -1 none.

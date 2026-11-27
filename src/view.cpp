@@ -8,7 +8,7 @@
 // far camera's end to no nearer than it. The far camera's start is left as the mission set it (view_clip.h: moving it
 // out cut the far-only mountains nearer than it, 2026-10-06). 0: the stock values are left alone. -1 (the default since
 // 2026-10-10, the user: "改一下上限，改成无限"): unlimited -- past the world's diagonal and the mission's far pass end
-// (crew.h UnlimitedViewDistance), so the plugin's clip is never what cuts a vehicle or a soldier off. (Static RE: M;
+// (view.h UnlimitedViewDistance), so the plugin's clip is never what cuts a vehicle or a soldier off. (Static RE: M;
 // untested in game. The depth range grows with it: far/near 30000 at 3000 m, the stock 10000.)
 #include "edf_layout.h"
 #include "plugin_log.h"

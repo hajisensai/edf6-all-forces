@@ -2,7 +2,7 @@
 // passes the one damage call (0x54A586 -> 0x547C30, docs/subcarrier-re.md §8.1); the hook there reads the HP before and
 // after, sorts the hit out (who dealt it with what, what it hit) and books it for the mission. The page is drawn over the
 // map (hud_stats.inc) and worked with the map's pointer: its STATS tab, or the stats key (ini DamageStatsKey) opens the
-// map on it. Included by crew.h.
+// map on it.
 #pragma once
 #include "damage_stats.h"
 

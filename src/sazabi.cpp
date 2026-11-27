@@ -476,7 +476,7 @@ bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noex
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-// The HUD's view of the player's Sazabi (crew.h SazabiCue): published each frame it is driven (PublishCue).
+// The HUD's view of the player's Sazabi (sazabi.h SazabiCue): published each frame it is driven (PublishCue).
 bool PlayerSazabiCue(SazabiCue* out) noexcept {
     if(!out || !stepfresh::Fresh(cueStep))return false;
     *out=cue;

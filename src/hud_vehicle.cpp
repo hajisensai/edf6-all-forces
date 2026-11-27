@@ -586,7 +586,7 @@ void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float
     Bar(drawer,ctx,bx+rpmW+between,by,heatW,barH,heat,heat,HeatColour(heat,c.overheated),s);
 }
 
-// --- The player's Sazabi (crew.h SazabiCue, published by sazabi.cpp; README 沙扎比): its own HUD (the user, 2026-10-07:
+// --- The player's Sazabi (sazabi.h SazabiCue, published by sazabi.cpp; README 沙扎比): its own HUD (the user, 2026-10-07:
 // "我们自制的hud … 需要做的都要做"), drawn while the player drives it (the stock vehicle weapon gauge given way:
 // HudPublish's SetStockGaugeCover). Positions in design px (1080 lines; times the HUD's scale `s`) from the screen's
 // centre C:

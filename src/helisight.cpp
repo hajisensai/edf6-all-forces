@@ -16,7 +16,7 @@
 //    flight"): velocity = muzzle row 2 x AmmoSpeed + the shooter's velocity x AmmoOwnerMove / 60 (m/frame; 0x691FA0
 //    reads weapon+0x190 and +0x24C, edf::kWeaponOwnerVel / kWeaponAmmoOwnerMove; the stock heli guns' AmmoOwnerMove is
 //    0, read anyway), falling AmmoGravityFactor x the world gravity / 3600 each frame, for AmmoAlive frames. Where a
-//    map ray first finds the ground along it (crew.h RoundImpact: terrain and buildings, not water or vehicles) is the
+//    map ray first finds the ground along it (launchers.h RoundImpact: terrain and buildings, not water or vehicles) is the
 //    predicted ground cross; none within its life, the round's place at its end (sight::RoundAfter), drawn as dim open dashes. Its distance from
 //    the muzzle goes next to it. No lead: the stock heli guns lock nothing.
 //  - The missile (the 506's and 602's: LockonType 1, a MissileBullet01 homing on what the weapon's own lock list

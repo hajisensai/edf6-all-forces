@@ -1,4 +1,4 @@
-// ground.cpp: the Depth Crawler (502), which has no stock AI. Included by crew.h.
+// ground.cpp: the Depth Crawler (502), which has no stock AI.
 #pragma once
 namespace crew {
 bool IsGroundRobo(const void* vehicle) noexcept;

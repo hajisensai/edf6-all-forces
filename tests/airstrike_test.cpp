@@ -116,7 +116,7 @@ int main() {
     Check(PlanAirSupport(call0,supportTarget,observer,&route)==support::Refusal::none && route.from[1]>=150,
           "production entry planner puts the aircraft in the air at the route's height");
     // Off the map (2026-10-10: made 180 m inside the ground, in plain sight): past the ground's edge (the walls +-1500 stand
-    // kVoidMargin inside it) by kOffMap, inside the physical square (crew.h ArrivalHalf: Havok's 3000 less kArrivalRoom).
+    // kVoidMargin inside it) by kOffMap, inside the physical square (world.h ArrivalHalf: Havok's 3000 less kArrivalRoom).
     Check(std::fmax(std::fabs(route.from[0]),std::fabs(route.from[2]))>=1500.0f+area::kVoidMargin+support::kOffMap-0.5f &&
           std::fabs(route.from[0])<=ArrivalHalf() && std::fabs(route.from[2])<=ArrivalHalf(),"the entry stands off the map, inside the square");
     // The map's preview plans the very same entry (support_warning.cpp), unlogged.

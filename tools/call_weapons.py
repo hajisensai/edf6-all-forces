@@ -602,7 +602,7 @@ def throw_sgo(template: bytes, call: Call) -> bytes:
 # Its reach (AmmoSpeed x AmmoAlive, the only limit on how far the gun shoots: a round lives AmmoAlive frames, and the
 # weapon's range +0x224 is that product, docs/boarding-re.md §2; src/boarding.cpp has no distance gate) is unlimited in practice (the user, 2026-10-11:
 # "登车狙击枪的射击距离应该是无限远"; it was 2 frames, 1500 m): 120 frames, 90 km in 2 s, past the farthest anything
-# can stand or be drawn, the unlimited view distance at the largest BigWorld (src/crew.h UnlimitedViewDistance:
+# can stand or be drawn, the unlimited view distance at the largest BigWorld (src/view.h UnlimitedViewDistance:
 # 2.83 x 20000 = 56.6 km) and the stock far pass (20 km); still a short life (under 600 frames, which
 # src/highcam.cpp / src/sightzoom.cpp take for an indirect-fire round), so a miss is gone in 2 s, at most 20 in
 # flight at 10 a second. No damage falloff: the four templates' AmmoDamageReduce is [1, 1].

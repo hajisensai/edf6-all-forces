@@ -11,7 +11,7 @@ How it works:
   them changed runs everything.
 - Each test's dependencies are found from the code itself, not by hand: a Python test's script and everything it
   imports (function-local and importlib imports too), transitively, and every string in them naming a repository path
-  ('src/crew.h', os.path.join(ROOT, 'edf5port'), f'tests/data/{x}', a sibling 'data' folder) or a built artifact
+  ('src/config.h', os.path.join(ROOT, 'edf5port'), f'tests/data/{x}', a sibling 'data' folder) or a built artifact
   ('EDF6VehicleCrew.dll', a CMake target's exe); a C++ test: everything a C++ test can compile or read (src/,
   autoturret/, third_party/, the C++ under tests/ and tools/, and every path a C++ test names); a selftest test:
   the code reachable from its function (the functions, modules and values it names, followed through selftest.py),

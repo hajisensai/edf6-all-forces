@@ -35,7 +35,7 @@ body = functools.partial(srcscan.body, regex=True, braces=False)
 
 
 def raw(root: str, rel: str) -> str:
-    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(root, rel), encoding='utf-8') as f:
         return gen_config.expand(f.read())
 
@@ -135,8 +135,8 @@ def main() -> int:
         fail('plugin.cpp: AllClassesRide is not read')
     if 'allClassesRide=%d' not in plugin:
         fail('plugin.cpp: AllClassesRide is not logged')
-    if not re.search(r'bool allClassesRide=true;', raw(root, 'src/crew.h')):
-        fail('crew.h: allClassesRide must default on')
+    if not re.search(r'bool allClassesRide=true;', raw(root, 'src/config.h')):
+        fail('config.h: allClassesRide must default on')
     ini = raw(root, 'EDF6VehicleCrew.ini')
     m = re.search(r'((?:^;.*\n)+)AllClassesRide=1\s*$', ini, re.M)
     if not m:

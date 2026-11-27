@@ -1,7 +1,7 @@
 // The map's order keys (mapcmd.cpp ReadKeys; the user, 2026-11-27: 「把指挥改成断箭的操作方式吧，全照抄」): Broken Arrow's
 // set, each a Windows virtual-key code in the ini (Map<name>Key, tools/config_keys.py; 0: none). The camera keeps WASD and the wheel
 // (map.cpp Steer); the selection keeps Shift, Ctrl, the digits and Ctrl+A as they are (not rebound here).
-// Included by crew.h; the values are Config members (Of).
+// Included by config.h (inside namespace crew); the values are Config members (Of).
 #pragma once
 
 namespace mapkeys {

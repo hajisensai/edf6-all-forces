@@ -1,5 +1,5 @@
 // The stock vehicles' HUD (vhud.cpp gathers it, hud.cpp StockVehicleHud draws it; docs/hud-re.md §7) and the round
-// models it shares with the helis' sight (rounds.cpp, rounds.h). Included by crew.h.
+// models it shares with the helis' sight (rounds.cpp, rounds.h).
 #pragma once
 #include <Windows.h>
 #include <cstdint>
@@ -113,7 +113,7 @@ struct StockHudReadout {
     FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
     int arms,selected;           // selected: secondary payload/list selection (-1 none)
     int sight=-1;               // independently selected actual primary/secondary fire-control weapon
-    int turret=-1;              // the arm the seat's turret is laid by (crew.h PlayerTurretGun; -1 none)
+    int turret=-1;              // the arm the seat's turret is laid by (turretcam_api.h PlayerTurretGun; -1 none)
     StockArm arm[kStockArms];
     int threats;                 // 2 a missile homing on it, 1 a jet's lock (missile.cpp, jet.cpp: as the jets' threat ring)
     float threatAt[kStockThreats][3];

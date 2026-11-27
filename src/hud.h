@@ -1,5 +1,4 @@
 // hud.cpp: the vehicle HUD (docs/hud-re.md), drawn from the follower gauge's call (subcarrier.cpp GaugeHook).
-// Included by crew.h.
 #pragma once
 namespace crew {
 bool InstallHud() noexcept;                         // at load: checks the draw and text functions it calls

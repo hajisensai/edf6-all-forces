@@ -1,6 +1,6 @@
 """Writes the plugin's config from tools/config_keys.py (the one table, 2026-11-27):
   src/config.inc         four sections, each taken by defining its macro before the #include:
-                           EDF6_CONFIG_FIELDS    the Config members with their defaults (crew.h struct Config)
+                           EDF6_CONFIG_FIELDS    the Config members with their defaults (config.h struct Config)
                            EDF6_CONFIG_LOAD      the reads into Config n (plugin.cpp LoadConfig: ReadBool / ReadFloat /
                                                  ReadInt)
                            EDF6_CONFIG_VALIDATE  the range checks (plugin.cpp Validate: Fix / FixInt / Reset), the keys
@@ -151,7 +151,7 @@ def expand(text: str, inc: str | None = None) -> str:
 
 
 def read_expanded(rel: str) -> str:
-    """expand() of a source under the repository (rel: 'src/crew.h')."""
+    """expand() of a source under the repository (rel: 'src/config.h')."""
     with open(os.path.join(ROOT, *rel.split('/')), encoding='utf-8') as f:
         return expand(f.read())
 

@@ -247,7 +247,7 @@ void Validate(Config& n) noexcept {
     // The ranges in tools/config_keys.py (tools/gen_config.py): those naming another key's value come last.
 #define EDF6_CONFIG_VALIDATE
 #include "config.inc"
-    // -1 (any negative): unlimited (crew.h UnlimitedViewDistance); 0: the mission's own; else from 1000 m, no upper limit.
+    // -1 (any negative): unlimited (view.h UnlimitedViewDistance); 0: the mission's own; else from 1000 m, no upper limit.
     if(n.viewDistance<0.0f)n.viewDistance=kUnlimitedView;
     else if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,1.0e6f);
 }

@@ -87,7 +87,7 @@ using DeleteFn=void(*)(void*);
 // What a support brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
 // (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
-// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (crew.h SortiePass, 0 none), `then` the kCalls index of
+// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (jet.h SortiePass, 0 none), `then` the kCalls index of
 // its second wave (-1 none), called onto the same mark `thenMs` after this one went out (SupportFollowUpQueue). `pt`
 // its price on the map's bar (tools/calls.py Call.pt).
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;

@@ -1,7 +1,6 @@
 // map.cpp: the map view (README 地图, docs/camera-re.md §8): M (ini MapKey) or a pad button (MapButton, XInput bits)
 // lifts the player's camera into an overhead view of the real 3D world that the mouse / stick pans and turns and the
 // wheel zooms (200 m to 3 km), the player's controls held while it is open; hud.cpp draws its marks over it.
-// Included by crew.h.
 #pragma once
 #include <Windows.h>
 #include <cstdint>

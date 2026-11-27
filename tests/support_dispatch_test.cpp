@@ -227,7 +227,7 @@ void SupportPointsSettle(std::uint32_t request,bool back) noexcept {
 bool soloHost=false;
 bool SupportSoloHostWorld() noexcept {return soloHost;}
 int airJet=-1,airHeli=static_cast<int>(HeliBody::eros506),airCount=1;bool airFollow=false;   // the air calls' spec
-int airSortie=0;   // a sortie call's pass (crew.h SortiePass; 0 none)
+int airSortie=0;   // a sortie call's pass (jet.h SortiePass; 0 none)
 bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
     if(id<0 || id>=21 || id==16)return false;
     *out={airJet,airHeli,airCount,300,airFollow,false,airSortie};return true;
@@ -294,7 +294,7 @@ void RescueHeliDeployed(unsigned char* v,const float* target,bool flown,const Ob
 }
 bool SupportTransactionRequester(std::uint64_t,ObjRef* out) noexcept {*out=hostRequester;return static_cast<bool>(hostRequester);}
 bool SupportAuthenticatedRequester(std::uint32_t,ObjRef* out) noexcept {*out=hostRequester;return static_cast<bool>(hostRequester);}
-// A submarine carrier: its deck nearest a point (crew.h SubDeck), when one is out; the takeoff planner's answer.
+// A submarine carrier: its deck nearest a point (subcarrier.h SubDeck), when one is out; the takeoff planner's answer.
 bool carrierOut=false;float carrierDeck[3]={300,193,-40};
 bool SubDeck(const float* from,float* deck) noexcept {
     if(!carrierOut)return false;

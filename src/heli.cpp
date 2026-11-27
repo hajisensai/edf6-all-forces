@@ -2401,7 +2401,7 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
 // The soft edge (airbound.h; the user 2026-10-06: a small edge before the edge, past it they come back). A heli is
 // held inside the move area (shrunk by its inset, veh+kAreaInset) by the stock input, which teleports it back: one
 // chasing out there sat on that edge (or, on the big map, 650 m out past the ground's edge, BigWorld's widened area).
-// Its edge: that box and the play edge (crew.h PlayEdge) overlapped; its soft edge that less the band (ini HeliSoftEdge,
+// Its edge: that box and the play edge (world.h PlayEdge) overlapped; its soft edge that less the band (ini HeliSoftEdge,
 // at least what it takes to stop from full speed, kHeliSoftReact s of it at full speed included). Its post and its hold
 // are put inside it (a guard post or a map command's point out there: its guard circle stays inside), and its wanted
 // velocity out across it is cut to what still stops on it (LimitOut); past it, in at kHeliBackShare of its top speed.

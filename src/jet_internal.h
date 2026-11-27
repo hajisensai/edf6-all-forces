@@ -43,7 +43,7 @@ constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
 constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
 constexpr std::size_t kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
-constexpr unsigned kDelete=scene::kDeleteObject,kCreateObject=scene::kCreateObject,kInitParamVtable=scene::kInitParamBaseVtable;   // SetTeam: crew.h kSetTeam
+constexpr unsigned kDelete=scene::kDeleteObject,kCreateObject=scene::kCreateObject,kInitParamVtable=scene::kInitParamBaseVtable;   // SetTeam: edf_layout.h kSetTeam
 constexpr std::size_t kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
 constexpr std::int32_t kTeamEnemy=1;   // the game's team relations: 0 (player) and 2 (friends) are both hostile to 1
@@ -315,7 +315,7 @@ constexpr bool KindsInOrder() noexcept {
 static_assert(KindsInOrder(),"kKinds is indexed by Role, each row's body is of its role, rotor craft lean, charges trigger and blast");
 constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r)]; }
 
-// The roles a launch asks for (crew.h JetRole) and the body each flies in. The blast and doll carriers are
+// The roles a launch asks for (jet.h JetRole) and the body each flies in. The blast and doll carriers are
 // carriers whose own bodies' marks name their drones. The support deployment's strike jet, fighter, interceptor and
 // multirole fly their kinds' Dreadnought-model bodies, its carriers the Helicarrier ones and its gunship the AC-130
 // (Body::sup*, Body::c130Gunship; the plain bodies stay the player's parked / requested twins' and the test range's).
@@ -753,7 +753,7 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept;
 bool NearWall(const Jet& j,const float* pos,float range,ULONGLONG ms) noexcept;
 // `clear`: GroundClearance(pos) this frame (the frame step has it: no second ray).
 void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcept;
-// The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (crew.h PlayEdge) less its band (ini
+// The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (world.h PlayEdge) less its band (ini
 // AirSoftEdge / AirSoftTurns: at least that many of its full-speed turn diameters); `band` gets the band's width.
 airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
 // m/s: the most a wing of kind `k` flies inside a play area of half size `half` (turns that fit it; jet_flight.cpp).

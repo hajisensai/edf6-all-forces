@@ -219,7 +219,7 @@ void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherR
 }  // namespace
 
 // The first ground along the arc from `pos` at `vel` (m/frame), `drop` m/frame^2 added a frame, for at most `frames`
-// frames: `hit` and the frames it took. Shared with playerjet.cpp's bomb impact (crew.h).
+// frames: `hit` and the frames it took. Shared with playerjet.cpp's bomb impact (launchers.h).
 bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept {
     rounds::Arc arc{};
     for(int c=0;c<3;++c){arc.vel[c]=vel[c];arc.drop[c]=drop[c];}

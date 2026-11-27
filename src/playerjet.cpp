@@ -504,7 +504,7 @@ void RightOf(const float* dir,float* right) noexcept {
     if(!Normalize(right)){right[0]=-1.0f;right[1]=0.0f;right[2]=0.0f;}
 }
 
-// The walls (playarea.h): where the map's ground ends, kVoidMargin inside it (until 2026-10-06 the play edge, crew.h
+// The walls (playarea.h): where the map's ground ends, kVoidMargin inside it (until 2026-10-06 the play edge, world.h
 // PlayEdge: the physics world's square, km out over the void on a stock map). From kEdgeBuffer m in the share of the
 // path allowed out at a wall falls from all of it to none at the wall, and past it the path must point back in by
 // kWallIn: the plane is bent round smoothly along it, its heading never flipped (a hard turn at the wall flipped its

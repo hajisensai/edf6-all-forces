@@ -1,11 +1,10 @@
 // heli.cpp: the helicopter pilot, its map rays and sea probe, the enemy registry walk, the sea rescue.
-// Included by crew.h (the other modules call these through it).
 #pragma once
 #include <Windows.h>
 #include <cstdint>
 
 namespace crew {
-enum class SortiePass : std::uint8_t;   // crew.h
+enum class SortiePass : std::uint8_t;   // jet.h (sortie_pass.inc)
 bool IsHelicopter(const void* vehicle) noexcept;
 // The player's board button pressed for them (the stock button's code: the nearest seat they may take in reach).
 void PressBoardButton(unsigned char* human) noexcept;

@@ -27,7 +27,7 @@ def check(ok: object, why: str) -> None:
 
 
 def read(*parts: str) -> str:
-    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    # config.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     return gen_config.expand(open(os.path.join(ROOT, *parts), encoding='utf-8').read())
 
 
@@ -46,7 +46,7 @@ src_dir = os.path.join(ROOT, 'src')
 names = sorted(n for n in os.listdir(src_dir) if n.endswith(('.cpp', '.h')))
 for name in names:
     check(not re.search(r'frameRateDev|FrameRateDev', code(read('src', name))), f'src/{name} reads no FrameRateDev')
-check(re.search(r'\bint frameRateCap=0;', read('src', 'crew.h')), 'Config::frameRateCap defaults to 0 (the game\'s rate, as the shipped ini)')
+check(re.search(r'\bint frameRateCap=0;', read('src', 'config.h')), 'Config::frameRateCap defaults to 0 (the game\'s rate, as the shipped ini)')
 check(re.search(r'(?m)^FrameRateCap=0$', ini), 'the shipped ini has FrameRateCap=0 (1 waits for the maintainer\'s checklist)')
 
 fr = code(read('src', 'frame_rate.cpp'))
@@ -69,7 +69,7 @@ check(callers['InstallSwapFlip('] == ['frame_rate.cpp', 'swap_flip.cpp', 'swap_f
 # The flip model is a developer switch: the shipped ini has no FrameRateFlip, the Config defaults it off, and the
 # creation's hook goes in only when it is asked for (the review of #386, 1 and 2).
 check(not re.search(r'(?im)^\s*;?\s*FrameRateFlip\s*=', ini), 'the shipped ini has no FrameRateFlip key')
-check(re.search(r'\bbool frameRateFlip=false;', read('src', 'crew.h')), 'Config::frameRateFlip defaults to off')
+check(re.search(r'\bbool frameRateFlip=false;', read('src', 'config.h')), 'Config::frameRateFlip defaults to off')
 check(re.search(r'InstallSwapFlip\(c\.frameRateFlip\)', body), 'InstallFrameRate passes the developer switch to InstallSwapFlip')
 sf = code(read('src', 'swap_flip.cpp'))
 check(re.search(r'if\(!flipModel\)return true;\s*return callTo\(kCreateCall', sf), 'the creation hook only with flipModel, after the Present')
