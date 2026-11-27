@@ -18,6 +18,8 @@ import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+import gen_config  # noqa: E402
 
 failures: list[str] = []
 
@@ -31,8 +33,9 @@ def code_only(text: str) -> str:
 
 
 def read(root: str, rel: str) -> str:
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
     with open(os.path.join(root, rel), encoding='utf-8') as f:
-        return f.read()
+        return gen_config.expand(f.read())
 
 
 def body(text: str, signature: str) -> str:

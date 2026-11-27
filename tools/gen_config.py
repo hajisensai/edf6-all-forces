@@ -137,6 +137,25 @@ def render_ini() -> str:
     return '\n'.join(out + list(ck.TAIL))
 
 
+_INCLUDE = re.compile(r'^#define (EDF6_CONFIG_\w+)\n#include "config\.inc"[^\n]*\n', re.M)
+
+
+def expand(text: str, inc: str | None = None) -> str:
+    """A source's text with each config.inc section it includes written out after its #include (the committed
+    src/config.inc, or inc): what the compiler sees, for the source checks (tools/selftest.py src, tests/*_guard.py)."""
+    if inc is None:
+        with open(INC, encoding='utf-8') as f:
+            inc = f.read()
+    sections = dict(re.findall(r'^#(?:el)?if defined\((EDF6_CONFIG_\w+)\)\n#undef \1\n(.*?)(?=^#el)', inc, re.M | re.S))
+    return _INCLUDE.sub(lambda m: m.group(0) + sections[m.group(1)], text)
+
+
+def read_expanded(rel: str) -> str:
+    """expand() of a source under the repository (rel: 'src/crew.h')."""
+    with open(os.path.join(ROOT, *rel.split('/')), encoding='utf-8') as f:
+        return expand(f.read())
+
+
 def outputs() -> list[tuple[str, str]]:
     check_table()
     return [(INC, render_inc()), (INI, render_ini())]

@@ -74,8 +74,14 @@ def test(fn: Callable[[], None]) -> Callable[[], None]:
 
 
 def src(rel: str) -> str:
+    """A source's text; crew.h's and plugin.cpp's with the config.inc sections they include written out (the ini's keys,
+    tools/config_keys.py via tools/gen_config.py), as the compiler sees them."""
     with open(os.path.join(ROOT, *rel.split('/')), encoding='utf-8') as f:
-        return f.read()
+        text = f.read()
+    if '#include "config.inc"' in text:
+        import gen_config
+        text = gen_config.expand(text)
+    return text
 
 
 def disabled_return_offset(hook: str) -> int:
@@ -6494,7 +6500,10 @@ def fire4_pad_default_migrates() -> None:
     at 0 is moved once by the installer's 11-08 step, a button the player chose is kept, a later install changes nothing."""
     import installer
     ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
-    assert re.search(r'^VehicleFire4Button=512$', ini, re.M) and 'vehicleFire4Button=0x200,' in crew
+    import config_keys
+    fire4 = config_keys.BY_NAME['VehicleFire4Button']   # the plugin's default is the table's (tools/gen_config.py)
+    assert re.search(r'^VehicleFire4Button=512$', ini, re.M) and fire4.default == '512' and \
+        'int vehicleFire4Button=512;' in crew
     assert installer.NEW_DEFAULTS_1108[installer.SECTION] == {'VehicleFire4Button': ('0', '512')}
     done = (f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\n{installer.DEFAULTS_MARK_1017}\n{installer.DEFAULTS_MARK_1024}\n'
             'Enabled=1\nVehicleFire4Button=0\n')
@@ -10770,12 +10779,15 @@ def edf41_mother301_finish_contract() -> None:
     assert 'const wchar_t* hitSe=nullptr;' in header and 'bool FillSePreset(unsigned char* preset' in header   # unified with UfoRobo's (one definition, initialises the preset itself)
     assert 'FillSePreset(param+0x100,b.hitSeTable,b.hitSe)' in shared
     plugin, ini = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
-    assert 'ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,4095)' in plugin
+    import config_keys
+    force = config_keys.BY_NAME['Edf41MotherForce']   # read and clamped by the generated code (src/config.inc)
+    assert 'n.edf41MotherForce=ReadInt(L"Edf41MotherForce",' in plugin and \
+        'FixInt("Edf41MotherForce",n.edf41MotherForce,0,4095)' in plugin and (force.lo, force.hi) == ('0', '4095')
     assert re.search(r'^Edf41MotherForce=0$', ini, re.M) and '16 =' in ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
     # the clamp keeps every bit the ini documents (2048 = the puffs: a cap of 2047 cut it, 2026-10-17 review)
     doc = ini.split('Edf41MotherForce=0', 1)[0].rsplit('Edf41MotherParts=31', 1)[1]
     top = max(int(b) for b in re.findall(r'(\d+) =', doc))
-    cap = int(re.search(r'ReadInt\(L"Edf41MotherForce",n\.edf41MotherForce\),0,(\d+)\)', plugin).group(1))
+    cap = int(force.hi)
     assert top == 2048 and cap == 2 * top - 1, (top, cap)
 
 

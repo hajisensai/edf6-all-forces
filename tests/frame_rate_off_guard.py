@@ -10,6 +10,9 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import gen_config  # noqa: E402
+
 checks = 0
 
 
@@ -22,7 +25,8 @@ def check(ok: object, why: str) -> None:
 
 
 def read(*parts: str) -> str:
-    return open(os.path.join(ROOT, *parts), encoding='utf-8').read()
+    # crew.h / plugin.cpp: with the config.inc sections they include (tools/gen_config.py expand: the ini's keys)
+    return gen_config.expand(open(os.path.join(ROOT, *parts), encoding='utf-8').read())
 
 
 def code(text: str) -> str:
