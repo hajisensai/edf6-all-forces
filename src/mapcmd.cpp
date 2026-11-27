@@ -64,6 +64,7 @@
 #include <cstring>
 
 namespace crew {
+bool SupportWithdrawVehicle(const void* vehicle) noexcept;   // support_dispatch.cpp: a support vehicle sent off the field
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept;
 namespace {
 // Freshness by the scene step (step_fresh.h). The map closed is an explicit state: SuspendMapCommands (map.cpp Close,
@@ -356,6 +357,8 @@ NpcCommandResult GiveUnit(const Entry& e,const Command& order,const ObjRef& requ
     // HOLD FIRE is the table's (every module asks UnitHoldsFire before a shot); a squad's and a tank's go through npcai.cpp
     // (the network's executor too), the aircraft's and the crawlers' are set here.
     if(c.order==Order::holdFire && e.owner!=Owner::squad && e.owner!=Owner::tank){SetUnitHoldFire(e.u.v,c.param!=0);return done(true);}
+    // WITHDRAW to an aircraft a call brought: off the field as transport.cpp's (StartLeave / JetWithdrawNow; Retire deletes it).
+    if(c.order==Order::withdraw && (e.owner==Owner::heli || e.owner==Owner::jet))return done(SupportWithdrawVehicle(e.u.v));
     switch(e.owner) {
     case Owner::heli: return done(HeliCommand(e.u.v,c,focus));
     case Owner::jet: return done(JetCommand(e.u.v,c,focus,requester));
@@ -501,7 +504,8 @@ bool Takes(const Entry& e,Order o) noexcept {
     }
     if(mapcmd::DismountOrder(o))return e.u.carries;   // its riding squad's (Give)
     if(e.owner==Owner::tank)return mapcmd::VehicleOrder(o) || o==Order::focus;
-    if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o) || o==Order::withdraw;
+    if(o==Order::withdraw && (e.owner==Owner::heli || e.owner==Owner::jet))return e.u.withdraws;
+    if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
 }
 // Whether the orders reach `e` (Tab's sub-selection, mapcmd_logic.h NextSub): selected and of the active kind.

@@ -46,6 +46,7 @@ struct CommandUnit { const void* v; const char* name; Command now; bool air; flo
     // (SPRINT: a Wing Diver / Fencer squad, a jet), `decoys` it has decoys left (DECOY: a jet's flares). No unit has
     // smoke of its own: SMOKE is taken by none (the card shows it unavailable, the key does nothing).
     bool holdFire=false,high=false,sprints=false,decoys=false;
+    bool withdraws=false;   // an aircraft a support call brought (heli.cpp / jet.cpp): WITHDRAW sends it off the field
 };
 bool CommandVehicleLive(const ObjRef& ref) noexcept;
 bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;

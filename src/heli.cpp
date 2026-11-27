@@ -513,6 +513,7 @@ struct Heli {
     Command cmd;
     bool cmdMoving;
     bool ownGuard;
+    bool high;            // ALTITUDE high (HeliCommand): it holds HeliHeightOf over its post / the player, kHeliHighShare up
     float ownPost[3],ownHold[3];
     // A map focus order's target (HeliCommand: the enemy the player marked): engaged before any other, wherever it is,
     // its post and order kept; let go once it is no longer among its targets (PickTarget) or another order comes.
@@ -996,12 +997,15 @@ void Unit(const float* p,float a,float b,float* q) noexcept {
     q[0]=(dx*area.u[0]+dz*area.u[1])/a;q[1]=(dx*area.w[0]+dz*area.w[1])/b;
 }
 
+// How high it holds over its post or the player: HeliHeight, kHeliHighShare times that flying high (ALTITUDE, V on the map).
+float HeliHeightOf(const Heli& h) noexcept { return Cfg().heliHeight*(h.high ? mapcmd::kHeliHighShare : 1.0f); }
+
 // No target: escort the travelling player, or fly the ellipse round the area they are about (see
 // kRoamSpan). Sets the wanted velocity and height; returns how far it is off its slot or the ellipse.
 float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl,float* vel,float* height) noexcept {
     const float* first=fl.first ? fl.first->pos : pos;
     const float group=static_cast<float>(fl.group),wing=static_cast<float>(fl.wing);
-    *height=player.pos[1]+Cfg().heliHeight+Stack(fl);
+    *height=player.pos[1]+HeliHeightOf(h)+Stack(fl);
     if(roaming) {
         // Each flight a V: the first flight on the side the first heli is on, heliFollow out and
         // kEscortAhead forward, the second on the other side, the next ones kGroupGap farther out,
@@ -2299,6 +2303,9 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
             if(shot.missile)h.missileAt=s.ms;
         }
     } else h.firing=false;
+    // HOLD FIRE (the map's H; mapcmd.h UnitHoldsFire): it aims as ever and fires only once hurt. A medic's guns heal on.
+    const bool holding=!Medic(s.v) && UnitHoldsFire(s.v);
+    if(holding)shot.gun=shot.missile=false;
     if(shot.gun && !Medic(s.v))shot.gun=!HoldFire(s.v,h.target.obj,pos,s.arms.gunSpeed,s.arms.gunGravity*kGravity);
     if(shot.missile && !Medic(s.v)) {
         const unsigned char* w=s.arms.store ? s.arms.store : h.arms[2].weapon;
@@ -2307,7 +2314,7 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
     }
     if(s.type->guns==Guns::nose){s.v[kFireGun]=shot.gun;s.v[kFireMissile]=shot.missile;}
     else if(doorOk && Cfg().heliDoorGuns && SeatCount(s.v)>=3)
-        for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
+        for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing || holding,s.dt,s.ms);
     return shot;
 }
 
@@ -3304,7 +3311,7 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
         if(!h){Log("HELI v=%p called, but not flown by the plugin (see above): it stays where it is",vehicle);return;}
         h->called=true;h->guard=guard;
         std::memcpy(h->post,post,12);
-        h->hold[0]=post[0];h->hold[1]=post[1]+Cfg().heliHeight;h->hold[2]=post[2];
+        h->hold[0]=post[0];h->hold[1]=post[1]+HeliHeightOf(*h);h->hold[2]=post[2];
         h->leaveAt=GameMs()+static_cast<ULONGLONG>(fuelSec)*1000;
         // Spawned in the air with the rotor still: it starts at the rotor Fly assumes for hover, so it
         // does not drop while the rotor spins up.
@@ -3354,16 +3361,30 @@ int HeliCommandUnits(CommandUnit* out,int most) noexcept {
     int n=0;
     for(const auto& h:helis)
         if(n<most && Commandable(h) &&
-           ReadCommandUnit(h.ref,h.type ? h.type->name : "heli",h.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : h.cmd,true,&out[n]))++n;
+           ReadCommandUnit(h.ref,h.type ? h.type->name : "heli",h.focus ? Command{Order::focus,{0.0f,0.0f,0.0f}} : h.cmd,true,&out[n])) {
+            out[n].high=h.high;
+            out[n].withdraws=h.called;   // a called one: WITHDRAW flies it off (support_dispatch.cpp SupportWithdrawVehicle)
+            ++n;
+        }
     return n;
 }
 
 // guard: the post moved to the point (its guard orbit round it, HeliGuardRadius out; HeliHeight over it with the orbit
 // off), as a guard call's; follow: no post (it follows the player, Fly's escort / orbit); none: the call's own back.
+// altitude: a state, not an order -- HeliHeightOf high or low, its post's hold raised or lowered at once (a ferry's is the
+// ferry's), its order kept.
 bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexcept {
     __try {
         Heli* const h=Find(vehicle);
         if(!h || !Commandable(*h))return false;
+        if(c.order==Order::altitude) {
+            if(c.param>mapcmd::kAltitudeHigh)return false;
+            h->high=c.param==mapcmd::kAltitudeHigh;
+            if(!h->ferry && h->guard)h->hold[1]=h->post[1]+HeliHeightOf(*h);
+            Log("HELI v=%p map command: altitude %s (%.0f m)",vehicle,h->high ? "high" : "low",HeliHeightOf(*h));
+            return true;
+        }
+        if(c.order!=Order::none && c.order!=Order::guard && c.order!=Order::follow && c.order!=Order::focus)return false;
         // focus: the marked enemy engaged first (Heli::focus), its post and order kept; a medic's guns heal (none), and
         // the enemy must be one of its targets now (as npcai.cpp checks a squad's focus).
         if(c.order==Order::focus) {
@@ -3383,7 +3404,7 @@ bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexc
         if(c.order==Order::guard) {
             h->guard=true;
             std::memcpy(h->post,c.at,12);
-            h->hold[0]=c.at[0];h->hold[1]=c.at[1]+Cfg().heliHeight;h->hold[2]=c.at[2];
+            h->hold[0]=c.at[0];h->hold[1]=c.at[1]+HeliHeightOf(*h);h->hold[2]=c.at[2];
         } else if(c.order==Order::follow) {
             h->guard=false;
         } else if(h->cmd.order!=Order::none) {

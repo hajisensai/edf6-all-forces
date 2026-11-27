@@ -562,6 +562,10 @@ struct Jet {
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     bool barrelsLogged=false;   // its guns' barrels against its nose logged (JetBarrelLog: once a jet, they do not move)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
+    // The map's Broken Arrow orders (JetCommand): DECOY a pair of its flares dropped next frame (NpcFlares), ALTITUDE high
+    // (kind.alt times mapcmd::kJetHighShare), SPRINT its afterburner until burnUntil (game ms; mapcmd::kAfterburnerSpeed).
+    bool flareNow=false,high=false;
+    ULONGLONG burnUntil=0;
     PrimerState primer;
     bool cmdMoving=false;       // reach a new map order before taking another target
     Command cmd{};              // a map command (JetCommand, mapcmd.cpp): what it works round instead (jet.cpp JetFrame)

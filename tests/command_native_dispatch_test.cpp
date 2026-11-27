@@ -88,6 +88,11 @@ NpcCommandResult MapCommandAuthority(const ObjRef& unit,const mapcmd::Command& c
                                      bool,MapCommandGive give,std::uint32_t) noexcept {
     return give(unit,c,requester,focus);
 }
+// mapcmd.cpp's HOLD FIRE table (its own checks: tools/map_command_runtime_check.cpp): no unit here holds fire.
+void SetUnitHoldFire(const void*,bool) noexcept {}
+bool UnitHoldFire(const void*) noexcept { return false; }
+void UnitStruck(const void*) noexcept {}
+bool UnitHoldsFire(const void*) noexcept { return false; }
 bool MapGroundNear(float,float,float,float* out,bool) noexcept { *out=0;return rpc_fixture::projectionOk; }
 bool SupportCommandRequesterMatches(void* puid,const char* sender) noexcept {
     return puid==rpc_fixture::users[1] && !std::strcmp(sender,rpc_fixture::authClient);
