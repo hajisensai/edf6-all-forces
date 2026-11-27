@@ -472,7 +472,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - 只瞄准本机玩家；联机未验证；两种生物只由放置它们的任务加载，不增加其它关卡的加载量；`Primer=0` 时场上的星导者生物被删除；
    - **升级时必须重新运行安装器**：标记 7012 / 7013 以前（未发布的开发版）属于群体合体机，只换 DLL 不重新生成机体，旧机体会被当成龙虫 / 蜻蜓来飞。
 
-所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。
+所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。（开发者：出厂 ini 由 `tools/config_keys.py` 经 `tools/gen_config.py` 生成。）
 
 **插件按键在游戏自己的按键设置里改**（2026-10-26，`src/keyconfig.cpp`、`docs/keyconfig-re.md` §5～§7、`docs/plan-2026-10-25-keybinds.md` §4）：
 HQ → 设置 → 按键设置，列表末尾多了六页「插件：步行与通用 / 载具通用 / 战机 / 钻头战车·普罗透斯 / 无畏舰 / 沙扎比」，用原版的改键框、
@@ -559,7 +559,7 @@ EDF6AutoTurret 时，键仍按 ini。
 即 `EDF6VehicleCrew` 和 `EDF6AutoTurret`；`tools/selftest.py` 的 `pack_ships_every_plugin` 检查 CMake 构建的每个插件都在这个清单里）；
 版本号只有一处：`CMakeLists.txt` 的 `project(VERSION)`（DLL 自报的版本也来自它）。CI 每次推送都打同样的安装器包，
 推 `vX.Y.Z` 标签时要求它与 `project(VERSION)` 一致。不打包时也可直接 `python tools/installer.py install`（从 `build/` 取 DLL，没构建会提示先运行 `build.cmd`）。
-`python tools/selftest.py` 是安装链的自测（CI 里跑）；改了 `tools/calls.py` 后运行 `python tools/gen_calls.py` 重新生成 `src/calls.inc` 并一起提交。
+`python tools/selftest.py` 是安装链的自测（CI 里跑）；改了 `tools/calls.py` 后运行 `python tools/gen_calls.py` 重新生成 `src/calls.inc` 并一起提交；ini 的键改在 `tools/config_keys.py`，再运行 `python tools/gen_config.py` 生成 `src/config.inc` 与 `EDF6VehicleCrew.ini`。
 发布构建和生成资源缓存共用本地模块唯一性检查，拒绝工具与库同名。SHKT 的全游戏检查入口为 `python tools/check_shkt.py`（原版校准加 `--stock`）；冻结包自检会执行合成碰撞数据的实际重绑定和凸包编辑。
 
 制作分享包时，先用当前版本的 `python tools/export_edf41_assets.py <素材目录>` 增量导出 EDF4.1 素材，

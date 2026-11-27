@@ -165,6 +165,7 @@
 - 做法：先让生成器输出与现有代码逐字等价的结果，再按键分批迁移。有特殊逻辑的键（例如 Validate 里依赖别的键的 `HeliCombatRange`）留一个手写钩子。
 - 护栏：gen `--check` 接入 CI；ini 来回读写测试，默认值等于生成表。
 - 规模：一个新生成器约 300 行，删掉 LoadConfig / Validate 约 900 行，ini 改成生成。风险低到中，行为可以逐字对比。
+- 进展（2026-11-27，分支 `wave1-config`）：已做。`tools/config_keys.py` 一张表（500 键 + 11 个退役键），`tools/gen_config.py` 生成 `src/config.inc`（`EDF6_CONFIG_FIELDS` / `_LOAD` / `_VALIDATE` / `_RETIRED` 四段）和 `EDF6VehicleCrew.ini`；手写只留跨键逻辑（FrameRateCap、HudLanguage、机库、TestBoardVehicle、日志路径、任务包、ViewDistance）。`SortiePass`、Barrage `Kind` 由 `gen_calls.py` 生成 `src/sortie_pass.inc` / `src/barrage_kind.inc`。`--check` 接入 `tools/check.py` 与 CI；往返测试 `tests/config_roundtrip_test.py`。README 没有配置键表（只有一句指向 ini），所以不生成 README 段落。
 
 ### 第 4 步：模块注册表：Install / Reset / Frame 一处登记（解决 P2、P3）
 - 范围：新增 `src/module.h`：`struct Module{ name; install; reset; tick; vehicleStep; phase; runsWhenDisabled; }`。`plugin.cpp` 的 119 个 Install、`mission.cpp` 的约 70 个 Reset、`crew.cpp` 的 78 个 Guarded 改成从注册表遍历。

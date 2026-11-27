@@ -21,7 +21,7 @@ import struct
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / 'pylib')]
+sys.path[:0] = [str(ROOT / 'pylib'), str(ROOT / 'tools')]
 if not __debug__:
     raise RuntimeError('Run without -O: contract assertions must execute')
 
@@ -102,7 +102,8 @@ assert DRIVE[0] == 0x32 and all(ROWS[r * 7] != 0x32 for r in range(1, 7))
 assert DRIVE[3] == 0x4D, "the drive page's 「DriveHorn」 (default right button) is bit 0x20: the Car's empty slot 83"
 assert DRIVE[5] == 0x36, "the drive page's 「TanksAttack2」 (default middle button) is bit 0x40: the Car's horn"
 HORN_DEFAULT_VK = 0x04   # 0x36's stock default, the middle button (0xD52F0; tests/keyconfig_native_audit.py)
-free_look = int(re.search(r'int freeLookKey=(0x[0-9A-Fa-f]+|\d+);', (ROOT / 'src' / 'crew.h').read_text(encoding='utf-8')).group(1), 0)
+import config_keys  # noqa: E402  (the ini's keys and defaults: crew.h Config takes them through src/config.inc)
+free_look = int(config_keys.BY_NAME['FreeLookKey'].default, 0)
 assert free_look != HORN_DEFAULT_VK, "free look on the key that sounds the Grape's horn (2026-11-10)"
 
 
@@ -139,7 +140,6 @@ for name, vtable, fn in (('505', 0x17DADB0, 0x61ACD0), ('601', 0x17DC250, 0x6207
 
 # --- The plugin's keys
 payload = (ROOT / 'src' / 'payload.cpp').read_text(encoding='utf-8')
-crew_h = (ROOT / 'src' / 'crew.h').read_text(encoding='utf-8')
 free = re.search(r'constexpr bool FreeSecondary\(Class c\) noexcept \{ return ([^;]*); \}', payload).group(1)
 assert 'Class::car' not in free and 'Class::other' not in free, 'the Car drives on +0x2E0: no coax there'
 assert set(re.findall(r'Class::(\w+)', free)) == {'tank505', 'tank601'}, free
@@ -149,7 +149,7 @@ car_switch, other_switch = buttons[switch.group(1)], buttons[switch.group(2)]
 assert car_switch not in CAR_READS and car_switch != 0x20, 'the Car\'s switch on a button it never tests'
 assert other_switch == 0x10
 XINPUT_TO_SEAT = {0x1000: 0x01, 0x2000: 0x02, 0x4000: 0x04, 0x8000: 0x08, 0x100: 0x10, 0x200: 0x20, 0x40: 0x40, 0x80: 0x80}
-fire4 = int(re.search(r'vehicleFire4Button=(0x[0-9A-Fa-f]+|\d+)', crew_h).group(1), 0)
+fire4 = int(config_keys.BY_NAME['VehicleFire4Button'].default, 0)
 assert XINPUT_TO_SEAT.get(fire4) == 0x20, 'fire key 4 on a pad: RB, which the Car leaves to its empty slot 83'
 import vcobjects as vc  # noqa: E402
 coax = vc.STOCK_MOUNTS['ifv']['MG401']
@@ -170,7 +170,7 @@ assert 'VehicleLookOffered(v,i,look.keys)' in look, 'the look asks with the seat
 turret = (ROOT / 'src' / 'turretcam.cpp').read_text(encoding='utf-8')
 held = re.search(r'bool FreeHeld\(const void\* v,const unsigned char\* seat\) noexcept \{(.*?)\n\}', turret, re.S).group(1)
 assert 'VehicleLookOffered(v,0,keys)' in held, 'the turret camera free look: the same gate'
-free_button = int(re.search(r'int freeLookButton=(0x[0-9A-Fa-f]+|\d+);', crew_h).group(1), 0)
+free_button = int(config_keys.BY_NAME['FreeLookButton'].default, 0)
 assert free_button & 0x40, 'the default pad free look is L3: on a Grape with a horn the gate above takes it away'
 print("car input audit: Car reads +0x2E0 throttle, LB brake, A handbrake, L3 horn, RB nothing; the keyboard's horn is the "
       "drive page's middle-button row, free look off it; 505/601/603 no +0x2E0; "

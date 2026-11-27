@@ -162,10 +162,17 @@
   "allclass_guard": {
    "labels": [
     "autoturret-tools",
+    "cockpit",
     "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
     "plugin-native",
+    "pylib-model",
     "test-data",
-    "testhub"
+    "testhub",
+    "tools-misc",
+    "worldmap"
    ],
    "scripts": [
     "tests/allclass_guard.py"
@@ -400,6 +407,7 @@
     "pylib-model",
     "test-data",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -942,6 +950,18 @@
     "plugin-native"
    ],
    "scripts": []
+  },
+  "config_roundtrip": {
+   "labels": [
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/config_roundtrip_test.py"
+   ]
   },
   "coop_attr": {
    "labels": [
@@ -4096,8 +4116,10 @@
     "docs-guard",
     "installer",
     "plugin-native",
+    "pylib-model",
     "test-data",
-    "testhub"
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tests/npc_backpack_guard.py"
@@ -5133,8 +5155,11 @@
   },
   "room_ui_wiring": {
    "labels": [
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "tools-misc"
    ],
    "scripts": [
     "tests/room_ui_wiring_guard.py"
@@ -5311,8 +5336,11 @@
     "docs-guard",
     "edf41",
     "edf5",
+    "installer",
     "plugin-native",
-    "test-data"
+    "pylib-model",
+    "test-data",
+    "tools-misc"
    ],
    "scripts": [
     "tests/scope_spread_guard.py"
@@ -6893,7 +6921,10 @@
  "selftest": {
   "aim_lines_hide_real_crews": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -6908,7 +6939,9 @@
   "air_chase_wired": {
    "labels": [
     "installer",
-    "plugin-native"
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -6923,7 +6956,10 @@
   },
   "air_support_arrival_is_the_flight_controls": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -6969,6 +7005,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -6986,7 +7023,10 @@
   },
   "arrival_smoke_is_drawn_where_it_is_laid": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7057,6 +7097,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7252,6 +7293,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7293,7 +7335,10 @@
   },
   "boarding_an_empty_aircraft_makes_its_entry": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7357,7 +7402,10 @@
   },
   "boarding_only_after_collision": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7473,6 +7521,7 @@
     "native-codec",
     "plugin-native",
     "pylib-model",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7637,6 +7686,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7654,8 +7704,10 @@
   "cockpit_fields_current": {
    "labels": [
     "cockpit",
+    "installer",
     "plugin-native",
-    "pylib-model"
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7671,8 +7723,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7759,6 +7814,7 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "native-codec",
     "plugin-native",
     "pylib-model",
@@ -7780,6 +7836,7 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "native-codec",
     "plugin-native",
     "pylib-model",
@@ -7808,6 +7865,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7833,6 +7891,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -7853,8 +7912,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -7875,8 +7937,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -8258,9 +8322,11 @@
   },
   "edf41_clone_destructor_slot": {
    "labels": [
+    "installer",
     "native-codec",
     "plugin-native",
-    "pylib-model"
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -8668,8 +8734,10 @@
   "edf41_kill_counters_plugin_table": {
    "labels": [
     "edf41",
+    "installer",
     "plugin-native",
-    "pylib-model"
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tests/killcount_native_audit.py",
@@ -8895,6 +8963,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -9110,7 +9179,10 @@
   },
   "edf41_net_contract": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -9125,7 +9197,10 @@
   },
   "edf41_objects_after_weapons": {
    "labels": [
-    "installer"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -9195,6 +9270,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10151,9 +10227,11 @@
   },
   "edf5_campaign_plugin_sites": {
    "labels": [
+    "installer",
     "native-codec",
     "plugin-native",
-    "pylib-model"
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -10206,6 +10284,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -10603,7 +10682,10 @@
   },
   "embedded_seat_aim_wired": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -10682,6 +10764,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -10789,8 +10872,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -10814,6 +10900,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11011,7 +11098,10 @@
   "game_clock_and_hud_stop_with_the_pause": {
    "labels": [
     "docs-guard",
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11035,6 +11125,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11139,8 +11230,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11166,6 +11260,7 @@
     "pylib-model",
     "testhub",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11194,6 +11289,7 @@
     "pylib-model",
     "testhub",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11221,6 +11317,7 @@
     "pylib-model",
     "testhub",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11270,7 +11367,9 @@
     "edf41",
     "edf5",
     "installer",
+    "plugin-native",
     "pylib-model",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11288,8 +11387,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11333,7 +11435,10 @@
   },
   "heli_store_flies_its_own_arc": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11432,8 +11537,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11448,7 +11556,10 @@
   },
   "hud_switch_cues_wired": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11505,6 +11616,7 @@
     "pylib-model",
     "testhub",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -11867,7 +11979,9 @@
    "labels": [
     "autoturret-tools",
     "installer",
-    "plugin-native"
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -11998,6 +12112,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -12040,9 +12155,11 @@
   },
   "katyusha_fires_over_its_cab": {
    "labels": [
+    "installer",
     "native-codec",
     "plugin-native",
-    "pylib-model"
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -12065,6 +12182,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12211,9 +12329,11 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -12339,8 +12459,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -12356,6 +12479,7 @@
   "map_hides_stock_hud": {
    "labels": [
     "docs-guard",
+    "installer",
     "native-codec",
     "plugin-native",
     "pylib-model",
@@ -12564,10 +12688,12 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "native-codec",
     "plugin-native",
     "pylib-model",
-    "testhub"
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -12602,7 +12728,10 @@
   },
   "npc_ai_asks_less": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -12618,8 +12747,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tests/npc_mobility_native_audit.py",
@@ -12637,8 +12769,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -12655,8 +12790,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -12677,6 +12815,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -12913,7 +13052,10 @@
   },
   "play_area_wired": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -12935,6 +13077,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13146,10 +13289,12 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "native-codec",
     "plugin-native",
     "pylib-model",
-    "testhub"
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -13385,8 +13530,10 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13494,8 +13641,10 @@
   "release_reads_no_sources": {
    "labels": [
     "installer",
+    "plugin-native",
     "pylib-model",
-    "testrange"
+    "testrange",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -13580,6 +13729,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13608,6 +13758,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -13714,8 +13865,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14011,8 +14165,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14071,8 +14228,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14115,7 +14275,10 @@
   },
   "sound_at_takes_a_still_sound": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14440,7 +14603,10 @@
   "split_missile_wired": {
    "labels": [
     "docs-guard",
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14456,8 +14622,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14474,8 +14643,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14490,9 +14662,11 @@
   },
   "stock_gun_sight_ranged": {
    "labels": [
+    "installer",
     "native-codec",
     "plugin-native",
-    "pylib-model"
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14536,6 +14710,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -14609,10 +14784,12 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "native-codec",
     "plugin-native",
     "pylib-model",
-    "testhub"
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14662,6 +14839,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14678,7 +14856,10 @@
   },
   "support_arrives_from_off_the_map": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14702,6 +14883,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14728,6 +14910,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -14967,8 +15150,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -14985,8 +15171,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -15092,6 +15281,7 @@
     "plugin-native",
     "pylib-model",
     "testrange",
+    "tools-misc",
     "worldmap"
    ],
    "scripts": [
@@ -15112,8 +15302,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -15130,8 +15323,11 @@
    "labels": [
     "autoturret-tools",
     "docs-guard",
+    "installer",
     "plugin-native",
-    "testhub"
+    "pylib-model",
+    "testhub",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
@@ -15147,7 +15343,10 @@
   },
   "view_distance_keeps_far_pass_start": {
    "labels": [
-    "plugin-native"
+    "installer",
+    "plugin-native",
+    "pylib-model",
+    "tools-misc"
    ],
    "scripts": [
     "tools/selftest.py"
