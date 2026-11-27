@@ -294,6 +294,12 @@
    ],
    "scripts": []
   },
+  "barga_aim_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "barrage_check": {
    "labels": [
     "plugin-native"
@@ -3355,6 +3361,15 @@
    ],
    "scripts": []
   },
+  "hudtext_fit": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hudtext_fit.py"
+   ]
+  },
   "ifc_model": {
    "labels": [
     "plugin-native"
@@ -5669,6 +5684,16 @@
    ],
    "scripts": [
     "tests/spot_ray_native_audit.py"
+   ]
+  },
+  "srcscan": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/srcscan_test.py"
    ]
   },
   "stab_check": {
