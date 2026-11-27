@@ -244,18 +244,12 @@ bool BvmOnline() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-bool WriteImage(unsigned rva,const unsigned char* code,std::size_t size) noexcept {
-    unsigned char* at=image+rva;
-    edf::ClaimCode(at,size);   // a code write of its own (edf/code_owner.h)
-    DWORD old=0;
-    if(!VirtualProtect(at,size,PAGE_EXECUTE_READWRITE,&old))return false;
-    std::memcpy(at,code,size);
-    edf::RestoreProtection(at,size,old);
-    FlushInstructionCache(GetCurrentProcess(),at,size);
-    return true;
+// One site's write, only while it holds `expected` (edf::PatchCode: claimed, protection put back, the cache flushed).
+bool WriteImage(unsigned rva,const unsigned char* expected,const unsigned char* code,std::size_t size) noexcept {
+    return edf::PatchCode(image+rva,expected,code,size);
 }
 // The install's writer (tests/edf5_online_native_test.cpp's rollback run fails one on purpose).
-using WriteFn=bool(*)(unsigned,const unsigned char*,std::size_t) noexcept;
+using WriteFn=bool(*)(unsigned,const unsigned char*,const unsigned char*,std::size_t) noexcept;
 WriteFn writeCode=&WriteImage;
 
 // MSVC's _Ref_count_base::_Decref (as booster.cpp DropShared).
@@ -785,11 +779,11 @@ bool InstallEdf5Online() noexcept {
     onlineObject=reinterpret_cast<OnlineObjectFn>(image+kOnlineObject);
     registerFn=reinterpret_cast<RegisterFn>(image+kRegister);
     std::size_t written=0;
-    while(written<count && writeCode(writes[written].rva,writes[written].bytes,writes[written].size))++written;
+    while(written<count && writeCode(writes[written].rva,writes[written].was,writes[written].bytes,writes[written].size))++written;
     if(written<count) {
         const unsigned failed=writes[written].rva;
         bool restored=true;
-        while(written>0){--written;restored=writeCode(writes[written].rva,writes[written].was,writes[written].size) && restored;}
+        while(written>0){--written;restored=writeCode(writes[written].rva,writes[written].bytes,writes[written].was,writes[written].size) && restored;}
         if(restored)VirtualFree(page,0,MEM_RELEASE);   // kept if a site could not be put back: it may still jump there
         onlineObject=nullptr;
         registerFn=nullptr;

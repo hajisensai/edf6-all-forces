@@ -5,6 +5,7 @@
 #include "enemy_control_gun_factory.h"
 #include "enemy_control_walking_parts.h"
 #include "memory.h"
+#include "edf/patch.h"
 #include "team_native_logic.h"
 #include <cstring>
 namespace crew {
@@ -669,37 +670,27 @@ constexpr unsigned kPublication=0x1194949;
 constexpr unsigned char kPublicationBytes[]={0x4C,0x8D,0x44,0x24,0x48,0x48,0x8D,0x55,0xB7};
 const void* publicationTable[3]={nullptr,nullptr,reinterpret_cast<void*>(&ScenePublication)};
 bool PatchPublication() noexcept {
- if(!Readable(image+kPublication,9) || std::memcmp(image+kPublication,kPublicationBytes,9))return false;
  // Replace only the argument LEAs. Native null-callback JE ->1194955 and CALL [RAX+10] stay intact.
  // This is a leaf: the real C++ guard is called from the original native instruction/pdata frame.
  unsigned char code[]={0x4C,0x8B,0x48,0x10,0x4C,0x8D,0x44,0x24,0x50,0x48,0x8D,0x55,0xB7,0x48,0xB8,0,0,0,0,0,0,0,0,0xC3};
  const auto table=reinterpret_cast<std::uintptr_t>(publicationTable);std::memcpy(code+15,&table,8);
- const auto* thunk=static_cast<const unsigned char*>(AllocateNearCode(image+kPublication,code,sizeof(code)));if(!thunk)return false;
- const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(image+kPublication+5);if(delta<INT32_MIN || delta>INT32_MAX)return false;
- unsigned char patch[9]={0xE8,0,0,0,0,0x90,0x90,0x90,0x90};const auto relative=static_cast<std::int32_t>(delta);std::memcpy(patch+1,&relative,4);
- edf::ClaimCode(image+kPublication,9);   // a code write of its own (edf/code_owner.h)
- DWORD old=0;if(!VirtualProtect(image+kPublication,9,PAGE_EXECUTE_READWRITE,&old))return false;
- std::memcpy(image+kPublication,patch,9);FlushInstructionCache(GetCurrentProcess(),image+kPublication,9);DWORD ignored=0;
- if(!VirtualProtect(image+kPublication,9,old,&ignored))return false;
- std::memcpy(publicationAfter,patch,9);std::memcpy(publicationCode,code,sizeof(code));publicationRelay=thunk;publicationChanged=true;return true;
+ // The 9 LEA bytes become a call to the leaf and nops: the leaf page given back when the site is not written.
+ const auto* thunk=edf::RedirectToCode(image+kPublication,kPublicationBytes,9,code,sizeof(code),edf::Branch::kCall,publicationAfter);
+ if(!thunk)return false;
+ std::memcpy(publicationCode,code,sizeof(code));publicationRelay=thunk;publicationChanged=true;return true;
 }
 
 constexpr unsigned kBulletPublication=0x1194395;
 constexpr unsigned char kBulletPublicationBytes[]={0x4C,0x8D,0x44,0x24,0x70,0x48,0x8D,0x94,0x24,0x80,0,0,0};
 const void* bulletPublicationTable[3]={nullptr,nullptr,reinterpret_cast<void*>(&BulletPublication)};
 bool PatchBulletPublication() noexcept {
- if(!Readable(image+kBulletPublication,13) || std::memcmp(image+kBulletPublication,kBulletPublicationBytes,13))return false;
  // A leaf replaces only argument LEAs; native null-callback branch and indirect CALL remain in their original frame.
  unsigned char code[]={0x4C,0x8B,0x48,0x10,0x4C,0x8D,0x44,0x24,0x78,0x48,0x8D,0x94,0x24,0x88,0,0,0,0x48,0xB8,0,0,0,0,0,0,0,0,0xC3};
  const auto table=reinterpret_cast<std::uintptr_t>(bulletPublicationTable);std::memcpy(code+19,&table,8);
- const auto* thunk=static_cast<const unsigned char*>(AllocateNearCode(image+kBulletPublication,code,sizeof(code)));if(!thunk)return false;
- const auto delta=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(image+kBulletPublication+5);if(delta<INT32_MIN || delta>INT32_MAX)return false;
- unsigned char patch[13]={0xE8,0,0,0,0,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90};const auto relative=static_cast<std::int32_t>(delta);std::memcpy(patch+1,&relative,4);
- edf::ClaimCode(image+kBulletPublication,13);   // a code write of its own (edf/code_owner.h)
- DWORD old=0;if(!VirtualProtect(image+kBulletPublication,13,PAGE_EXECUTE_READWRITE,&old))return false;
- std::memcpy(image+kBulletPublication,patch,13);FlushInstructionCache(GetCurrentProcess(),image+kBulletPublication,13);DWORD ignored=0;
- if(!VirtualProtect(image+kBulletPublication,13,old,&ignored))return false;
- std::memcpy(bulletPublicationAfter,patch,13);std::memcpy(bulletPublicationCode,code,sizeof(code));bulletPublicationRelay=thunk;bulletPublicationChanged=true;return true;
+ const auto* thunk=edf::RedirectToCode(image+kBulletPublication,kBulletPublicationBytes,13,code,sizeof(code),edf::Branch::kCall,
+                                       bulletPublicationAfter);
+ if(!thunk)return false;
+ std::memcpy(bulletPublicationCode,code,sizeof(code));bulletPublicationRelay=thunk;bulletPublicationChanged=true;return true;
 }
 
 bool HookReady(const HookSite& h) noexcept {

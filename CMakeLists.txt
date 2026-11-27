@@ -2224,6 +2224,7 @@ set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(mission_watch_test tests/mission_watch_test.cpp src/crash_dump.cpp)
 target_include_directories(mission_watch_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(mission_watch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_link_libraries(mission_watch_test PRIVATE edf6common)   # crash_dump.cpp's redirect: edf::PatchCode
 add_test(NAME mission_watch COMMAND mission_watch_test)
 # The plugin's crash dump (src/crash_dump.cpp): a child process per crash kind (access violation, C++ throw, stack
 # overflow, abort / terminate in ucrtbase and in the static CRT, an invalid CRT parameter, a filter set later, two
@@ -2239,7 +2240,7 @@ target_include_directories(crash_dump_test PRIVATE common)
 target_compile_definitions(crash_dump_test PRIVATE "CRASH_PEER_DLL=L\"$<TARGET_FILE:crash_flush_peer>\"")
 add_dependencies(crash_dump_test crash_flush_peer)
 target_compile_options(crash_dump_test PRIVATE /W4 /WX /utf-8 /permissive-)
-target_link_libraries(crash_dump_test PRIVATE dbghelp)
+target_link_libraries(crash_dump_test PRIVATE dbghelp edf6common)   # crash_dump.cpp's redirect: edf::PatchCode
 add_test(NAME crash_dump COMMAND crash_dump_test)
 # It crashes in the exe's own CRT too: the static one, the plugins' (cmake/toolcrt.cmake).
 set_target_properties(crash_dump_test PROPERTIES EDF6_STATIC_CRT ON)
@@ -2314,6 +2315,13 @@ target_link_libraries(code_owner_test PRIVATE edf6common)
 target_compile_options(code_owner_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks code_owner_test)
 add_test(NAME code_owner COMMAND code_owner_test)
+# edf::RedirectToThunk / RedirectToCode / AllocateCodeAbove (common/patch.cpp, memory.cpp) on a scratch code page.
+add_executable(redirect_thunk_test EXCLUDE_FROM_ALL tests/redirect_thunk_test.cpp)
+target_include_directories(redirect_thunk_test PRIVATE common)
+target_link_libraries(redirect_thunk_test PRIVATE edf6common)
+target_compile_options(redirect_thunk_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks redirect_thunk_test)
+add_test(NAME redirect_thunk COMMAND redirect_thunk_test)
 add_executable(fp_skin_test EXCLUDE_FROM_ALL tests/fp_skin_test.cpp src/fp_skin_gpu.cpp)
 target_include_directories(fp_skin_test PRIVATE src common)
 target_link_libraries(fp_skin_test PRIVATE edf6common d3d11)

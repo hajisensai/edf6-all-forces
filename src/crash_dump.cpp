@@ -1,6 +1,7 @@
 // The plugin's own crash dump: src/crash_dump.h says what it catches and what it cannot.
 #include "crash_dump.h"
 #include "log.h"
+#include "edf/patch.h"
 #include <Psapi.h>
 #include <atomic>
 #include <csignal>
@@ -342,6 +343,9 @@ LPTOP_LEVEL_EXCEPTION_FILTER WINAPI SetFilterRedirect(LPTOP_LEVEL_EXCEPTION_FILT
 
 // The first bytes of kernelbase!SetUnhandledExceptionFilter replaced by a jump to SetFilterRedirect (mov rax,imm64;
 // jmp rax). The original is never called again, so nothing of it is kept. Not over a jump someone else put there.
+// Written by edf::PatchCode, over the bytes read here (claimed for this file in the code owner registry): it may run
+// under the loader lock, and the only lock PatchCode takes is the registry's SRW lock, a leaf one (held over its own
+// scan, nothing called under it, the conflict sink called after it is let go), so it cannot wait on the loader.
 bool Redirect() noexcept {
     const HMODULE kernelbase=GetModuleHandleW(L"kernelbase.dll");
     auto* at=kernelbase ? reinterpret_cast<unsigned char*>(GetProcAddress(kernelbase,"SetUnhandledExceptionFilter")) : nullptr;
@@ -354,11 +358,9 @@ bool Redirect() noexcept {
     unsigned char jump[12]={0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
     const auto target=reinterpret_cast<std::uintptr_t>(&SetFilterRedirect);
     std::memcpy(jump+2,&target,sizeof(target));
-    DWORD old=0;
-    if(!VirtualProtect(at,sizeof(jump),PAGE_EXECUTE_READWRITE,&old)){Log("CRASHDUMP redirect: VirtualProtect error %lu",GetLastError());return false;}
-    std::memcpy(at,jump,sizeof(jump));
-    VirtualProtect(at,sizeof(jump),old,&old);
-    FlushInstructionCache(GetCurrentProcess(),at,sizeof(jump));
+    unsigned char stock[sizeof(jump)];
+    std::memcpy(stock,at,sizeof(stock));
+    if(!edf::PatchCode(at,stock,jump,sizeof(jump))){Log("CRASHDUMP redirect: not written (error %lu)",GetLastError());return false;}
     return true;
 }
 
