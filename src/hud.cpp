@@ -22,6 +22,7 @@
 // load make every one stale, as the count stands still in the menus; nothing is drawn while the game is paused (GamePaused).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "barga_aim.h"
 #include "cockpit_canvas.h"
 #include "firstperson.h"
 #include "vehicle_look.h"
@@ -164,7 +165,7 @@ Work work[kEntries]{};
 // waits in `middle` (its index, kFresh while the draw has not taken it).
 struct Snapshot { stepfresh::Step step; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue; bool emc; EmcCue emcCue;
-                  bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
+                  bool launcher; LauncherReadout launch; bool barga; bargaaim::Readout bargaAim; bool heliSight; HeliSightReadout heliAim;
                   bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
                   bool turret; edf::aimlink::TurretReadoutV1 turretAim;
                   bool mountedOptic;
@@ -2950,6 +2951,135 @@ void TargetRing(void* drawer,void* ctx,const float* vp,float width,float height,
     Seg(drawer,ctx,x-r-tick,y,x-r,y,t,kGreen);Seg(drawer,ctx,x+r,y,x+r+tick,y,t,kGreen);
     Seg(drawer,ctx,x,y-r-tick,x,y-r,t,kGreen);Seg(drawer,ctx,x,y+r,x,y+r+tick,t,kGreen);
 }
+// A line through world points, broken where one is off the screen. Returns how many of the points are on it.
+int WorldPolyline(void* drawer,void* ctx,const float* vp,float width,float height,const float (*pts)[3],int n,float t,
+                  const float* rgba) noexcept {
+    float px=0.0f,py=0.0f;
+    bool had=false;
+    int shown=0;
+    for(int i=0;i<n;++i) {
+        float x,y,depth;
+        const bool on=Project(vp,pts[i],width,height,&x,&y,&depth);
+        if(on && had)Seg(drawer,ctx,px,py,x,y,t,rgba);
+        shown+=on ? 1 : 0;
+        had=on;px=x;py=y;
+    }
+    return shown;
+}
+void WorldRing(void* drawer,void* ctx,const float* vp,float width,float height,const float* c,float radius,float t,
+               const float* rgba) noexcept {
+    constexpr int kSides=24;
+    float pts[kSides+1][3];
+    for(int i=0;i<=kSides;++i) {
+        const float a=kTurn*static_cast<float>(i)/kSides;
+        pts[i][0]=c[0]+radius*std::sin(a);pts[i][1]=c[1];pts[i][2]=c[2]+radius*std::cos(a);
+    }
+    WorldPolyline(drawer,ctx,vp,width,height,pts,kSides+1,t,rgba);
+}
+// The Balam's impact marker (barga_aim.cpp, docs/feature-barga-aim.md):
+//  - each fist: a small reticle (four ticks round a gap, its letter) at the reach of the attack its button would start
+//    now (L the LB side cyan, R the RB side green; bright when that button may start one, dim when not), red with
+//    corner brackets on the enemy when an enemy's lock point is inside that attack's hit sphere; off the screen or
+//    behind the camera, a chevron at the screen's border pointing the way to it. Its size is fixed, not the sphere's:
+//    a ring as wide as the sphere took in everything behind it on the screen and read as "all of this gets hit";
+//  - a lit sphere: a cross where it touches the ground or meets an enemy (the spheres themselves are left out: the
+//    2026-11-27 run had them on the screen hardly ever, "spheres 0/3", at most 1/3);
+//  - V605's cannon: a line through where the rounds still to come land, their blast rings every kRingEvery and the
+//    last; a round that lands nowhere is left out.
+// The clip coordinates of `p` (Project's, before the divide).
+void Clip(const float* vp,const float* p,float* c) noexcept {
+    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
+}
+// The side's letter in strokes, `h` px high, its top left at (x, y).
+void FistLetter(void* drawer,void* ctx,int side,float x,float y,float h,float t,const float* rgba) noexcept {
+    const float w=h*0.6f;
+    Seg(drawer,ctx,x,y,x,y+h,t,rgba);
+    if(side==bargaaim::kLeft){Seg(drawer,ctx,x,y+h,x+w,y+h,t,rgba);return;}
+    Seg(drawer,ctx,x,y,x+w*0.7f,y,t,rgba);Seg(drawer,ctx,x+w*0.7f,y,x+w,y+h*0.25f,t,rgba);
+    Seg(drawer,ctx,x+w,y+h*0.25f,x+w*0.7f,y+h*0.5f,t,rgba);Seg(drawer,ctx,x+w*0.7f,y+h*0.5f,x,y+h*0.5f,t,rgba);
+    Seg(drawer,ctx,x+w*0.35f,y+h*0.5f,x+w,y+h,t,rgba);
+}
+// Corner brackets round (x, y), `half` px from it.
+void Brackets(void* drawer,void* ctx,float x,float y,float half,float t,const float* rgba) noexcept {
+    const float arm=half*0.45f;
+    for(int sx=-1;sx<=1;sx+=2)for(int sy=-1;sy<=1;sy+=2) {
+        const float cx=x+sx*half,cy=y+sy*half;
+        Seg(drawer,ctx,cx,cy,cx-sx*arm,cy,t,rgba);Seg(drawer,ctx,cx,cy,cx,cy-sy*arm,t,rgba);
+    }
+}
+// What the fist's mark came out as (the Debug=1 "BARGA draw" line).
+struct FistDrawn { char how; float x,y; bool target; };   // how: 'r' a reticle on the screen, 'e' a chevron at the edge, '-' none
+FistDrawn FistMarkDraw(void* drawer,void* ctx,const float* vp,float width,float height,float s,int side,
+                       const bargaaim::FistMark& f) noexcept {
+    alignas(16) static const float kDimCyan[4]={0.3f,0.85f,1.0f,0.45f};
+    alignas(16) static const float kDimGreen[4]={0.35f,1.0f,0.35f,0.45f};
+    alignas(16) static const float kDimRed[4]={1.0f,0.3f,0.25f,0.5f};
+    if(!f.on)return {'-',-1.0f,-1.0f,false};
+    const float* const rgba=f.target ? (f.next ? kRed : kDimRed)
+                          : side==bargaaim::kLeft ? (f.next ? kCyan : kDimCyan) : (f.next ? kGreen : kDimGreen);
+    const float t=(f.next ? 3.0f : 2.0f)*s,letter=14.0f*s;
+    float x,y,depth;
+    if(f.target && Project(vp,f.targetAt,width,height,&x,&y,&depth))Brackets(drawer,ctx,x,y,18.0f*s,t,rgba);
+    if(Project(vp,f.at,width,height,&x,&y,&depth)) {
+        const float gap=5.0f*s,tick=gap+9.0f*s;
+        Seg(drawer,ctx,x-tick,y,x-gap,y,t,rgba);Seg(drawer,ctx,x+gap,y,x+tick,y,t,rgba);
+        Seg(drawer,ctx,x,y-tick,x,y-gap,t,rgba);Seg(drawer,ctx,x,y+gap,x,y+tick,t,rgba);
+        FistLetter(drawer,ctx,side,x+tick*0.6f+2.0f*s,y-tick*0.6f-letter,letter,t,rgba);
+        return {'r',x,y,f.target};
+    }
+    float c[4];
+    Clip(vp,f.at,c);
+    const float size=12.0f*s;
+    const auto e=bargaaim::ToEdge(c[0],c[1],width,height,size*2.5f);
+    // A chevron: its tip at the edge point, its arms back along the direction.
+    const float bx=e.x-e.dx*size,by=e.y-e.dy*size,px=-e.dy*size*0.8f,py=e.dx*size*0.8f;
+    Seg(drawer,ctx,bx+px,by+py,e.x,e.y,t,rgba);Seg(drawer,ctx,e.x,e.y,bx-px,by-py,t,rgba);
+    FistLetter(drawer,ctx,side,e.x-e.dx*size*2.2f-letter*0.3f,e.y-e.dy*size*2.2f-letter*0.5f,letter,t,rgba);
+    return {'e',e.x,e.y,f.target};
+}
+void BargaAimMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const bargaaim::Readout& r) noexcept {
+    const float t=2.0f*s;
+    // Debug=1: what of it is on the screen, every kBargaDrawLogMs (the draw's half of the game thread's "BARGA v=" line).
+    constexpr ULONGLONG kBargaDrawLogMs=500;
+    static ULONGLONG logged=0;
+    const ULONGLONG now=GetTickCount64();
+    const bool log=Cfg().debug && now-logged>=kBargaDrawLogMs;
+    if(log)logged=now;
+    FistDrawn drawn[2];
+    for(int side=0;side<2;++side)drawn[side]=FistMarkDraw(drawer,ctx,vp,width,height,s,side,r.fist[side]);
+    int contacts=0,contactsShown=0,roundsShown=0;
+    for(int i=0;i<r.spheres && i<bargaaim::kMostSpheres;++i) {
+        const auto& sp=r.sphere[i];
+        float sx,sy;
+        if(sp.touch && sp.ground){++contacts;contactsShown+=ImpactCross(drawer,ctx,vp,width,height,s,sp.groundAt,&sx,&sy) ? 1 : 0;}
+        if(sp.target){++contacts;contactsShown+=ImpactCross(drawer,ctx,vp,width,height,s,sp.targetAt,&sx,&sy) ? 1 : 0;}
+    }
+    const int n=!r.cannon || r.rounds<=0 ? 0 : r.rounds<bargaaim::kMostRounds ? r.rounds : bargaaim::kMostRounds;
+    if(log)
+        Log("BARGA draw %.0fx%.0f L=%c%s%s (%.0f,%.0f) R=%c%s%s (%.0f,%.0f) spheres %d contacts %d/%d rounds %d",
+            width,height,drawn[0].how,r.fist[0].next ? "*" : "",drawn[0].target ? " hit" : "",drawn[0].x,drawn[0].y,
+            drawn[1].how,r.fist[1].next ? "*" : "",drawn[1].target ? " hit" : "",drawn[1].x,drawn[1].y,r.spheres,contactsShown,contacts,n);
+    if(n<=0)return;
+    // Only the rounds that land: one that meets nothing ends its flight in the air (RoundLands' finite end, up to
+    // km out), no point on the ground to mark, so the line breaks there and it has no ring or cross.
+    const float* const rgba=r.bursting ? kRed : kAmber;
+    int landedCount=0;
+    for(int i=0;i<n;) {
+        if(!r.landed[i]){++i;continue;}
+        int end=i;
+        while(end<n && r.landed[end])++end;
+        roundsShown+=WorldPolyline(drawer,ctx,vp,width,height,r.at+i,end-i,t*1.5f,rgba);
+        landedCount+=end-i;
+        i=end;
+    }
+    if(log)Log("BARGA draw rounds %d landed of %d, %d on the screen",landedCount,n,roundsShown);
+    for(int i=0;i<n;++i) {
+        if(!r.landed[i] || (i%bargaaim::kRingEvery!=0 && i!=n-1))continue;
+        if(r.blast>0.0f)WorldRing(drawer,ctx,vp,width,height,r.at[i],r.blast,t,rgba);
+    }
+    float sx,sy;
+    if(r.landed[0])ImpactCross(drawer,ctx,vp,width,height,s,r.at[0],&sx,&sy);   // the next round
+}
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
                     const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {
     namespace link=edf::aimlink;
@@ -3799,6 +3929,7 @@ void HudPublish() noexcept {
     s.drill=PlayerDrillCue(&s.drillCue);
     s.emc=PlayerEmcCue(&s.emcCue);
     s.launcher=PlayerLauncher(&s.launch);
+    s.barga=PlayerBargaAim(&s.bargaAim);
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun) || DreadnoughtGunnerHud(&s.gun);   // the gunship's gun or a Dreadnought turret
     s.sensor=PlayerVehicleContacts(&s.sensorHud);
@@ -6178,6 +6309,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && snap.heliSight && !snap.cockpit && !gunnerSight && !mechSight)
             HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
+        if(fresh && snap.barga)BargaAimMarks(drawer,ctx,viewProj,width,height,s,snap.bargaAim);
         if(fresh && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(fresh && snap.lookHint) {
             wchar_t key[32];

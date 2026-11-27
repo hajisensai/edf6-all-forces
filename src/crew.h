@@ -16,6 +16,8 @@
 #include "step_fresh.h"   // handoff freshness by the scene step (GameFrame), any thread
 #include "sound_place.h"
 
+namespace bargaaim { struct Readout; }   // barga_aim.h
+
 namespace crew {
 extern unsigned char* image;
 
@@ -51,6 +53,7 @@ struct Config {
     int heliHoverKey=0x48;     // H while piloting a rotorcraft: flight / hover
     int heliHoverButton=0;    // optional XInput chord
     bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
+    bool bargaAimMarker=true;       // the player driving a Balam (501): its fists' reach, its lit hit spheres, the V605 cannon's landing (barga_aim.cpp)
     bool stockVehicleHud=true;      // any other stock vehicle the player drives or mans: our HUD and impact points, its seat's aim lines hidden (vhud.cpp)
     bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
@@ -642,6 +645,7 @@ void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
 void ResetLauncher() noexcept;    // launcher.cpp
+void ResetBargaAim() noexcept;    // barga_aim.cpp
 void ResetHeliSight() noexcept;   // helisight.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
 void ResetMissiles() noexcept;    // missile.cpp
@@ -1541,6 +1545,14 @@ int AndryushaSeat(const unsigned char* vehicle,const unsigned char* seat,unsigne
 void AndryushaFrame(unsigned char* vehicle) noexcept;
 void ResetAndryusha() noexcept;
 bool PlayerLauncher(LauncherReadout* out) noexcept;
+// barga_aim.cpp: the Balam's impact marker (docs/feature-barga-aim.md). BargaAimFrame from every vehicle's input (game
+// thread; only a 501 the player drives reads); PlayerBargaAim the last readout, false with none this step.
+void BargaAimFrame(unsigned char* vehicle) noexcept;
+bool PlayerBargaAim(bargaaim::Readout* out) noexcept;
+// Whether the marker draws `weapon`'s rounds this step (V605's SwingShoot while it charges or sweeps): vhud.cpp leaves
+// that weapon's own impact point out, so the two do not show one cannon twice.
+bool BargaOwnsCannon(const void* weapon) noexcept;
+void ResetBargaAim() noexcept;
 // katyusha.cpp: the Katyusha's launcher pose. The 402 class's pose call is detoured: after the stock pose the launcher
 // is held at the elevation LauncherFrame asks for with SetLauncherLoft (the arc onto where the player's camera looks;
 // `aim` false: none, the stock pose, the player's own aim), eased at the stock turret's rate, and the telescopic ram's

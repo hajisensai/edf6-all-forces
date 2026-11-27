@@ -244,6 +244,7 @@ struct DrawSnap {
     instruments::Readings instruments;
     bool panoramic;             // riding a panoramic seat (RideView::panoramic): the vehicle's own bones folded in its draw
     float boot;                 // ...seconds into its boot (cockpit_instruments.h BootShown; past kBootEnd: no boot)
+    float stick[4];             // riding: the seat's sticks as its control sticks lean (State::stick)
     M4 probeAnchor[2];bool probeAnchored[2];   // Debug=1: each hand's anchor as the camera step read it
     bool nativeArms;            // a stock action (fp_aim.h NativeArms): the arms as its animation poses them, no IK
 };
@@ -326,6 +327,8 @@ struct State {
     instruments::Readings instruments;
     bool instrumentsReady;
     ULONGLONG bootAt;           // a panoramic seat's boot began (GameMs; 0: this ride does not boot)
+    float stick[4];             // the seat's left x, y and right x, y sticks, followed (cockpit_instruments.h StickFollow)
+    ULONGLONG stickAt;          // ...as of this GameMs (0: not yet this ride)
     bool gunCamera;             // the seat's view is its gun camera's (Ride: fp_view.h GunCameraFrame), last said in the log
     bool nativeArms;            // every weapon in hand hidden by the third person (an appeal): the arms native (fp_aim.h)
     // The aim (fp_aim.h Converge): on foot this camera step (aimOk) and the view's direction it left (aimCamDir); the
@@ -1663,6 +1666,29 @@ void Watch(const unsigned char* h) noexcept {
 // runs (its secondary physics keep running, fp-render-re.md §3), and its shadow stays.
 // The game puts the rider's own weapons away; the near clip and the look smoothing are the stock ones in a vehicle.
 // False: no eye (no cockpit in this seat: the stock camera then).
+// The seat's sticks as the rider holds them (the seat block a player's HumanBase writes, docs/heli-input-re.md §4:
+// +0x2C0 / +0x2C4 the left stick, +0x2D0 / +0x2D4 the right, each -1..1), followed for the seat's control sticks.
+void FollowSticks(const RideView& ride) noexcept {
+    constexpr std::size_t kSeatSticks[4]={0x2C0,0x2C4,0x2D0,0x2D4};
+    State& s=Current();
+    const ULONGLONG now=GameMs();
+    const float dt=s.stickAt && now>s.stickAt ? static_cast<float>(now-s.stickAt)*0.001f : 0.0f;
+    s.stickAt=now ? now : 1;
+    const unsigned char* seat=ride.seat>=0 && static_cast<unsigned>(ride.seat)<SeatCount(ride.vehicle) ?
+                              SeatAt(ride.vehicle,static_cast<unsigned>(ride.seat)) : nullptr;
+    const bool read=seat && Readable(seat+0x2C0,0x18);
+    float want[4]{};
+    for(int i=0;i<4;++i) {
+        want[i]=read ? fpview::Clamp(At<float>(seat,kSeatSticks[i]),-1.0f,1.0f) : 0.0f;
+        s.stick[i]=instruments::StickFollow(s.stick[i],want[i],dt);
+    }
+    static ULONGLONG logged=0;
+    if(Cfg().debug && now-logged>=500 && (want[0]!=0.0f || want[1]!=0.0f || want[2]!=0.0f || want[3]!=0.0f)) {
+        logged=now;
+        Log("FP sticks seat %d: left %.2f %.2f, right %.2f %.2f",ride.seat,want[0],want[1],want[2],want[3]);
+    }
+}
+
 bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     float eye[3];
     RideView ride{};
@@ -1677,6 +1703,7 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
         // A panoramic cockpit boots on the vehicle's first start only: nobody (no NPC, no other machine's player, not
         // this one before) has been aboard it this mission (crew.cpp VehiclePowered).
         Current().bootAt=0;
+        std::memset(Current().stick,0,sizeof(Current().stick));Current().stickAt=0;
         if(ride.panoramic && !VehiclePowered(ride.vehicle)) {
             const ULONGLONG now=GameMs();
             Current().bootAt=now ? now : 1;
@@ -1690,6 +1717,7 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
             static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
     }
     Current().riding=true;Current().ride=ride;Current().rideCtrl=At<const void*>(ride.vehicle,kSelfCtrl);
+    FollowSticks(ride);
     HookDrawOf(At<void**>(ride.vehicle+0xE40,0));
     // Most seats follow their physical cockpit frame. Sazabi's decorated neck is not its pilot's view controller:
     // preserve the physical eye while taking rotation from the same heading/pitch that drives its aim.
@@ -1862,6 +1890,7 @@ void Publish() noexcept {
         d.rideSeat=c.ride.seat;d.instrumentsReady=c.instrumentsReady;d.instruments=c.instruments;
         d.panoramic=c.riding && c.ride.panoramic;
         d.boot=instruments::kBootEnd+1.0f;
+        std::memcpy(d.stick,c.stick,sizeof(d.stick));
         if(d.panoramic && c.bootAt) {
             const ULONGLONG now=GameMs();
             d.boot=now>c.bootAt ? static_cast<float>(now-c.bootAt)*0.001f : 0.0f;
@@ -2172,7 +2201,9 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
     for(int i=0;i<n;++i) {
         const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
         // A panoramic seat: the vehicle's own bones (its hull, its shell regions) folded; the kit rides vc_pan_.
-        if(d.panoramic && (!name || std::wcsncmp(name,L"vc_",3)!=0 || std::wcsncmp(name,L"vc_shell_",9)==0)) {
+        // Its arms stay (cockpit_instruments.h PanoramicArm): where the vehicle's blows land.
+        if(d.panoramic && (!name || std::wcsncmp(name,L"vc_",3)!=0 || std::wcsncmp(name,L"vc_shell_",9)==0) &&
+           !instruments::PanoramicArm(name)) {
             const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
             const M4 moved=fpview::Collapse(original.m+12);
             std::memcpy(pose+i*16,moved.m,64);
@@ -2201,7 +2232,14 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         if(!name || std::wcsncmp(name,L"vc_i_",5)!=0)continue;
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
-        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'Z' || mode==L'p') && fields!=6))continue;
+        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'Z' || mode==L'p' || mode==L'j') && fields!=6))continue;
+        if(mode==L'j') {   // a control stick: the rider's own seat's leans with its stick, any other stays upright
+            if(seat!=d.rideSeat || field<0 || field>1)continue;
+            const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
+            const M4 moved=instruments::StickPose(original,d.stick[2*field],d.stick[2*field+1],place);
+            std::memcpy(pose+i*16,moved.m,64);
+            continue;
+        }
         const instruments::SeatPose how=instruments::SeatPoseOf(seat==d.rideSeat,mode,field,place,fields);
         if(how==instruments::SeatPose::skip)continue;
         const bool ready=d.instrumentsReady && how==instruments::SeatPose::live &&

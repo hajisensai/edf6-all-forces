@@ -187,6 +187,7 @@ void HudSee(unsigned char *) noexcept{unexpectedHook();return;}
 void HudPublish(void) noexcept{unexpectedHook();return;}
 bool PlayerStockOwnSight(void const *) noexcept{unexpectedHook();return {};}
 void StockHudFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void BargaAimFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void PlayAreaTick(void) noexcept{unexpectedHook();return;}
 void PayloadFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void TwinBarrelFrame(unsigned char *) noexcept{unexpectedHook();return;}

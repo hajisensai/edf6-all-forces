@@ -237,6 +237,7 @@ bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return h
 bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;return hasHeli; }
 bool WarnLatest(Warnings* o) noexcept { if(hasWarn){*o=sceneWarn;o->step=stepfresh::Now();}return hasWarn; }
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
+bool PlayerBargaAim(bargaaim::Readout*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
 bool PlayerPayload(PayloadReadout* o) noexcept { if(hasMapPayload){*o=sceneMapPayload;return true;}if(hasHeli || hasStock){*o=PayloadReadout{};o->choices=hasStock ? sceneStock.arms : 3;o->switchButton=0x10;o->keys=hasHeli ? sceneHeli.f.keys : true;}return hasHeli || hasStock; }

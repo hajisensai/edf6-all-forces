@@ -414,7 +414,8 @@ void StockHudFrame(unsigned char* v) noexcept {
             for(int k=0;k<triggers;++k)if(triggered[k]==w)a.armed=true;
             // The range to what it is aimed at: the pick's, and every gun on a trigger (each keeps its own sight, hud.cpp
             // OtherTriggerSight: the Titan's Requiem cannon while its machine gun is picked).
-            Arm(w,!r.heli && (a.coFired || a.armed),a,(w==sight || a.armed) && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
+            // V605's cannon while the Balam's marker draws its sweep (barga_aim.cpp): not one more point for the live muzzle.
+            Arm(w,!r.heli && (a.coFired || a.armed) && !BargaOwnsCannon(w),a,(w==sight || a.armed) && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
             a.side=SideOf(v,seat,holders[i]);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }

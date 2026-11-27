@@ -199,7 +199,7 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 
 `crew.cpp` `kClasses` 挂了输入钩子的全部类（玩家坐任一座位时）：402_Rocket（Naegling / 喀秋莎 / 榴弹炮底盘）、403_Tank、404_Tank（Titan）、502_GroundRobo（Depth Crawler，第 4 槽）、503 / 511 Bike、504_begaruta / Begaruta（机甲）、505_Tank、510_Maser、601_Tank、603_Flak、612_nix、Car（Grape、卡车）以及直升机类。排除：插件机体（`BodyOf != none`：喷气机、潜舰、玩家战机）。原版直升机只用这里的「挂载」一行（`HeliStrip` 底行），瞄准具仍是 §6、仪表仍是 `HeliHud`。
 
-**没覆盖：501_FortressRobo（巴尔加）**——`kClasses` 里它的输入槽是 0（不挂钩），没有每帧入口，所以这套 HUD 不出现（L：要加需先逆它的每帧输入槽）。
+**501_FortressRobo（巴尔加）**：`kClasses` 已挂它的每帧输入 0x60AEC0（NPC 驾驶时加的），`StockHudFrame` 也会对它跑；它的武器（V605 加农 Weapon_VehicleSwingShoot）在这套 HUD 里画成什么样，还没有实机看过（L）。拳脚和加农扫射的落点由 `barga_aim.cpp` 单独画，见 [feature-barga-aim.md](feature-barga-aim.md)。
 
 ### 7.2 数据（游戏线程，`StockHudFrame`，`AimLines` 之后）
 

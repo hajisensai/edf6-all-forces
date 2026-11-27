@@ -925,7 +925,7 @@ LONG ReadPackContent(const wchar_t* key) noexcept {
 
 // "mission <row|RM015|M001|range|edf41:ROW> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1),
 // difficulty 0-4. RM015 is the stock mission again (the test range left it for its own pack); "range" is that pack's
-// row 0; "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content), "edf41mp01:ROW" / "edf41mp02:ROW" of its
+// row 0, "range:ROW" its row ROW (1.. the PvP presets: tools/make_edf5_campaign.py PVP_ROWS); "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content), "edf41mp01:ROW" / "edf41mp02:ROW" of its
 // Mission Pack 1 / 2 (EDF41Content + 1 / + 2: the plugin's run of the three 4.1 packs); "edf5:ROW" row ROW of the EDF5
 // campaign's main pack (EDF5CampaignContent: its last mission M099 is row 109).
 void AskMission(const char* text) noexcept {
@@ -933,14 +933,15 @@ void AskMission(const char* text) noexcept {
     if(sscanf_s(text,"%*s %31s %d %7s",name,static_cast<unsigned>(sizeof(name)),&difficulty,mode,
                 static_cast<unsigned>(sizeof(mode)))<1)return;
     stayInHq=!_stricmp(mode,"hq") ? 1 : 0;
-    const bool range=!_stricmp(name,"range");
+    const bool rangeRow=!_strnicmp(name,"range:",6);
+    const bool range=rangeRow || !_stricmp(name,"range");
     // which of the 4.1 packs: -1 none, 0 the story, 1 / 2 its mission packs
     const int pack41=!_strnicmp(name,"edf41:",6) ? 0 : !_strnicmp(name,"edf41mp01:",10) ? 1
                     : !_strnicmp(name,"edf41mp02:",10) ? 2 : -1;
     const bool edf41=pack41>=0;
     const bool edf5=!_strnicmp(name,"edf5:",5);
     const char* rowText=edf5 ? name+5 : pack41==0 ? name+6 : name+10;
-    const int row=range ? 0 : edf41 || edf5 ? std::atoi(rowText) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
+    const int row=rangeRow ? std::atoi(name+6) : range ? 0 : edf41 || edf5 ? std::atoi(rowText) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
                                                                                                     : std::atoi(name);
     missionDifficulty=difficulty<0 || difficulty>4 ? 1 : difficulty;
     const long first41=edf41 ? ReadPackContent(L"EDF41Content") : -1;

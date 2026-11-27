@@ -758,6 +758,7 @@ class DuringRaceTest(DriverTest):
                                              1)[0], 'failed')
         (self.plugins / 'EDF6VehicleCrew.ini').write_text('[VehicleCrew]\nTestRangeContent=4242\nEDF41Content=50\n')
         self.assertEqual(drive.mission_target(self.game, 'range'), (0, 4242))
+        self.assertEqual(drive.mission_target(self.game, 'range:4'), (4, 4242))
         self.assertEqual(drive.mission_target(self.game, 'edf41mp02:3'), (3, 52))
         self.assertEqual(drive.mission_target(self.game, 'M001'), (1, 0))
         self.assertEqual(drive.mission_target(self.game, 'RM015'), (13, 0))
@@ -765,6 +766,28 @@ class DuringRaceTest(DriverTest):
         self.assertIn('difficulty 1, not 3', drive.entry_mismatch(how[1], 0, 3, 4242))
         self.assertIn('content id 4242, not 0', drive.entry_mismatch(how[1], 0, 1, 0))
         self.assertIn('mode 8, not the 7', drive.entry_mismatch(dict(how[1], mode=8), 0, 1, 4242))
+
+class ReplaceOpenTest(unittest.TestCase):
+    def test_keys_file_replaced_while_the_autopilot_reads_it(self):
+        # The autopilot's poll opens the keys file (FILE_SHARE_DELETE) every few ms: os.replace refused it then
+        # (WinError 5) and the run stopped with the game left running (2026-11-26).
+        from ctypes import wintypes as wt
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.restype = wt.HANDLE
+        kernel.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID, wt.DWORD, wt.DWORD, wt.HANDLE]
+        kernel.CloseHandle.argtypes = [wt.HANDLE]
+        with tempfile.TemporaryDirectory() as d:
+            keys = Path(d) / 'EDF6Autopilot.keys'
+            keys.write_text('0d')
+            reader = kernel.CreateFileW(str(keys), 0x80000000, 7, None, 3, 0, None)
+            try:
+                Path(str(keys) + '.tmp').write_text('10c 112')
+                drive.replace_open(str(keys) + '.tmp', str(keys))
+            finally:
+                kernel.CloseHandle(reader)
+            self.assertEqual(keys.read_text(), '10c 112')
+            self.assertFalse(Path(str(keys) + '.tmp').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

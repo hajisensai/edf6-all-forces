@@ -261,6 +261,12 @@
    ],
    "scripts": []
   },
+  "barga_aim_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "barrage_check": {
    "labels": [
     "plugin-native"

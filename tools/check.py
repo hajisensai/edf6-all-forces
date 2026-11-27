@@ -62,6 +62,7 @@ GENERATED = [
     (['tools/gen_pvp_units.py', '--check'], None),
     (['tools/gen_nozzles.py', '--check'], None),
     (['tools/gen_katyusha_cab.py', '--check'], None),
+    (['tools/gen_barga_reach.py', '--check'], None),
     (['tools/gen_mech_parts.py', '--check'], None),
     (['tools/gen_weapon_series.py', '--check'], None),
     (['tools/gen_worldmap.py', '--check'], None),
