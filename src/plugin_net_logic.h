@@ -3,7 +3,8 @@
 // feature kept its own magic check, codec helpers, broadcast loop, sender check and roster reset, and support_net.cpp
 // called them in a chain; an unknown message ended in the support parser, which logged it malformed every time.
 // Now a channel is a row of this registry:
-//  - its magic (the message's first little-endian word) or, for a channel that owns several, its own `owns` test;
+//  - its magic (the message's first little-endian word; every channel has one, the PvP one too since 2026-11-27: before,
+//    it was found by an `owns` test sniffing 'AFPV' after the magics);
 //  - its version (the second word; 0: the channel checks its own). A message of another version is the channel's and
 //    dropped here;
 //  - its size bounds (outside: dropped);
@@ -27,8 +28,7 @@ constexpr std::size_t kMaxPayload=1024;   // EDF6COOP_EXTENSION_MAX_PAYLOAD
 
 struct Channel {
     const char* name="";
-    std::uint32_t magic=0;                                    // first word; 0: `owns` decides
-    bool (*owns)(const void* bytes,std::size_t size) noexcept=nullptr;
+    std::uint32_t magic=0;                                    // first word, never 0
     std::uint32_t version=0;                                  // second word; 0: the channel checks its own
     std::size_t minSize=4,maxSize=kMaxPayload;
     bool (*receive)(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now) noexcept=nullptr;
@@ -75,22 +75,21 @@ enum class Route : std::uint8_t {
 
 class Registry {
 public:
-    // False: full, no receive, no magic and no owns, a magic taken already, bounds that make no sense.
+    // False: full, no receive, no magic, a magic taken already, bounds that make no sense.
     bool Register(const Channel& c) noexcept {
-        if(count_>=kMaxChannels || !c.receive || (!c.magic && !c.owns) || c.minSize<4 || c.minSize>c.maxSize ||
+        if(count_>=kMaxChannels || !c.receive || !c.magic || c.minSize<4 || c.minSize>c.maxSize ||
            c.maxSize>kMaxPayload)return false;
-        if(c.magic)for(std::size_t i=0;i<count_;++i)if(rows_[i].magic==c.magic)return false;
+        for(std::size_t i=0;i<count_;++i)if(rows_[i].magic==c.magic)return false;
         rows_[count_++]=c;
         return true;
     }
     std::size_t Count() const noexcept { return count_; }
     const Channel& At(std::size_t i) const noexcept { return rows_[i<count_ ? i : 0]; }
-    // The channel a message is for: its magic first, then the channels that test their own.
+    // The channel a message is for: its magic.
     const Channel* Find(const void* bytes,std::size_t size,std::size_t* index=nullptr) const noexcept {
         if(!bytes || size<4)return nullptr;
         const std::uint32_t magic=wire::HeadWord(bytes,size,0);
-        for(std::size_t i=0;i<count_;++i)if(rows_[i].magic && rows_[i].magic==magic){if(index)*index=i;return &rows_[i];}
-        for(std::size_t i=0;i<count_;++i)if(!rows_[i].magic && rows_[i].owns && rows_[i].owns(bytes,size)){if(index)*index=i;return &rows_[i];}
+        for(std::size_t i=0;i<count_;++i)if(rows_[i].magic==magic){if(index)*index=i;return &rows_[i];}
         return nullptr;
     }
     // Every channel's reset (the room changed: RoomWatch; or the transport reset whole).

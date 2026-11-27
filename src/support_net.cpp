@@ -180,10 +180,6 @@ void CommandContext(ULONGLONG now) noexcept {
     plugin_net::Update(room,now);
 }
 void QMarkUpdate(const CommandNetworkContext& c,std::uint64_t now) noexcept { UpdateQMarkNetwork(c.linked,c.peerCount,c.send,now); }
-bool PvpOwns(const void* bytes,std::size_t size) noexcept {
-    const auto* b=static_cast<const unsigned char*>(bytes);
-    return bytes && size>=4 && b[0]=='A' && b[1]=='F' && b[2]=='P' && b[3]=='V';
-}
 // The channels, in the old chain's order (qmark, command, PvP, enemy control, the submarine's and the carrier's drones,
 // then the gravity operations, the float guns and the ultimate strike). Every machine of the room runs this build
 // (mod_room.h kAllForcesRoomProtocol): each channel is sent to and read from every peer.
@@ -197,7 +193,7 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(c);
     c=Channel{};c.name="command";c.magic=command_net::kMagic;c.receive=&ReceiveCommandNetwork;c.update=&UpdateCommandNetwork;
     c.reset=&ResetCommandNetwork;plugin_net::RegisterChannel(c);
-    c=Channel{};c.name="pvp";c.owns=&PvpOwns;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
+    c=Channel{};c.name="pvp";c.magic=pvp_protocol::kMagic;c.minSize=32;c.maxSize=pvp_protocol::kMaxWireBytes;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
     plugin_net::RegisterChannel(c);
     c=Channel{};c.name="enemy control";c.magic=enemy_control_protocol::kMagic;c.receive=&ReceiveEnemyControlNetwork;
     c.takesState=&enemy_control_protocol::PoseState;
