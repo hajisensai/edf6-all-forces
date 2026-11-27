@@ -12,5 +12,6 @@ void SubVehicle(unsigned char* v) noexcept;            // the submarine carrier,
 void GroundVehicle(unsigned char* v) noexcept;         // a ground robo's NPC driver (ground.cpp)
 void UnderPlayerTick() noexcept;                       // the underground watch: the player
 void UnderVehicleStep(unsigned char* v) noexcept;      // ...and each vehicle
+void UnderReset() noexcept;                            // ...its watched objects dropped (the mission's start)
 void ExitGroundWatchTick() noexcept;                   // the player off a vehicle put on the floor (exit_ground.h)
 }  // namespace crew::frame

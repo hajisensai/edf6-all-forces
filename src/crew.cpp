@@ -944,6 +944,7 @@ void SubVehicle(unsigned char* v) noexcept { if(BodyOf(v)==PluginBody::sub){SubF
 void GroundVehicle(unsigned char* v) noexcept { if(IsGroundRobo(v))GroundFrame(v); }
 void UnderPlayerTick() noexcept { UnderPlayer(); }
 void UnderVehicleStep(unsigned char* v) noexcept { UnderVehicle(v); }
+void UnderReset() noexcept { for(auto& w:underWatch)w=UnderWatch{}; }   // the last mission's objects: their addresses may be the new ones
 void ExitGroundWatchTick() noexcept { ExitGroundTick(); }
 }  // namespace frame
 

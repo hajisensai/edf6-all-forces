@@ -120,7 +120,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kNativePad,"native pad",kLoadOnly) \
     M(kGpuFx,"gpufx",nullptr) \
     M(kViewDepth,"view depth",kLoadOnly) \
-    M(kView,"view",nullptr) \
+    M(kView,"view","viewdiag.cpp's last diagnosis: dropped while the new mission's play area is unmeasured (ResetPlayArea, ViewDiagTick)") \
     M(kFirstPerson,"first person",nullptr) \
     M(kScopeSpread,"scope spread",kLoadOnly) \
     M(kEnemyControl,"enemy control",nullptr) \
@@ -236,12 +236,12 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kUnderground,"underground",nullptr) \
     M(kExitGround,"exit ground","crew.cpp's exit watch: the crews' reset (ResetCrew) drops it") \
     M(kWarn,"warn",nullptr) \
-    M(kDebugSpawn,"debug spawn",nullptr) \
+    M(kDebugSpawn,"debug spawn","its tables: dropped by its own preload at each mission (mission.cpp PreloadDebugSpawn), its online enemies by the support session's (ResetSupportNet)") \
     M(kMapQueue,"map queue","mapcmd.cpp's queue: the map's reset drops it (ResetMap, ResetMapCommands)") \
-    M(kJetLever,"jet lever",nullptr) \
-    M(kEmplacement,"emplacement",nullptr) \
-    M(kNetProbe,"net probe",nullptr) \
-    M(kAimLines,"aim lines",nullptr) \
+    M(kJetLever,"jet lever","its slots: its channel's reset (jet_lever_net.cpp JetLeverNetChannel), run by the plugin net module's") \
+    M(kEmplacement,"emplacement","keeps nothing: the driver's stick cleared on the vehicle itself each frame (emplacement.cpp)") \
+    M(kNetProbe,"net probe","its debug log's pacing only (per object, per session edge): a stale slot holds back one line at most (netprobe.cpp)") \
+    M(kAimLines,"aim lines","its hidden lines are in the crews' vehicle states: the crews' reset (ResetCrew) drops them") \
     M(kLockSound,"lock sound","jetsound.cpp's: the jet sound's reset (ResetJetSound) drops it") \
     M(kTwinBarrel,"twin barrel","payload.cpp's: the payload's reset (ResetPayload) drops it")
 
@@ -490,6 +490,8 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kPlayArea,&Call<&ResetPlayArea>},
     {RP::kMissionState,Id::kEdf5Online,&Call<&ResetEdf5Online>},   // the EDF5 creation loop's online arguments (edf5online.cpp)
     {RP::kMissionState,Id::kVehicleWeapons,&Call<&ResetVehicleWeapons>},   // nothing of this mission's vehicle weapons queued yet (vehicle_weapons.h)
+    {RP::kMissionState,Id::kUnderground,&Call<&frame::UnderReset>},   // the last mission's objects not watched (their addresses may be the new ones)
+    {RP::kMissionState,Id::kWarn,&Call<&ResetWarn>},   // nothing lit, no missile counted from the last mission (warn.cpp)
 };
 
 inline void GpuFxTick() noexcept { gpufx::Tick(); }
@@ -603,5 +605,7 @@ static_assert(PhasesInOrder(kInstalls) && PhasesInOrder(kResets) && PhasesInOrde
 static_assert(IdsInRange(kInstalls,kModuleCount) && IdsInRange(kResets,kModuleCount) && IdsInRange(kTicks,kModuleCount) &&
               IdsInRange(kVehicleSteps,kModuleCount),"every entry a module's, with a function");
 static_assert(FirstUnused(kModules,kInstalls,kResets,kTicks,kVehicleSteps)==kModuleCount,"every module in some pass");
+// The reset rule (module_logic.h): a module that keeps anything has its one reset, one that keeps nothing says why.
+static_assert(FirstResetBreak(kModules,kResets)==kModuleCount,"every stateful module has its reset (or a stateless reason)");
 }  // namespace
 }  // namespace crew::modules

@@ -3975,6 +3975,12 @@
     "tests/modelpack_test.py"
    ]
   },
+  "module_registry": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "native_bc7": {
    "labels": [
     "native-codec",
@@ -6915,9 +6921,13 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "air_chase_wired",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src"
    ]
   },
@@ -6952,9 +6962,12 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "andryusha_fuse_online",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -7232,12 +7245,18 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "barrage_copies_agree",
     "calls",
     "cw",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src",
+    "ticks",
     "vc"
    ]
   },
@@ -7679,9 +7698,12 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "cockpit_warnings_wired",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -7770,9 +7792,13 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "damage_numbers_wired",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -7791,9 +7817,14 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "damage_stats_wired",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src"
    ]
   },
@@ -7918,6 +7949,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -7927,7 +7959,11 @@
     "tools/selftest.py"
    ],
    "uses": [
-    "edf41_anthill_voxel_body"
+    "ROOT",
+    "edf41_anthill_voxel_body",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_asset_pack": {
@@ -8059,12 +8095,13 @@
     "_synthetic_call_text",
     "_tree",
     "_utf",
+    "_wrapper_body",
     "at_build",
     "ballistics",
+    "before_stock_input",
     "calls",
     "contextlib",
     "cw",
-    "disabled_return_offset",
     "dsgo",
     "e5c",
     "edf41_asset_pack",
@@ -8074,6 +8111,7 @@
     "hudtext_entries",
     "in_team_field",
     "installer",
+    "installs",
     "io",
     "json",
     "katyusha_kept_whole_bar_the_prune",
@@ -8087,13 +8125,20 @@
     "os",
     "patched",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
     "shutil",
     "spawn_catalog_archives",
     "src",
     "sys",
     "tempfile",
+    "ticks",
     "traceback",
     "vc",
+    "vehicle_phase",
+    "vehicle_step",
     "xm_units"
    ]
   },
@@ -8105,6 +8150,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8114,10 +8160,13 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_e5c_have_game",
     "_edf41_root",
     "edf41_big_dragon_ragdoll_mass",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_big_dragon_sounds": {
@@ -8142,7 +8191,9 @@
     "_edf41_root",
     "_sound_games",
     "edf41_big_dragon_sounds",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_calls_convert": {
@@ -8215,6 +8266,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8224,9 +8276,12 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_e5c_have_game",
     "edf41_class_keys",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_class_names": {
@@ -8250,9 +8305,13 @@
     "ROOT",
     "_e5c_have_game",
     "_edf41_root",
+    "_wrapper_body",
     "edf41_class_names",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -8292,8 +8351,14 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "edf41_dlc_insects",
-    "os"
+    "installs",
+    "os",
+    "re",
+    "registry",
+    "registry_index",
+    "src"
    ]
   },
   "edf41_dlc_objects": {
@@ -8304,6 +8369,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8313,12 +8379,14 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_e5c_have_game",
     "_edf41_object",
     "_edf41_root",
     "edf41_dlc_objects",
     "os",
-    "re"
+    "re",
+    "src"
    ]
   },
   "edf41_dlc_packs": {
@@ -8403,6 +8471,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8413,7 +8482,11 @@
    ],
    "uses": [
     "EDF41_SOLDIERS",
-    "edf41_friend_climb_shipped"
+    "ROOT",
+    "edf41_friend_climb_shipped",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_friend_grip_matches_weapons": {
@@ -8445,6 +8518,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8455,7 +8529,11 @@
    ],
    "uses": [
     "EDF41_SOLDIERS",
-    "edf41_friend_grip_shipped"
+    "ROOT",
+    "edf41_friend_grip_shipped",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_friend_looks_shipped": {
@@ -8466,6 +8544,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8475,7 +8554,11 @@
     "tools/selftest.py"
    ],
    "uses": [
-    "edf41_friend_looks_shipped"
+    "ROOT",
+    "edf41_friend_looks_shipped",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_friends_load_in_edf6": {
@@ -8677,9 +8760,13 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "edf41_kill_counters_plugin_table",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -8716,6 +8803,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8725,8 +8813,12 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_sgo_bytes",
-    "edf41_kill_counters_shipped"
+    "edf41_kill_counters_shipped",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_map_wires_real": {
@@ -8943,6 +9035,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -8952,7 +9045,11 @@
     "tools/selftest.py"
    ],
    "uses": [
-    "edf41_mother401_data"
+    "ROOT",
+    "edf41_mother401_data",
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_mother401_parts_collision_layer": {
@@ -9027,10 +9124,15 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "edf41_mother401_plugin_contract",
+    "installs",
     "os",
     "re",
-    "src"
+    "registry",
+    "registry_index",
+    "src",
+    "ticks"
    ]
   },
   "edf41_mother_parts_default_migrates": {
@@ -9079,9 +9181,13 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "edf41_mother_plugin_contract",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -9093,6 +9199,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9105,7 +9212,9 @@
    "uses": [
     "ROOT",
     "edf41_motherships_not_faked",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_net_contract": {
@@ -9145,6 +9254,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9154,10 +9264,13 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "__name__",
     "edf41_objects_install",
     "modfiles",
     "os",
+    "re",
+    "src",
     "tempfile"
    ]
   },
@@ -9169,6 +9282,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9182,7 +9296,9 @@
     "_e5c_have_game",
     "edf41_objects_shipped",
     "json",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_outfit_item_label": {
@@ -9228,10 +9344,15 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "edf41_outfits_install",
+    "installs",
     "ledger",
     "modfiles",
     "os",
+    "re",
+    "registry",
+    "registry_index",
     "src",
     "tempfile"
    ]
@@ -9257,6 +9378,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9266,8 +9388,11 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "edf41_outfits_reproducible",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_outfits_shipped": {
@@ -9277,6 +9402,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9286,9 +9412,12 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "edf41_outfits_shipped",
     "json",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_rest_behaviour_real": {
@@ -9349,9 +9478,13 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "edf41_robo_plugin_contract",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -9363,6 +9496,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -9375,7 +9509,9 @@
    "uses": [
     "ROOT",
     "edf41_robo_registered",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_shared_asset_backed_up_by_older_install": {
@@ -9497,6 +9633,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9506,10 +9643,13 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_e5c_have_game",
     "_edf41_object",
     "edf41_shipped_textures_load_before_models",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_sk_grass_real": {
@@ -9607,6 +9747,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9616,10 +9757,13 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_e5c_have_game",
     "_edf41_root",
     "edf41_stale_stock",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf41_stat_lines": {
@@ -9673,6 +9817,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9687,7 +9832,8 @@
     "_edf41_root",
     "edf41_story_small_dragons",
     "os",
-    "re"
+    "re",
+    "src"
    ]
   },
   "edf41_story_small_dragons_upgrade": {
@@ -9698,6 +9844,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -9707,11 +9854,14 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "edf41_story_small_dragons_upgrade",
     "ledger",
     "modfiles",
     "os",
     "patched",
+    "re",
+    "src",
     "tempfile"
    ]
   },
@@ -10255,6 +10405,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -10265,6 +10416,7 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_e5c_game",
     "_e5c_have_game",
     "_e5c_real",
@@ -10274,6 +10426,7 @@
     "os",
     "patched",
     "re",
+    "src",
     "tempfile"
    ]
   },
@@ -10298,6 +10451,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testhub",
     "testrange",
@@ -10308,6 +10462,7 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_e5c_game",
     "_e5c_have_game",
     "_e5c_real",
@@ -10316,6 +10471,8 @@
     "json",
     "os",
     "patched",
+    "re",
+    "src",
     "tempfile"
    ]
   },
@@ -10377,6 +10534,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "worldmap"
@@ -10385,6 +10543,7 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "_FakeEdf6",
     "_edf5dlc_data",
     "_edf5dlc_game",
@@ -10393,6 +10552,8 @@
     "modfiles",
     "os",
     "patched",
+    "re",
+    "src",
     "tempfile"
    ]
   },
@@ -10403,6 +10564,7 @@
     "edf5",
     "installer",
     "native-codec",
+    "plugin-native",
     "pylib-model",
     "testrange",
     "tools-misc",
@@ -10412,8 +10574,11 @@
     "tools/selftest.py"
    ],
    "uses": [
+    "ROOT",
     "edf5_dlc_shipped",
-    "os"
+    "os",
+    "re",
+    "src"
    ]
   },
   "edf5_found_by_gamedir": {
@@ -10636,13 +10801,20 @@
    ],
    "uses": [
     "ROOT",
-    "disabled_return_offset",
+    "_wrapper_body",
+    "before_stock_input",
     "emc_copies_agree",
+    "installs",
     "ledger",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
     "src",
-    "vc"
+    "vc",
+    "vehicle_phase"
    ]
   },
   "emplacement_fallback_without_the_dreadnought": {
@@ -11103,12 +11275,16 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "calls",
     "cw",
     "gravity_gun_mark_in_plugin",
     "os",
     "re",
-    "src"
+    "registry",
+    "registry_index",
+    "src",
+    "ticks"
    ]
   },
   "ground_mission_builders_take_the_game_alone": {
@@ -11147,10 +11323,16 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "gun_stabilizer_wired",
+    "installs",
     "os",
     "re",
-    "src"
+    "registry",
+    "registry_index",
+    "resets",
+    "src",
+    "vehicle_step"
    ]
   },
   "gunship_cannon_round": {
@@ -11324,9 +11506,12 @@
    "uses": [
     "INI_MODULES",
     "ROOT",
+    "_wrapper_body",
     "heli_sight_after_aim_lines",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src",
     "sys"
    ]
@@ -11773,12 +11958,13 @@
     "_synthetic_call_text",
     "_tree",
     "_utf",
+    "_wrapper_body",
     "at_build",
     "ballistics",
+    "before_stock_input",
     "calls",
     "contextlib",
     "cw",
-    "disabled_return_offset",
     "dsgo",
     "e5c",
     "gen_calls",
@@ -11788,6 +11974,7 @@
     "in_team_field",
     "installer",
     "installer_menu_8_opens_the_loadouts",
+    "installs",
     "io",
     "json",
     "katyusha_kept_whole_bar_the_prune",
@@ -11801,13 +11988,20 @@
     "os",
     "patched",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
     "shutil",
     "spawn_catalog_archives",
     "src",
     "sys",
     "tempfile",
+    "ticks",
     "traceback",
     "vc",
+    "vehicle_phase",
+    "vehicle_step",
     "xm_units"
    ]
   },
@@ -12347,10 +12541,14 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "map_commands_wired",
     "os",
     "re",
-    "src"
+    "registry",
+    "registry_index",
+    "src",
+    "ticks"
    ]
   },
   "map_hides_stock_hud": {
@@ -12416,9 +12614,14 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "installs",
     "map_wired",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src"
    ]
   },
@@ -12627,10 +12830,17 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "before_stock_input",
     "npc_ai_wired",
     "os",
     "re",
-    "src"
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
+    "src",
+    "vehicle_phase"
    ]
   },
   "npc_formation_wired": {
@@ -12920,9 +13130,15 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "os",
     "play_area_wired",
-    "src"
+    "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "src",
+    "ticks"
    ]
   },
   "play_edge_margin_is_the_big_maps": {
@@ -13045,11 +13261,15 @@
    "uses": [
     "ROOT",
     "_e5c_have_game",
+    "_wrapper_body",
     "calls",
     "installer",
+    "installs",
     "os",
     "ported_content_unlock_keys",
     "re",
+    "registry",
+    "registry_index",
     "src"
    ]
   },
@@ -13156,10 +13376,15 @@
    ],
    "uses": [
     "ROOT",
-    "disabled_return_offset",
+    "_wrapper_body",
+    "installs",
     "os",
     "proteus_wired",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
     "src"
    ]
   },
@@ -13722,9 +13947,13 @@
    ],
    "uses": [
     "ROOT",
-    "disabled_return_offset",
+    "_wrapper_body",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
     "sazabi_sound_wired",
     "src"
    ]
@@ -13870,12 +14099,13 @@
     "_synthetic_call_text",
     "_tree",
     "_utf",
+    "_wrapper_body",
     "at_build",
     "ballistics",
+    "before_stock_input",
     "calls",
     "contextlib",
     "cw",
-    "disabled_return_offset",
     "dsgo",
     "e5c",
     "gen_calls",
@@ -13884,6 +14114,7 @@
     "hudtext_entries",
     "in_team_field",
     "installer",
+    "installs",
     "io",
     "json",
     "katyusha_kept_whole_bar_the_prune",
@@ -13897,14 +14128,21 @@
     "os",
     "patched",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
     "sent_crash_dump_is_this_runs",
     "shutil",
     "spawn_catalog_archives",
     "src",
     "sys",
     "tempfile",
+    "ticks",
     "traceback",
     "vc",
+    "vehicle_phase",
+    "vehicle_step",
     "xm_units"
    ]
   },
@@ -13979,13 +14217,20 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "before_stock_input",
     "calls",
     "cw",
+    "installs",
     "ledger",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "sidecar_copies_agree",
-    "src"
+    "src",
+    "vehicle_phase"
    ]
   },
   "sidecar_tub_holds_the_gunner": {
@@ -14019,10 +14264,16 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "sight_zoom_wired",
-    "src"
+    "src",
+    "vehicle_step"
    ]
   },
   "sk_terrain_real": {
@@ -14104,12 +14355,17 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "calls",
     "dsgo",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "sortie_copies_agree",
     "src",
+    "ticks",
     "vc"
    ]
   },
@@ -14447,7 +14703,12 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "installs",
     "os",
+    "re",
+    "registry",
+    "registry_index",
     "split_missile_wired",
     "src"
    ]
@@ -14464,8 +14725,12 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src",
     "stock_gauges_wired"
    ]
@@ -14482,8 +14747,12 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src",
     "stock_guidance_wired"
    ]
@@ -14574,12 +14843,17 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "installs",
     "ledger",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src",
     "stock_payload_and_seats_wired",
-    "vc"
+    "vc",
+    "vehicle_phase"
    ]
   },
   "stock_stores_build": {
@@ -14619,9 +14893,12 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "dsgo",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src",
     "stock_vehicle_hud_wired"
    ]
@@ -14685,10 +14962,16 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "before_stock_input",
     "os",
     "re",
+    "registry",
+    "registry_index",
     "src",
-    "support_arrives_from_off_the_map"
+    "support_arrives_from_off_the_map",
+    "vehicle_phase",
+    "vehicle_step"
    ]
   },
   "support_c130_models": {
@@ -14975,8 +15258,12 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src",
     "turret_aim_wired"
    ]
@@ -14993,10 +15280,16 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src",
-    "turret_cam_wired"
+    "turret_cam_wired",
+    "vehicle_step"
    ]
   },
   "ultimate_copies_agree": {
@@ -15019,12 +15312,17 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
     "calls",
     "cw",
     "ledger",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src",
+    "ticks",
     "ultimate_copies_agree",
     "vc"
    ]
@@ -15120,10 +15418,18 @@
    ],
    "uses": [
     "ROOT",
+    "_wrapper_body",
+    "before_stock_input",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
     "src",
-    "vehicle_ram_wired"
+    "vehicle_phase",
+    "vehicle_ram_wired",
+    "vehicle_step"
    ]
   },
   "vehicle_sound_wired": {
@@ -15138,10 +15444,16 @@
    ],
    "uses": [
     "ROOT",
-    "disabled_return_offset",
+    "_wrapper_body",
+    "installs",
     "os",
     "re",
+    "registry",
+    "registry_index",
+    "resets",
+    "runs_when_disabled",
     "src",
+    "vehicle_phase",
     "vehicle_sound_wired"
    ]
   },

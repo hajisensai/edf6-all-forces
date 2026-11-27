@@ -78,7 +78,9 @@ class StockStoreRecoilTests(unittest.TestCase):
         head = (ROOT / 'src' / 'storerecoil.h').read_text(encoding='utf-8')
         self.assertIn('kVtable403=0x17D8FA0,kFired403=0x5FED60,kHullFired=0x5FFEE0', src)
         self.assertIn('index!=0 && index<holders && index>=seats ? Path::hull : Path::stock', head)
-        self.assertIn('InstallStoreRecoil();', (ROOT / 'src' / 'plugin.cpp').read_text(encoding='utf-8'))
+        # installed at load: the module registry's install pass (src/module_table.h kInstalls; plugin.cpp runs it)
+        self.assertIn('{IP::kFeatures,Id::kStoreRecoil,&Install<&InstallStoreRecoil>}',
+                      (ROOT / 'src' / 'module_table.h').read_text(encoding='utf-8'))
         self.assertIn('src/storerecoil.cpp', (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8'))
 
     def test_upgrade_rewrites_request_and_releases_old_coax_asset(self) -> None:

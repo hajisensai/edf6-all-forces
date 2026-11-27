@@ -16,7 +16,7 @@
     BoardBay over that m -> SendOut(..., true)), the board press reaching it from crew.cpp FindSeatHook; their fighter is
     called home to the bay it came out of (CallPlayerHome: the bay whose jet it is); the foredeck's ready fighter is gone
     (no dn_ready, kDeckRunSec, nextKind, DreadnoughtParked anywhere);
-  - the Dreadnought's frame and input run under their own fault step (crew.cpp kStepDreadnought), named in kStepNames.
+  - the Dreadnought's frame and input run under their own fault step (src/module_table.h kVehicleSteps: the dreadnought module, its own fault id).
 """
 from __future__ import annotations
 
@@ -133,21 +133,14 @@ def main() -> int:
         if gone in everything:
             fail(f'the foredeck\'s ready fighter is gone (2026-10-24), yet {gone} is still there')
 
-    crew = read(root, 'src/crew.cpp')
+    table = read(root, 'src/module_table.h')
+    steps = table[table.index('constexpr VehicleEntry kVehicleSteps[]={'):]
+    steps = steps[:steps.index('\n};')]
     for fn in ('DreadnoughtFrame', 'DreadnoughtInput'):
-        if not re.search(rf'Guarded\s*\(\s*kStepDreadnought\s*,\s*&{fn}\b', crew):
-            fail(f'crew.cpp: {fn} not under kStepDreadnought')
-    steps = re.search(r'enum\s+Step\s*\{([^}]*)\}', crew)
-    names_init = re.search(r'kStepNames\s*\[\s*\]\s*=\s*\{([^}]*)\}', crew)
-    if not steps or not names_init:
-        fail('crew.cpp: no Step enum or kStepNames[]')
-    else:
-        enum = [s.strip() for s in steps.group(1).split(',') if s.strip() and s.strip() != 'kStepCount']
-        labels = re.findall(r'"([^"]*)"', names_init.group(1))
-        if len(enum) != len(labels):
-            fail(f'crew.cpp: {len(enum)} steps, {len(labels)} names')
-        elif labels[enum.index('kStepDreadnought')] != 'dreadnought':
-            fail('crew.cpp: kStepDreadnought not named "dreadnought"')
+        if not re.search(rf'\{{VP::\w+,Id::kDreadnought,&Vehicle<&{fn}>', steps):
+            fail(f'module_table.h kVehicleSteps: {fn} not under the dreadnought module (its own fault id)')
+    if not re.search(r'M\(kDreadnought,"dreadnought",', table):
+        fail('module_table.h: no dreadnought module named "dreadnought"')
 
     for f in failures:
         print('FAIL', f)

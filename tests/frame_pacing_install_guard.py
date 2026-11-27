@@ -81,8 +81,15 @@ check(re.search(r'if\(!Cfg\(\)\.maxFrameLatency\)\{[^}]*return false;\}', lat[:r
 check(len(re.findall(r'\bRedirect(?:Import)?Call\(|\bPatchCode\(|\bPatchVtableSlot\(', src)) == 4, 'frame_pacing.cpp patches only its four sites')
 
 # Both are installed at load, before the application's init (the fence loop and the device init run in it).
-plugin = open(os.path.join(ROOT, 'src', 'plugin.cpp'), encoding='utf-8').read()
-check(plugin.count('InstallRenderFence();') == 1 and plugin.count('InstallFrameLatency();') == 1, 'plugin.cpp installs both once')
-check(0 <= plugin.find('InstallFramePacing()') < plugin.find('InstallRenderFence();') < plugin.find('InstallFrameLatency();') < plugin.find('InstallFrameRate()'),
+# The load's installs are the module registry's table (src/module_table.h kInstalls), run in its order.
+table = open(os.path.join(ROOT, 'src', 'module_table.h'), encoding='utf-8').read()
+table = table[table.index('constexpr InstallEntry kInstalls[]={'):]
+table = table[:table.index('\n};')]
+at = {f: [i for i, line in enumerate(table.split('\n')) if f'&Install<&{f}>' in line]
+      for f in ('InstallFramePacing', 'InstallRenderFence', 'InstallFrameLatency', 'InstallFrameRate')}
+check(all(len(v) == 1 for v in at.values()), f'the registry installs each once: {at}')
+check(at['InstallFramePacing'] < at['InstallRenderFence'] < at['InstallFrameLatency'] < at['InstallFrameRate'],
       'the pacing, the fence, the latency, then the frame rate (whose gate needs TickWait)')
+check(all('{IP::kBeforeAppInit,' in table.split('\n')[v[0]] for v in at.values()),
+      'all four before the application\'s init (InstallPhase::kBeforeAppInit)')
 print(f'frame pacing install gates: {checks} checks ok')

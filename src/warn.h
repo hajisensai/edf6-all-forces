@@ -31,4 +31,5 @@ float ClosureIn(const float* pos,const float* vel,float climb,float clear,float 
 Gpws GpwsOf(float impactIn,bool rising) noexcept;
 void WarnTick() noexcept;                 // once a game frame (crew.cpp FrameTick): decided, published and sounded
 bool WarnLatest(Warnings* out) noexcept;  // the last published (hud.cpp HudPublish); false with no aircraft flown
+void ResetWarn() noexcept;                // the mission's start: nothing lit, no missile counted (published off)
 }  // namespace crew

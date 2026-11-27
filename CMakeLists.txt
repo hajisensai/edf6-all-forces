@@ -1478,6 +1478,13 @@ target_compile_options(tvguide_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks tvguide_test)
 add_test(NAME tvguide COMMAND tvguide_test)
 
+add_executable(module_registry_test EXCLUDE_FROM_ALL tests/module_registry_test.cpp)
+target_compile_options(module_registry_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks module_registry_test)
+add_test(NAME module_registry COMMAND module_registry_test)
+# plugin.cpp / mission.cpp list no installs / resets of their own; every module keeps the reset rule (src/module_table.h).
+add_test(NAME module_registry_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/module_registry_guard.py")
+
 add_executable(crew_first_use_test EXCLUDE_FROM_ALL tests/crew_first_use_test.cpp)
 target_link_libraries(crew_first_use_test PRIVATE edf6common)
 target_compile_options(crew_first_use_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
