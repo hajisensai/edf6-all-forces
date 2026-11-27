@@ -437,18 +437,6 @@ COLLIDE_TIME = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF COLLIDE constru
                           r'dispatch (\d+) calls ([\d.]+) ms, mode0 (\d+), sleep (\d+) calls ([\d.]+) ms')
 
 
-NAV_RAYS = re.compile(r'\[(\d+):(\d+):(\d+(?:\.\d+)?)\] PERF NAV RAYS (\d+) batches, (\d+) floor, '
-                      r'(\d+) clearance, (\d+) water, (\d+) dry')
-
-
-def read_nav_rays(log: str, window: tuple[float, float]) -> dict[str, int]:
-    rows = _rows(log, NAV_RAYS, window)
-    if not rows:
-        return {}
-    return {key: sum(int(m[i]) for m in rows)
-            for i, key in enumerate(('batches', 'floor', 'clearance', 'water', 'dry'), 4)}
-
-
 def read_collide(log: str, window: tuple[float, float]) -> dict:
     """Totals from the first Havok build; mode-0 sleep is included in dispatch."""
     rows = _rows(log, COLLIDE_TIME, window)
@@ -1034,11 +1022,6 @@ def report(run_dir: str, top: int = 20, img: Image | None = None) -> str:
         out += ['', '## Havok task graphs (direct timing, including waits)', '']
         out += [f'- {phase}: {count} calls, {mean:.2f} ms/call (worst {worst:.2f})'
                 for phase, (count, mean, worst) in havok.items()]
-    rays = read_nav_rays(log, cw)
-    if rays:
-        out += ['', '## Ground navigation rays', '',
-                f"{rays['batches']:,} world views served {rays['floor']:,} floor and {rays['clearance']:,} clearance probes. "
-                f"The dry water-area view answered {rays['dry']:,}/{rays['water']:,} water checks."]
     collide = read_collide(log, cw)
     if collide:
         n, construct_ms = collide['construct']

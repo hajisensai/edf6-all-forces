@@ -7594,7 +7594,7 @@ def npc_ai_asks_less() -> None:
     visit = body(code, 'void __fastcall FriendVisit(void* self,void* object) noexcept {')
     assert 'IsSoldierClassLive(o)' in visit and 'IsSoldierClass(o)' not in visit, "FriendVisit: the walk's object's vtable read"
     assert 'IsAnyPlayer(o)' not in visit and 'KnownVehicle(o)' not in visit and 'KnownVehicleVtable(vtable)' in visit,         "FriendVisit: a player is a soldier class; a vehicle's class off the vtable read"
-    assert srcscan.has(code, 'bool IsSoldierClass(const void* human) noexcept { return Readable(human,8) && IsSoldierClassLive(human); }')
+    assert srcscan.has(code, 'bool IsSoldierClass(const void* human) noexcept { return stepobj::Reads(human,8) && IsSoldierClassLive(human); }')
     # cpu-2: the asks moved to AskArms (once a soldier, again when SameArms sees its arms changed)
     arms = body(code, 'bool AskArms(ArmsSeen& seen,const unsigned char* const* list,std::uint64_t count,const unsigned char* sets,\n             std::uint64_t setCount) noexcept {')
     first = arms.index('edf::PrefetchReadableSpans(spans,spanCount);')
