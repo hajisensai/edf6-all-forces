@@ -162,6 +162,16 @@ float RollToLift(const Jet& j) noexcept {
     return std::acos(Clamp(Dot(up,lift),-1.0f,1.0f));
 }
 
+// The path's turn time constant for kind `k` pulling at most `maxG`, no shorter than `least`: no shorter than the time
+// its roll rate takes to bring it out of its steepest bank either. Closing on its heading at angle/tau the turn asks the
+// bank to come off at bank/tau; asked faster than k.roll, the bank lags its command and the heading runs on past and
+// back (the gunship, 0.3 rad/s: 27 deg of bank still swinging 20 s after a 30 deg heading step; --wobble-suite).
+float SteerTau(const Kind& k,float maxG,float least) noexcept {
+    const float bank=maxG>1.0f ? std::acos(1.0f/maxG) : 0.0f;   // the level turn's bank at maxG
+    const float rollOut=k.roll>0.0f ? bank/k.roll : 0.0f;
+    return rollOut>least ? rollOut : least;
+}
+
 // A wing's flight step. The lift it wants: gravity held up plus the turn toward `want` (unit), at most
 // maxG; `up` gets that lift's direction across the path, where Attitude rolls the body. The lift it gets
 // is only along the body's up as it is (`bodyUp`), at most maxG and kNegG pushing: so it banks first and
@@ -172,24 +182,36 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     // Its stores (BurdenOf): the same wing lifts fewer g of a heavier jet, the same engine speeds it up less, and
     // their drag takes off top speed (drag ~ v^2: the speed it can hold falls as the root of 1 + their share).
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
-    const float maxG=(bombing ? kBombG : k.maxG)/mass,tau=bombing ? kBombTau : kSteerTau;
+    const float maxG=(bombing ? kBombG : k.maxG)/mass,tau=SteerTau(k,maxG,bombing ? kBombTau : kSteerTau);
     speed/=std::sqrt(1.0f+(j.burden.drag>0.0f ? j.burden.drag : 0.0f));
     float dir[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
     float s=Len(dir);
     if(s<1.0f || !Normalize(dir)){std::memcpy(dir,fwd,12);s=k.minSpeed;}
     const float most=maxG*kG/(s>k.minSpeed ? s : k.minSpeed)*dt;
-    const float angle=std::acos(Clamp(Dot(dir,want),-1.0f,1.0f));
+    // The angle off `want` from its sine and cosine both (atan2): acos alone rounds every angle under ~3.5e-4 rad to 0
+    // in float (its cosine reads 1). That 0 had the path snapped onto `want` in one frame, the lift asking the whole
+    // residual over dt instead of over kSteerTau (30x the gain): on a level run the body rolled +-5 deg every 0.45 s
+    // round a heading off by 2e-4 rad (the user, 2026-11-27: 「飞机会左右摇摆，即便是在平飞的时候」; --wobble-suite).
+    float axis[3];Cross(dir,want,axis);
+    const float sine=Len(axis),angle=std::atan2(sine,Dot(dir,want));
     const float eased=angle*(dt<tau ? dt/tau : 1.0f);
     const float turn=eased<most ? eased : most;
     float next[3];
-    if(angle<1e-5f)std::memcpy(next,want,12);
-    else {
-        float axis[3];Cross(dir,want,axis);
-        if(!Normalize(axis)){axis[0]=0;axis[1]=1;axis[2]=0;}
+    if(sine>1e-6f) {
+        for(int i=0;i<3;++i)axis[i]/=sine;
         float side[3];Cross(axis,dir,side);   // in the turn plane, toward `want`
         for(int i=0;i<3;++i)next[i]=dir[i]*std::cos(turn)+side[i]*std::sin(turn);
-        Normalize(next);
+    } else if(angle<1.0f) {
+        // On it to float's resolution: the same share of what is left (no plane to turn in, none needed).
+        const float share=angle>0.0f ? turn/angle : 0.0f;
+        for(int i=0;i<3;++i)next[i]=dir[i]+(want[i]-dir[i])*share;
+    } else {
+        // Straight away from it: any turn plane, the world's up square to the path (else its x).
+        float side[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};
+        if(!Normalize(side)){side[0]=1;side[1]=0;side[2]=0;}
+        for(int i=0;i<3;++i)next[i]=dir[i]*std::cos(turn)+side[i]*std::sin(turn);
     }
+    if(!Normalize(next))std::memcpy(next,dir,12);
     float lift[3]={0,kG,0};
     for(int i=0;i<3;++i)lift[i]+=(next[i]-dir[i])/dt*s;
     const float along=Dot(lift,dir);
@@ -860,6 +882,14 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
 // over the map (2026-10-10).
 float FerrySpeed(const Kind& k) noexcept { return Clamp(k.minSpeed*kLoiterMin,k.minSpeed,k.cruise); }
 float FerryTurn(const Kind& k) noexcept { return TurnRadiusOf(k,1.0f,FerrySpeed(k)); }
+
+void BombLine(const float* pos,const float* at,const float* dir,float lead,float height,float* want) noexcept {
+    const float rel[3]={pos[0]-at[0],0.0f,pos[2]-at[2]};
+    const float along=Dot(rel,dir)+lead;
+    const float to[3]={at[0]+dir[0]*along-pos[0],0.0f,at[2]+dir[2]*along-pos[2]};
+    Level(pos,to,height,want);
+}
+float BombLead(float speed) noexcept { const float r=airbound::TurnRadius(speed,std::sqrt(kBombG*kBombG-1.0f));return r>ferry::kLeadLeast ? r : ferry::kLeadLeast; }
 float Ferry(Jet& j,const float* pos,float height,float* want) noexcept {
     const Kind& k=KindOf(j);
     float way[3];

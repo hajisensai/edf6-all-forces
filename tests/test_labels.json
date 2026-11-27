@@ -4440,6 +4440,18 @@
    ],
    "scripts": []
   },
+  "jet_wobble": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "jetsound_check": {
    "labels": [
     "plugin-air",

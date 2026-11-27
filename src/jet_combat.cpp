@@ -524,9 +524,10 @@ bool WeaponsFree(const Jet& j) noexcept {
            j.mode!=Mode::takeoff;
 }
 
-// Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (its fall from here
-// at the jet's velocity, the target's height, the target moving on as it falls) is within kBombHit of its blast
-// radius of the target, and the jet is kBombSafe over it (its own blast); one every kBombMs.
+// Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (StoreLands: as the game
+// flies the round, the world's 14.7 m/s^2 x its factor onto the ground under it; it reckoned 9.8 onto the target's
+// height before and fell short, the user, 2026-11-27: 「炸弹也很难投中」), the target moved on over its fall, is within
+// kBombHit of its blast radius of the target, and the jet is kBombSafe over it (its own blast); one every kBombMs.
 // Rockets (StoreRole::rocket) in a strafing run: a ripple (the store's burst) every kRocketMs while the guns' lead is
 // within kRocketCone of the nose, from kRocketOpen in to kRocketClose times the guns' closest; then the guns go on.
 constexpr float kRocketOpen=1400.0f,kRocketClose=2.5f,kRocketCone=0.026f;   // m, x gunClose, rad (1.5 deg)
@@ -538,11 +539,12 @@ void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) n
     if(!t.target || t.flyer || a.bombs<=0 || ms-t.bombAt<kBombMs)return;
     const float over=pos[1]-t.aim[1];
     if(over<kBombSafe)return;
-    const float vy=j.m.vel[1],fall=(vy+std::sqrt(vy*vy+2.0f*kG*over))/kG;   // s to the target's height
     for(int i=0;i<a.storeCount;++i) {
         const Store& s=a.stores[i];
         if(s.spec->role!=StoreRole::bomb || s.ammo<=0)continue;
-        const float dx=pos[0]+j.m.vel[0]*fall-(t.aim[0]+t.tgtVel[0]*fall),dz=pos[2]+j.m.vel[2]*fall-(t.aim[2]+t.tgtVel[2]*fall);
+        float at[3],fall=0.0f;
+        if(!StoreLands(s,kBombReach,at,&fall))return;
+        const float dx=at[0]-(t.aim[0]+t.tgtVel[0]*fall),dz=at[2]-(t.aim[2]+t.tgtVel[2]*fall);
         const float miss=std::sqrt(dx*dx+dz*dz),hit=At<float>(s.weapon,kWeaponBlast)*kBombHit;
         if(!(miss<hit))return;
         if(HoldFire(v,t.target,pos,At<float>(s.weapon,kWeaponSpeed)*60.0f,At<float>(s.weapon,kWeaponGravity)*kGravity))return;

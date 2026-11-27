@@ -274,16 +274,6 @@ inline void Ahead(const Line& l,const float* p,float lead,float* out) noexcept {
     for(int i=0;i<3;++i)out[i]=l.at[i]+l.dir[i]*a;
 }
 
-// s a bomb takes to fall `over` m with `vy` m/s up at release under `g`.
-inline float FallTime(float over,float vy,float g) noexcept {
-    const float d=vy*vy+2.0f*g*(over>0.0f ? over : 0.0f);
-    return (vy+std::sqrt(d))/g;
-}
-// Where a bomb let go at `pos` with velocity `vel` lands on the height `ground` (no drag: the plugin's Bomb() reckons so).
-inline void Impact(const float* pos,const float* vel,float ground,float g,float* out) noexcept {
-    const float t=FallTime(pos[1]-ground,vel[1],g);
-    out[0]=pos[0]+vel[0]*t;out[1]=ground;out[2]=pos[2]+vel[2]*t;
-}
 // The carpet's window: a bomb landing within kCarpetHalf of the mark along the line.
 inline bool InCarpet(const Line& l,const float* impact) noexcept { return std::fabs(Along(l,impact))<=kCarpetHalf; }
 // The gap between bombs that spreads `bombs` over the carpet at `speed` m/s (ms).
