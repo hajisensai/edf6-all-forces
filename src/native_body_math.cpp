@@ -324,6 +324,92 @@ __forceinline void VisitRosterActor(void* callback,const void* actor) {
     reinterpret_cast<RosterVisitor>(table[1])(callback,actor);
 }
 
+class NearestRosterScan {
+public:
+    NearestRosterScan(void* context,bool active) noexcept:callback(context) {
+        enabled=active;
+        if(enabled) {ReadMode();ReadObserver();}
+    }
+
+    bool Enabled() const noexcept {return enabled;}
+
+    __forceinline bool Visit(const void* actor) {
+        const auto* const table=edf::At<const void* const*>(callback,0);
+        const auto visitor=reinterpret_cast<RosterVisitor>(table[1]);
+        const bool stock=table==reinterpret_cast<const void* const*>(image+kNearestRosterVtable) &&
+                         table[1]==image+kTargetScore;
+        if(enabled && stock && (edf::At<std::uint32_t>(actor,0x39C)&~2u))return true;
+        if(!enabled || !stock || (weighted && edf::At<std::uint32_t>(actor,0x47C)!=0x3F800000u)) {
+            // Ordinary unit-weight scans use the bound. General weighted scans revert after their first non-unit weight.
+            enabled=false;
+            visitor(callback,actor);
+            return false;
+        }
+        if(Score(actor))return true;
+        const auto best=edf::At<std::uint32_t>(callback,0x20);
+        visitor(callback,actor);
+        if(best!=edf::At<std::uint32_t>(callback,0x20))limit=kInfinity;
+        ReadMode();
+        ReadObserver();
+        return enabled;
+    }
+
+    void Reset() noexcept {
+        limit=kInfinity;
+        if(enabled) {ReadMode();ReadObserver();}
+    }
+
+private:
+    // A winning unweighted, non-held candidate certifies this bound in the current rounding mode.
+    // The native score represents sqrt(d2). Equal scores keep the first candidate.
+    static constexpr unsigned kNormal=0x00800000u,kInfinity=0x7F800000u;
+    void* callback;
+    const void* observer{};
+    unsigned limit=kInfinity,mode{};
+    bool enabled=false,precision=false,weighted=false;
+
+    void ReadObserver() noexcept {
+        observer=edf::At<const void*>(callback,0x28);
+        weighted=edf::At<unsigned char>(callback,0x38)!=0;
+    }
+    void ReadMode() noexcept {
+        const unsigned csr=_mm_getcsr();
+        const unsigned next=csr&0xFFC0u;
+        if(next!=mode)limit=kInfinity;
+        mode=next;
+        enabled=(csr&0x1F80u)==0x1F80u;
+        precision=(csr&0x20)!=0;
+    }
+
+    __forceinline bool Score(const void* actor) noexcept {
+        if(!observer)return false;
+        const auto* const holder=edf::At<const void*>(observer,0x548);
+        if(holder && edf::At<const void*>(holder,0x518)==actor)return false;
+
+        const auto p=_mm_loadu_ps(reinterpret_cast<const float*>(static_cast<const unsigned char*>(actor)+0x90));
+        const auto origin=_mm_load_ps(reinterpret_cast<const float*>(static_cast<const unsigned char*>(callback)+0x10));
+        const auto delta=_mm_sub_ps(p,origin);
+        // Preserve the native subtraction, fourth lane, multiply, and ordered sum before testing the bound.
+        const auto lanes=_mm_shuffle_ps(delta,_mm_shuffle_ps(p,delta,0xAF),0x24);
+        const auto d2=_mm_mul_ps(lanes,lanes);
+        const auto sum=_mm_add_ss(_mm_add_ss(_mm_shuffle_ps(d2,d2,0x55),d2),_mm_shuffle_ps(d2,d2,0xAA));
+        const auto bits=static_cast<unsigned>(_mm_cvtsi128_si32(_mm_castps_si128(sum)));
+        if(bits<kNormal || bits>=kInfinity)return false;
+        // On a normal positive operand the square root can only add inexact. That flag is already set here.
+        if(precision && bits>=limit)return true;
+
+        const auto distance=_mm_sqrt_ss(sum);
+        const auto best=_mm_load_ss(reinterpret_cast<const float*>(static_cast<const unsigned char*>(callback)+0x20));
+        if(_mm_comigt_ss(best,distance)) {
+            edf::Put(callback,0x20,_mm_cvtss_f32(distance));
+            edf::Put(callback,0x30,actor);
+            limit=bits;
+        }
+        if(!precision)precision=(_mm_getcsr()&0x20u)!=0;
+        return true;
+    }
+};
+
 void VisitLiveRoster(const RosterRow& row,const RosterNode* node,void* callback) {
     while(node!=row.head) {
         const void* const actor=node->actor;
@@ -357,19 +443,23 @@ bool SnapshotRoster(const RosterRow& row,RosterSnapshot& list,std::uint64_t epoc
     return true;
 }
 
-void VisitRosterRow(const RosterRow& row,RosterSnapshot& list,void* callback) {
+void VisitRosterRow(const RosterRow& row,RosterSnapshot& list,void* callback,NearestRosterScan* nearest) {
     if(!row.size)return;
     const auto epoch=rosterEpoch.load(std::memory_order_relaxed);
     if(!SnapshotRoster(row,list,epoch)) {
         VisitLiveRoster(row,row.head->left,callback);
+        if(nearest)nearest->Reset();
         return;
     }
     for(const void* actor:list.actors) {
         if(!RosterTargetable(actor))continue;
-        VisitRosterActor(callback,actor);
+        if(nearest) {
+            if(!nearest->Visit(actor))nearest=nullptr;
+        } else VisitRosterActor(callback,actor);
         if(rosterEpoch.load(std::memory_order_relaxed)!=epoch) {
             // A re-entrant visitor can change registration. Continue with the next key in the live tree.
             VisitLiveRoster(row,AfterRosterActor(row.head,actor),callback);
+            if(nearest)nearest->Reset();
             return;
         }
     }
@@ -391,8 +481,11 @@ bool TryVisitRoster(void* manager,int observer,void* callback) {
         scratch.manager=manager;
         scratch.rows=rows;
     }
+    const bool nearest=edf::At<const void*>(callback,0)==image+kNearestRosterVtable;
+    NearestRosterScan scan(callback,nearest);
     for(unsigned i=0;i<count;++i) {
-        if(rows[observer].relations[i]==team_native::kEnemy)VisitRosterRow(rows[i],scratch.teams[i],callback);
+        if(rows[observer].relations[i]==team_native::kEnemy)
+            VisitRosterRow(rows[i],scratch.teams[i],callback,scan.Enabled() ? &scan : nullptr);
     }
     return true;
 }

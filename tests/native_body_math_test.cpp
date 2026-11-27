@@ -141,8 +141,6 @@ bool TargetScoreCases() {
     const auto previous=reinterpret_cast<TargetScore>(static_cast<unsigned char*>(reference)+kReferenceEntry);
     alignas(16) unsigned char observer[0x550]{},holder[0x530]{};
     alignas(16) unsigned char first[0x480]{},second[0x480]{},control[16]{};
-    edf::Put(first,0x47C,0.75f);
-    edf::Put(second,0x47C,0.75f);
     edf::Put(observer,0x538,3.0f);
 
     struct Choice {
@@ -155,9 +153,12 @@ bool TargetScoreCases() {
     const auto same=[](const Choice& a,const Choice& b) {
         return a.candidate==b.candidate && a.score==b.score && a.fpStatus==b.fpStatus && a.strong==b.strong;
     };
-    const auto choose=[&](TargetScore run,unsigned flags,unsigned mxcsr,const PositionBits* bits=nullptr) {
+    const auto choose=[&](TargetScore run,unsigned flags,unsigned mxcsr,const PositionBits* bits=nullptr,bool prune=false) {
         alignas(16) unsigned char walk[0x40]{};
+        edf::Put(walk,0,image+kNearestRosterVtable);
         edf::Put(walk,0x20,FLT_MAX);
+        edf::Put(first,0x47C,(flags&256) ? 1.0f : 0.75f);
+        edf::Put(second,0x47C,(flags&256) ? 1.0f : 0.75f);
         edf::Put(walk,0x28,observer+0);
         walk[0x38]=static_cast<unsigned char>(flags&1);
         edf::Put(observer,0x548,(flags&2) ? static_cast<unsigned char*>(nullptr) : holder+0);
@@ -165,14 +166,20 @@ bool TargetScoreCases() {
         edf::Put(holder,0x520,(flags&16) ? static_cast<unsigned char*>(nullptr) : control+0);
         edf::Put(control,8,(flags&32) ? 0 : 2);
         edf::Put(first,0x39C,(flags&64) ? 4u : 0u);
-        const float defaultA[4]{(flags&128) ? std::numeric_limits<float>::quiet_NaN() : 12.0f,0,0,0};
-        constexpr float defaultB[4]{12.0f,0,0,0};
+        const float defaultA[4]{(flags&128) ? std::numeric_limits<float>::quiet_NaN() : 12.0f,2.0f,1.0f,0};
+        constexpr float defaultB[4]{12.0f,2.0f,1.0f,0};
         std::memcpy(first+0x90,bits ? static_cast<const void*>(bits->data()+4) : defaultA,16);
         std::memcpy(second+0x90,bits ? static_cast<const void*>(bits->data()+8) : defaultB,16);
         if(bits)std::memcpy(walk+0x10,bits->data(),16);
         _mm_setcsr(mxcsr);
-        run(walk,first);
-        run(walk,second);
+        if(prune) {
+            NearestRosterScan scan(walk,true);
+            scan.Visit(first);
+            scan.Visit(second);
+        } else {
+            run(walk,first);
+            run(walk,second);
+        }
         return Choice{edf::At<const void*>(walk,0x30),edf::At<std::uint32_t>(walk,0x20),_mm_getcsr()&0x3F,
                       edf::At<int>(control,8)};
     };
@@ -203,17 +210,20 @@ bool TargetScoreCases() {
         }
         for(std::size_t mode=0;mode<std::size(modes);++mode)
             for(unsigned i=0;i<positions.size();++i)
-                expected[mode][i]=choose(score,i%256,modes[mode],&positions[i]);
+                expected[mode][i]=choose(score,i%512,modes[mode],&positions[i]);
 
         if(!InstallNativeTargetScore())return false;
-        for(unsigned i=0;i<structured.size();++i)
-            if(!same(choose(score,i,nearest),structured[i]))return false;
+        for(unsigned i=0;i<structured.size();++i) {
+            if(!same(choose(score,i,nearest),structured[i]) ||
+               !same(choose(score,i,nearest,nullptr,true),structured[i]))return false;
+        }
         for(std::size_t mode=0;mode<std::size(modes);++mode) {
             for(unsigned i=0;i<positions.size();++i) {
-                if(!same(choose(score,i%256,modes[mode],&positions[i]),expected[mode][i]))return false;
+                if(!same(choose(score,i%512,modes[mode],&positions[i]),expected[mode][i]) ||
+                   !same(choose(score,i%512,modes[mode],&positions[i],true),expected[mode][i]))return false;
             }
         }
-        std::printf("native target scoring: %zu identical decisions and floating-point status values\n",
+        std::printf("native target scoring and roster bounds: %zu identical decisions and floating-point status values\n",
                     structured.size()+std::size(modes)*positions.size());
         return true;
     }();
