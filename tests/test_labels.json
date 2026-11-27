@@ -4397,6 +4397,14 @@
    ],
    "scripts": []
   },
+  "jet_mix_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native",
+    "plugin-sound"
+   ],
+   "scripts": []
+  },
   "jet_phase": {
    "labels": [
     "plugin-air",
