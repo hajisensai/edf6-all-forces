@@ -140,3 +140,4 @@ dialog.outlineDlg h2 { margin: 0; font-size: 17px; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .olLane[data-tone="violet"], :root:not([data-theme="light"]) .olStep[data-tone="violet"] { --tone: #a98ee8; } }
 [hidden] { display: none !important; }
 .bar { margin: 1em 0; }
+.reviewBody { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

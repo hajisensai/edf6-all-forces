@@ -135,7 +135,8 @@ async function publish(db, b) {
 export async function reviewRoute(request, env, me, path) {
   const db = env.DB;
   const dev = me?.role === 'dev';
-  if (path === '/api/review' && request.method === 'GET') return shown(db, await rater(request.headers.get('x-review-token'), false));
+  // dev: the page then also loads /api/review/results and shows every score and comment (developers only).
+  if (path === '/api/review' && request.method === 'GET') return { ...await shown(db, await rater(request.headers.get('x-review-token'), false)), dev };
   if (path === '/api/review/results' && request.method === 'GET') { if (!dev) throw new HttpError(403, 'developer only'); return results(db); }
   if (path === '/api/review/source' && request.method === 'GET') { if (!dev) throw new HttpError(403, 'developer only'); return source(db); }
   if (request.method !== 'POST') return null;
