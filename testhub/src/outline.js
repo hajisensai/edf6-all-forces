@@ -5,6 +5,8 @@
 // Players' text: cleaned like the plan (clean()), rendered as text only (public/outline.js), rate limited per account.
 // Reading is open to everyone, visitors without an account included; writing stays with the group's members and developers.
 // A group with nothing written yet is listed only to its own members; an empty outline only to those who can write it.
+// A developer can open an outline to every account (`open`: anyone with an account edits it, though only its group and
+// developers delete it) and name one the main outline (`main`: its group and it come first and open by default).
 // Every line and step can be scored (1..5) and reviewed by any account, once each (a new score replaces its old one;
 // stored per group as item "<book>/<id>", so equal ids in two outlines stay apart);
 // visitors see only each item's average and how many scored it, not the reviews, who started the outline or who saved it.
@@ -83,26 +85,42 @@ function bookOf(value) {
   return n;
 }
 
-const WRITES = new Set(['/api/outline/save', '/api/outline/remove', '/api/outline/rate', '/api/outline/unrate']);
+const WRITES = new Set(['/api/outline/save', '/api/outline/remove', '/api/outline/rate', '/api/outline/unrate', '/api/outline/settings']);
+
+// The group a save acts on: an open outline of another group when that is the one named, else scope() (own group).
+async function saveScope(db, me, b, book) {
+  if (book && me.role !== 'dev' && b.group != null && String(b.group) !== me.group && GROUP.test(String(b.group))) {
+    const row = await db.prepare('SELECT open FROM story_outlines WHERE grp = ?1 AND book = ?2').bind(String(b.group), book).first();
+    if (row?.open) return String(b.group);
+  }
+  return scope(me, b.group);
+}
 const FILLED = "json_array_length(data, '$.lanes') > 0";
 
 export async function outlineRoute(request, env, me, missions, groups, path, url) {
   const db = env.DB;
   if (path === '/api/outline' && request.method === 'GET') {
     // me = null: a visitor without an account.
-    const shown = await readable(db, me, groups, `SELECT grp FROM story_outlines WHERE ${FILLED}`);
-    const group = pick(me, url.searchParams.get('group'), shown, groups);
-    const editable = group != null && canWrite(me, group);
-    // The group's outlines: the written ones, and the empty ones too for those who can write them.
-    const all = group == null ? [] : (await db.prepare('SELECT book, data, author FROM story_outlines WHERE grp = ?1 ORDER BY book').bind(group).all()).results
-      .map((r) => ({ book: r.book, author: r.author, outline: JSON.parse(r.data) })).filter((x) => editable || x.outline.lanes.length > 0);
+    const main = await db.prepare(`SELECT grp, book FROM story_outlines WHERE main = 1 AND ${FILLED} LIMIT 1`).first();
+    let shown = await readable(db, me, groups, `SELECT grp FROM story_outlines WHERE ${FILLED}`);
+    if (main && shown.includes(main.grp)) shown = [main.grp, ...shown.filter((g) => g !== main.grp)];
+    // No group named: the main outline's, else the reader's own, else the first listed.
+    const named = url.searchParams.get('group');
+    const group = pick(me, named ?? (main && shown.includes(main.grp) ? main.grp : null), shown, groups);
+    const member = group != null && canWrite(me, group);
+    // The group's outlines: the written ones, and the empty ones too for those who can write them; the main one first.
+    const all = group == null ? [] : (await db.prepare('SELECT book, data, author, open, main FROM story_outlines WHERE grp = ?1 ORDER BY main DESC, book').bind(group).all()).results
+      .map((r) => ({ book: r.book, author: r.author, open: !!r.open, main: !!r.main, outline: JSON.parse(r.data) })).filter((x) => member || x.outline.lanes.length > 0);
     const asked = bookOf(url.searchParams.get('book'));
     const book = all.some((x) => x.book === asked) ? asked : all[0]?.book ?? 0;
     const row = book ? await db.prepare('SELECT * FROM story_outlines WHERE grp = ?1 AND book = ?2').bind(group, book).first() : null;
     const outline = row ? JSON.parse(row.data) : null;
+    // editable: may save this outline; member: may also delete it and start new ones in the group.
+    const editable = member || (me != null && !!row?.open);
     return {
-      me: me && { user: me.user, role: me.role, group: me.group }, group, groups: shown, editable,
-      books: all.map((x) => ({ book: x.book, title: x.outline.title, lanes: x.outline.lanes.length, author: me ? x.author ?? null : null })),
+      me: me && { user: me.user, role: me.role, group: me.group }, group, groups: shown, editable, member,
+      open: !!row?.open, main: !!row?.main,
+      books: all.map((x) => ({ book: x.book, title: x.outline.title, lanes: x.outline.lanes.length, open: x.open, main: x.main, author: me ? x.author ?? null : null })),
       book, outline, version: row ? row.version : 0,
       author: me ? row?.author ?? null : null, updated_by: me ? row?.updated_by ?? null : null, updated_at: me ? row?.updated_at ?? null : null,
       ...(row ? await ratings(db, me, group, book, outline) : { scores: {} }),
@@ -134,10 +152,27 @@ export async function outlineRoute(request, env, me, missions, groups, path, url
     }
     return ratings(db, me, group, book, outline);
   }
-  const group = scope(me, b.group);
+  if (path === '/api/outline/settings') {
+    // Developers only: open an outline to every account, and name the main one (at most one at a time).
+    if (me.role !== 'dev') throw new HttpError(403, '只有开发者能改大纲设置');
+    const group = scope(me, b.group);
+    const book = bookOf(b.book);
+    if (!book) throw new HttpError(400, 'bad outline number');
+    const row = await db.prepare('SELECT open, main FROM story_outlines WHERE grp = ?1 AND book = ?2').bind(group, book).first();
+    if (!row) throw new HttpError(404, '没有这份大纲');
+    const open = typeof b.open === 'boolean' ? b.open : !!row.open;
+    const main = typeof b.main === 'boolean' ? b.main : !!row.main;
+    await db.batch([
+      ...(main ? [db.prepare('UPDATE story_outlines SET main = 0 WHERE main = 1')] : []),
+      db.prepare('UPDATE story_outlines SET open = ?3, main = ?4 WHERE grp = ?1 AND book = ?2').bind(group, book, open ? 1 : 0, main ? 1 : 0),
+    ]);
+    return { group, book, open, main };
+  }
   const version = Number.isSafeInteger(b.version) && b.version >= 0 ? b.version : null;
   if (version == null) throw new HttpError(400, '缺少版本号，请刷新后重试');
   const book = bookOf(b.book);
+  // Deleting and starting outlines stay with the group; saving an existing one may be open to every account.
+  const group = path === '/api/outline/save' ? await saveScope(db, me, b, book) : scope(me, b.group);
   const prefix = book + '/';
   if (path === '/api/outline/remove') {
     if (!book) throw new HttpError(400, 'bad outline number');

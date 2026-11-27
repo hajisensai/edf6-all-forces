@@ -136,7 +136,10 @@ function render() {
     $('titleInput').classList.toggle('hide', !editing);
     if (document.activeElement !== $('titleInput')) $('titleInput').value = data.title || '';
     for (const id of ['addLane', 'undo', 'redo']) $(id).classList.toggle('hide', !editing);
-    $('removeBook').classList.toggle('hide', !editing || !book);
+    $('removeBook').classList.toggle('hide', !editing || !book || !state?.member);
+    $('badges').replaceChildren(...fill(state?.main ? h('span', { class: 'badge olMain' }, '主大纲') : null,
+      state?.open ? h('span', { class: 'badge', title: '有账号的人都能编辑，不限组' }, '所有账号可编辑') : null));
+    $('who').textContent = state?.open ? '登录的账号都能改' : '同组成员都能改';
     $('removeBook').disabled = busy;
     $('newBook').disabled = busy;
     $('edit').textContent = editing ? '完成编辑' : '编辑';
@@ -572,8 +575,8 @@ async function load() {
     api('/api/story' + (group == null ? '' : '?group=' + encodeURIComponent(group))).catch(() => null)]);
   state = answer;
   group = state.group;
-  if (book !== 0 || !state.editable) book = state.book || null;
-  if (book === null && state.editable && !state.books.length) book = 0;   // nothing yet: the first save makes outline 1
+  if (book !== 0 || !state.member) book = state.book || null;
+  if (book === null && state.member && !state.books.length) book = 0;   // nothing yet: the first save makes outline 1
   data = book && state.outline ? structuredClone(state.outline) : structuredClone(EMPTY);
   base = JSON.stringify(data);
   version = book ? state.version : 0;
@@ -598,12 +601,12 @@ async function load() {
 
 // The group's outlines as buttons, the shown one pressed; the address keeps ?book= so a link opens the same one.
 function renderBooks() {
-  const list = state.books.map((b) => ({ book: b.book, label: (b.title || `大纲 ${b.book}`) + (b.lanes ? '' : '（空）') }));
-  if (book === 0 && state.editable) list.push({ book: 0, label: '新大纲（还没保存）' });
+  const list = state.books.map((b) => ({ book: b.book, label: (b.main ? '★ ' : '') + (b.title || `大纲 ${b.book}`) + (b.lanes ? '' : '（空）') }));
+  if (book === 0 && state.member) list.push({ book: 0, label: '新大纲（还没保存）' });
   $('books').replaceChildren(...list.map((b) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(b.book === book),
     onclick: () => { if (b.book !== book) leave(() => { book = b.book; return b.book ? load() : null; }); } }, b.label)));
-  $('newBook').classList.toggle('hide', !state.editable || book === 0);
-  $('bookBar').classList.toggle('hide', list.length < 2 && !state.editable);
+  $('newBook').classList.toggle('hide', !state.member || book === 0);
+  $('bookBar').classList.toggle('hide', list.length < 2 && !state.member);
   const url = new URL(location.href);
   if (book) url.searchParams.set('book', book); else url.searchParams.delete('book');
   if (url.href !== location.href) history.replaceState(null, '', url);
