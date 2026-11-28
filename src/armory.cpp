@@ -10,6 +10,7 @@
 #include "armory_look.h"
 #include "armory_logic.h"
 #include "armory_presets.h"
+#include "armory_tabs.h"
 #include "host_settings.h"
 #include "hud.h"
 #include "ini_text.h"
@@ -337,7 +338,7 @@ public:
 class MissionPage final : public ar::Page {
 public:
     void Bind(bool inRoom) noexcept { room=inRoom; }
-    const wchar_t* Name() const noexcept override { return hudtext::Tr(Tx::armoryTabMission); }
+    const wchar_t* Name() const noexcept override { return ar::tabs::Name(ar::tabs::kMission); }
     int Rows(int) const noexcept override { return room ? 2 : 1; }
     void RowLine(int,int row,ar::Line* out) const noexcept override {
         if(row==0){ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryWorldMap));return;}
@@ -376,11 +377,11 @@ MissionPage missionPage;
 LookGame lookGame;
 ar::look::Texts lookTexts;
 ar::look::LookPage lookPage;
-// 任务 stays last (in HQ stepping onto it opens the map: Q / E reach 外观 without passing it). The world map's tab
-// strip (worldmap.cpp kTabs, kMapTab 3) has no 外观 tab: its 0..2 are these 0..2.
-ar::Page* const kPages[]={&weaponsPage,&squadPage,&vehiclePage,&lookPage,&missionPage};
-constexpr int kWeaponsTab=0,kSquadTab=1,kVehicleTab=2,kLookTab=3;
+// In the order of armory_tabs.h, the one tab table the world map's strip shows too (its kMapTab is tabs::kMission).
+ar::Page* const kPages[ar::tabs::kCount]={&weaponsPage,&squadPage,&vehiclePage,&lookPage,&missionPage};
+constexpr int kWeaponsTab=ar::tabs::kPlayer,kSquadTab=ar::tabs::kSquad,kVehicleTab=ar::tabs::kVehicle,kLookTab=ar::tabs::kLook;
 constexpr int kPageCount=static_cast<int>(std::size(kPages));
+static_assert(kPageCount<=ar::kPageMost && kPageCount<=ar::skin::layout::kTabMost,"every tab has room in the title bar");
 
 ar::State state;
 ar::Presets presets;
@@ -501,7 +502,7 @@ void BindSupport() noexcept {
 
 void FillWeaponTexts() noexcept {
     ar::wpage::Texts& t=weaponTexts;
-    t.name=hudtext::Tr(Tx::armoryTabPlayer);
+    t.name=ar::tabs::Name(ar::tabs::kPlayer);
     static constexpr Tx kClassNames[]={Tx::classRanger,Tx::classWingDiver,Tx::armoryClassAirRaider,Tx::classFencer};
     static_assert(std::size(kClassNames)==ar::wpage::kStockClasses && ar::wpage::kClasses==playerslots::kClasses);
     for(int c=0;c<ar::wpage::kStockClasses;++c)t.cls[c]=hudtext::Tr(kClassNames[c]);
@@ -552,7 +553,7 @@ void FillWeaponTexts() noexcept {
 void FillLookTexts() noexcept {
     ar::look::Texts& t=lookTexts;
     static_assert(ar::look::kClasses==ar::wpage::kClasses);
-    t.name=hudtext::Tr(Tx::armoryTabLook);
+    t.name=ar::tabs::Name(ar::tabs::kLook);
     for(int c=0;c<ar::look::kClasses;++c)t.cls[c]=weaponTexts.cls[c];   // FillWeaponTexts: the same class names
     t.outfit=hudtext::Tr(Tx::armoryLookOutfit);
     t.primary=hudtext::Tr(Tx::armoryLookPrimary);
