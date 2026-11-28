@@ -258,6 +258,7 @@ public:
     bool built=false;   // the catalog built from the table loaded now (Open)
     bool Ready() const noexcept override { return built && wequip::Ready() && wequip::RowCount()>=0; }
     int CurrentClass() const noexcept override { return wequip::CurrentClass(0); }
+    int Classes() const noexcept override { return wequip::ClassCount(); }
     bool Read(int cls,wlist::Loadout* out) noexcept override {
         try { return wequip::ReadLoadout(0,cls,out); } catch(...) { return false; }
     }
@@ -443,7 +444,18 @@ void FillWeaponTexts() noexcept {
     ar::wpage::Texts& t=weaponTexts;
     t.name=hudtext::Tr(Tx::armoryTabPlayer);
     static constexpr Tx kClassNames[]={Tx::classRanger,Tx::classWingDiver,Tx::armoryClassAirRaider,Tx::classFencer};
-    for(int c=0;c<ar::wpage::kClasses;++c)t.cls[c]=hudtext::Tr(kClassNames[c]);
+    static_assert(std::size(kClassNames)==ar::wpage::kStockClasses && ar::wpage::kClasses==playerslots::kClasses);
+    for(int c=0;c<ar::wpage::kStockClasses;++c)t.cls[c]=hudtext::Tr(kClassNames[c]);
+    // The plugin's classes: the game's own text of their name keys (SoldierInit[c][1], SoldierType_ZwVehicler /
+    // SoldierType_ZwRuneBlade), copied (the text table may be reloaded). Not in the game (soldier_classes off): no page.
+    static wchar_t newNames[ar::wpage::kClasses-ar::wpage::kStockClasses][64];
+    for(int c=ar::wpage::kStockClasses;c<ar::wpage::kClasses;++c){
+        wchar_t* to=newNames[c-ar::wpage::kStockClasses];
+        const wchar_t* name=wequip::ClassName(c);
+        to[0]=0;
+        if(name)wcsncpy_s(to,std::size(newNames[0]),name,_TRUNCATE);
+        t.cls[c]=to;
+    }
     t.slotFormat=hudtext::Tr(Tx::armorySlot);
     t.empty=hudtext::Tr(Tx::armoryEmpty);
     t.notReady=hudtext::Tr(Tx::armoryNoPlayer);

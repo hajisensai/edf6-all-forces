@@ -46,6 +46,9 @@ const wlist::WeaponSlotRule kRules[]={
     {0,1,false,{0,1,2,3,-1,-1,-1,-1}},
     {0,2,false,{20,-1,-1,-1,-1,-1,-1,-1}},
     {3,0,true,{200,-1,-1,-1,-1,-1,-1,-1}},
+    {5,0,false,{500,-1,-1,-1,-1,-1,-1,-1}},   // the plugin's 刻印剑士 (its page only when the game has 6 classes)
+    {5,1,false,{501,-1,-1,-1,-1,-1,-1,-1}},
+    {5,2,false,{502,-1,-1,-1,-1,-1,-1,-1}},
 };
 int Row(const wchar_t* id) {
     for(const auto& r:kRows)if(std::wcscmp(r.id,id)==0)return r.index+10;
@@ -65,6 +68,7 @@ class FakeGame final : public wpage::Game {
 public:
     bool ready=true;
     int current=0;
+    int classes=4;   // the game's SoldierInit: 4 stock, 6 with the plugin's classes
     int cap=-1;
     std::set<int> owned;
     std::array<std::array<int,wlist::kSlotsMost>,wpage::kClasses> equipped{};
@@ -82,6 +86,7 @@ public:
     }
     bool Ready() const noexcept override { return ready; }
     int CurrentClass() const noexcept override { return current; }
+    int Classes() const noexcept override { return classes; }
     bool Read(int cls,wlist::Loadout* out) noexcept override {
         out->owned=[this](int row){ return owned.count(row)!=0; };
         out->levelCap=cap;
@@ -114,7 +119,7 @@ public:
 wpage::Texts MakeTexts() {
     wpage::Texts t;
     t.name=L"武器";
-    t.cls[0]=L"游骑兵";t.cls[1]=L"翼装";t.cls[2]=L"空袭";t.cls[3]=L"剑士";
+    t.cls[0]=L"游骑兵";t.cls[1]=L"翼装";t.cls[2]=L"空袭";t.cls[3]=L"剑士";t.cls[4]=L"载具手";t.cls[5]=L"刻印剑士";
     t.slotFormat=L"槽位 %d";
     t.empty=L"（空）";t.notReady=L"未载入";t.noWeapons=L"没有武器";t.all=L"全部";t.search=L"搜索";
     t.owned=L"持有";t.previewOther=L"只显示当前兵种";
@@ -210,6 +215,20 @@ bool Has(const std::wstring& s,const wchar_t* part) { return s.find(part)!=std::
 void Basics() {
     Rig r;
     Check(r.page.Subs()==4 && r.page.Rows(0)==3 && r.page.Rows(1)==0 && r.page.Rows(3)==1,"slots per class from the rules");
+    Check(r.page.Rows(5)==0 && std::wcscmp(r.page.SubName(4),L"")==0,"4 classes in the game: no page for the plugin's");
+    // the plugin's classes in the game (soldier_classes): 6 pages, 刻印剑士 with its 3 slots, 载具手 without rules none
+    r.game.classes=6;
+    r.page.Refresh();
+    Check(r.page.Subs()==6 && r.page.Rows(5)==3 && r.page.Rows(4)==0 && std::wcscmp(r.page.SubName(5),L"刻印剑士")==0,
+          "6 classes: the plugin's pages");
+    r.game.classes=9;   // more than the page knows: its 6
+    r.page.Refresh();
+    Check(r.page.Subs()==6,"at most kClasses pages");
+    r.game.classes=-1;  // not readable: the stock 4
+    r.page.Refresh();
+    Check(r.page.Subs()==4 && r.page.Rows(5)==0,"class count not readable: the stock pages");
+    r.game.classes=4;
+    r.page.Refresh();
     Line row;
     r.page.RowLine(0,0,&row);
     Check(std::wcscmp(row.label,L"槽位 1")==0 && std::wcscmp(row.value,L"鹳鸟１")==0,"slot line: number and equipped");

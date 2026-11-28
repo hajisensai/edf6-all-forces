@@ -48,6 +48,12 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x8BDA26, 0x36, 'confirm: 0x8BB920(this, &player +0x7B0, _, &slot +0x7B4, &row), +0xE628 = 1, close 0x7E2EB0'),
     (0x8BB939, 0xB8, 'msg 4 sender: payload {player, slot, row, class (snapshot +0x828)}, 0x119D1B0(system = '
                      '[0x20B2960] - 0x88, 4, &payload)'),
+    # The class table (cfg = GS+0x130, [cfg+0x20] SoldierInit: docs/newclass-re/equip.md), called: how many classes the
+    # pages show (the plugin's 4 / 5 once soldier_classes put them in), their slots and the new classes' names.
+    (0x0E34D0, 0x08, 'class count (cfg): [[cfg+0x20]+4], the SoldierInit element count'),
+    (0x0E3680, 0x21, 'slot count (cfg, class): the element count of SoldierInit[class][4], no bounds check'),
+    (0x959170, 0x2C, 'class display name (class): 0xE3580 (GS+0x130) the name key SoldierInit[class][1], jmp 0x7A3500 '
+                     'the text lookup; no bounds check'),
 )
 
 

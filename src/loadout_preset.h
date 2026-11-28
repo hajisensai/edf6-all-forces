@@ -356,12 +356,12 @@ inline bool RememberMission(Book& b,std::string_view mission,int index) {
     b.missions.insert(it,{k,index});
     return true;
 }
-// A new preset `name` holding `support` (CaptureSupport) and `player`, appended; its index, -1 when the book is full or
+// A new preset `name` holding `support` (CaptureSupport) and `loadout`, appended; its index, -1 when the book is full or
 // the preset invalid.
-inline int AddPreset(Book& b,const std::string& name,std::vector<Entry> support,const Player& player) {
+inline int AddPreset(Book& b,const std::string& name,std::vector<Entry> support,const Player& loadout) {
     if(static_cast<int>(b.presets.size())>=kPresetMost)return -1;
     std::sort(support.begin(),support.end(),[](const Entry& x,const Entry& y){return x.key<y.key;});
-    Preset p{name,std::move(support),player};
+    Preset p{name,std::move(support),loadout};
     if(!ValidPreset(p,nullptr))return -1;
     b.presets.push_back(std::move(p));
     return static_cast<int>(b.presets.size())-1;
@@ -377,10 +377,10 @@ inline bool RenamePreset(Book& b,int index,const std::string& name) {
     return true;
 }
 // The preset's contents replaced by what is in force now (the screen's R: 存入方案).
-inline bool StorePreset(Book& b,int index,std::vector<Entry> support,const Player& player) {
+inline bool StorePreset(Book& b,int index,std::vector<Entry> support,const Player& loadout) {
     if(index<0 || index>=static_cast<int>(b.presets.size()))return false;
     std::sort(support.begin(),support.end(),[](const Entry& x,const Entry& y){return x.key<y.key;});
-    Preset p{b.presets[static_cast<std::size_t>(index)].name,std::move(support),player};
+    Preset p{b.presets[static_cast<std::size_t>(index)].name,std::move(support),loadout};
     if(!ValidPreset(p,nullptr))return false;
     b.presets[static_cast<std::size_t>(index)]=std::move(p);
     return true;
