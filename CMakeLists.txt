@@ -177,6 +177,7 @@ set_source_files_properties(src/native_bone_update_avx.cpp PROPERTIES COMPILE_OP
 target_sources(EDF6VehicleCrew PRIVATE src/native_bone_update.cpp src/native_bone_update_avx.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/native_body_math.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/target_grid.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/bullet_sweep_cull.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/object_update_mt.cpp)
 # The game thread's synchronous file reads in the resource cache 0x84E80 (src/sync_load_probe.h, docs/sync-load-re.md).
 target_sources(EDF6VehicleCrew PRIVATE src/sync_load_probe.cpp)
