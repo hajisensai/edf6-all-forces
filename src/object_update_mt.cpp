@@ -73,6 +73,8 @@ void WindowOpen(void* arg) noexcept {
     engine.stock.lock(arg);
     ReadLayers();
     engine.Open();
+    // ini 热重载关掉 ObjectUpdateMT（启动时开着才装上）：这一窗全由游戏线程当场做，与原版同（perfrun 一次启动内 A/B）
+    if(!Cfg().objectUpdateMT)engine.open=false;
 }
 void WindowClose(void* arg) noexcept {
     engine.Close();
@@ -93,7 +95,8 @@ void GateHit(unsigned char* src,unsigned gate) noexcept {
     case Gate::kBody: engine.Flush(Reason::kBodyQuery);break;
     case Gate::kPose: engine.Flush(Reason::kPoseMode);break;
     case Gate::kSetPosition: engine.Flush(Reason::kSetPosition);break;
-    case Gate::kDelete: engine.Flush(Reason::kDelete);break;
+    // 0x118A1C2：bit2（已删）时原版直接跳到尾声 0x118A3C3，什么都不碰，不必等工作线程
+    case Gate::kDelete: if(!(src[0x18]&4))engine.Flush(Reason::kDelete);break;
     case Gate::kContainer: if(engine.IsPending(src))engine.Flush(Reason::kRecall);break;
     }
 }

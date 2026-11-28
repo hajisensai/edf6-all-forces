@@ -73,6 +73,20 @@ LEGS (more than one positional argument): one launch, the scenarios one after th
   --leg-timeout S   seconds from a leg's `next` until its mission and any enemy wave are ready (default 900: stress:100 leaves at a
                     few frames a second)
   --next-reboot     back in through the script's ReBoot (SystemReset) instead of HQMain
+  LEG options for an A/B in one launch (the user, 2026-11-28: 「测试的话想办法快一点，现在每次要测试半天」):
+  ini=KEY=VALUE     (repeatable) KEY set in the game's EDF6VehicleCrew.ini for this leg, over the launch's (--ini): the
+                    first leg's go into the launch's ini, a later leg's are written before it starts (its `next`, or
+                    its stay), and a later leg without ini= has the launch's ini again
+  stay              the leg stays in the mission the leg before it is in (no `next`, no loading, no new wave): only its
+                    ini written, the plugin reloads it (a hot-reloaded switch: ObjectUpdateMT, NpcParallelThink and
+                    the other per-frame ones; a launch-only key changes nothing), STAY_SETTLE s of warm-up (warm=),
+                    the clean window, a FLIP_STACKS s stack window (the phases a leg)
+  --flip "KEY=VALUE[;KEY=VALUE]"
+                    each scenario leg becomes A (as given) then B (these settings), B, A, A, B ... as stay legs
+                    (2 x --rounds windows, default ABBA: a drift of the scene over the launch falls on both alike), summary.md's A/B table of the means a phase; --cpu defaults
+                    to FLIP_CPU there. e.g. perfrun.py bench:2000 bench:4000 --flip "ObjectUpdateMT=0;NpcParallelThink=0"
+  --normal-priority the game at normal priority (default below normal: tests/autopilot/drive.py BELOW_NORMAL, so the
+                    desktop stays usable under a bench of thousands)
 
 What it saves over doing the steps by hand: the range scenarios rewrite only the range mission's four files (gen.
 write_scenario) on the installed range, never the full install that regenerates every vehicle and touches Mods; the run
@@ -103,6 +117,9 @@ import gamelease  # noqa: E402
 # bench: soldiers by default (the same S at every E, so the slope is the enemies'); seconds after E is reached before
 # sampling (the enemies walking in from 180-450 m); how long a count that stops rising is waited on before sampling it
 BENCH_SOLDIERS, BENCH_SETTLE, BENCH_PLATEAU = 120, 30.0, 30.0
+STAY_SETTLE = 6.0   # a stay leg's warm-up: the ini reloaded (the next frame) and the old setting's frames out of the rows
+FLIP_CPU = 12       # --flip's clean window a leg (four of them a scenario), unless --cpu says
+FLIP_STACKS = 8     # a stay leg's stack window: its phases (pre_update ...) for the A/B table, shorter than --stacks
 BENCH_PINNED = 0.95   # the window's mean enemies under this share of E: the report says the count was not held
 WARM = {'grand': 45.0, 'swarm': 30.0, 'horde': 40.0, 'blast': 40.0}   # the waves need this long to fill up; a stock mission's start: 25 s
 # (past drive.run's real-mouse nudge at 20 s, which must not fall into the clean window)
@@ -427,6 +444,27 @@ def wait_population(game: str, log: str, timeout: float, gate=None, want: int = 
     return 'no live enemy wave before the readiness deadline (--leg-timeout)'
 
 
+RELOADED = re.compile(rb'\] CONFIG reloaded')
+RELOAD_TIMEOUT = 15.0   # the plugin looks at the ini's write time once a second, once a frame (a bench's 3 a second)
+
+
+def wait_reload(log: str, mark: tuple[int, int], timeout: float, gate=None) -> str | None:
+    """A stay leg's ini written: until the plugin logs that it reloaded it (src/plugin.cpp ReloadConfigIfChanged)
+    after `mark`; why not, when it does not within `timeout` s (the leg's windows would be the leg before's)."""
+    import drive
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if gate is not None and gate.state != drive.Gate.OPEN:
+            return 'the run ended before the plugin reloaded the ini'
+        try:
+            if RELOADED.search(run_log(log, mark) or b''):
+                return None
+        except OSError:
+            pass   # the logger may be rotating the file
+        time.sleep(0.25)
+    return f'the plugin did not reload the ini within {timeout:.0f} s (no CONFIG reloaded row): the leg would be the last one'
+
+
 def check_wave_window(plan, opts: dict, marks: dict, log: str) -> None:
     """A successful spawn before warm-up is insufficient when the battle is empty during the measurement."""
     window = marks.get('windows', {}).get('cpu')
@@ -540,17 +578,25 @@ def seconds(text: str, positive: bool = False) -> float:
 
 
 def leg_option(text: str) -> dict:
-    """One positional argument: SCENARIO[,key=SPEC@S[:MS]]...[,warm=S][,diff=N] (MS default 300, as --key's)."""
+    """One positional argument: SCENARIO[,key=SPEC@S[:MS]]...[,warm=S][,diff=N][,ini=KEY=VALUE]...[,stay] (MS default
+    300, as --key's)."""
     scenario, *parts = text.split(',')
     if not scenario:
         raise SystemExit(f'{text}: no scenario before its leg options')
-    leg: dict = {'scenario': scenario, 'keys': [], 'warm': None, 'difficulty': None}
+    leg: dict = {'scenario': scenario, 'keys': [], 'warm': None, 'difficulty': None, 'ini': [], 'stay': False}
     for part in parts:
+        if part == 'stay':
+            leg['stay'] = True
+            continue
         name, eq, value = part.partition('=')
         if not eq or not value:
-            raise SystemExit(f'{text}: a leg option is NAME=VALUE (key=, warm=, diff=), not "{part}"')
+            raise SystemExit(f'{text}: a leg option is NAME=VALUE (key=, warm=, diff=, ini=) or stay, not "{part}"')
         try:
-            if name == 'key':
+            if name == 'ini':
+                if '=' not in value:
+                    raise ValueError(value)
+                leg['ini'].append(value)
+            elif name == 'key':
                 import drive
                 leg['keys'].append(drive.key_option(value if ':' in value else value + ':300'))
             elif name == 'warm':
@@ -560,7 +606,7 @@ def leg_option(text: str) -> dict:
                 if not 0 <= leg['difficulty'] <= 4:
                     raise ValueError(value)
             else:
-                raise SystemExit(f'{text}: unknown leg option {name} (key=, warm=, diff=)')
+                raise SystemExit(f'{text}: unknown leg option {name} (key=, warm=, diff=, ini=, stay)')
         except ValueError:
             raise SystemExit(f'{text}: bad {name}={value}') from None
     return leg
@@ -570,7 +616,7 @@ def leg_names(legs: list[dict]) -> list[str]:
     """Each leg's folder under the run's: the scenario (':' as '_'), -2, -3 ... on one run twice."""
     names: list[str] = []
     for leg in legs:
-        base = leg['scenario'].replace(':', '_')
+        base = leg.get('name') or leg['scenario'].replace(':', '_')
         name, k = base, 1
         while name in names:
             k += 1
@@ -668,13 +714,34 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
     import gen
     gate = state['gate']
     i = 0
+    entry = -1   # the launch's mission entries so far (0: the first; a stay leg makes none)
     try:
         for i, leg in enumerate(legs):
             began = time.monotonic()
             marks = legmarks[i]
             mission = leg_mission(leg['scenario'])
             seen = 0   # the first: every row of the launch (its `running` went with the mission)
+            if leg['stay']:   # the mission the leg before is in: its ini only, reloaded by the plugin
+                mark = log_mark(plugin_log(game))
+                with gate.writing():
+                    drive.replace_placed(game, INI_DEST, drive.ini_text_with(state['ini'], tuple(leg['ini'])))
+                marks['asked'] = time.time()
+                why = wait_reload(plugin_log(game), mark, RELOAD_TIMEOUT, gate)
+                if why:
+                    marks['error'] = why
+                    return
+                marks['entered'] = time.time()
+                _sample(dirs[i], warms[i], opts['cpu'], FLIP_STACKS, opts['interval'], marks, opts.get('presentmon'))
+                if marks.get('error') or 'windows' not in marks:
+                    marks.setdefault('error', 'not sampled')
+                    return
+                marks['done'] = time.time()
+                continue
+            entry += 1
             if i:
+                if leg['ini'] or legs[i - 1]['ini']:   # this leg's settings (or the launch's again) before its way in
+                    with gate.writing():
+                        drive.replace_placed(game, INI_DEST, drive.ini_text_with(state['ini'], tuple(leg['ini'])))
                 seen = len(drive.rows(game))
                 # the range's files and the `next`, each checked and written under the run's gate: nothing after the
                 # run's quit (it would overwrite it) or once it puts things back (left behind) -- drive.Gate
@@ -685,7 +752,7 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
                 marks['asked'] = time.time()
                 drive.command(game, drive.next_command(mission, difficulties[i], opts['next_reboot']), gate)
             # in its mission once the mission runs (the loading over), every leg the same way: its warm-up from there
-            why = wait_next(game, i, seen, opts['leg_timeout'], mission, difficulties[i], gate)
+            why = wait_next(game, entry, seen, opts['leg_timeout'], mission, difficulties[i], gate)
             if why:
                 marks['error'] = why
                 return
@@ -710,6 +777,9 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
         legmarks[i]['error'] = f'{type(e).__name__}: {e}'
 
 
+INI_DEST = 'Plugins/EDF6VehicleCrew.ini'   # drive.run's --ini placement, rewritten for a leg's ini=
+
+
 def multi_run(game: str, legs: list[dict], out: str, dll: str | None, opts: dict) -> int:
     """One launch of the game for all `legs` in order: each leg's run.json, logs and samples in <out>/<leg>/, the
     launch's whole logs in `out`; everything put back once, at the end. Non-zero when a leg was not sampled, the run
@@ -729,11 +799,14 @@ def multi_run(game: str, legs: list[dict], out: str, dll: str | None, opts: dict
     dirs = [os.path.join(out, n) for n in names]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
-    warms = [warm_for(leg['scenario'], leg['warm'] if leg['warm'] is not None else opts['warm']) for leg in legs]
+    warms = [(leg['warm'] if leg['warm'] is not None else STAY_SETTLE) if leg['stay'] else
+             warm_for(leg['scenario'], leg['warm'] if leg['warm'] is not None else opts['warm']) for leg in legs]
     difficulties = [leg['difficulty'] if leg['difficulty'] is not None else opts['difficulty'] for leg in legs]
     legmarks: list[dict] = [{} for _ in legs]
     skipped: list = [[] for _ in legs]
-    state = {'gate': drive.Gate(), 'written': False}
+    launch_ini = ('Debug=1', 'PerfProbe=1', *opts['ini'])
+    # the launch's ini (before drive.run places it, from the game's own): a later leg's ini= go over it
+    state = {'gate': drive.Gate(), 'written': False, 'ini': drive.ini_with(game, launch_ini)}
     log = plugin_log(game)
     log_at = log_mark(log)
     clog = coop_log(game)
@@ -749,7 +822,7 @@ def multi_run(game: str, legs: list[dict], out: str, dll: str | None, opts: dict
         rc = drive.run(game, leg_mission(legs[0]['scenario']), difficulties[0],
                        legs_longest(warms, opts['cpu'], opts['stacks'], opts['leg_timeout']),
                        os.path.join(out, 'autopilot.log'), place=placements(dll),
-                       ini=('Debug=1', 'PerfProbe=1', *opts['ini']),
+                       ini=(*launch_ini, *legs[0]['ini']),
                        shots=os.path.join(out, 'shots') if opts['shots'] else None,
                        during=lambda: run_legs(game, legs, plans, warms, difficulties, dirs, legmarks, skipped, state,
                                                opts),
@@ -782,7 +855,7 @@ def multi_run(game: str, legs: list[dict], out: str, dll: str | None, opts: dict
                 f.write(piece)
     for i, (leg, d, marks) in enumerate(zip(legs, dirs, legmarks)):
         check_wave_window(plans[i], opts, marks, os.path.join(d, 'vehiclecrew.log'))
-        run = dict(scenario=leg['scenario'], variant='', leg=i + 1, legs=len(legs), dll=kept or dll, built=dll,
+        run = dict(scenario=leg['scenario'], variant=leg.get('variant', ''), stay=leg['stay'], ini=leg['ini'], leg=i + 1, legs=len(legs), dll=kept or dll, built=dll,
                    **loaded, warm=warms[i], difficulty=difficulties[i], keys=leg['keys'],
                    edf_dll=os.path.join(game, 'EDF.dll'), drive_rc=rc, skipped=skipped[i], cycle=None, **marks)
         with open(os.path.join(d, 'run.json'), 'w', encoding='utf-8') as f:
@@ -852,17 +925,23 @@ def legs_table(dirs: list[str]) -> str:
 def options(argv: list[str]) -> tuple[str, dict]:
     opts = {'dll': DEFAULT_DLL, 'ab': None, 'rounds': 2, 'warm': None, 'cpu': 20, 'stacks': 20, 'interval': 2,
             'difficulty': 1, 'out': None, 'shots': False, 'restore': False, 'ini': [], 'presentmon': None,
-            'cycle': 0, 'cycle_stay': 20.0, 'keys': [], 'legs': [], 'leg_timeout': 900.0, 'next_reboot': False}
+            'cycle': 0, 'cycle_stay': 20.0, 'keys': [], 'legs': [], 'leg_timeout': 900.0, 'next_reboot': False,
+            'flip': None, 'normal_priority': False}
     pos = []
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in ('--shots', '--restore', '--next-reboot'):
+        if a in ('--shots', '--restore', '--next-reboot', '--normal-priority'):
             opts[a[2:].replace('-', '_')] = True
             i += 1
         elif a == '--ab':
             opts['ab'] = (os.path.abspath(argv[i + 1]), os.path.abspath(argv[i + 2]))
             i += 3
+        elif a == '--flip':
+            opts['flip'] = [p.strip() for p in argv[i + 1].split(';') if p.strip()]
+            if not opts['flip'] or any('=' not in p for p in opts['flip']):
+                raise SystemExit('--flip wants "KEY=VALUE[;KEY=VALUE]"')
+            i += 2
         elif a in ('--dll', '--out', '--presentmon'):
             opts[a[2:]] = argv[i + 1]
             i += 2
@@ -899,6 +978,14 @@ def options(argv: list[str]) -> tuple[str, dict]:
     if opts['restore'] if pos else not opts['restore']:
         raise SystemExit(__doc__)
     legs = [leg_option(p) for p in pos]
+    if legs and legs[0]['stay']:
+        raise SystemExit(f'{pos[0]}: the first leg has no mission to stay in')
+    if opts['flip']:
+        if opts['ab'] or opts['cycle']:
+            raise SystemExit('--flip is an A/B in one launch: not with --ab or --cycle')
+        legs = flip_legs(legs, opts['flip'], opts['rounds'])
+        if '--cpu' not in argv:
+            opts['cpu'] = FLIP_CPU
     if len(legs) > 1:
         for bad, why in ((opts['ab'], '--ab'), (opts['cycle'], '--cycle'), (opts['keys'], '--key (key= on a leg)')):
             if bad:
@@ -926,6 +1013,27 @@ def options(argv: list[str]) -> tuple[str, dict]:
     return (legs[0]['scenario'] if legs else ''), opts
 
 
+def flip_legs(legs: list[dict], flip: list[str], rounds: int) -> list[dict]:
+    """--flip: each leg as A, then 2 x `rounds` - 1 stay legs of it, B (`flip` over its ini=) and A in the order
+    AB BA AB BA ...: a steady drift of the scene over the launch (the bench's wave thinning, the camera's view) weighs
+    on A's and B's windows alike."""
+    out = []
+    for leg in legs:
+        base = leg['scenario'].replace(':', '_')
+        order = [v for r in range(rounds) for v in (('A', 'B') if r % 2 == 0 else ('B', 'A'))]
+        seen = {'A': 0, 'B': 0}
+        for k, v in enumerate(order):
+            seen[v] += 1
+            name = f'{base}-{v}{seen[v]}'
+            if not k:
+                out.append({**leg, 'variant': 'A', 'name': name})
+                continue
+            out.append({'scenario': leg['scenario'], 'keys': [], 'warm': None, 'difficulty': leg['difficulty'],
+                        'ini': [*leg['ini'], *flip] if v == 'B' else list(leg['ini']), 'stay': True,
+                        'variant': v, 'name': name})
+    return out
+
+
 def loads_report(out: str) -> str:
     """A load run's loads.md: each entry of the launch (perf_report.read_loads), cold first."""
     import perf_report
@@ -944,6 +1052,7 @@ def main(argv: list[str]) -> int:
     import drive
     import gen
     import perf_report
+    drive.BELOW_NORMAL = not opts['normal_priority']
     if opts['restore']:
         with gamelease.lease(game, 'perfrun --restore'):
             if drive.game_pids():
@@ -966,9 +1075,13 @@ def main(argv: list[str]) -> int:
                     perf_report.report(d)
                     print('report:', os.path.join(d, 'report.md'))
         table = legs_table(dirs)
-        scaling = perf_report.scaling_table(dirs)
-        if scaling:
-            table += '\n' + scaling
+        variants = [leg.get('variant', '') for leg in opts['legs']]
+        for v in sorted(set(variants)):   # a scaling table a variant (--flip: A and B each), not the legs mixed
+            scaling = perf_report.scaling_table([d for d, w in zip(dirs, variants) if w == v])
+            if scaling:
+                table += '\n' + (scaling.replace('## Scaling', f'## Scaling, {v}', 1) if v else scaling)
+        if opts['flip']:
+            table += '\n' + perf_report.flip_table(dirs, opts['flip'])
         with open(os.path.join(out, 'summary.md'), 'w', encoding='utf-8') as f:
             f.write(table)
         print(table)

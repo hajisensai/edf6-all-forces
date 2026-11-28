@@ -3,6 +3,7 @@
 // off: a release or a teardown not seen would leave a period trusting freed objects.
 #include "step_objects_hook.h"
 #include "edf_layout.h"
+#include "config.h"
 #include "plugin_log.h"
 #include "edf/game_frame.h"
 #include "edf/memory.h"
@@ -24,6 +25,10 @@ void __fastcall FrameRelease(void* system) {
     stepobj::Releasing();
     reinterpret_cast<SystemFn>(image+kRelease)(system);
     stepobj::Released(true);
+    // Once a frame on the game thread before its steps, vehicles or none (the vehicles' input hook was the only
+    // caller: a battle without one never reloaded, perfrun --flip's B windows ran A, 2026-11-28). At most a file
+    // time a second (IniWatch); the steps' workers are idle here.
+    ReloadConfigIfChanged();
 }
 void __fastcall FlushRelease(void* system) {
     stepobj::Releasing();

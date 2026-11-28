@@ -410,6 +410,22 @@ def place_file(game: str, dest: str, payload: bytes, *, new: bool = False) -> No
     print('placed', dest, 'over the original' if original is not None else '(new)')
 
 
+def replace_placed(game: str, dest: str, payload: bytes) -> None:
+    """A file this run already placed (place_file) rewritten in place mid-run, e.g. the ini for a hot-reloaded switch
+    (tools/perfrun.py's stay legs): its manifest entry takes the new payload's sha256 first, so restore_placed still
+    puts the original back (it keeps only a file still holding the payload it recorded)."""
+    entries = _manifest(game)
+    entry = next((e for e in entries if os.path.normcase(e['dest']) == os.path.normcase(dest)), None)
+    if entry is None:
+        raise RuntimeError(f'{dest} was not placed for this run')
+    entry['payload_sha256'] = hashlib.sha256(payload).hexdigest()
+    _write_manifest(game, entries)
+    path = os.path.join(game, 'Mods', dest)
+    with open(path + '.tmp', 'wb') as f:
+        f.write(payload)
+    os.replace(path + '.tmp', path)
+
+
 def _unmake(game: str, entry: dict) -> None:
     """The folders `entry`'s placement made (place_file's made_dirs) removed, innermost first, each only while empty
     (something else put in it since: it and those over it stay)."""
@@ -494,17 +510,44 @@ def unrecorded_placed(game: str, entries: list[dict]) -> list[str]:
 
 def ini_with(game: str, settings: tuple[str, ...]) -> bytes:
     """EDF6VehicleCrew.ini with `KEY=VALUE` settings set in [VehicleCrew] (tools/support_config.put), its encoding kept."""
+    with open(os.path.join(plugins(game), 'EDF6VehicleCrew.ini'), 'rb') as f:
+        return ini_text_with(f.read(), settings)
+
+
+def ini_text_with(raw: bytes, settings: tuple[str, ...]) -> bytes:
+    """ini_with on an ini's bytes `raw`."""
     if TOOLS not in sys.path:
         sys.path.insert(0, TOOLS)
     import support_config
-    with open(os.path.join(plugins(game), 'EDF6VehicleCrew.ini'), 'rb') as f:
-        raw = f.read()
     bom = raw.startswith(b'\xef\xbb\xbf')
     text = raw[3 if bom else 0:].decode('utf-8')
     for setting in settings:
         key, _, value = setting.partition('=')
         text = support_config.put(text, key.strip(), value.strip())
     return (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8')
+
+
+# The game below normal priority (the user, 2026-11-28: 「测试 ... 还会把我的电脑弄得很卡」): a bench of thousands of
+# enemies keeps every core busy, the desktop and the editor take them back whenever they want them. On an idle machine
+# the game's throughput is the same; a run's A/B halves alternate in one launch (perfrun's stay legs), so both see the
+# same machine. perfrun.py --normal-priority keeps the game normal.
+BELOW_NORMAL = True
+
+
+def below_normal(pid: int) -> None:
+    """EDF6.exe `pid` in BELOW_NORMAL_PRIORITY_CLASS (its threads' own relative priorities kept)."""
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x0200, False, pid)   # PROCESS_SET_INFORMATION
+    if not h:
+        print(f'below normal priority: EDF6.exe {pid} not opened (error {k.GetLastError()}), left normal')
+        return
+    try:
+        if k.SetPriorityClass(h, 0x4000):
+            print(f'EDF6.exe {pid} below normal priority')
+        else:
+            print(f'below normal priority: refused (error {k.GetLastError()}), left normal')
+    finally:
+        k.CloseHandle(h)
 
 
 def launch(game: str) -> gamelaunch.Game:
@@ -518,6 +561,8 @@ def launch(game: str) -> gamelaunch.Game:
         hide(hwnd)
         user32.SetForegroundWindow(before)
     started = gamelaunch.launch(game, on_window=off_screen)
+    if BELOW_NORMAL:
+        below_normal(started.pid)
     print('window', hex(started.hwnd), f'off screen (EDF6.exe {started.pid}, started by {gamelaunch.LAUNCHER})')
     return started
 

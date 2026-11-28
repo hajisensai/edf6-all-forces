@@ -484,7 +484,8 @@ K('ObjectUpdateMT', 'objectUpdateMT', INT, '1',
   ini=(
       '; 对象更新多核：每帧更新敌人和士兵时，原版在主线程上逐个把骨骼姿态同步到碰撞体（算矩阵、包围盒）。',
       '; 开启后这些纯计算交给工作线程并行做，主线程在需要结果的时候（帧内射线查询、改位置、删对象、本轮对象更新结束）按原顺序逐个提交。',
-      '; 1 = 开（默认），0 = 原版（全在主线程）。碰撞体、布娃娃相关的异常可改成 0 对照；Debug=1 时日志会抽样核对结果（OBJMT MISMATCH）。')),
+      '; 1 = 开（默认），0 = 原版（全在主线程）。碰撞体、布娃娃相关的异常可改成 0 对照；Debug=1 时日志会抽样核对结果（OBJMT MISMATCH）。',
+      '; 启动时为 1 才装上；运行中改成 0 下一帧起全交主线程，再改回 1 恢复（同一次启动内对照用）。')),
 K('SweepCull', 'sweepCull', BOOL, True,
   note=("the bullets' step-3 object shape cast (0x231720 / 0x11A8E40) skips the bodies whose world box the swept sphere misses (bullet_sweep_cull.cpp); read every build (docs/bullet-sweep-cull-re.md)",),
   ini=(
