@@ -87,8 +87,14 @@ namespace crew {
 //      pass under each entry.
 //  26 (2026-11-27): the map command card trimmed (command protocol v12: FAST MOVE / SMOKE retired, BOARD's vehicle in
 //      the request's focus). An older build would send orders the host refuses and board another vehicle.
+//  27 (2026-11-28): the two new soldier classes (docs/plan-2026-11-28-new-classes-impl.md: 4 Vehicler, 5 Rune Blade)
+//      travel as themselves in every member's MissionSync record (0x78E9A0 packs GameStatus+0x6E90 as an int, 0x78D0E0
+//      forwards and 0x790600 unpacks it unchecked; docs/newclass-re/online.md). Every machine builds them from its own
+//      SoldierInit 4 / 5, its factories and its name-tag table: an older build has none of them and would read the
+//      record's class past the game's four. And every member needs EDF6Coop 2.10.0 (coop_attr.h kRoomCoop*), whose
+//      loadout guard and armor copy know six classes.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=26;  // the map card trimmed: FAST MOVE / SMOKE retired, BOARD names its vehicle
+constexpr std::int64_t kAllForcesRoomProtocol=27;  // soldier classes 4 / 5 in the MissionSync records
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

@@ -56,6 +56,7 @@
 #include "qmark.h"
 #include "infantryscope.h"
 #include "crew_frame.h"
+#include "soldier_identity.h"
 #include "crash_dump.h"
 #include "frame_pacing.h"
 #include "perf_probe.h"
@@ -256,6 +257,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kTerrainShare,"terrain share",nullptr) \
     M(kMission,"mission","the mission's start hook itself: what a mission keeps is the modules' (ResetAll)") \
     M(kLoadout,"loadout",kLoadOnly) \
+    M(kSoldierIdentity,"soldier identity",kLoadOnly) \
     M(kAirstrikes,"airstrikes",nullptr) \
     M(kCrew,"crew",nullptr) \
     M(kPerfProbe,"perf probe",kLoadOnly) \
@@ -471,6 +473,8 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kEnemyControlNativePvp,[](const LoadContext&) noexcept {Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());}},
     {IP::kFeatures,Id::kEnemyControlWeaponAim,[](const LoadContext&) noexcept {Log("ENEMY CONTROL weapon aiming=%d",InstallEnemyControlWeaponAim());}},
     {IP::kFeatures,Id::kTerrainShare,&Install<&InstallTerrainShare>},   // before any map loads: the pieces of one terrain decoded once
+    // before any mission: the online code that names players knows All Forces' classes 4 / 5 (soldier_identity.h)
+    {IP::kFeatures,Id::kSoldierIdentity,&Install<&InstallSoldierIdentity>},
     {IP::kMission,Id::kMission,&Install<&InstallMission>},         // the mission's start (ResetAll, the preloads) and a trigger of the per-frame hooks
     {IP::kMission,Id::kLoadout,[](const LoadContext& c) noexcept {InstallLoadout(c.iniPath);}},
     {IP::kMission,Id::kAirstrikes,[](const LoadContext&) noexcept {Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());}},

@@ -7413,23 +7413,18 @@
    ],
    "scripts": []
   },
-  "soldier_save": {
+  "soldier_identity": {
    "labels": [
     "plugin-core",
     "plugin-native"
    ],
    "scripts": []
   },
-  "soldier_save_native": {
+  "soldier_identity_native": {
    "labels": [
-    "plugin-net",
-    "pylib-model",
-    "test-data",
-    "tools-misc"
+    "test-data"
    ],
-   "scripts": [
-    "tests/soldier_save_native_audit.py"
-   ]
+   "scripts": []
   },
   "sortie_check": {
    "labels": [
