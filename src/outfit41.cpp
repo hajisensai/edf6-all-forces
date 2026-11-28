@@ -356,14 +356,29 @@ void* __fastcall OurMove(void* impl,void* where) {
     if(made)Put<void*>(made,0,&ourVtable[1]);
     return made;
 }
-std::uintptr_t __fastcall OurPicked(void* impl,void* arg) {
-    const int who=ScreenPlayer(impl);
+// The choice made / dropped (the popup's items here, the armory's outfit page through Outfit41Choose / Outfit41Leave).
+void Choose(int who,const char* by) noexcept {
     if(Cfg().enabled && ValidLocal(who) && !state.on[who]) {
         state.on[who]=true;
         SaveState();
-        Log("OUTFIT41 player %d: the EDF4.1 outfit chosen",who+1);
+        Log("OUTFIT41 player %d: the EDF4.1 outfit chosen (%s)",who+1,by);
     }
     if(ValidLocal(who))Recolour(who);   // its own colours in before the view is rebuilt
+}
+// True when it was on: the stock block put back before the caller changes the outfit.
+bool Leave(int who,const char* by,int item) noexcept {
+    const bool was=Cfg().enabled && ValidLocal(who) && state.on[who];   // Enabled=0: the stored choice left as it is
+    if(was) {
+        state.on[who]=false;
+        SaveState();
+        Log("OUTFIT41 player %d: the EDF4.1 outfit off (%s %d)",who+1,by,item);
+        Recolour(who);
+    }
+    return was;
+}
+std::uintptr_t __fastcall OurPicked(void* impl,void* arg) {
+    const int who=ScreenPlayer(impl);
+    Choose(who,"popup");
     const auto result=reinterpret_cast<CloseFn>(image+kClosePopup)(At<void*>(arg,0));
     if(ValidLocal(who))Rebuild(who,ClassOf(who));
     if(who==0)PublishOwn();
@@ -371,13 +386,7 @@ std::uintptr_t __fastcall OurPicked(void* impl,void* arg) {
 }
 template<int I> std::uintptr_t __fastcall StockPicked(void* impl,void* arg) {
     const int who=ScreenPlayer(impl);
-    const bool was=Cfg().enabled && ValidLocal(who) && state.on[who];   // Enabled=0: the stored choice left as it is
-    if(was) {
-        state.on[who]=false;
-        SaveState();
-        Log("OUTFIT41 player %d: the EDF4.1 outfit off (stock item %d)",who+1,I);
-        Recolour(who);   // the stock block back before the stock item changes the outfit
-    }
+    const bool was=Leave(who,"stock item",I);   // the stock block back before the stock item changes the outfit
     const auto result=stockCall[I](impl,arg);
     if(ValidLocal(who))Recolour(who);   // the outfit may now resolve to another block (the EDF4.1 pack's default)
     if(was)Rebuild(who,ClassOf(who));
@@ -541,6 +550,23 @@ std::uintptr_t Outfit41SessionPreload(PlayerPreloadFn call,std::uintptr_t a,std:
     const auto result=call(a,b,c,d);
     building=was;
     return result;
+}
+
+bool Outfit41Offered(int who,int cls) noexcept { return installed && Cfg().enabled && ValidLocal(who) && Installed(cls); }
+bool Outfit41Chosen(int who) noexcept { return installed && Cfg().enabled && ValidLocal(who) && state.on[who]; }
+bool Outfit41Choose(int who) noexcept {
+    if(!installed || !Cfg().enabled || !ValidLocal(who))return false;
+    Choose(who,"armory");
+    if(who==0)PublishOwn();
+    return true;
+}
+void Outfit41Leave(int who) noexcept {
+    if(installed)Leave(who,"armory",-1);
+}
+void Outfit41Changed(int who) noexcept {
+    if(!installed || !ValidLocal(who))return;
+    Recolour(who);   // the outfit may resolve to another block now; a colour written into the worn block is kept
+    if(who==0)PublishOwn();
 }
 
 void Outfit41MissionSync() noexcept {

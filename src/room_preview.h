@@ -70,5 +70,10 @@ float ScreenAspectNow() noexcept;
 // (OnMessage 4 {player, slot, row}); one pending row per slot (the latest wins),
 // when the view shows class `cls` and no support soldier is previewed; sent from the view's next update.
 void ShowPlayerWeapon(int cls,int slot,int row) noexcept;
+// The player's own model rebuilt from GameStatus (OnMessage 3 {player, GS class, 0xD8700 outfit}, what the stock HQ
+// sends after its outfit / colour screens write GS) in the view's next update: after the armory wrote the class, the
+// outfit or a colour. Nothing while a support soldier is shown (its build stands; the player's comes back with
+// HidePreview).
+void RefreshPlayer() noexcept;
 
 }  // namespace crew::roompreview

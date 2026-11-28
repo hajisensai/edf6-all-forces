@@ -107,6 +107,8 @@ struct Ui {
     // ShowPlayerWeapon, sent from the update: one per slot (a preset switch shows all four in one frame), the latest
     // row of a slot wins.
     struct Weapon { bool pending=false;std::int32_t row=0,cls=0; } weapon[kWeaponSlots];
+    // RefreshPlayer: the player's own model rebuilt from GS (msg 3) in the view's next update.
+    bool refresh=false;
     // The placement drew the model (WorldMatrix: placedMatrix below) at view update `drawnAt` (PreviewPlacement).
     unsigned frames=0,drawnAt=0;
     bool drawn=false;
@@ -501,6 +503,10 @@ void Frame(unsigned char* view,float frames) noexcept {
     const Actions a=Step(ui.plan,ui.want,ReadShown(view,0,ui.posted));
     if(a.Any())Execute(view,a);
     HoldVisible(view);
+    if(ui.refresh){   // a support soldier shown: its own build stands, the player's is rebuilt when it goes
+        ui.refresh=false;
+        if(!ui.want.on && !ui.plan.locked)BuildPlayer(view,At<std::int32_t>(view,kViewPlayer));
+    }
     SendWeapon(view);
     Camera(view);
     Squad(view);
@@ -511,6 +517,7 @@ void Forget() noexcept {
     ui.view=nullptr;ui.plan=Plan{};ui.camera=CameraShift{};ui.turntable=Turntable{};ui.posted=0;
     ui.place.forced=false;ui.drawn=false;
     for(auto& w:ui.weapon)w.pending=false;
+    ui.refresh=false;
 }
 
 // A made view's update: its frame, the game's, then the menu's keys' turn / zoom put back (it reads them as well).
@@ -600,6 +607,7 @@ void ShowPreview(const PreviewSpec& spec) noexcept {
     ui.sinceTick=0;
 }
 void HidePreview() noexcept { ui.want.on=false;HideSquad(); }
+void RefreshPlayer() noexcept { if(installed)ui.refresh=true; }
 void ShowSquad(const SquadSpec& squad) noexcept {
     if(!installed)return;
     if(squad.count<2){HideSquad();return;}
