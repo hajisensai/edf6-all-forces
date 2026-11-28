@@ -7413,6 +7413,21 @@
    ],
    "scripts": []
   },
+  "soldier_classes": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_classes_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "sortie_check": {
    "labels": [
     "plugin-air",

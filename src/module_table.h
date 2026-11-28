@@ -78,6 +78,7 @@
 #include "mod_room.h"
 #include "outfit41.h"
 #include "weapon_records.h"
+#include "soldier_classes.h"
 #include "weapon_equip.h"
 #include "loadout_store.h"
 #include "room_ui.h"
@@ -129,6 +130,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
 #define EDF6_MODULES(M) \
     M(kCrashDump,"crash dump",kLoadOnly) \
     M(kWeaponRecords,"weapon records",kLoadOnly) \
+    M(kSoldierClasses,"soldier classes",kLoadOnly) \
     M(kFramePacing,"frame pacing",kLoadOnly) \
     M(kRenderFence,"render fence",kLoadOnly) \
     M(kFrameLatency,"frame latency",kLoadOnly) \
@@ -330,6 +332,9 @@ constexpr InstallEntry kInstalls[]={
     // the weapon records past 0x800 (weapon_records.cpp): before anything could make the game status, whose
     // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord
     {IP::kBeforeGameStatus,Id::kWeaponRecords,&Install<&InstallWeaponRecords>},
+    // six player classes (soldier_classes.cpp): before the game status, whose constructor reads the mode data's
+    // SoldierInit (SetMode 0xDC460 from 0xD6722)
+    {IP::kBeforeGameStatus,Id::kSoldierClasses,&Install<&InstallSoldierClasses>},
     {IP::kBeforeAppInit,Id::kFramePacing,&Install<&InstallFramePacing>},   // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
     {IP::kBeforeAppInit,Id::kRenderFence,&Install<&InstallRenderFence>},   // the game thread's spin on the render fence made a wait (frame_pacing.cpp)
     {IP::kBeforeAppInit,Id::kFrameLatency,&Install<&InstallFrameLatency>}, // before the application's init makes the device: DXGI's queue to ini MaxFrameLatency
