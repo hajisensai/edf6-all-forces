@@ -888,6 +888,12 @@ unsigned char* ZwOwnedVehicle(const unsigned char* human) noexcept {
         if(m.transaction && m.active && m.handed && !m.replaced && Alive(m.vehicle) && OwnerOf(m)==human && (!best || m.serial>best->serial))best=&m;
     return best ? best->vehicle.Obj() : nullptr;
 }
+int ZwMadeHulls(unsigned char** out,int* kinds,int most) noexcept {
+    int n=0;
+    for(const auto& m:made)
+        if(n<most && m.transaction && m.active && objref::Exists(m.vehicle)){out[n]=m.vehicle.Obj();kinds[n]=m.kind;++n;}
+    return n;
+}
 
 void SetZwDeliverLedger(const ZwDeliverLedger& l) noexcept { ledger=l; }
 

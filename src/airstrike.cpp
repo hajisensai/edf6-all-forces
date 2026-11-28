@@ -57,6 +57,7 @@
 #include "weapon_equip.h"
 #include "weapon_records.h"
 #include "soldier_classes.h"
+#include "zw_vehicle_gear.h"
 #include <cmath>
 #include <cstdarg>
 #include <cwchar>
@@ -441,6 +442,7 @@ void Grant(unsigned char* gs) noexcept {
         const Granted granted=GrantCalls(gs,ported);
         const int classWeapons=GrantSoldierClassWeapons(gs);   // classes 4 / 5's defaults (soldier_classes.h)
         if(classWeapons>0)Log("CALLS %d weapons of classes 4 / 5 owned now",classWeapons);
+        GrantZwProgress(gs);   // the Vehicler's later vehicles by the story's progress (zw_vehicle_gear.h)
         if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
         if(granted.moved>0)Log("CALLS %d support call weapons are on the map's bar now: no longer owned (one equipped goes back "
                                "to the default weapon)",granted.moved);

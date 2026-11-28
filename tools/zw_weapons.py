@@ -65,6 +65,8 @@ class Weapon:
     kind: str                           # 'none' | 'gyrojet' | 'carbine' | 'vehicle'
     text: dict[str, tuple[str, str]]    # lang -> (name, description); a none row keeps the template's texts
     vehicle: str = ''                   # a vehicle row's vehicle (pylib/zw_vehicles.py ZwVehicle.row: its own id)
+    acquire: bool = True                # owned by a new save (column 5 ACQUIRE); a vehicle unlocked later is not
+                                        # (zw_vehicles.ZwVehicle.unlock != 'start': the plugin owns it, src/zw_unlock.cpp)
 
 
 NONE_TEMPLATE = 'aSupportNone'
@@ -156,6 +158,78 @@ WEAPONS: tuple[Weapon, ...] = (
                                 '느리다. 장갑은 두껍고 속도는 중간. 유기압 서스펜션 승강은 아직 구현되지 않았다.\n\n'
                                 '모델은 임시로 블래커를 사용한다.'),
     }, vehicle='ZW_V3_MBT70'),
+    Weapon('ZW_V4_OBJ279', 400, NONE_TEMPLATE, 'vehicle', {
+        'SC': ('279 工程重型坦克',
+               '最重的坦克，开局坐在车里入场。\n130 mm 主炮威力极大、装填很慢；装甲极厚，速度很慢。在废墟里找到完好的 279 并登上它也能解锁。战役推进到中期（通关三分之一）解锁。\n\n模型暂用原版布莱克战车代替。'),
+        'CN': ('279 工程重型坦克',
+               '最重的坦克，開局坐在車裡入場。\n130 mm 主砲威力極大、裝填很慢；裝甲極厚，速度很慢。在廢墟裡找到完好的 279 並登上它也能解鎖。戰役推進到中期（通關三分之一）解鎖。\n\n模型暫用原版布萊克戰車代替。'),
+        'JA': ('オブイェクト279 重戦車',
+               '最重量の戦車。乗車した状態で出撃する。\n130mm 主砲は極めて強力だが装填は遅い。装甲は非常に厚く、速度は遅い。廃墟に残る無傷の 279 に乗り込んでも解放される。本編の進行が中盤（3 分の 1 クリア）で解放。\n\nモデルは仮にブラッカーを使用。'),
+        'EN': ('Object 279 Heavy Tank',
+               "The heaviest tank; the mission starts with them in it.\nIts 130 mm gun hits very hard and reloads slowly; very thick armour, slow. Boarding an intact 279 left in the ruins unlocks it too.Unlocked a third of the way into the campaign.\n\nThe stock Blacker's model stands in for its own."),
+        'KR': ('오브옉트 279 중전차',
+               '가장 무거운 전차. 탑승한 상태로 출격한다.\n130mm 주포는 매우 강력하지만 장전이 느리다. 장갑은 매우 두껍고 속도는 느리다. 폐허에 남은 멀쩡한 279에 탑승해도 해금된다.캠페인 중반(3분의 1 클리어)에 해금.\n\n모델은 임시로 원작의 블래커를 사용한다.'),
+    }, vehicle='ZW_V4_OBJ279', acquire=False),
+    Weapon('ZW_V5_OBJ760', 400, NONE_TEMPLATE, 'vehicle', {
+        'SC': ('760 工程气垫坦克',
+               '最快的车，开局坐在车里入场。\n73 mm 低压炮轻快、装填快；装甲薄。气垫漂移手感尚未实装。战役推进到中期（通关三分之一）解锁。\n\n模型暂用原版布莱克战车代替。'),
+        'CN': ('760 工程氣墊坦克',
+               '最快的車，開局坐在車裡入場。\n73 mm 低壓砲輕快、裝填快；裝甲薄。氣墊漂移手感尚未實裝。戰役推進到中期（通關三分之一）解鎖。\n\n模型暫用原版布萊克戰車代替。'),
+        'JA': ('オブイェクト760 ホバー戦車',
+               '最速の車両。乗車した状態で出撃する。\n73mm 低圧砲は軽快で装填が速い。装甲は薄い。ホバーの横滑りは未実装。本編の進行が中盤（3 分の 1 クリア）で解放。\n\nモデルは仮にブラッカーを使用。'),
+        'EN': ('Object 760 Hover Tank',
+               "The fastest vehicle; the mission starts with them in it.\nIts 73 mm gun is light and quick to reload; thin armour. The hover drift is not in yet.Unlocked a third of the way into the campaign.\n\nThe stock Blacker's model stands in for its own."),
+        'KR': ('오브옉트 760 호버 전차',
+               '가장 빠른 차량. 탑승한 상태로 출격한다.\n73mm 저압포는 가볍고 장전이 빠르다. 장갑은 얇다. 호버 미끄러짐은 아직 구현되지 않았다.캠페인 중반(3분의 1 클리어)에 해금.\n\n모델은 임시로 원작의 블래커를 사용한다.'),
+    }, vehicle='ZW_V5_OBJ760', acquire=False),
+    Weapon('ZW_V6_AH56', 400, NONE_TEMPLATE, 'vehicle', {
+        'SC': ('AH-56 夏延',
+               '载具手的第一架飞机，开局坐在机舱里入场。\n两门 30 mm 机炮与 TOW 反坦克导弹。战役推进到中期（通关三分之一）解锁。\n\n模型暂用原版武装直升机代替。'),
+        'CN': ('AH-56 夏延',
+               '載具手的第一架飛機，開局坐在機艙裡入場。\n兩門 30 mm 機砲與 TOW 反戰車飛彈。戰役推進到中期（通關三分之一）解鎖。\n\n模型暫用原版武裝直升機代替。'),
+        'JA': ('AH-56 シャイアン',
+               'ヴィークラー初の航空機。搭乗した状態で出撃する。\n30mm 機関砲 2 門と TOW 対戦車ミサイル。本編の進行が中盤（3 分の 1 クリア）で解放。\n\nモデルは仮に戦闘ヘリを使用。'),
+        'EN': ('AH-56 Cheyenne',
+               "The Vehicler's first aircraft; the mission starts with them in it.\nTwo 30 mm cannons and TOW anti-tank missiles.Unlocked a third of the way into the campaign.\n\nThe stock gunship's model stands in for its own."),
+        'KR': ('AH-56 샤이엔',
+               '비클러의 첫 항공기. 탑승한 상태로 출격한다.\n30mm 기관포 2문과 TOW 대전차 미사일.캠페인 중반(3분의 1 클리어)에 해금.\n\n모델은 임시로 원작의 전투 헬기를 사용한다.'),
+    }, vehicle='ZW_V6_AH56', acquire=False),
+    Weapon('ZW_V7_1K17', 400, NONE_TEMPLATE, 'vehicle', {
+        'SC': ('1K17 压缩',
+               '激光战车，开局坐在车里入场。\n持续照射的光束，照得越久越热、威力越高；过热后强制冷却一段时间才能再射。战役推进到后期（通关三分之二）解锁。\n\n模型暂用原版激光炮战车代替。'),
+        'CN': ('1K17 壓縮',
+               '雷射戰車，開局坐在車裡入場。\n持續照射的光束，照得越久越熱、威力越高；過熱後強制冷卻一段時間才能再射。戰役推進到後期（通關三分之二）解鎖。\n\n模型暫用原版雷射砲戰車代替。'),
+        'JA': ('1K17 シャチエ',
+               'レーザー戦車。乗車した状態で出撃する。\n照射し続けるほど熱を帯びて威力が上がるが、オーバーヒートすると冷えるまで撃てない。本編の進行が終盤（3 分の 2 クリア）で解放。\n\nモデルは仮にメーサー車を使用。'),
+        'EN': ('1K17 Szhatie',
+               "A laser vehicle; the mission starts with them in it.\nIts beam grows hotter and stronger the longer it fires; overheated, it must cool down before it fires again.Unlocked two thirds of the way into the campaign.\n\nThe stock Maser's model stands in for its own."),
+        'KR': ('1K17 스자티예',
+               '레이저 전차. 탑승한 상태로 출격한다.\n오래 조사할수록 뜨거워지고 위력이 오르지만, 과열되면 식을 때까지 쏠 수 없다.캠페인 후반(3분의 2 클리어)에 해금.\n\n모델은 임시로 원작의 메이저 차를 사용한다.'),
+    }, vehicle='ZW_V7_1K17', acquire=False),
+    Weapon('ZW_V8_TV8', 400, NONE_TEMPLATE, 'vehicle', {
+        'SC': ('TV-8 核动力坦克',
+               '核动力坦克，开局坐在车里入场。\n90 mm 主炮，装甲极厚。被击毁时留下一小片辐射区，一段时间内伤害靠近的一切。战役推进到后期（通关三分之二）解锁。\n\n模型暂用原版布莱克战车代替。'),
+        'CN': ('TV-8 核動力坦克',
+               '核動力坦克，開局坐在車裡入場。\n90 mm 主砲，裝甲極厚。被擊毀時留下一小片輻射區，一段時間內傷害靠近的一切。戰役推進到後期（通關三分之二）解鎖。\n\n模型暫用原版布萊克戰車代替。'),
+        'JA': ('TV-8 原子力戦車',
+               '原子力戦車。乗車した状態で出撃する。\n90mm 主砲、非常に厚い装甲。撃破されると小さな放射線区域が残り、しばらく近づくものすべてを傷つける。本編の進行が終盤（3 分の 2 クリア）で解放。\n\nモデルは仮にブラッカーを使用。'),
+        'EN': ('TV-8 Nuclear Tank',
+               "A nuclear-powered tank; the mission starts with them in it.\n90 mm gun, very thick armour. Destroyed, it leaves a small radiation zone that hurts everything near it for a while.Unlocked two thirds of the way into the campaign.\n\nThe stock Blacker's model stands in for its own."),
+        'KR': ('TV-8 원자력 전차',
+               '원자력 전차. 탑승한 상태로 출격한다.\n90mm 주포, 매우 두꺼운 장갑. 격파되면 작은 방사선 구역이 남아 한동안 다가오는 모든 것에 피해를 준다.캠페인 후반(3분의 2 클리어)에 해금.\n\n모델은 임시로 원작의 블래커를 사용한다.'),
+    }, vehicle='ZW_V8_TV8', acquire=False),
+    Weapon('ZW_V9_VZ9', 400, NONE_TEMPLATE, 'vehicle', {
+        'SC': ('VZ-9 飞碟',
+               '会爬升、能悬停的飞碟，开局坐在里面入场。\n环形速射炮与诱导弹。360° 环形射界尚未实装。通关战役最终任务后解锁。\n\n模型暂用原版武装直升机代替。'),
+        'CN': ('VZ-9 飛碟',
+               '會爬升、能懸停的飛碟，開局坐在裡面入場。\n環形速射砲與誘導彈。360° 環形射界尚未實裝。通關戰役最終任務後解鎖。\n\n模型暫用原版武裝直升機代替。'),
+        'JA': ('VZ-9 アブロカー',
+               '上昇とホバリングができる円盤機。搭乗した状態で出撃する。\n環状速射砲と誘導弾。360° の環状射界は未実装。本編の最終ミッションクリアで解放。\n\nモデルは仮に戦闘ヘリを使用。'),
+        'EN': ('VZ-9 Avrocar',
+               "A saucer that climbs and hovers; the mission starts with them in it.\nRing cannon and guided rounds. The 360° ring arc is not in yet.Unlocked by clearing the campaign's last mission.\n\nThe stock gunship's model stands in for its own."),
+        'KR': ('VZ-9 아브로카',
+               '상승과 호버링이 가능한 원반기. 탑승한 상태로 출격한다.\n환형 속사포와 유도탄. 360° 환형 사계는 아직 구현되지 않았다.캠페인 최종 미션 클리어 시 해금.\n\n모델은 임시로 원작의 전투 헬기를 사용한다.'),
+    }, vehicle='ZW_V9_VZ9', acquire=False),
 )
 IDS: tuple[str, ...] = tuple(w.id for w in WEAPONS)
 BY_ID = {w.id: w for w in WEAPONS}
@@ -165,6 +239,7 @@ BY_ID = {w.id: w for w in WEAPONS}
 RELEASED: dict[str, tuple[int, str]] = {
     'new classes stage 1 (2026-11-28)': (5, '8d36b020ae73501fe550abbd106c121977f4caa1fbfe7e53f78729c5f8679e1d'),
     'vehicler stage 2 (2026-11-28)': (8, 'c71ed7b9f776f865c51730e0475e07d978ec28a7d20c338672329efdda5709a1'),
+    'vehicler stage 4 (2026-11-28)': (14, 'bc976b37ce98464dbfdb4a00b3891b8ab16b6fda07adf5b6e8a1c5575205ffdd'),
 }
 
 
@@ -288,7 +363,7 @@ def table_row(template: Node, w: Weapon) -> Node:
     row.items[2] = float(w.category)
     row.items[3] = SOURCE
     row.items[4] = LEVEL
-    row.items[5] = ACQUIRE
+    row.items[5] = ACQUIRE if w.acquire else 0.0
     row.items[6] = Node([])
     row.items[7] = STAR_CAP
     row.items[8] = PACK

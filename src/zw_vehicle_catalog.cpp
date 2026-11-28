@@ -6,6 +6,7 @@
 #include "plugin_log.h"
 #include "soldier_classes_logic.h"
 #include "weapon_equip.h"
+#include "zw_vehicle_gear.h"
 #include <array>
 #include <atomic>
 #include <string_view>
@@ -29,6 +30,7 @@ void SnapshotZwVehicles() noexcept {
     for(auto& k:missionKind)k.store(-1,std::memory_order_relaxed);
     unlocked.store(0,std::memory_order_relaxed);
     if(!wequip::Ready()){Log("ZW vehicles: the weapon table reader is off (WEQUIP REFUSED): no Vehicler vehicle this mission");return;}
+    GrantZwProgress(nullptr);   // the story cleared since the save's load: its vehicles owned before the set is read
     std::uint32_t owned=0;
     for(int k=0;k<kZwVehicleCount;++k) {
         const int row=wequip::FindRow(kZwVehicles[k].row);
@@ -48,5 +50,9 @@ int ZwMissionVehicle(int player) noexcept {
 
 std::uint32_t ZwUnlockedKinds(int player) noexcept {
     return player>=0 && player<wequip::kPlayers ? unlocked.load(std::memory_order_relaxed) : 0u;
+}
+
+void NoteZwUnlocked(int kind) noexcept {
+    if(kind>=0 && kind<kZwVehicleCount)unlocked.fetch_or(1u<<kind,std::memory_order_relaxed);
 }
 }  // namespace crew

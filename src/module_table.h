@@ -86,6 +86,7 @@
 #include "soldier_classes.h"
 #include "vehicler_foot.h"
 #include "vehicler_start.h"
+#include "zw_vehicle_gear.h"
 #include "weapon_equip.h"
 #include "loadout_store.h"
 #include "room_ui.h"
@@ -237,6 +238,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kLockon,"lockon",kLoadOnly) \
     M(kSeatSwitch,"seat switch",nullptr) \
     M(kVehiclerStart,"vehicler start",nullptr) \
+    M(kZwVehicleGear,"vehicler gear",nullptr) \
     M(kAllClassesRide,"all classes ride",kLoadOnly) \
     M(kBigWorld,"big world",nullptr) \
     M(kLegacyMap,"legacy map",kLoadOnly) \
@@ -466,6 +468,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kRoomPvp,&Install<&InstallRoomPvp>},        // the room's start held until every member acknowledged the PvP lock (room_pvp.cpp)
     {IP::kFeatures,Id::kLockon,&Install<&InstallLockon>},          // every lock-on weapon's search order: the player's nearest the view first
     {IP::kFeatures,Id::kSeatSwitch,&Install<&InstallSeatSwitch>},  // the player moving between seats (the stock board button's steps, checked)
+    {IP::kFeatures,Id::kZwVehicleGear,&Install<&InstallZwVehicleGear>},   // the Vehicler's V4..V9 (zw_vehicle_gear.cpp)
     {IP::kFeatures,Id::kVehiclerStart,&Install<&InstallVehiclerStart>},   // the Vehicler's start seat: the stock ride's natives checked (vehicler_start.cpp)
     {IP::kFeatures,Id::kAllClassesRide,&Install<&InstallAllClassesRide>},   // every class in every seat: before any mission makes a vehicle (the seat build is in its constructor)
     {IP::kFeatures,Id::kBigWorld,&Install<&InstallBigWorld>},
@@ -565,6 +568,7 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kPayload,&Call<&ResetPayload>},
     {RP::kMissionState,Id::kSeatSwitch,&Call<&ResetSeatSwitch>},
     {RP::kMissionState,Id::kVehiclerStart,&Call<&ResetVehiclerStart>},
+    {RP::kMissionState,Id::kZwVehicleGear,&Call<&ResetZwVehicleGear>},
     {RP::kMissionState,Id::kGear,&Call<&ResetGear>},
     {RP::kMissionState,Id::kJetSound,&Call<&ResetJetSound>},
     {RP::kMissionState,Id::kVehicleSound,&Call<&ResetVehicleSound>},
@@ -612,6 +616,7 @@ constexpr TickEntry kTicks[]={
     {TP::kAfterHudPublish,Id::kBigWorld,&Call<&BigWorldProbe>},
     {TP::kAfterHudPublish,Id::kPlayArea,&Call<&PlayAreaTick>},   // the walls where the map's ground ends (playarea.cpp)
     {TP::kAfterHudPublish,Id::kSupportDispatch,&Call<&SupportDispatchTick>},
+    {TP::kAfterHudPublish,Id::kZwVehicleGear,&Call<&ZwVehicleGearTick>},   // after the dispatch's: its hulls activated
     {TP::kAfterHudPublish,Id::kVehiclerStart,&Call<&VehiclerStartTick>},   // after the dispatch's: its made hulls activated first
     {TP::kAfterHudPublish,Id::kPlayerJet,&Call<&PlayerEjectTick>},
     {TP::kAfterHudPublish,Id::kView,&Call<&ViewDiagTick>},   // the grey-map diagnosis (viewdiag.cpp)

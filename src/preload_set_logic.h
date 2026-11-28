@@ -41,8 +41,8 @@ enum class Item : std::uint8_t {
     ultimate=55,             // the ultimate strike's magic circles (ultimate.cpp)
     dnRounds=56,             // the Dreadnought's turret rounds (jet_bay.cpp kDnRounds) and, with them, the gunship's shells
     vehicleRounds=57,        // the impact charges, the drill charge, the EMC / Sazabi / Proteus / Andryusha rounds
-    zwVehicle0=58,           // .. zwVehicle0+2: zw_vehicle_catalog.h kZwVehicles[k], the Vehicler's vehicle (support_spawn.cpp)
     soldier0=64,             // .. soldier0+14: support_call.h SupportWeapon k's two bodies (support_soldier.cpp)
+    zwVehicle0=80,           // .. zwVehicle0+9: zw_vehicle_catalog.h kZwVehicles[k], the Vehicler's vehicle (support_spawn.cpp)
     end=128,
 };
 inline constexpr int kBodyItems=39,kCatchItems=7,kSoldierItems=15;
@@ -57,10 +57,10 @@ constexpr Item Body(int k) noexcept { return static_cast<Item>(static_cast<int>(
 constexpr Item Catch(int i) noexcept { return static_cast<Item>(static_cast<int>(Item::catch0)+i); }
 constexpr Item Soldier(int k) noexcept { return static_cast<Item>(static_cast<int>(Item::soldier0)+k); }
 constexpr Item ZwVehicle(int k) noexcept { return static_cast<Item>(static_cast<int>(Item::zwVehicle0)+k); }
-static_assert(static_cast<int>(Item::zwVehicle0)+kZwVehicleMost<=static_cast<int>(Item::soldier0),"the Vehicler's vehicles before the soldiers");
+static_assert(static_cast<int>(Item::zwVehicle0)+kZwVehicleMost<=static_cast<int>(Item::end),"the Vehicler's vehicles fit");
 static_assert(static_cast<int>(Item::body0)+kBodyItems<=static_cast<int>(Item::catch0),"bodies before the catch files");
 static_assert(static_cast<int>(Item::catch0)+kCatchItems<=static_cast<int>(Item::chute),"catch files before the chute");
-static_assert(static_cast<int>(Item::soldier0)+kSoldierItems<=static_cast<int>(Item::end),"soldiers fit");
+static_assert(static_cast<int>(Item::soldier0)+kSoldierItems<=static_cast<int>(Item::zwVehicle0),"soldiers before the Vehicler's vehicles");
 
 struct Set {
     std::uint64_t w[2]{};

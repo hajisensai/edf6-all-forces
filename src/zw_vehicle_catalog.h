@@ -14,6 +14,11 @@
 #include <string_view>
 
 namespace crew {
+// When a vehicle is unlocked (pylib/zw_vehicles.py UNLOCKS; zw_unlock_logic.h): owned by every save, or granted by the
+// plugin as the EDF6 story goes (a third / two thirds cleared, its last mission cleared).
+enum class ZwUnlock : std::uint8_t { start, mid, late, final };
+// What the plugin runs for a vehicle beside its native hull (pylib/zw_vehicles.py BEHAVIORS; zw_vehicle_behavior.cpp).
+enum class ZwBehavior : std::uint8_t { none, heat, fallout };
 struct ZwVehicleSpec {
     const wchar_t* row;        // its weapon row (tools/zw_weapons.py, category 400: the Vehicler's slot 0)
     const wchar_t* sgo;        // the vehicle SGO the plugin creates (app:/Object/..., the installer's Mods/OBJECT file)
@@ -23,6 +28,9 @@ struct ZwVehicleSpec {
     float halfWidth,halfLength,height;   // envelope about the native origin, metres (the stock MDB's bounds rounded out)
     unsigned logisticsCost;    // its price: the logistics points a resupply of it costs, by vehicle (M4 reads it)
     supportlevel::Curve curve; // the stock request curve its guns' damage goes by with the support level (support_firepower.h)
+    ZwUnlock unlock;           // when it is unlocked (zw_unlock.cpp grants the later ones)
+    bool capture;              // boarding an intact one left in a mission unlocks it too (zw_unlock.cpp, catalog 1017)
+    ZwBehavior behavior;       // heat: V7's beam; fallout: V8's radiation zone
 };
 inline constexpr ZwVehicleSpec kZwVehicles[]={
 #include "zw_vehicles.inc"
@@ -32,7 +40,7 @@ inline constexpr int kZwVehicleCount=static_cast<int>(sizeof(kZwVehicles)/sizeof
 // the most a Vehicler holds. Every vehicle's price fits it (the maintainer 2026-11-28: light ones about half, MBT-70 a full one).
 inline constexpr unsigned kZwLogisticsGauge=40u;
 // Preload items and plan resources are reserved for this many (preload_set_logic.h, kZwVehicleResource).
-inline constexpr int kZwVehicleMost=3;
+inline constexpr int kZwVehicleMost=10;
 static_assert(kZwVehicleCount>=1 && kZwVehicleCount<=kZwVehicleMost,"zw_vehicles.inc: within the reserved items / resources");
 constexpr bool ZwPricesFit() noexcept {
     for(const auto& v:kZwVehicles)if(!v.logisticsCost || v.logisticsCost>kZwLogisticsGauge)return false;
@@ -41,6 +49,13 @@ constexpr bool ZwPricesFit() noexcept {
 static_assert(ZwPricesFit(),"zw_vehicles.inc: every price within the gauge");
 // The price of a resupply of `kind` (M4: what the host holds of the requester's points), 0 for no such kind.
 constexpr unsigned ZwVehiclePrice(int kind) noexcept { return kind>=0 && kind<kZwVehicleCount ? kZwVehicles[kind].logisticsCost : 0u; }
+
+// The kind of the vehicle whose hull is `vtable` and behaviour `behavior` (zw_vehicle_behavior.cpp finds a hull's kind by the
+// dispatch's own record instead; this is for the tests), -1 none.
+constexpr int ZwVehicleKindOfBehavior(ZwBehavior behavior) noexcept {
+    for(int k=0;k<kZwVehicleCount;++k)if(kZwVehicles[k].behavior==behavior)return k;
+    return -1;
+}
 
 constexpr const ZwVehicleSpec* ZwVehicleInfo(int kind) noexcept {
     return kind>=0 && kind<kZwVehicleCount ? &kZwVehicles[kind] : nullptr;
@@ -70,6 +85,9 @@ int ZwMissionVehicle(int player=0) noexcept;
 // kZwVehicles[k]'s row owned (unlocked: weapon_records.h flag bit 0), read with the snapshot. A resupply's request carries
 // it: the host cannot read a guest's weapon records and takes the requester's word, as it takes every member's loadout.
 std::uint32_t ZwUnlockedKinds(int player=0) noexcept;
+// A kind unlocked within the mission (zw_unlock.cpp: a capture, granted to this machine's save): into the snapshot's set, so a
+// resupply may ask for it at once.
+void NoteZwUnlocked(int kind) noexcept;
 // Its hull preloaded this mission and not broken (defined in support_spawn.cpp, which preloads and makes it: the file
 // installed in Mods/OBJECT, the native spawn profile matched, the firepower step in).
 bool ZwVehicleReady(int kind) noexcept;

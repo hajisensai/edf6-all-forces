@@ -456,6 +456,14 @@
    ],
    "scripts": []
   },
+  "bullet_expand_cull": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "bullet_pass_test": {
    "labels": [
     "plugin-air",
@@ -8753,6 +8761,38 @@
     "tests/vehicler_foot_native_audit.py"
    ]
   },
+  "vehicler_logistics": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "vehicler_start": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehicler_start_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/vehicler_start_native_audit.py"
+   ]
+  },
   "vehsound_gun": {
    "labels": [
     "plugin-air",
@@ -9355,6 +9395,14 @@
    ]
   },
   "zw_dispatch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "zw_v4v9": {
    "labels": [
     "plugin-core",
     "plugin-native",
