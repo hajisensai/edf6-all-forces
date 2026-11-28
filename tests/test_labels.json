@@ -7056,11 +7056,16 @@
    ],
    "scripts": []
   },
-  "runeblade": {
+  "runeblade_weapons": {
    "labels": [
     "plugin-core",
-    "plugin-native",
-    "plugin-net"
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "runeblade_weapons_sgo": {
+   "labels": [
+    "test-data"
    ],
    "scripts": []
   },

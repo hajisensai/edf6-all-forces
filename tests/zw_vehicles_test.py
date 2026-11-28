@@ -37,7 +37,7 @@ for w in rows:
     check(w.category == 400 and w.template == zw.NONE_TEMPLATE and set(w.text) == set(zw.LANGS), f'{w.id}: a V row')
 check(zw.BY_ID['ZW_VehicleNone'].kind == 'none', 'ZW_VehicleNone stays: on foot')
 check(all(w.vehicle == '' for w in zw.WEAPONS if w.kind != 'vehicle'), 'only vehicle rows name a vehicle')
-check(zw.RELEASED['vehicler stage 2 (2026-11-28)'][0] == len(zw.IDS) == 8, 'stage 2 released at 8 rows')
+check(zw.RELEASED['vehicler stage 2 (2026-11-28)'][0] == 8 <= len(zw.IDS), 'stage 2 released at 8 rows (later rows after them)')
 
 # the registry: class known, guns one per stock weapon, files once each, the V3 todo kept, placeholders marked
 check(mzv.OWNER in ledger.OWNERS, 'zwvehicle is a ledger owner')
