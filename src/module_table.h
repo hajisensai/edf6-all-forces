@@ -80,6 +80,7 @@
 #include "mod_room.h"
 #include "outfit41.h"
 #include "weapon_records.h"
+#include "soldier_save.h"
 #include "soldier_classes.h"
 #include "weapon_equip.h"
 #include "loadout_store.h"
@@ -132,6 +133,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
 #define EDF6_MODULES(M) \
     M(kCrashDump,"crash dump",kLoadOnly) \
     M(kWeaponRecords,"weapon records",kLoadOnly) \
+    M(kSoldierSave,"soldier save",kLoadOnly) \
     M(kSoldierClasses,"soldier classes",kLoadOnly) \
     M(kFramePacing,"frame pacing",kLoadOnly) \
     M(kRenderFence,"render fence",kLoadOnly) \
@@ -336,6 +338,8 @@ constexpr InstallEntry kInstalls[]={
     // the weapon records past 0x800 (weapon_records.cpp): before anything could make the game status, whose
     // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord
     {IP::kBeforeGameStatus,Id::kWeaponRecords,&Install<&InstallWeaponRecords>},
+    // the new classes' save (soldier_save.cpp): after the weapon records, whose load completion it listens to
+    {IP::kBeforeGameStatus,Id::kSoldierSave,&Install<&InstallSoldierSave>},
     // six player classes (soldier_classes.cpp): before the game status, whose constructor reads the mode data's
     // SoldierInit (SetMode 0xDC460 from 0xD6722)
     {IP::kBeforeGameStatus,Id::kSoldierClasses,&Install<&InstallSoldierClasses>},

@@ -7413,18 +7413,23 @@
    ],
    "scripts": []
   },
-  "soldier_native": {
-   "labels": [
-    "test-data"
-   ],
-   "scripts": []
-  },
-  "soldier_type": {
+  "soldier_save": {
    "labels": [
     "plugin-core",
     "plugin-native"
    ],
    "scripts": []
+  },
+  "soldier_save_native": {
+   "labels": [
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_save_native_audit.py"
+   ]
   },
   "sortie_check": {
    "labels": [
@@ -9217,26 +9222,6 @@
    ],
    "scripts": [
     "tests/xmorph_registry_guard.py"
-   ]
-  },
-  "zw_classes": {
-   "labels": [
-    "autoturret-tools",
-    "cockpit",
-    "edf41",
-    "edf5",
-    "installer",
-    "native-codec",
-    "plugin-core",
-    "pylib-model",
-    "test-data",
-    "testhub",
-    "testrange",
-    "tools-misc",
-    "worldmap"
-   ],
-   "scripts": [
-    "tests/zw_classes_test.py"
    ]
   }
  },

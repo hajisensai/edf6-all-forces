@@ -60,6 +60,7 @@ const unsigned char kUiOwnedSig[]={0x0F,0xB6,0x84,0x8B,0xE8,0x7C,0x00,0x00};    
 const unsigned char kUiStatusSig[]={0x41,0x8B,0x94,0x8D,0xE8,0x84,0x00,0x00};   // mov edx, [r13+rcx*4+0x84E8]
 
 std::atomic<bool> active{false};
+std::atomic<SaveBlockLoadedFn> blockLoaded{nullptr};   // SetSaveBlockLoaded
 SRWLOCK lock=SRWLOCK_INIT;
 struct Locked { Locked(){AcquireSRWLockExclusive(&lock);} ~Locked(){ReleaseSRWLockExclusive(&lock);} };
 
@@ -297,6 +298,7 @@ void* __cdecl ResultCopyHook(void* dst,const void* src,std::size_t n) {
     unsigned char* const gs=Gs();
     if(!active.load(std::memory_order_acquire) || !LiveBlock(dst,n))return dst;
     ReadFromBlock(gs);
+    if(const SaveBlockLoadedFn fn=blockLoaded.load(std::memory_order_acquire))fn(gs+kBlock);
     Locked l;
     const void* buffers[kMostLoads];
     for(std::size_t i=0;i<loadCount;++i)buffers[i]=loads[i].buffer;
@@ -417,6 +419,7 @@ bool Redirect(unsigned site,unsigned target,void* hook) noexcept {
 }  // namespace
 
 bool WeaponRecordsActive() noexcept { return active.load(std::memory_order_acquire); }
+void SetSaveBlockLoaded(SaveBlockLoadedFn fn) noexcept { blockLoaded.store(fn,std::memory_order_release); }
 std::uint32_t WeaponRecordCapacity() noexcept { return WeaponRecordsActive() ? kSlots : kNativeSlots; }
 unsigned char* WeaponRecord(unsigned char* gs,std::uint32_t id) noexcept {
     if(!gs || id>=WeaponRecordCapacity())return nullptr;
