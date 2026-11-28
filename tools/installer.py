@@ -1159,8 +1159,7 @@ def uninstall(game: str) -> None:
         uninstall_stock_stores(game)
         # the new classes are the plugin's: their names off the text tables (with 1 make_zw_classes.remove did it),
         # before the packs' tables beneath them are put back
-        for path in make_zw_classes.remove_texts(game)[0]:
-            print(tr('还原', 'Restoring'), path)
+        remove_zw_texts(game)
     if gen.uninstall(game, unregister=False):   # its pack goes with the others just below
         print(tr('删除测试场关卡', 'Deleting the test range missions'))
     # with 2 too: without the plugin the packs would stay listed as content the player does not own
@@ -1366,6 +1365,16 @@ def install_zw_texts(game: str) -> None:
         print(tr('写入', 'Writing'), path)
     for note in notes:
         print(tr('！ 新兵种名字：', '! The new classes\' names: '), note)
+
+
+def remove_zw_texts(game: str) -> None:
+    """The new classes' names off the text tables (make_zw_classes.remove_texts): each table back to what was beneath."""
+    import make_zw_classes
+    done, kept = make_zw_classes.remove_texts(game)
+    for path in done:
+        print(tr('还原', 'Restoring'), path)
+    for path in kept:
+        print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
 
 
 def manage_campaign(game: str) -> int:

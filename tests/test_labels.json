@@ -19322,8 +19322,10 @@
    "uses": [
     "e5c",
     "modfiles",
+    "os",
     "patched",
     "tempfile",
+    "vc",
     "zw_class_texts_without_packs"
    ]
   }
