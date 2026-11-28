@@ -1282,6 +1282,18 @@ def legs_run() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def contention_run() -> None:
+    """A clean window with the machine busy and other processes on its cores is flagged; one with the game alone, a
+    machine with cores to spare, or no machine numbers is not."""
+    m = {'machine': {'cores': 16, 'busy_cores': 15.5}}
+    check('contended' in (perfrun.contention(m, 250.0) or ''), 'busy machine, others 13 cores: contended')
+    check(perfrun.contention(m, 1500.0) is None, 'the game itself on 15 cores: not contended')
+    check(perfrun.contention({'machine': {'cores': 16, 'busy_cores': 8.0}}, 100.0) is None, 'cores to spare: not')
+    check(perfrun.contention({}, 100.0) is None, 'no machine numbers: not known, not flagged')
+    t = perfrun.machine_times()
+    check(t is None or (t[1] >= t[0] >= 0), 'machine_times: busy within all')
+
+
 def flip_run() -> None:
     """--flip: one launch, A then B, B, A as stay legs (no `next`, no population wait, a short stack window, STAY_SETTLE s
     of warm-up), each stay leg's ini written over the launch's (B with the flip, A the launch's again), the variants in
@@ -1453,5 +1465,6 @@ legs_logs()
 wave_ready()
 legs_run()
 flip_run()
+contention_run()
 print(f'{len(failures)} failed' if failures else 'all passed')
 sys.exit(1 if failures else 0)
