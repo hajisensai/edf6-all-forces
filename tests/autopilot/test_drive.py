@@ -371,6 +371,30 @@ class DriverTest(unittest.TestCase):
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game):
             self.assertEqual(drive.main(['restore']), 0)   # nothing left: nothing to do
 
+    def test_a_mission_that_never_starts_closes_the_runs_own_game(self):
+        """The game this run launched shows a message box (no mission): that game is closed again (gamelaunch.abandon,
+        its pid only) and what was placed is put back in the same run."""
+        dll = self.plugins / 'EDF6VehicleCrew.dll'
+        dll.write_bytes(b'installed plugin')
+        build = self.root / 'build.dll'
+        build.write_bytes(b'our build')
+        running = []
+        self.pids.side_effect = lambda: list(running)
+
+        def launch(*_):
+            running.append(123)
+            return drive.gamelaunch.Game(pid=123, hwnd=1, launcher=7)
+
+        def abandon(_game, pid, _launcher, *a, **k):
+            running.remove(pid)
+        with patch.object(drive, 'launch', side_effect=launch), patch.object(drive, 'wait_for', return_value=False), \
+             patch.object(drive.gamelaunch, 'abandon', side_effect=abandon) as closed:
+            self.assertEqual(drive.run(self.game, 'RM015', 1, 0, None, place=(f'{build}=Plugins/EDF6VehicleCrew.dll',)),
+                             1)
+        closed.assert_called_once_with(self.game, 123, None)
+        self.assertEqual(dll.read_bytes(), b'installed plugin')
+        self.assertEqual([p.name for p in self.plugins.iterdir()], ['EDF6VehicleCrew.dll'])
+
     def test_a_run_that_leaves_a_placed_file_fails(self):
         """A run that went well otherwise is non-zero when restore_placed left a file (changed by someone else)."""
         dll = self.plugins / 'EDF6VehicleCrew.dll'
