@@ -49,7 +49,7 @@ def test_no_meta_or_no_agent_untouched() -> None:
 def test_helper_semantics_explicit_type_wins() -> None:
     # Object.assign({agentType: default}, o) -> o.agentType overrides; null opts ok.
     assert "Object.assign({agentType: 'general'}, o || {})" in HELPER
-    assert '"scout": "sonnet"' in HELPER and '"general": "opus"' in HELPER
+    assert '"scout": "sonnet"' in HELPER and '"general": "sonnet"' in HELPER
 
 
 if __name__ == "__main__":

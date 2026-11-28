@@ -3,7 +3,7 @@
 A workflow agent() without opts.agentType runs as the built-in workflow-subagent, which carries
 26 tool schemas (Artifact, SendUserFile, plugin/skill suggesters, ccd session tools, visualize...)
 plus the skills list: ~55k baseline tokens re-read on every turn (2026-11-05 audit: workflow
-subagents were 19% of all spend). .claude/agents/general.md is the same Opus role with only
+subagents were 19% of all spend). .claude/agents/general.md is the same role with only
 the tools subagents actually use. An explicit opts.agentType in the script still wins.
 
 Rewrite: every code-position call `agent(` becomes `__wfAgent(`, and a one-line helper is
@@ -22,7 +22,7 @@ DEFAULT_TYPE = "general"
 MARKER = "/*wf-agent-default*/"
 # Mirror subagent_model_router.py: the model is pinned by agent type (workflow agent() calls do not
 # pass through the Agent-tool router, and agent .md `model:` is not applied to workflow agents).
-TYPE_MODEL: dict[str, str] = {"scout": "sonnet", "worker": "sonnet", "general": "opus", "reviewer": "opus"}
+TYPE_MODEL: dict[str, str] = {"scout": "sonnet", "worker": "sonnet", "general": "sonnet", "reviewer": "opus"}
 HELPER = (
     f"{MARKER} const __wfAgent = (p, o) => {{ const q = Object.assign({{agentType: '{DEFAULT_TYPE}'}}, o || {{}}); "
     f"const m = {json.dumps(TYPE_MODEL)}[q.agentType]; if (m) q.model = m; return agent(p, q); }};\n"
@@ -152,4 +152,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Claude Code 给 hook 的 stdin/stdout 是 UTF-8；Windows 下 Python 默认按 locale(cp936) 解码，
+    # UTF-8 汉字尾字节会吞掉紧跟的反斜杠使 JSON 断裂（JSONDecodeError），回写中文也会错码。
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     main()

@@ -9,8 +9,8 @@ import json
 import sys
 from typing import Any
 
-SONNET_TYPES: frozenset[str] = frozenset({"scout", "worker"})
-OPUS_TYPES: frozenset[str] = frozenset({"reviewer", "general", "general-purpose", "claude", "Plan"})
+SONNET_TYPES: frozenset[str] = frozenset({"scout", "worker", "general"})
+OPUS_TYPES: frozenset[str] = frozenset({"reviewer", "general-purpose", "claude", "Plan"})
 # Built-in general-purpose carries every tool schema, the skills list and MCP/session prompt
 # sections (~54k baseline tokens re-read on every turn). .claude/agents/general.md is the same
 # role with only the tools subagents actually use (2026-11-05 audit), so redirect to it.
@@ -58,4 +58,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Claude Code 给 hook 的 stdin/stdout 是 UTF-8；Windows 下 Python 默认按 locale(cp936) 解码，
+    # UTF-8 汉字尾字节会吞掉紧跟的反斜杠使 JSON 断裂（JSONDecodeError），回写中文也会错码。
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     sys.exit(main())

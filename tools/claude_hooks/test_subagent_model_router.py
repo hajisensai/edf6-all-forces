@@ -23,8 +23,8 @@ def run(tool_input: dict[str, Any], tool_name: str = "Agent") -> dict[str, Any] 
 
 
 def test_routing() -> None:
-    assert run({"prompt": "x"}) == {"prompt": "x", "subagent_type": "general", "model": "opus"}
-    assert run({"subagent_type": "general-purpose"}) == {"subagent_type": "general", "model": "opus"}
+    assert run({"prompt": "x"}) == {"prompt": "x", "subagent_type": "general", "model": "sonnet"}
+    assert run({"subagent_type": "general-purpose"}) == {"subagent_type": "general", "model": "sonnet"}
     assert run({"subagent_type": "worker", "model": "opus"}) == {"subagent_type": "worker", "model": "sonnet"}
     assert run({"subagent_type": "scout"}) == {"subagent_type": "scout", "model": "sonnet"}
     assert run({"subagent_type": "reviewer", "model": "opus"}) is None
