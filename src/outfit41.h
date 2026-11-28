@@ -20,4 +20,15 @@ void Outfit41RoomTick() noexcept;
 // what the others build this machine's player from): the EDF4.1 colours put into the block the record reads, so the
 // others never wait for a frame of the room to see them (whatever thread the script runs on: the swap is locked).
 void Outfit41MissionSync() noexcept;
+// The armory's outfit page (armory.cpp, the UI thread), the same steps as the popup's items without the popup: the
+// caller writes GS and rebuilds the 3D view (roompreview::RefreshPlayer). All of them nothing / false when not installed.
+// Offered: installed, Enabled, the class's EDF4.1 files there (what the popup offers). Chosen: the plugin's choice.
+bool Outfit41Offered(int who,int cls) noexcept;
+bool Outfit41Chosen(int who) noexcept;
+// The EDF4.1 outfit chosen (stored, its colours in, the room told); false: not offered at all (not installed / Enabled=0).
+bool Outfit41Choose(int who) noexcept;
+// Before the caller writes a stock outfit (GS+0x6E94): the choice dropped, the stock colours back.
+void Outfit41Leave(int who) noexcept;
+// After the caller wrote the outfit, the class or a colour: the colour blocks reconciled, the room told.
+void Outfit41Changed(int who) noexcept;
 }  // namespace crew

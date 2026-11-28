@@ -28,6 +28,17 @@ void CallRows() {
                              L"EDF6VC_CALL_FLY_FIGHTERX",L"edf6vc_call_fly_fighter",L"SOMETHING_EDF6VC_CALL_FLY_FIGHTER"})
         AddCallItems(none,s);
     Expect(s.Empty(),"other rows (ground, player jets, not a call) reach nothing of the preload");
+    // The Vehicler's vehicle rows (zw_vehicle_catalog.h): each brings its own vehicle, nothing else; the empty slot's row
+    // and a near name nothing.
+    for(int k=0;k<crew::kZwVehicleCount;++k) {
+        s=Set{};AddCallItems(crew::kZwVehicles[k].row,s);
+        Expect(s.Has(ZwVehicle(k)) && s.Count()==1,"a Vehicler's vehicle row brings its vehicle");
+    }
+    s=Set{};
+    for(const wchar_t* none:{L"ZW_VehicleNone",L"ZW_V1_HSTV",L"zw_v1_hstvl",L"ZW_V1_HSTVL_",L"ZW_P1_GYROJET"})AddCallItems(none,s);
+    Expect(s.Empty(),"no vehicle for the empty slot, a near name or the Vehicler's pistol");
+    Expect(crew::ZwVehicleKindOfRow(L"ZW_V1_HSTVL")==0 && crew::ZwVehicleKindOfRow(L"ZW_V2_M247")==1 &&
+           crew::ZwVehicleKindOfRow(L"ZW_V3_MBT70")==2 && crew::kZwVehicleCount==3,"the kinds in the registry's order");
 }
 
 void Sets() {
@@ -38,7 +49,10 @@ void Sets() {
            "every mission: the vehicle rounds, the canopy, every soldier kind");
     Expect(!always.Has(Body(body::strike)) && !always.Has(Item::sub) && !always.Has(Item::dnRounds) && !always.Has(Catch(0)),
            "no call's own content in every mission");
-    Expect(all.Count()==kBodyItems+kCatchItems+10+kSoldierItems,"everything: every body, catch file, item and soldier");
+    Expect(all.Count()==kBodyItems+kCatchItems+10+crew::kZwVehicleCount+kSoldierItems,
+           "everything: every body, catch file, item, Vehicler's vehicle and soldier");
+    for(int k=0;k<crew::kZwVehicleCount;++k)
+        Expect(all.Has(ZwVehicle(k)) && !always.Has(ZwVehicle(k)),"a Vehicler's vehicle: in everything, not in every mission");
     Expect(!all.Has(Item::end) && !Set{}.Has(Item::end),"nothing past the end");
     Set s;s.Add(Item::end);
     Expect(s.Empty(),"an out-of-range item is not added");
@@ -58,6 +72,12 @@ void Room() {
     const Set room=RoomSet(host,members,3);
     Expect(room.Has(Item::sub) && room.Has(Body(body::xmBomber)) && room.Has(Item::dnRounds) && room.Count()==3,
            "the room's set: the host's and every member's");
+    // A guest Vehicler's vehicle: every machine makes it, so the room's set has it although the host's own loadout has none.
+    {
+        Set guest;AddCallItems(L"ZW_V2_M247",guest);
+        const Set withZw=RoomSet(host,&guest,1);
+        Expect(withZw.Has(ZwVehicle(1)) && !host.Has(ZwVehicle(1)),"the room's set carries a member's Vehicler vehicle");
+    }
     Expect(RoomSet(host,nullptr,0)==host,"alone: the host's own");
 
     Set local;local.Add(Item::laser);

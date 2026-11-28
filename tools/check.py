@@ -71,6 +71,7 @@ GENERATED = [
     (['tools/gen_mech_parts.py', '--check'], None),
     (['tools/gen_py_consts.py', '--check'], None),
     (['tools/gen_weapon_series.py', '--check'], None),
+    (['tools/gen_zw_vehicles.py', '--check'], None),
     (['tools/gen_worldmap.py', '--check'], None),
 ]   # gen_checks also runs tools/doc_links_check.py and test_domains' --check, on every run
 

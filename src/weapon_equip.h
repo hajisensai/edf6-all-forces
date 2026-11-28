@@ -16,6 +16,13 @@ bool InstallWeaponEquip() noexcept;
 bool Ready() noexcept;
 
 inline constexpr int kPlayers=2;   // GS 里的两份装备（1P / 分屏 2P，步长 0x3E60）
+inline constexpr int kClassesMost=10;   // GS 每名玩家留的兵种格数（docs/newclass-re/count.md §0）
+
+// 兵种表（模式对象 GS+0x130 的 SoldierInit，原生 0xE34D0 / 0xE3680 / 0x959170）。每次调用现读：插件兵种 4/5 由
+// soldier_classes 在模式载入时注入，注入前 / 失败时这里就是原版的 4。-1 / nullptr：未就绪、表不在、兵种越界。
+int ClassCount() noexcept;                    // 1..kClassesMost
+int ClassSlots(int cls) noexcept;             // SoldierInit[cls][4] 的槽数
+const wchar_t* ClassName(int cls) noexcept;   // 游戏文本里的兵种名（名字键 SoldierInit[cls][1]，如 SoldierType_ZwVehicler）
 
 // 运行时武器表（GS+0x130）。表还没载入（[cfg+0x188] 为空）或未就绪：-1 / false。
 int RowCount() noexcept;
@@ -35,7 +42,7 @@ wlist::Badge Badge(int row) noexcept;
 // 表里没有这一行 / 读不到：false。
 bool ReadSpec(int row,wlist::WeaponSpec* out);
 int LevelCap() noexcept;                                  // -1：不封顶（GS+0x14FC8 为 0，或 0xD8850 返回 -1）
-int CurrentClass(int player) noexcept;                    // GS+0x6E90+player*0x3E60；-1 读不到
+int CurrentClass(int player) noexcept;                    // GS+0x6E90+player*0x3E60；-1 读不到 / 不小于 ClassCount
 // 某兵种 6 个槽当前的行（-1 空；该兵种没有的槽也是 GS 里的原值）。
 bool ReadEquipped(int player,int cls,std::array<int,wlist::kSlotsMost>* out) noexcept;
 
@@ -58,7 +65,7 @@ EquipResult Equip(int player,int cls,int slot,int row) noexcept;
 // 一次写一个兵种的几个槽（整备方案切换）：want[s] -1 不动；判定见 wlist::PlanClassSlots（同 Equip 的规则，重复按写完
 // 以后判，两槽互换也能写；被拒的槽留原值）。未就绪 / 读不到：返回的 changed 为 0、verdict 全为 absent。
 wlist::ClassPlan SetClassSlots(int player,int cls,const std::array<int,wlist::kSlotsMost>& want) noexcept;
-// 选兵种：写 GS+0x6E90+player*0x3E60（0..3）。
+// 选兵种：写 GS+0x6E90+player*0x3E60（0..ClassCount-1）。
 bool SetClass(int player,int cls) noexcept;
 
 }  // namespace crew::wequip

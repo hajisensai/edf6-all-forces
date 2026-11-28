@@ -9,6 +9,7 @@
 #include "heli.h"
 #include "mapcmd.h"
 #include "npcai.h"
+#include "soldier_identity.h"
 #include "team_native_logic.h"
 #include "enemy_control.h"
 #include "net_object_resolve.h"
@@ -316,7 +317,7 @@ void FillSnapshot(Snapshot& snapshot,const ObjRef& owner,const ObjRef& target,co
 Reason CanPrepare(const ObjRef& requester,const ObjRef& target,Catalogue* catalogue) {
     if(!On())return Reason::disabled;
     if(!targetReady)return Reason::nativeMismatch;
-    if(!Alive(requester) || !IsAnyPlayer(static_cast<const unsigned char*>(requester.obj)) || !IsSoldierClass(requester.obj))
+    if(!Alive(requester) || !IsAnyPlayer(static_cast<const unsigned char*>(requester.obj)) || !IsPlayerClassSoldier(requester.obj))
         return Reason::invalidRequester;
     // Riding is the player's own state, not a broken requester: say what to do about it.
     if(!HumanOnFoot(static_cast<const unsigned char*>(requester.obj)))return Reason::riding;

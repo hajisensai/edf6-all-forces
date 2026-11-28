@@ -49,9 +49,11 @@ DATA = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.join(HERE, '..
 ACQUIRE = 0.0     # WEAPONTABLE column 5: dropped in missions like any weapon
 PACK = 0.0        # column 8: no EDF6 DLC pack (the earlier games' packs are not EDF6's)
 SOURCE = 1.0      # column 3: 1 every non-pack weapon, 3 a pack's
-# The soldier's CAS (OBJECT/) by weapon category // 100 (300 and up the Air Raider): its animation states are what a
-# ported weapon's holding names must play (Models.soldier_states, edf5port.plays).
-SOLDIER_CAS = ('EDF6ARMYSOLDIER.CAS', 'EDF6_WINGDIVER.CAS', 'EDF6HEAVYARMOR.CAS', 'EDF6ENGINEER.CAS')
+# The soldier's CAS (OBJECT/) by weapon category // 100 (3xx the Air Raider; 4xx / 5xx the new classes, plan-2026-11-28:
+# AssultSoldier-based, the Ranger's CAS): its animation states are what a ported weapon's holding names must play
+# (Models.soldier_states, edf5port.plays).
+SOLDIER_CAS = ('EDF6ARMYSOLDIER.CAS', 'EDF6_WINGDIVER.CAS', 'EDF6HEAVYARMOR.CAS', 'EDF6ENGINEER.CAS',
+               'EDF6ARMYSOLDIER.CAS', 'EDF6ARMYSOLDIER.CAS')
 
 
 @dataclass(frozen=True)
@@ -202,7 +204,7 @@ class Models:
         """The animation states of the CAS of the soldier whose weapons category `category` is (SOLDIER_CAS): those of
         player (layer) `layer` ('main' the whole body, 'weapon' the upper body), every player's when None. What
         edf5port.hold_as asks a holding name of (edf5port.plays)."""
-        cas = SOLDIER_CAS[min(category // 100, 3)]
+        cas = SOLDIER_CAS[category // 100]   # IndexError: a category of no class
         if cas not in self._states:
             import cas_graft
             self._states[cas] = {k: frozenset(v) for k, v in cas_graft.states(self.stock(f'OBJECT/{cas}')).items()}

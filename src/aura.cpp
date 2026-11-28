@@ -16,6 +16,7 @@
 // Online the host decides which auras stand and sends them (AFAU, state stream auraVehicles, every second and at a
 // change); every machine applies them. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "aura.h"
+#include "soldier_factory.h"
 #include "edf_layout.h"
 #include "config.h"
 #include "plugin_log.h"
@@ -100,7 +101,7 @@ const float* Pos(const void* o) noexcept { return reinterpret_cast<const float*>
 bool Soldier(const void* o) noexcept {
     const void* const vt=At<const void*>(o,0);
     for(unsigned x:kVtSoldiers)if(vt==image+x)return true;
-    return false;
+    return soldier::IsZwVtable(vt);   // classes 4 / 5 (their own vtables, src/soldier_factory.h)
 }
 
 // The aura kind of `v`'s model (its marker bone), -1 for none; -2 while its bones are not there yet.

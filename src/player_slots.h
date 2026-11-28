@@ -6,7 +6,8 @@
 // One table: the slots of a class and the categories a slot takes are wlist::kWeaponSlotRules (weapon_series.inc,
 // generated from CONFIG.SGO SoldierInit by tools/gen_weapon_series.py), the same table the 整备 weapon page and
 // wequip::SetClassSlots judge with. Nothing here repeats it.
-//   class 0 Ranger 4 slots, 1 WingDiver 4, 2 AirRaider 5, 3 Fencer 6.
+//   class 0 Ranger 4 slots, 1 WingDiver 4, 2 AirRaider 5, 3 Fencer 6; the plugin's 4 载具手 2, 5 刻印剑士 3
+//   (docs/plan-2026-11-28-new-classes-impl.md §1; their rules come into the table with tools/gen_weapon_series.py).
 // A slot is planned only with a row that exists in the installed table (by name), that the player owns and whose
 // category the slot takes; anything else leaves that slot as it is (counted, not an error: a weapon table without the
 // row, a weapon not found yet). The level cap and duplicates are judged by wequip (wlist::PlanClassSlots).
@@ -16,7 +17,7 @@
 
 namespace crew::playerslots {
 
-inline constexpr int kClasses=4,kSlotsMost=6;
+inline constexpr int kClasses=preset::kClasses,kSlotsMost=preset::kSlots;
 
 constexpr int SlotsOf(int cls) noexcept {
     int n=0;
@@ -34,9 +35,17 @@ constexpr bool SlotAccepts(int cls,int slot,int c) noexcept {
     }
     return false;
 }
-static_assert(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(4)==0,
+static_assert(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(4)==2 && SlotsOf(5)==3 && SlotsOf(6)==0,
               "SoldierInit's slot counts (docs/loadout-re.md §1.2)");
-static_assert(SlotsOf(3)<=kSlotsMost,"a class has at most kSlotsMost slots");
+// 4 / 5: their final slot counts, or not in the table yet (0: no rules, no slot planned).
+static_assert((SlotsOf(4)==0 || SlotsOf(4)==2) && (SlotsOf(5)==0 || SlotsOf(5)==3),
+              "the new classes' slots (docs/plan-2026-11-28-new-classes-impl.md §1)");
+constexpr bool RulesInRange() noexcept {
+    for(const wlist::WeaponSlotRule& r:wlist::kWeaponSlotRules)
+        if(r.cls<0 || r.cls>=kClasses || r.slot<0 || r.slot>=kSlotsMost)return false;
+    return true;
+}
+static_assert(RulesInRange(),"every slot rule is a class and slot a preset holds");
 
 // A WeaponTable row as the game has it now.
 struct RowInfo {

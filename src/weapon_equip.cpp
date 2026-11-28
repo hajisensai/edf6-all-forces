@@ -17,7 +17,9 @@ constexpr std::size_t kGsTable=0x130,kTableRows=0x188;   // cfg = GS+0x130；[cf
 constexpr std::size_t kGsCapOn=0x14FC8;           // 字节：等级上限生效（0x8BC863）
 constexpr std::size_t kGsClass=0x6E90,kGsEquipped=0x6E98,kGsPlayerStride=0x3E60,kGsClassStride=0x18;
 constexpr std::size_t kRowName=0x00,kRowCategory=0x10,kRowLevel=0x20;
-constexpr int kClasses=4;
+// The class table (SoldierInit, [cfg+0x20]): count, slots of a class, a class's display name (EDF.dll's own text).
+constexpr std::size_t kClassCount=0xE34D0,kClassSlots=0xE3680,kClassName=0x959170;
+constexpr std::size_t kCfgClasses=0x20;
 
 // 原版说明栏（0xD8A90）用的：WEAPONTEXT 文字表句柄 GS+0xD0 {doc*, u32 节点}，空时 0xD9350(GS) 载入；SGO 节点访问。
 constexpr std::size_t kGsText=0xD0;
@@ -38,6 +40,9 @@ using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
 using FindRowFn=int(__fastcall*)(void*,const wchar_t*);
 using LevelCapFn=int(__fastcall*)(void*);
+using ClassCountFn=std::uint32_t(__fastcall*)(void*);
+using ClassSlotsFn=std::uint32_t(__fastcall*)(void*,int);
+using ClassNameFn=const wchar_t*(__fastcall*)(int);
 
 using Signature=CodeSignature;
 #include "weapon_equip_signatures.inc"
@@ -148,9 +153,21 @@ bool ReadSpecRaw(int row,RawSpec* out) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+// SoldierInit's element count (0xE34D0), -1: the mode's class table is not there or the count is not one GS has cells
+// for. Read every call: soldier_classes puts the plugin's classes in when the mode loads.
+int ClassCountRaw() noexcept {
+    __try {
+        unsigned char* gs=Gs();
+        if(!gs || !Readable(gs+kGsTable+kCfgClasses,8))return -1;
+        auto* node=At<unsigned char*>(gs+kGsTable,kCfgClasses);
+        if(!node || !Readable(node+4,4))return -1;
+        const auto n=static_cast<int>(reinterpret_cast<ClassCountFn>(image+kClassCount)(gs+kGsTable));
+        return n>0 && n<=kClassesMost ? n : -1;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
 int* EquippedCell(int who,int cls,int slot) noexcept {
     unsigned char* gs=Gs();
-    if(!gs || who<0 || who>=kPlayers || cls<0 || cls>=kClasses || slot<0 || slot>=wlist::kSlotsMost)return nullptr;
+    if(!gs || who<0 || who>=kPlayers || cls<0 || cls>=ClassCountRaw() || slot<0 || slot>=wlist::kSlotsMost)return nullptr;
     unsigned char* at=gs+kGsEquipped+static_cast<std::size_t>(who)*kGsPlayerStride+static_cast<std::size_t>(cls)*kGsClassStride+
                       static_cast<std::size_t>(slot)*4;
     return reinterpret_cast<int*>(at);
@@ -165,6 +182,23 @@ bool InstallWeaponEquip() noexcept {
 bool Ready() noexcept { return ready; }
 
 int RowCount() noexcept { return ready ? RowCountRaw() : -1; }
+
+int ClassCount() noexcept { return ready ? ClassCountRaw() : -1; }
+
+int ClassSlots(int cls) noexcept {
+    if(!ready || cls<0 || cls>=ClassCountRaw())return -1;   // 0xE3680 has no bounds check
+    __try {
+        return static_cast<int>(reinterpret_cast<ClassSlotsFn>(image+kClassSlots)(Gs()+kGsTable,cls));
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+
+const wchar_t* ClassName(int cls) noexcept {
+    if(!ready || cls<0 || cls>=ClassCountRaw())return nullptr;   // 0x959170 neither
+    __try {
+        const wchar_t* name=reinterpret_cast<ClassNameFn>(image+kClassName)(cls);
+        return name && Readable(name,sizeof(wchar_t)) && *name ? name : nullptr;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+}
 
 int FindRow(const wchar_t* id) noexcept {
     if(!ready || !id)return -1;
@@ -231,7 +265,7 @@ int CurrentClass(int who) noexcept {
     unsigned char* at=gs+kGsClass+static_cast<std::size_t>(who)*kGsPlayerStride;
     if(!Readable(at,4))return -1;
     const int cls=At<std::int32_t>(at,0);
-    return cls>=0 && cls<kClasses ? cls : -1;
+    return cls>=0 && cls<ClassCountRaw() ? cls : -1;
 }
 
 bool ReadEquipped(int who,int cls,std::array<int,wlist::kSlotsMost>* out) noexcept {
@@ -310,7 +344,7 @@ wlist::ClassPlan SetClassSlots(int who,int cls,const std::array<int,wlist::kSlot
 
 bool SetClass(int who,int cls) noexcept {
     unsigned char* gs=ready?Gs():nullptr;
-    if(!gs || who<0 || who>=kPlayers || cls<0 || cls>=kClasses)return false;
+    if(!gs || who<0 || who>=kPlayers || cls<0 || cls>=ClassCountRaw())return false;
     unsigned char* at=gs+kGsClass+static_cast<std::size_t>(who)*kGsPlayerStride;
     if(!Readable(at,4,true))return false;
     Put<std::int32_t>(at,0,cls);
