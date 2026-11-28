@@ -34,6 +34,7 @@ Clone runeBladeClass{"ZwRuneBlade",st::kVtable,st::kMainSlots,st::kMainVtable,{}
 void* table120[1+st::kSlots120];
 void* table1940[1+st::kSlots1940];
 std::atomic<bool> ready{false};
+std::atomic<bool> factories{false};   // both AddFactory calls succeeded
 std::atomic<std::uint32_t> made[2],destroyed[2];
 
 State* StateOf(void* object) noexcept { return reinterpret_cast<State*>(static_cast<char*>(object)+kStateAt); }
@@ -148,10 +149,12 @@ bool InstallSoldierFactory() noexcept {
     const bool v=edf41c::AddFactory(L"ZwVehicler",&CreateVehicler);
     const bool r=edf41c::AddFactory(L"ZwRuneBlade",&CreateRuneBlade);
     Log("ZWSOLDIER factories ZwVehicler=%d ZwRuneBlade=%d (AssultSoldier 0x%zX, object 0x%zX bytes)",v,r,st::kCtor,kObjectSize);
+    factories.store(v && r,std::memory_order_release);
     return v && r;
 }
 
 namespace soldier {
+bool FactoriesReady() noexcept { return factories.load(std::memory_order_acquire); }
 int ZwType(const void* object) noexcept {
     if(!object || !Readable(object,sizeof(void*)))return -1;
     return TypeOfVtable(*static_cast<const void* const*>(object));

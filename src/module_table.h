@@ -342,6 +342,12 @@ constexpr InstallEntry kInstalls[]={
     {IP::kBeforeGameStatus,Id::kWeaponRecords,&Install<&InstallWeaponRecords>},
     // the new classes' save (soldier_save.cpp): after the weapon records, whose load completion it listens to
     {IP::kBeforeGameStatus,Id::kSoldierSave,&Install<&InstallSoldierSave>},
+    // the new classes' player objects ZwVehicler / ZwRuneBlade (soldier_factory.cpp): in the game's factory table
+    // (edf41classes AddFactory: only its own fingerprints and the scene system not yet made, so the game's start-up
+    // registration 0x701859 still to come); and the per-type tables made to hold types 4 / 5 (soldier_type_patches.cpp).
+    // Both before the classes: the SoldierInit read adds 4 / 5 only when they and the save's stand-in are in.
+    {IP::kBeforeGameStatus,Id::kSoldierFactory,&Install<&InstallSoldierFactory>},
+    {IP::kBeforeGameStatus,Id::kSoldierTypePatches,&Install<&InstallSoldierTypePatches>},
     // six player classes (soldier_classes.cpp): before the game status, whose constructor reads the mode data's
     // SoldierInit (SetMode 0xDC460 from 0xD6722)
     {IP::kBeforeGameStatus,Id::kSoldierClasses,&Install<&InstallSoldierClasses>},
@@ -466,8 +472,6 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kEdf41Robo,&Install<&InstallEdf41Robo>},    // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
     {IP::kFeatures,Id::kEdf41Deiroi,&Install<&InstallEdf41Deiroi>},   // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
     {IP::kFeatures,Id::kEdf41Mother401,&Install<&InstallEdf41Mother401>},   // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
-    {IP::kFeatures,Id::kSoldierFactory,&Install<&InstallSoldierFactory>},   // the new classes' player objects ZwVehicler / ZwRuneBlade (soldier_factory.cpp)
-    {IP::kFeatures,Id::kSoldierTypePatches,&Install<&InstallSoldierTypePatches>},   // the per-type tables made to hold types 4 / 5 (soldier_type_patches.cpp)
     {IP::kFeatures,Id::kEnemyControlRadar,[](const LoadContext&) noexcept {Log("ENEMY CONTROL radar=%d",InstallEnemyControlRadar());}},
     {IP::kFeatures,Id::kControlledPvpSpawn,[](const LoadContext&) noexcept {Log("ENEMY CONTROL spawn ownership=%d",InstallControlledPvpSpawnBridge());}},
     {IP::kFeatures,Id::kEnemyControlNativePvp,[](const LoadContext&) noexcept {Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());}},

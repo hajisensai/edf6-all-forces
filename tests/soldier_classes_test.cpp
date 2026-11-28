@@ -293,6 +293,13 @@ int Extend(const char* in,const char* outPath) {
 }
 }  // namespace
 
+void TestPrerequisites() {
+    Check(zwclass::MissingPrerequisite(true,true,true)==nullptr,"all three installed: classes 4 / 5 added");
+    Check(zwclass::MissingPrerequisite(false,true,true)!=nullptr,"no save stand-in: the stock four");
+    Check(zwclass::MissingPrerequisite(true,false,true)!=nullptr,"no factories: the stock four");
+    Check(zwclass::MissingPrerequisite(true,true,false)!=nullptr,"no per-type tables: the stock four");
+}
+
 int main(int argc,char** argv) {
     if(argc==4 && std::strcmp(argv[1],"--extend")==0)return Extend(argv[2],argv[3]);
     TestBuilder();
@@ -300,6 +307,7 @@ int main(int argc,char** argv) {
     TestCategories();
     TestRefusals();
     TestCounts();
+    TestPrerequisites();
     std::printf("soldier_classes_test: %d/%d checks passed\n",checks-failures,checks);
     return failures?1:0;
 }

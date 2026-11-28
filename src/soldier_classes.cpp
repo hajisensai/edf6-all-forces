@@ -14,8 +14,15 @@
 //
 // Everything is checked before anything is written; the writes go in an order where each prefix is harmless with four
 // classes (the clamps, the play count stub, the category read, the SoldierInit read last).
+//
+// The redirected read adds classes 4 / 5 only when the save's stand-in, the factories and the per-type tables are all in
+// (zwclass::MissingPrerequisite; those modules install before this one in kBeforeGameStatus): otherwise it returns the
+// stock nodes, logs why, and SoldierClassesActive() is false.
 #include "soldier_classes.h"
 #include "soldier_classes_logic.h"
+#include "soldier_factory.h"
+#include "soldier_save.h"
+#include "soldier_type_patches.h"
 #include "sgo_build_logic.h"
 #include "edf_layout.h"
 #include "plugin_log.h"
@@ -136,6 +143,12 @@ const unsigned char* SoldierInitHook(void* doc,const wchar_t* key) noexcept {
     const unsigned char* const init=read(doc,key);
     std::lock_guard<std::mutex> hold(lock);
     pendingFrom=pendingTo=nullptr;
+    // The modules classes 4 / 5 need were installed (or refused) at load, before this one; this runs from the game status's
+    // constructor on, so their state is final here.
+    if(const char* why=zwclass::MissingPrerequisite(SoldierSaveActive(),soldier::FactoriesReady(),SoldierTypePatchesActive())) {
+        Refuse(why);
+        return init;
+    }
     const unsigned char* const cats=read(doc,L"SoldierWeaponCategory");
     if(!init || !cats) {
         Refuse("CONFIG.SGO has no SoldierInit or no SoldierWeaponCategory");

@@ -9,9 +9,13 @@
 #include <cstdint>
 
 namespace crew {
-bool InstallSoldierFactory() noexcept;   // module "soldier factory" (src/module_table.h), the kFeatures phase
+bool InstallSoldierFactory() noexcept;   // module "soldier factory" (src/module_table.h), kBeforeGameStatus before "soldier classes"
 
 namespace soldier {
+// Both factories are added to edf41classes' table and their clones built (InstallSoldierFactory succeeded). The game
+// registers them with its own classes later in its start-up 0x7004F0 (0x701859), after it made the game status (0x701145,
+// whose SoldierInit read asks this): the furthest that read can know. Classes 4 / 5 are offered only then (soldier_classes.cpp).
+bool FactoriesReady() noexcept;
 // 4 / 5 for an object a new-class factory made (alive: its vptr is the clone's), -1 for anything else (or null).
 int ZwType(const void* object) noexcept;
 // Whether `vptr` is a new-class clone's main vtable: the plugin's soldier checks that compare an object's vptr with the four stock
