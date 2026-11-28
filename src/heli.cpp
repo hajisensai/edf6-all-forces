@@ -33,6 +33,7 @@
 // dropped at a new mission (ResetHelis, with the player's track and the rescue) and reused only once its heli
 // has not been flown for kStaleMs: a full table takes on no new heli rather than drop a live one.
 #include "edf/input_source.h"
+#include "soldier_factory.h"
 #include "step_fresh.h"
 #include "edf_layout.h"
 #include "config.h"
@@ -743,7 +744,7 @@ bool IsSoldier(const unsigned char* o) noexcept {
     if(!Readable(o,8))return false;
     const auto vt=At<const unsigned char*>(o,0);
     for(const auto r:kSoldierVts)if(vt==image+r)return true;
-    return false;
+    return soldier::IsZwVtable(vt);   // classes 4 / 5 (their own vtables, src/soldier_factory.h)
 }
 
 void AddFriend(FriendList& l,const unsigned char* o) noexcept {

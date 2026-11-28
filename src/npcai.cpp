@@ -22,6 +22,7 @@
 // one with no identity), as the stock AI writes only theirs; the block goes to the other machines the way the stock AI's
 // does (§2.1).
 #include "host_settings.h"
+#include "soldier_factory.h"
 #include "edf/input_source.h"
 #include "step_fresh.h"
 #include "edf_layout.h"
@@ -3465,10 +3466,12 @@ bool NpcOwnsNativeThink(const void* nativeTable,const void* function) noexcept {
     return false;
 }
 
+// A soldier of the stock four (kSoldiers) or of classes 4 / 5 (src/soldier_factory.h: their own vtables, AssultSoldier
+// underneath; their Think is AssultSoldier's live slot 7, inherited, so ThinkHook<0>). SoldierClassIndex stays the stock four's.
 bool IsSoldierClassLive(const void* human) noexcept {
     const auto vt=At<const unsigned char*>(human,0);
     for(const auto& c:kSoldiers)if(vt==image+c.vtable)return true;
-    return false;
+    return soldier::IsZwVtable(vt);
 }
 bool IsSoldierClass(const void* human) noexcept { return stepobj::Reads(human,8) && IsSoldierClassLive(human); }
 namespace {
