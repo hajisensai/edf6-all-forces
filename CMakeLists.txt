@@ -161,7 +161,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 # The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
-target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/ui_gpu.cpp src/ui_text.cpp src/armory.cpp src/armory_draw.cpp src/armory_presets.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/ui_gpu.cpp src/ui_text.cpp src/armory.cpp src/armory_draw.cpp src/armory_presets.cpp src/armory_look.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp src/pack_switch.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
@@ -1294,6 +1294,9 @@ add_test(NAME pack_switch_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 set_tests_properties(pack_switch_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The 整备 look page: its signatures and GameStatus offsets against EDF.dll read as a file (skipped without the game).
+add_test(NAME armory_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/armory_look_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(armory_look_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
 add_test(NAME player_vehicle_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_vehicle_native_audit.py")
 set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)

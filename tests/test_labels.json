@@ -250,6 +250,19 @@
    ],
    "scripts": []
   },
+  "armory_look_logic": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "armory_look_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": []
+  },
   "armory_native": {
    "labels": [
     "plugin-air",
@@ -7413,6 +7426,28 @@
    ],
    "scripts": []
   },
+  "soldier_classes": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "soldier_classes_native": {
+   "labels": [
+    "native-codec",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_classes_native_audit.py"
+   ]
+  },
   "soldier_identity": {
    "labels": [
     "plugin-core",
@@ -7422,7 +7457,55 @@
   },
   "soldier_identity_native": {
    "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
     "test-data"
+   ],
+   "scripts": [
+    "tests/soldier_identity_native_audit.py"
+   ]
+  },
+  "soldier_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_native_audit.py"
+   ]
+  },
+  "soldier_save": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_save_native": {
+   "labels": [
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_save_native_audit.py"
+   ]
+  },
+  "soldier_type": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
    ],
    "scripts": []
   },
@@ -9217,6 +9300,26 @@
    ],
    "scripts": [
     "tests/xmorph_registry_guard.py"
+   ]
+  },
+  "zw_classes": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/zw_classes_test.py"
    ]
   }
  },
