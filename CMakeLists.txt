@@ -926,6 +926,11 @@ add_executable(vehicler_foot_test tests/vehicler_foot_test.cpp)
 target_include_directories(vehicler_foot_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(vehicler_foot_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME vehicler_foot COMMAND vehicler_foot_test)
+# The Rune Blade's weapons (src/runeblade_weapons_logic.h): the rounds' marks, Matins Bell's 2-enemy pierce limit.
+add_executable(runeblade_weapons_test tests/runeblade_weapons_test.cpp)
+target_include_directories(runeblade_weapons_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(runeblade_weapons_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME runeblade_weapons COMMAND runeblade_weapons_test)
 # The Vehicler's start seat (src/vehicler_start_logic.h): the request's gate, what follows it, the NPCs' driver-seat bar.
 add_executable(vehicler_start_test tests/vehicler_start_test.cpp)
 target_include_directories(vehicler_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -1220,6 +1225,10 @@ add_test(NAME zw_vehicles COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/t
 # the Root.cpk part skips without the game.
 add_test(NAME zw_vehicler_sgo COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_vehicler_sgo_test.py")
 set_tests_properties(zw_vehicler_sgo PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
+# The Rune Blade's weapon rows and SGOs (tools/zw_weapons.py tuned rows, src/runeblade_weapons_logic.h marks); the Root.cpk
+# part skips without the game.
+add_test(NAME runeblade_weapons_sgo COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/runeblade_weapons_test.py")
+set_tests_properties(runeblade_weapons_sgo PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")

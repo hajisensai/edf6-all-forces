@@ -211,7 +211,8 @@ def port_rows() -> list[dict]:
 def zw_rows(stock: list[dict]) -> list[dict]:
     """The new classes' rows (tools/zw_weapons.py): a none row named as its stock template, the rest by their texts."""
     by_id = {r['id'].upper(): r for r in stock}
-    return [{'id': w.id, 'source': 0, 'category': w.category, 'raw': zw.LEVEL, 'flags': FLAG_INITIAL,
+    return [{'id': w.id, 'source': 0, 'category': w.category, 'raw': zw.LEVEL,
+             'flags': FLAG_INITIAL if w.acquire == 1 else 0,
              'names': tuple(w.text[lang][0] for lang in LANGS) if w.text else by_id[w.template.upper()]['names']}
             for w in zw.WEAPONS]
 

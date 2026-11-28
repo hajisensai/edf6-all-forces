@@ -456,6 +456,14 @@
    ],
    "scripts": []
   },
+  "bullet_expand_cull": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "bullet_pass_test": {
    "labels": [
     "plugin-air",
@@ -7048,6 +7056,19 @@
    ],
    "scripts": []
   },
+  "runeblade_weapons": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "runeblade_weapons_sgo": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": []
+  },
   "save_backup": {
    "labels": [
     "autoturret-tools",
@@ -8751,6 +8772,38 @@
    ],
    "scripts": [
     "tests/vehicler_foot_native_audit.py"
+   ]
+  },
+  "vehicler_logistics": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "vehicler_start": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehicler_start_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/vehicler_start_native_audit.py"
    ]
   },
   "vehsound_gun": {
