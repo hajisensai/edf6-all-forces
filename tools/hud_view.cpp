@@ -861,8 +861,9 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         {L"步兵小队（4人）",SupportIcon::squad},{L"步兵大队（12人）",SupportIcon::platoon},{L"坦克·有人",SupportIcon::tank},
         {L"坦克·空车交付",SupportIcon::tank},{L"装甲运兵车·有人",SupportIcon::apc},{L"装甲运兵车·空车交付",SupportIcon::apc},
         {L"民用轻卡·有人",SupportIcon::truck},{L"民用轻卡·空车交付",SupportIcon::truck},
-        // The salvo interceptor and the strikes (2026-10-26: every support on the bar).
-        {L"天顶截击机",SupportIcon::jet},
+        // The Arsenal Bird (2026-11-28: its drone mode's 守点 / 跟随 and its missile sortie on one row) and the strikes
+        // (2026-10-26: every support on the bar).
+        {L"武库鸟·守点",SupportIcon::carrier},{L"武库鸟·跟随",SupportIcon::carrier},{L"武库鸟·出击",SupportIcon::jet},
         {L"火箭齐射",SupportIcon::barrage},{L"精确制导火箭",SupportIcon::barrage},{L"温压齐射",SupportIcon::barrage},
         {L"子母火箭",SupportIcon::barrage},{L"徐进弹幕",SupportIcon::barrage},{L"同时弹着射击",SupportIcon::barrage},
         {L"重型臼炮",SupportIcon::barrage},{L"巡航导弹",SupportIcon::barrage},{L"弹道导弹",SupportIcon::barrage},

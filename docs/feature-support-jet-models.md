@@ -145,35 +145,47 @@
 - 螺旋桨不转（骨骼已留，插件未驱动）；没有尾焰（涡桨，模型没有喷口骨骼）；
 - 运输机投伞兵的位置（仍是插件按机体原点投放）。
 
-### 6.6 天顶截击机：Sketchfab 的 TU-1600 Zvezda（2026-11-26）
+### 6.6 武库鸟：ACE COMBAT 7 的 Arsenal Bird 与 M101（2026-11-28，取代 2026-11-26 的 TU-1600 天顶截击机）
 
-- 来源：Sketchfab「SPACESHIP PAK DA (K) TU-1600 ZVEZDA」（uid `30e58a90fe874f21afdfaa5c4022b311`，作者 Ilya Shevchuk / shilma513，
-  许可 **CC Attribution（CC BY 4.0）**；177534 三角形、7 个材质、4096² 贴图）。原件在 `D:\APP\edf6-models\downloads\salvo_tu1600\`，只当数据读
-  （`python -I`，脚本放在下载目录外、路径当参数传）。替换的是 `tools/calls.py` `sortie_missile_rain`（天顶截击机）的外观，原来是
-  bomber501_2 加一圈发光导弹舱圆柱。
-- `tools/prep_tu1600.py`（开发者用）→ `D:\APP\edf6-models\salvo_tu1600\`：源模型 +Y 朝上、机头朝 -x，转到游戏坐标 (z, y, -x)（绕 Y 旋转，
-  绕向不变）；缩放到翼展 40 m（系数 1.39958），整机 **40.0 × 9.67 × 61.8 m**（宽 × 高 × 长）；最低点为 y 0，x、z 居中。
-  `mesh_simplify` 按材质分组、保 UV 缝，从 177534 减到 72000 三角形（最大误差 0.03 m）。去掉 Decals 材质（MASK 贴花，62 个三角形）：船体材质不透明，
-  留着会露出透明角。贴图减半到 2048²（同原版机体量级），法线是 DirectX 绿通道（G 朝下），按 `pbr_maps` 统一成 R 粗糙度 / G 金属度。
-  SOURCE.txt 记署名与改动，`tu1600.json` 记材质、尺寸和两个喷口。
-- 喷口：机尾六个钟形喷管，两侧各三个，呈三角形排布。`MAX_NOZZLES` 是 4，放不下 6 个，所以每侧三个合成一束：`nozzle_0` / `nozzle_1`
-  位于三个喷口端面的中心 (±5.44, 4.27, -25.90)，宽 4.73 m（三个喷口的外接宽度），长 23.6 m（宽 × 5）。
-- 生成：`pylib/salvo_model.py`，骨架同 C-130：`mdl` → `tu1600` → `globalSRT` → `body` → `tu_hull`，再挂两个喷口骨骼和 `hp_gun` / `hp_store`。
-  材质用 V505 船体材质，换上本模型的贴图（7 个材质，BC7 / BC5 / DXT1），LOD 由 `model_lod.finish` 自动生成（72k / 25k / 12.6k）。
-  `tools/make_jets.py` `salvo_files` 写出 `EDF6VC_SALVO_INTERCEPTOR.MRAB` 和碰撞 `EDF6VC_SALVO_INTERCEPTOR_AIRFRAME.SHKT`
-  （`aircraft_collision.SALVO_FILES`，属于 `PACK_FILES`，SGO 带 `edf6vc_airframe`）。安装器缓存的模型输入是 `jets` → `salvo_tu1600/`，
-  发布包和分享包（`run_export.py EXTERNAL_MODELS`）都带这个目录。
-- 发射点：256 枚导弹从 `hp_store` 出膛，偏移沿用原版导弹舱的四个炮口偏移（`vcobjects.hardpoint_muzzles`，所有战机共用，本模型不改）。
-  决定出膛位置的是**骨骼位置**，不是偏移：`jet_hardpoints.with_hardpoints` 把 `hp_store` 放在机身纵向中部，在满足「每个炮口都在蒙皮内、
-  离地不少于 `GROUND_CLEAR`」的前提下取最高处。实测 `hp_store` 在 (0, 1.42, 0)，八个炮口落在机腹中线两侧 x ±1.05…±1.96、y 0.75…0.94、
-  z 0.2…1.5。没有外挂圆柱，原模型的发光导弹舱随之去掉，发光只来自导弹本身。
-- 缺 `salvo_tu1600/` 目录时，`make_jets` 打一行提示，不写模型、碰撞和 `EDF6VC_JET_SALVO_INTERCEPTOR.SGO`；插件规划时找不到预载的 SGO，
-  天顶截击机就不出动（同 6.4），不退回旧外观。
-- `vcobjects.JETS[SALVO_JET]` 指向新模型：`(app:/object/edf6vc_salvo_interceptor.mrab, edf6vc_salvo_interceptor.mdb)`、文件 `SALVO_MODEL`、
-  `body` / `anchor` 都是 `body`（同 C-130 / Helicarrier）。
-- 需实机确认：机头朝向与大小观感（62 m 长，编队间距是否够）；两束尾焰的位置；导弹从机腹出膛的观感；碰撞与着地；
-  质量（2026-11-26 起）按同尺寸的 Tu-160 取 240 t（§8），不再借截击机的 `JET_MASSES[7003]`：满挂（4.5 t 导弹 + 挂架）几乎不拖慢它，
-  撞击伤害是原来 20 t 时的 12 倍。
+用户原话与设计决定见 `docs/feedback-2026-11-28-arsenal-bird.md`。一个机体两种用法，支援栏同一行「武库鸟 · 守点 / 跟随 / 出击」：
+
+- **导弹模式**：`tools/calls.py` `sortie_missile_rain`（7808，键名 `SORTIE_MISSILE_RAIN` 不变），即原来的天顶截击机出击，改名「武库鸟·出击」，
+  Body::salvoInterceptor（标记 7070，`vcobjects.SALVO_JET`）换上武库鸟模型。
+- **无人机模式**：新增 `ARSENAL_BIRD` / `ARSENAL_BIRD_F`（7122 / 7123，守点 / 跟随，`JetRole::arsenalCarrier`），Body::arsenalCarrier
+  （标记 7071，`vcobjects.ARSENAL_CARRIER_JET`）：母舰的耐久、挂载、AI（`jet_carrier.cpp`：每 1.5 秒放一架、回收到机腹下的停靠点、10 秒装弹、
+  损失的 30 秒补一架、绕锚点盘旋），放出的是 Body::m101Drone（标记 7072，`vcobjects.M101_JET`：机炮无人机的耐久、武器和 AI，换 M101 模型）。
+  机炮无人机按母舰取机体（`BodyRow::gunDrone`，`jet.cpp GunDroneOf`），联机仍是 `SupportDroneKind::gun`，每台机器从母舰标记解析出 M101。
+
+来源与整理：
+
+- 来源：ACE COMBAT 7 的社区 mod「Arsenal Bird (AIAS)」（压缩包 `Arsenal Bird-3317-1-1-1757441192.7z`，其中 `~AIAS_Base_P.pak` 的 UE 4.18
+  网格与贴图：武库鸟机体和 M101 无人机 `w_wuav_m101_arsb`，解成 OBJ + PNG），设计属 Bandai Namco。涂装 14。原件只当数据读
+  （`python -I`，脚本放在原件目录外、路径当参数传），不进仓库。
+- `tools/prep_arsenal_bird.py`（开发者用）→ 模型包 `arsenal_bird/`：源坐标是 UE 的（厘米，+X 机头、+Y 右、+Z 上，左手系），
+  游戏坐标 (x, y, z) = (-Y, Z, X) / 100，镜像后绕向正好是游戏的（实测体积为正，不翻面）；最低点为 y 0，x、z 居中。补顶点法线
+  （45° 自动平滑，源文件没有）；机体 5521 个 V 落在下一格（-1..0，UE 按 wrap 采样）的三角形上移一格。SOURCE.txt 记署名与改动，
+  `arsenal_bird.json` 记骨骼、材质、尺寸。
+- 尺寸：武库鸟按原尺寸，**106.6 × 14.9 × 22.8 m**（翼展 × 高 × 长），111267 三角形全保留（一个材质，不跑 `mesh_simplify`：
+  四叶螺旋桨和薄舵面最先被塌缩吃掉）。M101 **3.24 × 1.53 × 5.70 m**，4384 三角形。
+- M101 缩放依据：源模型只有 1.33 m 长，放在 5.7 m 的原有机炮无人机（`EDF6VC_DRONE.MRAB`，pd607 ×3，`jet_models.RECIPES`）旁边像一枚导弹；
+  插件的无人机 AI、碰撞和武器都按那架的尺寸定，所以按长度对齐放大 4.2897 倍（`DRONE_LENGTH` 5.7 m）。
+- 贴图：机体颜色图 4096 × 2048 减半到 2048 × 1024（一架支援机，4096 宽光颜色就要 22 MB 显存），M101 的减到 1024²（同时在空中多架、共用）。
+  法线是 BC5（只有 R / G），按 DirectX 绿通道（实测 G 朝下 0.54 / 0.80）重建 Z；MREC（R 金属 / G 粗糙 / B 自发光）重排成插件的
+  R 粗糙度 / G 金属度，B（M101 灯的自发光）没有槽位，丢掉。材质沿用 V505 船体材质换贴图（同 C-130）。
+- 无喷口：武库鸟是螺旋桨推进，M101 的尾焰也没建模，两个模型都没有喷口骨骼，插件对没有喷口骨骼的模型不画尾焰（`src/booster.cpp ExhaustOf`）。
+- 生成：`pylib/salvo_model.py`，骨架同 C-130：`mdl` → 模型骨骼 → `globalSRT` → `body` → 机体，再挂 `hp_gun` / `hp_store`。
+  `tools/make_jets.py` `salvo_files` 写出 `EDF6VC_SALVO_INTERCEPTOR.MRAB`（机体，两种模式共用）、`EDF6VC_M101.MRAB` 与各自的碰撞
+  （`aircraft_collision.SALVO_FILES`，属于 `PACK_FILES`），以及 `EDF6VC_JET_SALVO_INTERCEPTOR.SGO` / `EDF6VC_JET_ARSENAL_CARRIER.SGO` /
+  `EDF6VC_JET_M101.SGO`。安装器缓存的模型输入是 `jets` → `arsenal_bird/`，发布包（`build_release.RELEASE_MODELS`）带这个目录。
+- 发射点：256 枚导弹从 `hp_store` 出膛，偏移沿用原版导弹舱的四个炮口偏移（`vcobjects.hardpoint_muzzles`，所有战机共用）。
+  `jet_hardpoints.with_hardpoints` 把 `hp_store` 放在**机腹**中线（没有起落架骨骼时取机身纵向中部，在炮口都在蒙皮内、离地不少于
+  `GROUND_CLEAR` 的前提下取最高处）：实测武库鸟 `hp_store` (0, 3.46, -0.02)、`hp_gun` (0, 2.59, -0.02)；M101 `hp_store` (0, 1.29, 0)、
+  `hp_gun` (0, 0.86, 0)。没有发射器网格，发光只来自导弹本身。
+- 可登乘：武库鸟（无人机模式，按 Helicarrier 的旋翼母舰行，`playerjet_kinds.h kArsenalCatch`）和 M101（按机炮无人机的固定翼行）都在
+  `kBoardable`，SGO 驾驶座收四个兵种（`BOARDABLE_MARKS`）；没有请求来自驾的孪生（模型在模型包里），接机用玩家战斗机。导弹模式只飞一轮就离开地图，不可登乘。
+- 缺 `arsenal_bird/` 目录时，`make_jets` 打一行提示，不写这两个模型、碰撞和三个 SGO；插件规划时找不到预载的 SGO，三个呼叫都不出动（同 6.4），
+  不退回旧外观。
+- 需实机确认：机头朝向与大小观感（107 m 翼展，编队与盘旋半径是否够）；导弹从机腹出膛的观感；M101 从机腹放出 / 回收的位置；玩家驾驶 107 m 飞翼按旋翼母舰飞的手感；碰撞与着地；质量 339.7 t（§8）下的撞击与满挂手感。
 
 ## 7. 验证
 
@@ -214,19 +226,20 @@
 | X-Morph 空中炮艇 7052（4.8 × 2.8 × 9.2 m） | Folland Gnat F.1 | 6 t → 2.8 t | 同上 | 同上 |
 | X-Morph 重型突击炮艇 7053（12.3 × 4.0 × 14.5 m） | Su-25 | 15 t → 12.4 t | 9,800 + 3,200 L ×0.8 | Wikipedia Su-25 |
 | X-Morph 重型轰炸机 7054（20.1 × 2.8 × 15.0 m） | A-6E | 30 t → 19.3 t | 12,093 + 9,030 L ×0.8 | Wikipedia A-6 Intruder |
-| 天顶截击机 7070（TU-1600，40.0 × 9.7 × 61.8 m） | Tu-160（对照 B-1B 207 t） | 20 t（借 7003）→ 240 t | 110,000 + 130,000 | Wikipedia Tu-160；B-1B 87,090 + 120,326（USAF） |
+| 武库鸟 7070 / 7071（106.6 × 14.9 × 22.8 m；2026-11-26 的 TU-1600 是 240 t） | Stratolaunch（117 m 翼展、73 m 长、15 m 高） | 20 t（借 7003）→ 339.7 t | 226,796 空重 + 112,874 燃油（最大起飞 589,670 − 外挂 250,000；Wikipedia 无油量数字，按差值） | Wikipedia Scaled Composites Stratolaunch |
+| M101 无人机 7072（3.24 × 1.53 × 5.70 m） | 同无人机 7006（BQM-167A） | 0.7 t（`JET_MASSES[7006]`） | 同无人机 | 同无人机 |
 | 沙扎比 7401、无畏舰 7601 | 不是飞机 | 71.2 t / 1e8 不变 | 设定值 / 超级航母排水量 | — |
 
 影响（离线算，原版挂载满挂时的质量比，推力与过载按它除）：
 
 - 战机：攻击 1.244 → 1.249、战斗 1.064 → 1.053、截击 1.140 → 1.103、多用途 1.173 → 1.147，无畏舰截击机 1.215 → 1.103：手感几乎不变。
 - 变重的：X-Morph 战斗机 1.19 → 1.34、炮艇 1.22 → 1.46、重型炮艇 1.28 → 1.33、轰炸机 1.19 → 1.29，无人机 1.12 → 1.38：满挂时推力 / 过载
-  少约 11–19%，打空后恢复；不算剧烈，没改飞行代码。天顶截击机 1.23 → 1.02，C-130 1.08 → 1.10，空母约 1.003。
-- 撞击伤害与质量成正比：空母 / Helicarrier ×2.7、天顶截击机 ×12、X-Morph 战斗机 ×0.56 等。
+  少约 11–19%，打空后恢复；不算剧烈，没改飞行代码。武库鸟（导弹模式，339.7 t）1.23 → 1.01，C-130 1.08 → 1.10，空母约 1.003。
+- 撞击伤害与质量成正比：空母 / Helicarrier ×2.7、武库鸟 ×17、X-Morph 战斗机 ×0.56 等。
 - 载重上限（40%）：攻击 8800 → 8640、战斗 6400 → 7720、截击 8000 → 10880、多用途 7200 → 8480 kg。**攻击机（含玩家攻击机）下降 160 kg**：
   已保存的 8640–8800 kg 攻击机挂载（如 38 枚 Mk 82 = 8740 kg）会按超重整条作废、按原版挂载出动并在日志点名；其余机体只放宽。
 - 玩家旋翼升力（`hover_lift.h PlayerLift`，按净重的 −1/3 次方）：空母直接按 327.2 t 算会从 10.57 掉到 7.57 m/s²，刹车 1 s 时仍以 0.7 m/s
   下沉（`hover_lift_check` 失败），重现 2026-10-06「空母…完全没办法正常开」。所以把升力满额的基准质量 `kFullLiftMass` 随这次重估同比放大
   （10 t × 327.2 / 120 = 27.3 t），空母 / Helicarrier 保持 10.57、无人机仍是满额；`hover_lift_check` 改用真实的 327.2 t。
 - 原版直升机的净重（`store_burden.h` `kHeliMass506` 5.5 t / `409` 6.8 t / `410` 15 t）这次没动。
-- 需实机确认：空母 / Helicarrier 玩家悬停爬升是否与之前一致；X-Morph 机与无人机满挂的手感；天顶截击机撞击与满挂手感；各机撞击伤害量级。
+- 需实机确认：空母 / Helicarrier 玩家悬停爬升是否与之前一致；X-Morph 机与无人机满挂的手感；武库鸟撞击与满挂手感；各机撞击伤害量级。

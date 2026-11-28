@@ -453,7 +453,7 @@ void PresetHands(std::uint32_t catalog,const SupportLoadout& load,int i,support_
 // names a body (support_loadout.h kVehicleKeys: the tank's, the strike jet's, ...); a jet sortie's (SORTIE_*, no key of
 // its own) the first guarding call of the same jet role that has one (the bomber's sortie the strike jet's
 // STRIKE, the defender's MULTIROLE, the fighter's FIGHTER); -1 none (the helicopters take no pylons, the
-// gunship and the Zenith none either). Derived from the call table alone, so the same on every machine of the room.
+// gunship and the Arsenal Bird's sortie none either). Derived from the call table alone, so the same on every machine of the room.
 int HullOf(int catalog) noexcept {
     if(catalog<0 || catalog>=kSupportConfigUnits)return -1;
     if(VehicleBodyOfKey(SupportCallKey(catalog))!=VehicleBody::none)return catalog;
@@ -1992,7 +1992,8 @@ SupportIcon SupportCallIcon(int index) noexcept {
         if(spec.heli>=0)return SupportIcon::heli;
         const auto role=static_cast<JetRole>(spec.jet);
         if(role==JetRole::gunship)return SupportIcon::gunship;
-        return role==JetRole::carrier || role==JetRole::blastCarrier || role==JetRole::dollCarrier ? SupportIcon::carrier : SupportIcon::jet;
+        return role==JetRole::carrier || role==JetRole::blastCarrier || role==JetRole::dollCarrier || role==JetRole::arsenalCarrier ?
+            SupportIcon::carrier : SupportIcon::jet;
     }
     if(InfantryCatalog(static_cast<std::uint32_t>(index)))return index==AirCount() ? SupportIcon::squad : SupportIcon::platoon;
     if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))return plane ? SupportIcon::jet : SupportIcon::heli;

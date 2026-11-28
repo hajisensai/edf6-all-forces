@@ -57,6 +57,7 @@ bool HooksOk() noexcept {UnexpectedWorldCall();}
 void DropRef(const ObjRef&) noexcept {UnexpectedWorldCall();}
 void JoinFlight(Jet&,unsigned) noexcept {UnexpectedWorldCall();}
 bool IsJetVehicle(const unsigned char*,Role*,Role*) noexcept {UnexpectedWorldCall();}
+Body GunDroneOf(const void*) noexcept {UnexpectedWorldCall();}
 bool DollMake(int,const unsigned char*,DWORD) noexcept {UnexpectedWorldCall();}
 bool DollReady() noexcept {UnexpectedWorldCall();}
 bool PreloadDolls(void*,bool) noexcept {UnexpectedWorldCall();}
