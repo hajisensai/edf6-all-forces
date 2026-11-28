@@ -7413,18 +7413,16 @@
    ],
    "scripts": []
   },
-  "soldier_classes": {
+  "soldier_native": {
    "labels": [
-    "plugin-core",
-    "plugin-native"
+    "test-data"
    ],
    "scripts": []
   },
-  "soldier_classes_native": {
+  "soldier_type": {
    "labels": [
     "plugin-core",
-    "plugin-native",
-    "test-data"
+    "plugin-native"
    ],
    "scripts": []
   },

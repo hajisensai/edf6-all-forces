@@ -169,6 +169,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 # Six player classes: SoldierInit / SoldierWeaponCategory copies with ZwVehicler / ZwRuneBlade (src/soldier_classes_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/soldier_classes.cpp)
+# The new classes' player objects and the per-type tables made to hold types 4 / 5 (src/soldier_type_logic.h,
+# docs/plan-2026-11-28-new-classes-impl.md §2 B).
+target_sources(EDF6VehicleCrew PRIVATE src/soldier_factory.cpp src/soldier_type_patches.cpp)
 # 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
@@ -897,6 +900,12 @@ add_executable(soldier_classes_test tests/soldier_classes_test.cpp)
 target_include_directories(soldier_classes_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(soldier_classes_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME soldier_classes COMMAND soldier_classes_test)
+# The new classes' pure part (src/soldier_type_logic.h): the script mapping, the nameplate and damage colours, the damage
+# colour stub's bytes, the site list (src/soldier_sites.inc) decoding.
+add_executable(soldier_type_test tests/soldier_type_test.cpp)
+target_include_directories(soldier_type_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(soldier_type_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME soldier_type COMMAND soldier_type_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 # The menu as the game's own dialogs: pages, buttons, paging, cancel, the edits and saves they make
@@ -1218,6 +1227,10 @@ add_test(NAME weapon_records_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOU
 set_tests_properties(weapon_records_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME soldier_classes_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_classes_native_audit.py" $<TARGET_FILE:soldier_classes_test>)
 set_tests_properties(soldier_classes_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The new classes' sites, the AssultSoldier vtables the clone copies and the slot 83 calls against the game's EDF.dll
+# (read only; the EDF.dll part skipped without the game).
+add_test(NAME soldier_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_native_audit.py")
+set_tests_properties(soldier_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1533,7 +1546,7 @@ target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permiss
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
 add_dependencies(offline_checks lazy_rows_test preload_set_test)
-add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test soldier_classes_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test support_pages_test weapon_list_logic_test weapon_page_logic_test room_coop_capability_test room_sync_test member_config_test)
+add_dependencies(offline_checks soldier_type_test soldier_classes_test worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test support_pages_test weapon_list_logic_test weapon_page_logic_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)

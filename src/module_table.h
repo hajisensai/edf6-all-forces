@@ -37,6 +37,8 @@
 #include "sazabi.h"
 #include "shield.h"
 #include "sidecar.h"
+#include "soldier_factory.h"
+#include "soldier_type_patches.h"
 #include "sightzoom_api.h"
 #include "sound.h"
 #include "stab_api.h"
@@ -243,6 +245,8 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kEdf41Robo,"edf41 robo",kLoadOnly) \
     M(kEdf41Deiroi,"edf41 deiroi",kLoadOnly) \
     M(kEdf41Mother401,"edf41 mother401",kLoadOnly) \
+    M(kSoldierFactory,"soldier factory",kLoadOnly) \
+    M(kSoldierTypePatches,"soldier type patches",kLoadOnly) \
     M(kEnemyControlRadar,"enemy control radar",kLoadOnly) \
     M(kControlledPvpSpawn,"controlled pvp spawn",kLoadOnly) \
     M(kEnemyControlNativePvp,"enemy control native pvp",nullptr) \
@@ -456,6 +460,8 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kEdf41Robo,&Install<&InstallEdf41Robo>},    // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
     {IP::kFeatures,Id::kEdf41Deiroi,&Install<&InstallEdf41Deiroi>},   // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
     {IP::kFeatures,Id::kEdf41Mother401,&Install<&InstallEdf41Mother401>},   // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
+    {IP::kFeatures,Id::kSoldierFactory,&Install<&InstallSoldierFactory>},   // the new classes' player objects ZwVehicler / ZwRuneBlade (soldier_factory.cpp)
+    {IP::kFeatures,Id::kSoldierTypePatches,&Install<&InstallSoldierTypePatches>},   // the per-type tables made to hold types 4 / 5 (soldier_type_patches.cpp)
     {IP::kFeatures,Id::kEnemyControlRadar,[](const LoadContext&) noexcept {Log("ENEMY CONTROL radar=%d",InstallEnemyControlRadar());}},
     {IP::kFeatures,Id::kControlledPvpSpawn,[](const LoadContext&) noexcept {Log("ENEMY CONTROL spawn ownership=%d",InstallControlledPvpSpawnBridge());}},
     {IP::kFeatures,Id::kEnemyControlNativePvp,[](const LoadContext&) noexcept {Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());}},
