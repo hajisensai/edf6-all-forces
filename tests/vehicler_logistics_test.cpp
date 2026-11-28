@@ -122,7 +122,8 @@ int main() {
         unsigned char bad[kCreditWire];
         std::memcpy(bad,bytes,sizeof(bad));bad[0]^=1;Check(!Decode(bad,sizeof(bad),o),"a wrong magic: refused");
         std::memcpy(bad,bytes,sizeof(bad));bad[4]=2;Check(!Decode(bad,sizeof(bad),o),"another version: refused");
-        std::memcpy(bad,bytes,sizeof(bad));bad[8]=4;Check(!Decode(bad,sizeof(bad),o),"an unknown kind: refused");
+        std::memcpy(bad,bytes,sizeof(bad));bad[8]=6;Check(!Decode(bad,sizeof(bad),o),"an unknown kind: refused");
+        std::memcpy(bad,bytes,sizeof(bad));bad[8]=0;Check(!Decode(bad,sizeof(bad),o),"kind 0: refused");
         std::memcpy(bad,bytes,sizeof(bad));bad[76]=0;Check(!Decode(bad,sizeof(bad),o),"no points: refused");
         std::memcpy(bad,bytes,sizeof(bad));bad[76]=kMostCredit+1;Check(!Decode(bad,sizeof(bad),o),"too many points: refused");
         // The victim a player's reference (a player is no kill), the player a NetId's: refused both ways.
@@ -165,12 +166,48 @@ int main() {
         std::memcpy(bad,bytes,sizeof(bad));bad[20]=kRowsMost+1;Check(!Decode(bad,sizeof(bad),o),"too many rows: refused");
         std::memcpy(bad,bytes,sizeof(bad));bad[24+2]=50;Check(!Decode(bad,sizeof(bad),o),"a row past the gauge: refused");
         std::memcpy(bad,bytes,sizeof(bad));bad[24+8]=bad[24];bad[24+9]=bad[25];Check(!Decode(bad,sizeof(bad),o),"one slot twice: refused");
-        std::memcpy(bad,bytes,sizeof(bad));bad[24+6]=1;Check(!Decode(bad,sizeof(bad),o),"a flag not defined: refused");
+        std::memcpy(bad,bytes,sizeof(bad));bad[24+6]=2;Check(!Decode(bad,sizeof(bad),o),"a flag not defined: refused");
         Check(!Decode(bytes,kCreditWire,o),"a state at the credit's size: refused");
         // A guest that hosts now: the host's last word, a held call given back.
         Ledger n;n.Start(30);
         Adopt(n,mirror);
         Check(n.gauge==40 && n.Points(5)==9 && n.Find(5)->held==0 && n.Points(9)==3,"the new host starts from the old one's word");
+    }
+    {
+        // A resupply on its way: the row's flag, sent and heard.
+        Ledger h;h.Start(40);h.Book(nullptr,3,5);
+        const std::uint32_t before=h.serial;
+        Check(h.Transit(3,true) && h.serial!=before,"on its way: the row changes");
+        Check(!h.Transit(3,true),"the same again: no change");
+        Check(!h.Transit(7,true),"no row: nothing");
+        unsigned char bytes[kStateWire];Msg o;Mirror mirror;
+        Check(Encode(StateOf(h),bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),o),"a state with a resupply on its way");
+        Hear(mirror,o);
+        Check(mirror.Find(3) && mirror.Find(3)->flags==kRowTransit,"a guest sees it on its way");
+        Check(h.Transit(3,false),"arrived");
+        Check(Encode(StateOf(h),bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),o),"(again)");
+        Hear(mirror,o);
+        Check(mirror.Find(3)->flags==0,"and that it arrived");
+        h.Start(40);Check(!h.Find(3),"a new mission: no row on its way");
+    }
+    {
+        // handed / retired: a hull and its courier by NetId, the flags.
+        Msg m;m.kind=Kind::handed;Native(m.victim,3);Native(m.player,4);m.points=kHandedFollows;
+        unsigned char bytes[kCreditWire];Msg o;
+        Check(WireOf(Kind::handed)==kCreditWire && WireOf(Kind::retired)==kCreditWire,"handed / retired: the credit's size");
+        Check(Encode(m,bytes,sizeof(bytes)),"a handed encodes");
+        Check(Decode(bytes,sizeof(bytes),o) && o.kind==Kind::handed && !std::memcmp(o.victim,m.victim,32) &&
+              !std::memcmp(o.player,m.player,32) && o.points==kHandedFollows,"and decodes");
+        unsigned char bad[kCreditWire];
+        std::memcpy(bad,bytes,sizeof(bad));bad[76]=2;Check(!Decode(bad,sizeof(bad),o),"a handed flag not defined: refused");
+        std::memcpy(bad,bytes,sizeof(bad));std::memset(bad+44,0,32);Check(!Decode(bad,sizeof(bad),o),"a handed without its courier: refused");
+        Msg p=m;crew::netref::MakePlayer(1,p.victim);
+        Check(!Encode(p,bytes,sizeof(bytes)),"a player as the hull: not encoded");
+        Msg r;r.kind=Kind::retired;Native(r.victim,5);Native(r.player,6);
+        Check(Encode(r,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),o) && o.kind==Kind::retired && !o.points &&
+              !std::memcmp(o.victim,r.victim,32),"a retired round-trips");
+        std::memcpy(bad,bytes,sizeof(bad));bad[76]=1;Check(!Decode(bad,sizeof(bad),o),"a retired with flags: refused");
+        r.points=1;Check(!Encode(r,bytes,sizeof(bytes)),"(nor encoded)");
     }
     std::printf("vehicler_logistics: %d checks passed\n",checks);
     return 0;

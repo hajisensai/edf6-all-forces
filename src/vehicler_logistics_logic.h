@@ -67,6 +67,7 @@ struct Row {
     unsigned points=0;        // what may be spent
     unsigned held=0;          // the price of the call being planned (0: none)
     std::uint64_t ticket=0;   // its ticket (0: none)
+    bool transit=false;       // a resupply of this player's on its way (zw_vehicle_dispatch.h ZwDeliverPending, the host's)
 };
 enum class Booked : std::uint8_t {
     kept,        // the points added (maybe fewer than given: the gauge's cap)
@@ -144,6 +145,12 @@ struct Ledger {
         r->points+=r->held;r->held=0;r->ticket=0;++serial;   // points + held never past the gauge: it fits
         return true;
     }
+    // Whether `slot` has a resupply on its way (the host's dispatch says): true when that changed.
+    bool Transit(int slot,bool on) noexcept {
+        Row* const r=Find(slot);
+        if(!r || r->transit==on)return false;
+        r->transit=on;++serial;return true;
+    }
     // The gauge lowered during a mission: every row brought within it (held first kept: it is a call being planned).
     bool Cap(unsigned most) noexcept {
         if(most>kMostGauge)most=kMostGauge;
@@ -159,7 +166,7 @@ struct Ledger {
 };
 
 // ---- a guest's word from the host ----
-struct MirrorRow { int slot=-1; unsigned points=0,held=0; };
+struct MirrorRow { int slot=-1; unsigned points=0,held=0,flags=0; };
 struct Mirror {
     bool heard=false;
     std::uint32_t serial=0;

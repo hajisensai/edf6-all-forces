@@ -7,7 +7,14 @@
 //   ack    (host -> that guest):     magic, version, kind 3 @8, victim @12, the rest zero (kCreditWire bytes): the
 //                                    guest stops sending it again
 //   state  (host -> every guest):    magic, version, kind 2 @8, serial @12, gauge @16, count @20, rows @24 (kRowWire a
-//                                    row: slot u16, points u16, held u16, flags u16 zero), kRowsMost rows (the unused zero)
+//                                    row: slot u16, points u16, held u16, flags u16: bit 0 a resupply of that player's on
+//                                    its way), kRowsMost rows (the unused zero)
+//   handed (host -> every guest):    magic, version, kind 4 @8, hull @12 (the delivered vehicle's NetId), courier @44 (the
+//                                    soldier who drove it in), flags @76 (bit 0: the courier now follows the owner): the
+//                                    vehicle is its owner's now (zw_vehicle_dispatch.cpp)
+//   retired (host -> every guest):   magic, version, kind 5 @8, hull @12 (the replaced vehicle's NetId), courier @44, flags
+//                                    @76 zero: the courier drove the old vehicle off the field; every machine deletes its
+//                                    copy of both (a native deletion is no message of the game's)
 // The resupply's call is no message of this channel: it is the support transaction catalog 1019 (zw_vehicle_dispatch.h),
 // the requester the authenticated transport's player; the host holds the price there (the ledger's hooks).
 #pragma once
@@ -22,12 +29,13 @@ constexpr std::uint32_t kMagic=0x474C575Au;   // "ZWLG"
 constexpr std::uint32_t kVersion=1;
 constexpr std::size_t kCreditWire=80,kRowWire=8,kStateWire=24+kRowWire*kRowsMost;
 
-enum class Kind : std::uint8_t { credit=1,state=2,ack=3 };
+enum class Kind : std::uint8_t { credit=1,state=2,ack=3,handed=4,retired=5 };
+constexpr unsigned kRowTransit=1u,kHandedFollows=1u;
 struct Msg {
     Kind kind=Kind::state;
-    unsigned char victim[32]{};   // credit / ack
-    unsigned char player[32]{};   // credit
-    unsigned points=0;            // credit
+    unsigned char victim[32]{};   // credit / ack; handed / retired: the hull
+    unsigned char player[32]{};   // credit; handed / retired: the courier
+    unsigned points=0;            // credit; handed / retired: the flags
     std::uint32_t serial=0;       // state
     unsigned gauge=0;             // state
     int count=0;                  // state
@@ -42,11 +50,13 @@ inline bool Valid(const Msg& m) noexcept {
     case Kind::credit:
         return netref::ValidNative(m.victim,false) && netref::IsPlayer(m.player) && m.points>=1 && m.points<=kMostCredit;
     case Kind::ack: return netref::ValidNative(m.victim,false);
+    case Kind::handed: return netref::ValidNative(m.victim,false) && netref::ValidNative(m.player,false) && m.points<=kHandedFollows;
+    case Kind::retired: return netref::ValidNative(m.victim,false) && netref::ValidNative(m.player,false) && !m.points;
     case Kind::state:
         if(m.gauge>kMostGauge || m.count<0 || m.count>kRowsMost)return false;
         for(int i=0;i<m.count;++i) {
             const MirrorRow& r=m.rows[i];
-            if(r.slot<0 || r.slot>=kSlotsMost || r.points+r.held>m.gauge)return false;
+            if(r.slot<0 || r.slot>=kSlotsMost || r.points+r.held>m.gauge || (r.flags&~kRowTransit))return false;
             for(int j=0;j<i;++j)if(m.rows[j].slot==r.slot)return false;
         }
         return true;
@@ -66,10 +76,11 @@ inline bool Encode(const Msg& m,void* bytes,std::size_t size) noexcept {
         w.Seek(detail::kSerial).U32(m.serial).U32(m.gauge).U32(static_cast<std::uint32_t>(m.count));
         for(int i=0;i<m.count;++i)
             w.U16(static_cast<std::uint16_t>(m.rows[i].slot)).U16(static_cast<std::uint16_t>(m.rows[i].points))
-             .U16(static_cast<std::uint16_t>(m.rows[i].held)).U16(0);
+             .U16(static_cast<std::uint16_t>(m.rows[i].held)).U16(static_cast<std::uint16_t>(m.rows[i].flags));
     } else {
         w.Seek(detail::kVictim).Ref(m.victim,false);
         if(m.kind==Kind::credit)w.Ref(m.player,false,true).U32(m.points);
+        else if(m.kind!=Kind::ack)w.Ref(m.player,false).U32(m.points);
     }
     return w.Ok();
 }
@@ -82,7 +93,7 @@ inline bool Decode(const void* bytes,std::size_t size,Msg& out) noexcept {
     r.Skip(4);
     if(r.U32()!=kVersion)return false;
     const std::uint8_t kind=r.U8();
-    if(kind<1 || kind>3)return false;
+    if(kind<1 || kind>5)return false;
     m.kind=static_cast<Kind>(kind);
     if(size!=WireOf(m.kind))return false;
     if(m.kind==Kind::state) {
@@ -93,12 +104,13 @@ inline bool Decode(const void* bytes,std::size_t size,Msg& out) noexcept {
         m.count=static_cast<int>(count);
         for(int i=0;i<m.count;++i) {
             m.rows[i].slot=r.U16();m.rows[i].points=r.U16();m.rows[i].held=r.U16();
-            if(r.U16())r.Fail();   // flags: none defined
+            m.rows[i].flags=r.U16();
         }
     } else {
         r.Seek(detail::kVictim);
         r.Ref(m.victim,false);
         if(m.kind==Kind::credit){r.Ref(m.player,false,true);m.points=r.U32();}
+        else if(m.kind!=Kind::ack){r.Ref(m.player,false);m.points=r.U32();}
     }
     if(!r.Ok() || !detail::Valid(m))return false;
     out=m;
@@ -111,7 +123,7 @@ inline Msg StateOf(const Ledger& l) noexcept {
     m.kind=Kind::state;m.serial=l.serial;m.gauge=l.gauge;
     for(const Row& r:l.rows) {
         if(r.slot<0 || m.count>=kRowsMost)continue;
-        m.rows[m.count++]=MirrorRow{r.slot,r.points,r.held};
+        m.rows[m.count++]=MirrorRow{r.slot,r.points,r.held,r.transit ? kRowTransit : 0u};
     }
     return m;
 }
