@@ -272,6 +272,7 @@ struct State {
     Shared nativeButton{};
     const wchar_t* nativeLabel=nullptr;
     bool nativeFocused=false;
+    bool stockHidden=false;        // the stock class / weapon select entries hidden on this screen (logged once)
     Gate gate{};
     bool previewShown=false;
     roompreview::PreviewSpec previewSpec{};   // what was asked of the preview last (asked again only on a change)
@@ -443,7 +444,7 @@ void ForgetMenu() noexcept {
 void Forget() noexcept {
     ForgetMenu();
     Release(st.nativeButton);
-    st.self=nullptr;st.nativeEntry=NativeEntry{};st.nativeLabel=nullptr;st.nativeFocused=false;
+    st.self=nullptr;st.nativeEntry=NativeEntry{};st.nativeLabel=nullptr;st.nativeFocused=false;st.stockHidden=false;
     followed.store(nullptr);
     followedGone.store(false);
 }
@@ -610,6 +611,28 @@ void NativeEntryDisplay(unsigned char* self,bool shown) noexcept {
             Release(text);
         }
         NativeEntryVisible(self,button.object,shown && st.nativeLabel!=nullptr);
+    }
+}
+// The stock class / weapon select entries (HQ ButtonGotoSelectArmy -> lyt_HUiHQSoldierSelect, the room's Button_Weapon
+// -> Request_Equipment) go once 整备's own entry is on this screen: 整备 is the one place weapons and the class are
+// picked (6 classes; the stock screens know 4). Every frame, as the native entry: the screen's own update may enable
+// them again. Split-screen 2P's ButtonGotoSelectArmy2P_1 / _2 stay: 整备 equips player 1 only. RoomLoadout turned off
+// mid-screen does not bring them back (the stock state they had is not known): the next time the screen is built it has
+// them.
+void HideStockEntries(unsigned char* self) noexcept {
+    if(!st.nativeEntry.ready)return;   // no 整备 entry here (old layouts / contracts): the stock entries are the way in
+    const wchar_t* const name=st.room ? L"Button_Weapon" : L"ButtonGotoSelectArmy";
+    Shared button=Find(self,name);
+    bool there=false;
+    __try {
+        there=button.object && button.control;
+        if(there)NativeEntryVisible(self,button.object,false);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ there=false; }
+    Release(button);
+    if(!st.stockHidden) {
+        st.stockHidden=true;
+        if(there)Log("ROOMUI the stock %ls hidden: 整备 picks the weapons and the class",name);
+        else Log("ROOMUI the stock %ls not in this %s layout: nothing hidden",name,st.room ? "room" : "HQ");
     }
 }
 // A TextField's text, font colour and shown flag (the canonical call: index by name, then the TextField at it, 0x886800).
@@ -794,6 +817,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     const bool entryShown=!st.menu.open && !armoryui::IsOpen() && !st.armoryTake;
     NativeEntryInput(st.nativeEntry,entryShown && hasInput && !st.gate.latched && Foreground());
     NativeEntryDisplay(self,entryShown);
+    HideStockEntries(self);
     std::uint64_t result;
     if(take && ctx) {
         alignas(16) unsigned char copy[kCtxSize];

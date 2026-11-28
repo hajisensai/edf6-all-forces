@@ -10,6 +10,7 @@
 
 namespace crew {
 unsigned char* image=nullptr;
+namespace wequip { int ClassCount() noexcept { return 4; } }   // weapon_equip.cpp (not linked): the stock classes
 Config config{};
 PlayerFix player{};
 bool supportSky=true,supportGround=true,supportMeasured=true;

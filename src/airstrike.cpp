@@ -53,6 +53,8 @@
 #include "online_authority.h"
 #include "preload_set.h"
 #include "unlock_ported.h"
+#include "player_slots.h"
+#include "weapon_equip.h"
 #include "weapon_records.h"
 #include <cmath>
 #include <cstdarg>
@@ -498,15 +500,17 @@ int SupportAirCallCount() noexcept { return kCallCount; }
 void AddEquippedCallItems(preload::Set& out) noexcept {
     constexpr unsigned kGameStatus=0x20B2890;
     constexpr std::size_t kWeapons=0x6E98,kClassStride=0x18;
-    constexpr int kSlots[4]={4,4,5,6};   // Ranger, Wing Diver, Air Raider, Fencer
+    // The classes the game has (the stock 4, with soldier_classes the plugin's 4 / 5), their slots from the rules.
+    const int counted=wequip::ClassCount();
+    const int classes=counted>0 ? (counted<playerslots::kClasses ? counted : playerslots::kClasses) : 4;
     __try {
         unsigned char* const gs=At<unsigned char*>(image,kGameStatus);
-        if(!gs || !Readable(gs+kWeapons,4*kClassStride) || !Readable(gs+kCfg+kTableRef,8))return;
+        if(!gs || !Readable(gs+kWeapons,static_cast<std::size_t>(playerslots::kClasses)*kClassStride) || !Readable(gs+kCfg+kTableRef,8))return;
         void* const table=gs+kCfg;
         if(!At<void*>(table,kTableRef))return;
         const std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
         alignas(8) unsigned char row[0x100];
-        for(int cls=0;cls<4;++cls)for(int i=0;i<kSlots[cls];++i) {
+        for(int cls=0;cls<classes;++cls)for(int i=0;i<playerslots::SlotsOf(cls);++i) {
             const auto id=At<std::int32_t>(gs,kWeapons+cls*kClassStride+i*4);
             if(id<0 || static_cast<std::uint32_t>(id)>=n)continue;
             reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,static_cast<std::uint32_t>(id));

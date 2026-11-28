@@ -133,7 +133,11 @@ void File() {
         "[Preset1]\r\nName=a\r\nWeapons0=a,b,c,d,e,f\r\n",              // weapons without class
         "[Preset1]\r\nName=a\r\nClass=0\r\nWeapons0=a,b,c\r\n",          // not 6
         "[Preset1]\r\nName=a\r\nClass=0\r\nWeapons0=a,b,c,d,e,f,g\r\n",  // 7
-        "[Preset1]\r\nName=a\r\nClass=4\r\n",                            // class
+        "[Preset1]\r\nName=a\r\nClass=6\r\n",                            // class (0..5)
+        "[Preset1]\r\nName=a\r\nClass=5\r\nWeapons6=a,b,c,d,e,f\r\n",    // no class 6
+        "[Book]\r\nFormat=1\r\n",                                        // version 1 has no Format line
+        "[Book]\r\nFormat=3\r\n",                                        // a newer plugin's book
+        "[Book]\r\nFormat=2\r\nFormat=2\r\n",                            // twice
         "[Preset1]\r\nName=a\r\nS.Enabled=1\r\n",                        // not a support key
         "[Preset1]\r\nName=a\r\nS.SupportPreset_A=x\r\nS.SupportPreset_A=y\r\n",
         "[Preset1]\r\nName=a\r\nS.SupportPreset_A=\r\n",                 // empty value
@@ -148,6 +152,35 @@ void File() {
         Book keep=Sample();
         Check(!Parse(t,&keep,&why) && !why.empty(),t);
         Check(keep.presets.size()==2,"refused parse leaves the book");
+    }
+    Check(text.find("[Book]\r\nFormat=2\r\n")!=std::string::npos,"the book says its format");
+    // the new classes (4 载具手, 5 刻印剑士) round trip
+    {
+        Book nb;
+        Player pl;
+        pl.cls=5;
+        pl.weapon[4][0]="ZW_VehicleNone";pl.weapon[4][1]="ZW_Gyrojet01";
+        pl.weapon[5][0]="ZW_MeleeNone";pl.weapon[5][1]="ZW_RuneCarbine01";pl.weapon[5][2]="ZW_SupportNone";
+        Check(AddPreset(nb,"剑士",{},pl)==0,"a preset of class 5");
+        Book back;
+        Check(Parse(Serialize(nb),&back,&why) && back.presets[0].player==pl,"class 4 / 5 weapons back");
+        Check(Serialize(nb).find("Weapons5=ZW_MeleeNone,ZW_RuneCarbine01,ZW_SupportNone,,,")!=std::string::npos,"Weapons5 line");
+    }
+    // migration: a version 1 book (no Format line, classes 0..3) reads as it is and is written back as version 2
+    {
+        const std::string v1="[Book]\r\nCurrent=1\r\n\r\n[Preset1]\r\nName=a\r\nClass=3\r\n"
+                             "Weapons0=AssultRifle01,,,,,\r\nWeapons1=,,,,,\r\nWeapons2=,,,,,\r\nWeapons3=hShield01,,,,,\r\n";
+        Book m;
+        Check(Parse(v1,&m,&why),"version 1 parses");
+        Check(m.current==0 && m.presets[0].player.cls==3 && m.presets[0].player.weapon[3][0]=="hShield01" &&
+              m.presets[0].player.weapon[0][0]=="AssultRifle01","version 1 contents");
+        for(int s=0;s<kSlots;++s)
+            Check(m.presets[0].player.weapon[4][s].empty() && m.presets[0].player.weapon[5][s].empty(),
+                  "version 1: the new classes left as they are");
+        const std::string v2=Serialize(m);
+        Book again;
+        Check(v2.find("Format=2")!=std::string::npos && Parse(v2,&again,&why) && Serialize(again)==v2,
+              "written back as version 2");
     }
     Book dropped;
     Check(Parse("[Preset1]\r\nName=a\r\n[Missions]\r\nedf6/m1=2\r\nedf6/m2=1\r\n",&dropped,&why),"mission to a missing preset");
