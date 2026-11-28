@@ -18,7 +18,7 @@
 #include "edf/patch.h"
 #include "net_counters.h"
 #include "object_update_mt.h"
-#include "bullet_sweep_cull.h"
+#include "bullet_expand_cull.h"
 
 namespace crew::perfprobe {
 namespace {
@@ -1033,7 +1033,7 @@ void Report(unsigned frames) noexcept {
     }
     if(taskTrace)ReportTaskGraphs();
     ReportObjectUpdateMT(frames);
-    ReportBulletSweepCull(frames);
+    ReportBulletExpandCull(frames);
     for(auto& graphs:havokGraphs)graphs={};
     const unsigned p=presents.exchange(0,std::memory_order_relaxed),u=unpaired.exchange(0,std::memory_order_relaxed);
     const unsigned pr=paired.exchange(0,std::memory_order_relaxed);

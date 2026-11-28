@@ -12,7 +12,7 @@
 #include "native_body_math.h"
 #include "native_bone_update.h"
 #include "target_grid.h"
-#include "bullet_sweep_cull.h"
+#include "bullet_expand_cull.h"
 #include "scene.h"
 #include "boarding.h"
 #include "plugin_body.h"
@@ -136,7 +136,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kFrameRate,"frame rate",kLoadOnly) \
     M(kNativePerformance,"native performance",kLoadOnly) \
     M(kTargetGrid,"target grid",kLoadOnly) \
-    M(kBulletSweepCull,"bullet sweep cull",kLoadOnly) \
+    M(kBulletExpandCull,"bullet expand cull",kLoadOnly) \
     M(kFsBudget,"fs budget",kLoadOnly) \
     M(kTeamCapacity,"team capacity",kLoadOnly) \
     M(kHavokProps,"havok props",kLoadOnly) \
@@ -346,7 +346,7 @@ constexpr InstallEntry kInstalls[]={
     }},
     {IP::kBeforeAppInit,Id::kFsBudget,&Install<&InstallFsLoaderBudget>},   // before the application's init starts CRI File System (fsbudget.cpp)
     {IP::kBeforeAppInit,Id::kTargetGrid,&Install<&InstallTargetGrid>},   // the nearest-enemy pick on team grids (target_grid.cpp)
-    {IP::kBeforeAppInit,Id::kBulletSweepCull,&Install<&InstallBulletSweepCull>},   // bullets cast only at the bodies their sweep reaches (bullet_sweep_cull.cpp)
+    {IP::kBeforeAppInit,Id::kBulletExpandCull,&Install<&InstallBulletExpandCull>},   // bullets' group expansion: only the parts their sweep reaches (bullet_expand_cull.cpp)
     {IP::kBeforeAppInit,Id::kTeamCapacity,&Install<&InstallTeamCapacity>}, // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     {IP::kBeforeAppInit,Id::kHavokProps,&Install<&InstallHavokProps>},     // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
     {IP::kBeforeAppInit,Id::kAiWorldCapacity,&Install<&InstallAiWorldCapacity>},   // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024
