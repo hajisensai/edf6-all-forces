@@ -1324,3 +1324,6 @@ HUDTEXT(zwLogDispatched,L"Resupply on its way",L"补给车已出发",L"補給車
 HUDTEXT(zwLogArrived,L"Resupply arrived: get in",L"补给车已到，上车吧",L"補給車已到，上車吧",L"補給車到着、乗車せよ")
 HUDTEXT(zwLogRefused,L"Resupply refused (see the log)",L"补车未成（见日志）",L"補車未成（見日誌）",L"補給要請 失敗（ログ参照）")
 HUDTEXT(zwLogPoor,L"Not enough logistics points",L"后勤点不够",L"後勤點不夠",L"兵站ポイント不足")
+HUDTEXT(rbEtherTitle,L"ETHER %.0f / %.0f",L"以太 %.0f / %.0f",L"以太 %.0f / %.0f",L"エーテル %.0f / %.0f")
+HUDTEXT(rbEtherDepleted,L"ETHER SPENT: LAND TO REFILL",L"以太耗尽：落地回充",L"以太耗盡：落地回充",L"エーテル枯渇：着地で回復")
+HUDTEXT(rbEtherGlide,L"GLIDE  STEPS %d",L"滑翔  踏阵 %d",L"滑翔  踏陣 %d",L"滑空  ステップ %d")
