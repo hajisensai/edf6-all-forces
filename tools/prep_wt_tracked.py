@@ -371,7 +371,7 @@ M247 = Vehicle(
 
 # V3 MBT-70 (the US version: the 152 mm XM150 gun / launcher, the remote 20 mm on the turret's right); the hull node is
 # `root`; the idler in front (A), six road wheels (B..G), the sprocket behind (H). The 20 mm's barrel front is a store
-# slot's muzzle as the PzH 2000's MG3. The hydropneumatic lift is not modelled (docs/newclass-re/vehicler.md §6.4).
+# slot's muzzle as the PzH 2000's MG3. The hydropneumatic lift is not modelled (docs/newclass-re/vehicler.md §6, item 4).
 MBT70 = Vehicle(
     kind='mbt70', folder='wt_mbt70', title='MBT-70 (War Thunder)',
     source_url='https://sketchfab.com/3d-models/mbt-70-war-thunder-3cc1dbc72f724d1887e52998c86b9fa6',
