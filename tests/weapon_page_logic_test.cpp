@@ -106,6 +106,14 @@ public:
         return v;
     }
     void Preview(int cls,int slot,int row) noexcept override { previews.push_back({cls,slot,row}); }
+    bool classWrites=true;
+    std::vector<int> classUses;
+    bool UseClass(int cls) noexcept override {
+        classUses.push_back(cls);
+        if(!classWrites)return false;
+        current=cls;
+        return true;
+    }
     void SaveFavourites(const std::set<std::wstring>& ids) noexcept override { saved=ids; ++saves; }
     bool ReadSpec(int row,wlist::WeaponSpec* out) noexcept override {
         ++specReads;
@@ -123,6 +131,7 @@ wpage::Texts MakeTexts() {
     t.slotFormat=L"槽位 %d";
     t.empty=L"（空）";t.notReady=L"未载入";t.noWeapons=L"没有武器";t.all=L"全部";t.search=L"搜索";
     t.owned=L"持有";t.previewOther=L"只显示当前兵种";
+    t.useClass=L"换成这个兵种";t.useClassFailed=L"兵种没换成";
     for(int i=0;i<8;++i)t.verdict[i]=L"?";
     t.verdict[static_cast<int>(wlist::Verdict::capped)]=L"超过等级上限";
     t.verdict[static_cast<int>(wlist::Verdict::duplicate)]=L"别的槽已装";
@@ -457,6 +466,41 @@ void Favourites() {
     r.Tap(kRight);
 }
 
+// 原版兵种选择入口去掉了：不是当前兵种的页，详情列有「换成这个兵种」，确认就写当前兵种。
+int UseClassField(wpage::WeaponsPage& page,const Pos& at) {
+    for(int i=0;i<page.Fields(at);++i){
+        Pos p=at;p.field=i;
+        Line l;
+        page.FieldLine(p,&l);
+        if(std::wcscmp(l.label,L"换成这个兵种")==0)return i;
+    }
+    return -1;
+}
+void UseClass() {
+    Rig r;
+    r.game.classes=6;
+    r.page.Refresh();
+    Pos here=r.s.pos;   // 兵种 0 = 当前兵种
+    Check(UseClassField(r.page,here)<0,"the current class's page: no use-class field");
+    Pos other=here;other.sub=5;other.row=0;other.item=0;other.field=0;
+    const int f=UseClassField(r.page,other);
+    Check(f>=0,"another class's page: a use-class field");
+    other.field=f;
+    Line l;
+    r.page.FieldLine(other,&l);
+    Check(std::wcscmp(l.value,L"刻印剑士")==0 && l.acts,"the field names the page's class");
+    r.game.classWrites=false;
+    Check(!r.page.Activate(other) && r.game.current==0,"not written: the class stays");
+    wchar_t note[64]{};
+    Check(r.page.TakeNote(note,64) && std::wcscmp(note,L"兵种没换成")==0,"not written: said");
+    r.game.classWrites=true;
+    Check(r.page.Activate(other) && r.game.current==5 && r.game.classUses.back()==5,"confirm: the class written");
+    Check(UseClassField(r.page,other)<0,"now current: the field gone");
+    Check(UseClassField(r.page,here)>=0,"the old class's page offers it back");
+    r.game.current=-1;   // 读不到当前兵种：不给这一项
+    Check(UseClassField(r.page,here)<0 && UseClassField(r.page,other)<0,"current class unreadable: no field");
+}
+
 void NotReady() {
     Rig r;
     r.game.ready=false;
@@ -523,6 +567,7 @@ int main() {
     Equipping();
     Favourites();
     Badges();
+    UseClass();
     NotReady();
     RandomWalk();
     std::printf("weapon_page_logic: %d checks passed\n",checks);

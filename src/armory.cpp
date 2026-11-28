@@ -268,6 +268,13 @@ public:
         return r.verdict;
     }
     void Preview(int cls,int slot,int row) noexcept override { roompreview::ShowPlayerWeapon(cls,slot,row); }
+    // The stock class select entry is gone (room_ui.cpp HideStockEntries): the player's class is chosen here.
+    bool UseClass(int cls) noexcept override {
+        const int was=wequip::CurrentClass(0);
+        const bool ok=wequip::SetClass(0,cls);
+        Log("ARMORY the player's class %d -> %d from the weapons page: %s",was,cls,ok ? "written" : "not written");
+        return ok;
+    }
     void SaveFavourites(const std::set<std::wstring>& ids) noexcept override {
         try {
             if(!SaveIniFlag("WeaponFavourites",wlist::SerializeFavourites(ids).c_str()))
@@ -476,6 +483,8 @@ void FillWeaponTexts() noexcept {
     t.badgeNew=hudtext::Tr(Tx::armoryWpNew);
     t.badgeUp=hudtext::Tr(Tx::armoryWpUp);
     t.previewOther=hudtext::Tr(Tx::armoryWpPreviewOther);
+    t.useClass=hudtext::Tr(Tx::armoryWpUseClass);
+    t.useClassFailed=hudtext::Tr(Tx::armoryWpUseClassFailed);
     t.verdict[static_cast<int>(wlist::Verdict::notOwned)]=hudtext::Tr(Tx::armoryWpNotOwned);
     t.verdict[static_cast<int>(wlist::Verdict::capped)]=hudtext::Tr(Tx::armoryWpCapped);
     t.verdict[static_cast<int>(wlist::Verdict::wrongSlot)]=hudtext::Tr(Tx::armoryWpWrongSlot);

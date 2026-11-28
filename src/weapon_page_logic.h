@@ -11,7 +11,7 @@
 //          已装（不可重复的槽）的灰显，确认时在提示栏说原因。◆ 本槽装着，★ 收藏；值前的 NEW / UP 与原版选择界面同一判定
 //          （WeaponRecord flags，只读不清，wlist::BadgeOf）。
 //   详情   上方 7 行留给 3D 预览（Hole：玩家拿着光标所指的武器，只能显示当前兵种），下面是操作与筛选：装备 / 展开、
-//          收藏、来源、显示未持有、只看收藏，以及与本槽当前装备的对比：等级，和原版说明栏的每一行属性（数据与格式同
+//          收藏、来源、显示未持有、只看收藏、换成这个兵种（不是当前兵种的页；原版兵种选择入口已去掉），以及与本槽当前装备的对比：等级，和原版说明栏的每一行属性（数据与格式同
 //          0xD8A90 / 0xD9B80，按标签配对；▲ 光标这把更好 ▼ 更差 = 相同，说不出方向的不标）。
 // 搜索不做屏幕键盘：键盘按 Tab（或点搜索框）直接打字，Enter 保留、Esc 清空；手柄用首字跳转（PgUp / PgDn、右摇杆
 // 上下）在列表里按名字首字循环跳。搜索的匹配不分大小写与全半角，片假名与平假名等同（wlist::Fold）。
@@ -46,6 +46,8 @@ public:
     virtual wlist::Verdict Equip(int cls,int slot,int row) noexcept=0;
     // 3D 预览让玩家拿这一把（cls 是当前兵种时才有意义）；row -1 空手。
     virtual void Preview(int cls,int slot,int row) noexcept=0;
+    // 把玩家的当前兵种换成 cls（GS+0x6E90，原版兵种选择界面写的同一格）；false：没写成。
+    virtual bool UseClass(int cls) noexcept=0;
     virtual void SaveFavourites(const std::set<std::wstring>& ids) noexcept=0;
     // 原版说明栏的属性（wlist::WeaponSpec，按该行当前星级）；false：读不到。
     virtual bool ReadSpec(int row,wlist::WeaponSpec* out) noexcept=0;
@@ -77,6 +79,8 @@ struct Texts {
     const wchar_t* badgeNew=L"NEW";             // 原版 WeaponNew
     const wchar_t* badgeUp=L"UP";               // 原版 WeaponUp
     const wchar_t* previewOther=L"";            // 不是当前兵种：3D 预览只显示当前兵种
+    const wchar_t* useClass=L"Use this class";  // 详情列「换成这个兵种」（不是当前兵种的页才有）
+    const wchar_t* useClassFailed=L"";          // 换兵种没写成
     const wchar_t* verdict[8]{};                // wlist::Verdict 顺序：装备不了的原因（ok / same / header 不用）
     const wchar_t* hints[3]{};                  // 三列的提示栏
     const wchar_t* typingHint=L"";              // 打字时的提示栏
@@ -84,7 +88,7 @@ struct Texts {
 };
 
 // 详情列的一行是什么。
-enum class Field : std::uint8_t { act, favourite, source, unowned, favouritesOnly, level, spec };
+enum class Field : std::uint8_t { act, favourite, source, unowned, favouritesOnly, level, spec, useClass };
 
 // 来源开关：EDF6 / EDF5 / EDF4.1（别的 mod 追加的行跟 EDF6 一起开关）。
 inline constexpr unsigned kSourceBits[3]={(1u<<wlist::kSourceEdf6)|(1u<<wlist::kSourceOther),1u<<wlist::kSourceEdf5,
@@ -225,6 +229,11 @@ public:
             CopyText(out->value,kTextMost,favouritesOnly_ ? texts_->on : texts_->off);
             out->steps=out->acts=true;
             break;
+        case Field::useClass:
+            CopyText(out->label,kTextMost,texts_->useClass);
+            CopyText(out->value,kTextMost,SubName(p.sub));
+            out->acts=true;
+            break;
         case Field::level:{
             const wlist::Entry* e=catalog_->ByRow(Equipped(p.sub,p.row));
             CopyText(out->label,kTextMost,texts_->level);
@@ -270,6 +279,7 @@ public:
         if(p.field<0 || p.field>=static_cast<int>(fs.size()))return false;
         switch(fs[static_cast<std::size_t>(p.field)]){
         case Field::act:return Act(p);
+        case Field::useClass:return UseClass(p);
         case Field::source:return false;
         case Field::level:case Field::spec:return false;
         default:return Step(p,1);
@@ -485,6 +495,8 @@ private:
         fs.push_back(Field::source);
         fs.push_back(Field::unowned);
         fs.push_back(Field::favouritesOnly);
+        // 原版的兵种选择入口已经去掉（整备是唯一入口）：不是当前兵种的页可以在这里换过去。
+        if(const int cur=game_->CurrentClass();cur>=0 && cur!=p.sub)fs.push_back(Field::useClass);
         if(ln && ln->kind!=wlist::LineKind::series){
             fs.push_back(Field::level);
             fs.insert(fs.end(),Diffs(p).size(),Field::spec);
@@ -565,6 +577,16 @@ private:
             note_=texts_->verdict[i] && texts_->verdict[i][0] ? texts_->verdict[i] : L"!";
         }
         return false;
+    }
+    // 换成这一页的兵种。写成了 3D 预览下一帧（Tick）就跟着换。
+    bool UseClass(const Pos& p) noexcept {
+        if(game_->CurrentClass()==p.sub)return false;
+        if(!game_->UseClass(p.sub)){
+            note_=texts_->useClassFailed && texts_->useClassFailed[0] ? texts_->useClassFailed : L"!";
+            return false;
+        }
+        ++gen_;
+        return true;
     }
     bool ToggleFavourite(const Pos& p) {
         const wlist::Line* ln=LineAt(p);
