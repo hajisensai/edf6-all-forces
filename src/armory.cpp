@@ -78,6 +78,9 @@ std::atomic<unsigned char*> drawOn{nullptr}; // the screen object it is open on 
 // 整备 closed for the world map, still drawn (armory_logic.h Handoff): `holding` for the render thread; `mapDrawn`:
 // the select drew since the UI thread last looked, `mapShown`: it is in place (worldmap.cpp's Draw, MapDrawn / MapShown).
 std::atomic<bool> holding{false},mapDrawn{false},mapShown{false};
+// Opened from the world map's title bar, waiting for its screen's input under the closing select (armory_logic.h
+// Arrival): the select's draw paints it over itself (PaintOverSelect).
+std::atomic<bool> overSelect{false};
 std::atomic<unsigned char*> gone{nullptr};   // a destructor ran on this object since the UI thread last looked
 
 // The render thread's: the renderer, its labels, the viewport last drawn into (for the pointer).
@@ -571,9 +574,12 @@ void DropEdits(const char* why) noexcept {
 }
 
 ar::HandoffState handoff;
+ar::Arrival arrival=ar::Arrival::none;   // the UI thread's; overSelect follows it for the render thread
 // `hold` (the world map asked): the view as last published stays drawn on its screen until the select takes over.
 void CloseNow(const char* why,bool hold=false) noexcept {
     if(!state.open && !openOn)return;
+    arrival=ar::Arrival::none;
+    overSelect.store(false);
     ar::Close(state);
     WeaponsView(false);
     wantText.store(false);
@@ -608,7 +614,8 @@ bool ReadDrawCtx(const unsigned char* ctx,ID3D11DeviceContext** device,int* vp) 
     } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
 }
 ar::View painting;   // the render thread's copy (under gpuLock)
-void Paint(unsigned char* ctx) noexcept {
+// `opaque`: on a base covering the whole viewport first (painted over the select: armory_logic.h Arrival).
+void Paint(unsigned char* ctx,bool opaque=false) noexcept {
     ID3D11DeviceContext* device=nullptr;
     int vp[4]{};
     if(!ReadDrawCtx(ctx,&device,vp) || vp[2]<=0 || vp[3]<=0)return;
@@ -632,6 +639,7 @@ void Paint(unsigned char* ctx) noexcept {
     }
     if(begun!=uigpu::Renderer::Begun::ok)return;
     struct Ender { uigpu::Renderer* r; ~Ender() { r->End(); } } ender{renderer};
+    if(opaque)renderer->Rect(0.f,0.f,ar::skin::kWidth,ar::skin::kHeight,ar::skin::kDiamondDark);
     {
         AcquireSRWLockExclusive(&geometryLock);
         for(int i=0;i<4;++i)geometry.vp[i]=static_cast<float>(vp[i]);
@@ -677,7 +685,7 @@ bool Install() noexcept {
 bool Installed() noexcept { return installed; }
 
 void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::IniRead read,void* readContext,bool previewOn,
-          int tab) noexcept {
+          int tab,bool waitInput) noexcept {
     if(!installed || !self)return;
     Subclass();
     openRoomNow=room;
@@ -722,9 +730,13 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
         ar::Note(state,note);
         editsDropped=0;
     }
-    wantText.store(true);
+    // Waiting (the select still closing over the screen): the wheel and typed characters stay the game's until it arrives.
+    arrival=waitInput ? ar::Arrival::waiting : ar::Arrival::none;
+    overSelect.store(waitInput);
+    wantText.store(!waitInput);
     Publish(true);
-    Log("ARMORY opened on the %s screen %p (%d presets)",room ? "room" : "HQ",static_cast<void*>(self),presets.count);
+    Log("ARMORY opened on the %s screen %p (%d presets)%s",room ? "room" : "HQ",static_cast<void*>(self),presets.count,
+        waitInput ? ": drawn, waiting for the screen's input (the select over it closing)" : "");
 }
 bool IsOpen() noexcept { return state.open; }
 
@@ -745,6 +757,17 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
         latched=AnyHeld(ReadInput(toggleDown));
         return latched;
     }
+    bool arrived=false;
+    switch(ar::ArrivalFrame(arrival,hasInput)) {
+        case ar::ArrivalStep::waiting: Publish(true);return false;   // drawn; nothing read, nothing taken
+        case ar::ArrivalStep::arrived:
+            arrived=true;
+            overSelect.store(false);
+            wantText.store(true);
+            Log("ARMORY on the %s screen %p: the screen has its input: 整备 takes it",openRoom ? "room" : "HQ",static_cast<void*>(openOn));
+            break;
+        case ar::ArrivalStep::open: break;
+    }
     if(!hasInput) {   // something of the game's opened over the screen (a dialog, a sub-screen, a transition)
         DropEdits("the screen lost its input");
         CloseNow("the screen lost its input");
@@ -755,6 +778,7 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
     FillRules();
     ar::Input in=ReadInput(toggleDown);
     in.dt=FrameSeconds();
+    if(arrived)ar::Latch(state,in);   // the keys held as the select went (the tab's click, Q / E) do nothing here
     const int tabWas=state.tab;
     const ar::Effects fx=ar::Step(state,kPages,kPageCount,presets,words,in);
     // Esc at the root of HQ's armory returns to the replacement mission map. The room's own lobby remains its parent.
@@ -833,6 +857,13 @@ void MapPressed(bool pressed) noexcept {
 }
 void MapDrawn() noexcept { if(holding.load())mapDrawn.store(true); }
 void MapShown() noexcept { if(holding.load())mapShown.store(true); }
+bool WaitingOverSelect() noexcept { return overSelect.load(); }
+bool PaintOverSelect(unsigned char* ctx) noexcept {
+    unsigned char* const on=drawOn.load();
+    if(!ctx || !overSelect.load() || !on || gone.load()==on || gpuBroken.load())return false;
+    Paint(ctx,true);
+    return true;
+}
 void AskOpen(int tab) noexcept { openTab=tab>=0 && tab<kPageCount ? tab : -1; }
 int TakeOpenAsk() noexcept {
     const int tab=openTab;
@@ -852,6 +883,7 @@ void ScreenGone(unsigned char* self) noexcept {
     gone.store(self);
     unsigned char* expected=self;
     if(drawOn.compare_exchange_strong(expected,nullptr)) {
+        overSelect.store(false);
         // open on it: the window procedure stops taking the wheel / WM_CHAR now, not at the next HQ / room frame (none
         // runs in a mission: a screen ended under an open 整备 would otherwise eat them through the whole mission)
         wantText.store(false);

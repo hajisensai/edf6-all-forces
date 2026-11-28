@@ -773,4 +773,39 @@ inline float ProgressShare(const Progress& p) noexcept {
     return p.shown>0 ? static_cast<float>(p.cleared)/static_cast<float>(p.shown) : 0.f;
 }
 
+// --- Who is on screen while the select's windows slide (worldmap.cpp DrawHook; docs/worldmap-select-re.md §11) ---
+// The stock select opens and closes by sliding its layout 0.3 s (transition_slide, read through its transform 0x7F9E90
+// at each draw). Its kept windows (the thumbnail, the medals, the briefing) and its window skins' empty frame move with
+// it; the map, the panel and the title bar do not. So while it moves, what the stock draw put on screen is covered by
+// the whole new screen; at rest only the empty frame is (kCovers) and the kept windows show. One translation per draw:
+// entering until it has stayed put two draws in a row (at rest), leaving once it moves after that. An unreadable
+// transform counts as at rest (nothing known to move).
+enum class Motion : std::uint8_t { entering, rest, leaving };
+struct MotionTrack { bool seen=false; bool rested=false; int still=0; float x=0.f,y=0.f; };
+inline Motion MotionStep(MotionTrack& t,bool readable,float x,float y) noexcept {
+    if(!readable)return Motion::rest;
+    if(!t.seen){t=MotionTrack{};t.seen=true;t.x=x;t.y=y;return Motion::entering;}
+    const bool same=std::fabs(x-t.x)<0.01f && std::fabs(y-t.y)<0.01f;
+    t.x=x;t.y=y;
+    t.still=same ? t.still+1 : 0;
+    if(t.still>=2){t.rested=true;return Motion::rest;}
+    return t.rested ? Motion::leaving : Motion::entering;
+}
+// What the select's draw puts over the stock draw: nothing (the map is not drawn: the stock list as it is), the map over
+// the empty frame (at rest), the whole map with the panel and the title bar (moving), or 整备 (opened from the map's
+// title bar, its screen still under this closing select: armory.h PaintOverSelect).
+enum class SelectCover : std::uint8_t { none, frames, whole, armory };
+inline SelectCover CoverFor(bool mapped,Motion m,bool armoryWaiting) noexcept {
+    if(armoryWaiting && m!=Motion::rest)return SelectCover::armory;
+    if(!mapped)return SelectCover::none;
+    return m==Motion::rest ? SelectCover::frames : SelectCover::whole;
+}
+// The new screen is on (整备 held for the map may stop drawing, armory.h MapShown): the map drew over the stock draw, or,
+// the map not drawn, the stock select is at rest.
+inline bool MapInPlace(SelectCover c,bool coverDrawn,Motion m) noexcept {
+    if(c==SelectCover::frames || c==SelectCover::whole)return coverDrawn || m==Motion::rest;
+    return c==SelectCover::none && m==Motion::rest;
+}
+
 }  // namespace worldmap
+

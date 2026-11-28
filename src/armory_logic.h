@@ -877,4 +877,22 @@ inline bool HandoffFrame(HandoffState& h,bool hasInput,bool selectDrawn) noexcep
     return h.phase!=Handoff::none;
 }
 
+// 整备 asked by the world map's title bar (armory.h AskOpen) opens on the screen under the select at once, while the
+// select is still closing the stock way over it: it waits. Waiting it is drawn (over the select by the select's own draw,
+// worldmap.cpp; on its screen once the select is gone) but reads nothing and takes nothing, and the screen having no
+// input is not "something came over 整备" (the DropEdits / close contract: nothing has been edited yet). The first
+// frame the screen has its input it arrives: the keys held then count as already down (Latch), as at Open.
+enum class Arrival : std::uint8_t { none, waiting };
+enum class ArrivalStep : std::uint8_t { open, waiting, arrived };
+inline ArrivalStep ArrivalFrame(Arrival& a,bool hasInput) noexcept {
+    if(a!=Arrival::waiting)return ArrivalStep::open;
+    if(!hasInput)return ArrivalStep::waiting;
+    a=Arrival::none;
+    return ArrivalStep::arrived;
+}
+inline void Latch(State& s,const Input& in) noexcept {
+    for(int k=0;k<kKeyCount;++k)s.prev[k]=in.held[k];
+}
+
 }  // namespace crew::armory
+

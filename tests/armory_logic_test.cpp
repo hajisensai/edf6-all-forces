@@ -639,6 +639,26 @@ void Handing() {
     HandoffPressed(h,true);
     Check(h.phase==Handoff::none,"a press with nothing held: nothing");
 }
+
+// 整备 opened from the map's title bar under the closing select: waits (drawn, nothing read) until its screen has its
+// input, then the keys held at that frame are latched (the click / Q that asked it does not fire inside).
+void Arriving() {
+    Arrival a=Arrival::waiting;
+    Check(ArrivalFrame(a,false)==ArrivalStep::waiting && ArrivalFrame(a,false)==ArrivalStep::waiting,"no input: waiting");
+    Check(ArrivalFrame(a,true)==ArrivalStep::arrived && a==Arrival::none,"the input: arrived");
+    Check(ArrivalFrame(a,true)==ArrivalStep::open && ArrivalFrame(a,false)==ArrivalStep::open,"then open (the usual contract)");
+    State s;
+    Input in;
+    Open(s,in,0);
+    in.held[kConfirm]=true;in.held[kTabPrev]=true;
+    Check(detail::Pressed(s,in,kConfirm),"a key down since the open reads pressed");
+    Latch(s,in);
+    Check(!detail::Pressed(s,in,kConfirm) && !detail::Pressed(s,in,kTabPrev),"latched at the arrival: not pressed");
+    in.held[kConfirm]=false;
+    Latch(s,in);
+    in.held[kConfirm]=true;
+    Check(detail::Pressed(s,in,kConfirm),"released and pressed again: pressed");
+}
 }  // namespace
 
 int main() {
@@ -648,6 +668,7 @@ int main() {
     Fitting();
     Looking();
     Handing();
+    Arriving();
     std::printf("armory_logic: %d checks passed\n",checks);
     return 0;
 }

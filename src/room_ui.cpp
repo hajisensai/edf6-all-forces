@@ -641,9 +641,9 @@ void SetText(unsigned char* self,int slot,const wchar_t* name,const wchar_t* tex
     if(!done)st.written.key[slot]=~0ull;   // tried again next frame
 }
 // --- 整备 opened (armory.h) over st.menu loaded from the ini now (Opened) ---
-void OpenArmory(unsigned char* self,int tab=-1) noexcept {
+void OpenArmory(unsigned char* self,int tab=-1,bool waitInput=false) noexcept {
     Opened();
-    armoryui::Open(self,st.room,&st.menu,&IniRead,nullptr,previewOk,tab);
+    armoryui::Open(self,st.room,&st.menu,&IniRead,nullptr,previewOk,tab,waitInput);
 }
 // --- The 对战 pages as the game's dialogs (room_pvp_dialog.h pages, room_dialog.h windows) ---
 // Each frame while the 对战 pages are up: the dialog's pick taken; once the game has closed it (picked, or its own
@@ -775,11 +775,15 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     const Plan plan=PlanFrame(hasInput,st.menu.open);
     // The toggle only opens 整备 (its own keys close it, armory_logic.h); the 对战 dialogs own every key while up.
     if(plan.step && press.toggle && !st.menu.open && !armoryui::IsOpen() && !st.armoryTake)OpenArmory(self);
-    // The world map's title bar asked 整备 at a tab (its select closed the stock way): the first frame this screen has its
-    // input again.
-    if(hasInput && !st.menu.open && !armoryui::IsOpen() && !st.armoryTake) {
+    // The world map's title bar asked 整备 at a tab (its select closing the stock way over this screen): opened at once,
+    // drawn over the select while it slides away and waiting for this screen's input (armory_logic.h Arrival), so no
+    // frame of the select's windows moving or of this screen's own menu shows between the map and 整备.
+    if(!st.menu.open && !armoryui::IsOpen() && !st.armoryTake) {
         const int tab=armoryui::TakeOpenAsk();
-        if(tab>=0){OpenArmory(self,tab);Log("ROOMUI 整备 opened at tab %d from the world map",tab);}
+        if(tab>=0) {
+            OpenArmory(self,tab,!hasInput);
+            Log("ROOMUI 整备 opened at tab %d from the world map%s",tab,hasInput ? "" : " (waiting for the screen's input)");
+        }
     }
     st.armoryTake=armoryui::Frame(self,hasInput,down.toggle);
     // Open the next screen only after the closing input is released; otherwise the same Esc also closes the map.

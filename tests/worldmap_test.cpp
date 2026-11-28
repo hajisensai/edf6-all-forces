@@ -477,6 +477,41 @@ void Stage6() {
     Expect(p.cleared==3 && p.shown==6 && Near(ProgressShare(p),0.5f) && ProgressShare(Progress{})==0.f,"the campaign's progress");
 }
 
+// Who is on screen while the select slides (worldmap_logic.h Motion / SelectCover): the stock windows moving are never
+// left showing; 整备 waiting under a closing select is painted over it; the hold of 整备 ends once the map is on.
+void Sliding() {
+    MotionTrack t;
+    // the slide in: from (0, -10.2) up to rest, two draws in place before at rest
+    Expect(MotionStep(t,true,0.f,-10.2f)==Motion::entering,"the first draw: entering");
+    Expect(MotionStep(t,true,0.f,-6.f)==Motion::entering && MotionStep(t,true,0.f,-1.f)==Motion::entering,"moving: entering");
+    Expect(MotionStep(t,true,0.f,0.f)==Motion::entering,"arrived, not yet still");
+    Expect(MotionStep(t,true,0.f,0.f)==Motion::entering,"one draw in place: still entering");
+    Expect(MotionStep(t,true,0.f,0.f)==Motion::rest && MotionStep(t,true,0.f,0.f)==Motion::rest,"two in place: at rest");
+    // the slide out
+    Expect(MotionStep(t,true,0.f,-0.5f)==Motion::leaving && MotionStep(t,true,0.f,-5.f)==Motion::leaving,"moving after rest: leaving");
+    Expect(MotionStep(t,false,0.f,0.f)==Motion::rest,"an unreadable transform: at rest");
+    MotionTrack fresh;
+    Expect(MotionStep(fresh,true,0.f,0.f)==Motion::entering && MotionStep(fresh,true,0.f,0.f)==Motion::entering &&
+           MotionStep(fresh,true,0.f,0.f)==Motion::rest,"no slide at all: at rest from the third draw");
+    // what covers the stock draw
+    Expect(CoverFor(true,Motion::entering,false)==SelectCover::whole && CoverFor(true,Motion::leaving,false)==SelectCover::whole,
+           "moving: the whole new screen over the stock draw");
+    Expect(CoverFor(true,Motion::rest,false)==SelectCover::frames,"at rest: the map over the empty frame, the kept windows shown");
+    Expect(CoverFor(false,Motion::entering,false)==SelectCover::none && CoverFor(false,Motion::rest,false)==SelectCover::none,
+           "the map not drawn: the stock list as it is");
+    Expect(CoverFor(true,Motion::leaving,true)==SelectCover::armory && CoverFor(false,Motion::leaving,true)==SelectCover::armory &&
+           CoverFor(true,Motion::entering,true)==SelectCover::armory,"整备 waiting under a moving select: 整备 over it");
+    Expect(CoverFor(true,Motion::rest,true)==SelectCover::frames,"整备 waiting, the select not moving (the 返回 not taken): the map");
+    // the new screen on
+    Expect(MapInPlace(SelectCover::whole,true,Motion::entering) && MapInPlace(SelectCover::frames,true,Motion::rest),
+           "the map drew over the stock draw: on");
+    Expect(!MapInPlace(SelectCover::whole,false,Motion::entering),"the map not drawn while moving: not on");
+    Expect(MapInPlace(SelectCover::frames,false,Motion::rest),"at rest whatever drew: on (as before)");
+    Expect(!MapInPlace(SelectCover::none,false,Motion::entering) && MapInPlace(SelectCover::none,false,Motion::rest),
+           "the stock list: on once at rest");
+    Expect(!MapInPlace(SelectCover::armory,true,Motion::leaving),"整备 over a leaving select: the map is not on");
+}
+
 int main() {
     Table();
     Projection();
@@ -491,6 +526,7 @@ int main() {
     Stage2();
     Groups();
     Stage6();
+    Sliding();
     std::printf("%d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }

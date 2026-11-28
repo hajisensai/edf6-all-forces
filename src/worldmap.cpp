@@ -1593,23 +1593,28 @@ void DrawMap(unsigned char* self,unsigned char* ctx) noexcept {
 }
 
 // Pass 2 (after the stock draw, under every later screen: a dialog, the main frame's title and key guide): the map
-// again over the window skins' empty frame, the panel on it, the pointer over everything of the select.
-void DrawOver(unsigned char* ctx) noexcept {
+// again over the window skins' empty frame (`whole`: over all the select drew, its windows moving: worldmap_logic.h
+// SelectCover), the panel on it, the pointer over everything of the select. True when drawn.
+constexpr Area kWholeScreen[]={{0.f,0.f,1920.f,1080.f}};
+bool DrawOver(unsigned char* ctx,bool whole) noexcept {
     ID3D11DeviceContext* device=nullptr;
     int vp[4]{};
-    if(!ReadDrawCtx(ctx,&device,vp))return;
+    if(!ReadDrawCtx(ctx,&device,vp))return false;
     std::lock_guard<std::mutex> hold(gpuLock);
-    if(!renderer || !labels || !cache || gpuState.load()!=kGpuReady)return;
+    if(!renderer || !labels || !cache || gpuState.load()!=kGpuReady)return false;
     const gpu::Viewport viewport{static_cast<float>(vp[0]),static_cast<float>(vp[1]),static_cast<float>(vp[2]),
                                  static_cast<float>(vp[3])};
-    if(renderer->Begin(device,viewport)!=gpu::Renderer::Begun::ok)return;
+    if(renderer->Begin(device,viewport)!=gpu::Renderer::Begun::ok)return false;
     struct Ender { gpu::Renderer* r; ~Ender() { r->End(); } } ender{renderer};
     cache->Bind(*renderer);
     const Screen screen{1920.f,1080.f,viewport.w};
     View v=drawn.view;
     Clamp(v,screen);
     int xy[2*kMostVisible];
-    for(const Area& a:kCovers) {
+    const Area* const areas=whole ? kWholeScreen : kCovers;
+    const std::size_t count=whole ? std::size(kWholeScreen) : std::size(kCovers);
+    for(std::size_t i=0;i<count;++i) {
+        const Area& a=areas[i];
         renderer->Clip(a.x0,a.y0,a.x1,a.y1);
         renderer->Rect(a.x0,a.y0,a.x1,a.y1,0xFF0B1B30u);
         DrawTiles(v,screen,xy);
@@ -1626,6 +1631,7 @@ void DrawOver(unsigned char* ctx) noexcept {
         renderer->Line(x-10.f,y,x+10.f,y,2.f,0xFFFFFFFFu);
         renderer->Line(x,y-10.f,x,y+10.f,2.f,0xFFFFFFFFu);
     }
+    return true;
 }
 
 // The select's own transform (0x7F9E90, what the stock draw places its layout by; the 0.3 s slide in and out,
@@ -1638,43 +1644,42 @@ bool Translation(unsigned char* self,float* x,float* y) noexcept {
     *x=m[12];*y=m[13];
     return true;
 }
-// Render thread: the translation last seen, frames it has stayed, the select it is of.
+// Render thread: the select's motion (worldmap_logic.h MotionStep), the select it is of.
 // (A select is told apart by its generation too: the next one may be allocated where the last was.)
-struct Slide { unsigned char* self=nullptr; unsigned generation=0; float x=0.f,y=0.f; int still=0; bool logged=false; };
+struct Slide { unsigned char* self=nullptr; unsigned generation=0; MotionTrack track; Motion logged=Motion::rest; bool any=false; };
 Slide slide;
-// The select's windows are still (no slide): only then the empty frame is covered and the panel drawn (they would
-// not move with the windows; while the windows slide in or out, 0.3 s, the stock frame shows as it is).
-bool Still(unsigned char* self) noexcept {
+Motion MotionOf(unsigned char* self) noexcept {
     float x=0.f,y=0.f;
-    if(!Translation(self,&x,&y))return true;
+    const bool readable=Translation(self,&x,&y);
     const unsigned generation=selectGeneration.load();
-    if(slide.self!=self || slide.generation!=generation){slide=Slide{};slide.self=self;slide.generation=generation;slide.x=x;slide.y=y;Log("WORLDMAP select %p: transform translation (%.1f, %.1f) at its first draw",static_cast<void*>(self),static_cast<double>(x),static_cast<double>(y));return false;}
-    const bool same=std::fabs(x-slide.x)<0.01f && std::fabs(y-slide.y)<0.01f;
-    slide.x=x;slide.y=y;
-    slide.still=same ? slide.still+1 : 0;
-    if(slide.still==2 && !slide.logged) {
-        slide.logged=true;
-        Log("WORLDMAP select %p: transform still at (%.1f, %.1f): the panel shown",static_cast<void*>(self),static_cast<double>(x),
-            static_cast<double>(y));
+    if(slide.self!=self || slide.generation!=generation){slide=Slide{};slide.self=self;slide.generation=generation;}
+    const Motion m=MotionStep(slide.track,readable,x,y);
+    if(!slide.any || m!=slide.logged) {
+        static const char* const kName[]={"entering (the whole screen covered)","at rest (the panel over the empty frame)",
+                                          "leaving (the whole screen covered)"};
+        Log("WORLDMAP select %p: transform translation (%.1f, %.1f)%s: %s",static_cast<void*>(self),static_cast<double>(x),
+            static_cast<double>(y),readable ? "" : " (not readable)",kName[static_cast<int>(m)]);
+        slide.any=true;slide.logged=m;
     }
-    return slide.still>=2;
+    return m;
 }
 
+// Who is on screen over the select (worldmap_logic.h SelectCover; docs/worldmap-select-re.md §11): the map under the
+// stock draw and, after it, over its empty frame at rest or over all of it while its windows slide; 整备 over it while
+// it closes for 整备 (armory.h PaintOverSelect).
 std::uint64_t __fastcall DrawHook(unsigned char* self,unsigned char* ctx) {
-    bool mapped=false;
-    if(ctx) {
-        Read(drawn);
-        mapped=drawn.on && drawn.select==self && gpuState.load()!=kGpuBroken && store;
-        if(mapped)DrawMap(self,ctx);
-    }
+    if(!ctx)return nextDraw(self,ctx);
+    Read(drawn);
+    const bool mapped=drawn.on && drawn.select==self && gpuState.load()!=kGpuBroken && store;
+    const Motion motion=MotionOf(self);   // the transform the stock draw places its layout by (0x7F9E90): a getter
+    const SelectCover cover=CoverFor(mapped,motion,armoryui::WaitingOverSelect());
+    if(cover==SelectCover::frames || cover==SelectCover::whole)DrawMap(self,ctx);
     const std::uint64_t result=nextDraw(self,ctx);
-    if(ctx) {   // 整备 held drawn on its screen since it asked for the map: given up once the select is in place
-        armoryui::MapDrawn();
-        if(Still(self)) {
-            armoryui::MapShown();
-            if(mapped)DrawOver(ctx);
-        }
-    }
+    armoryui::MapDrawn();   // 整备 held drawn on its screen since it asked for the map: given up once the map is on
+    bool drew=false;
+    if(cover==SelectCover::frames || cover==SelectCover::whole)drew=DrawOver(ctx,cover==SelectCover::whole);
+    else if(cover==SelectCover::armory)drew=armoryui::PaintOverSelect(ctx);
+    if(MapInPlace(cover,drew,motion))armoryui::MapShown();
     return result;
 }
 

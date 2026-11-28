@@ -23,9 +23,11 @@ bool Installed() noexcept;
 // the 支援编成 / 载具 pages edit the copy and save their own lines, src/support_pages.h). `read` reloads them after a
 // preset switch; `previewOn`: the 3D preview's hooks are in (room_preview.h InstallPreviewHooks). The keys held now
 // count as already down (the key that opened it does nothing inside). `tab` >= 0: opened at that page (armory.cpp
-// kPages: 0 武器, 1 支援编成, 2 载具, 3 任务), else at the last one.
+// kPages: 0 武器, 1 支援编成, 2 载具, 3 任务), else at the last one. `waitInput` (asked by the world map's title bar while
+// its select is still closing over the screen: armory_logic.h Arrival): drawn at once, interactive from the first frame
+// the screen has its input.
 void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::IniRead read,void* readContext,bool previewOn,
-          int tab=-1) noexcept;
+          int tab=-1,bool waitInput=false) noexcept;
 bool IsOpen() noexcept;
 // One frame. `hasInput`: the screen would read input this frame (nothing of the game's over it); `toggleDown`: the
 // open / close key or pad combination is held (room_ui's KeysDown). Closed when the screen lost its input (a game
@@ -51,6 +53,11 @@ void MapPressed(bool pressed) noexcept;
 // the map is no longer drawn.
 void MapDrawn() noexcept;
 void MapShown() noexcept;
+// Render thread, the select's Draw (worldmap.cpp): 整备 waits for its screen's input under that select (Open waitInput).
+// WaitingOverSelect: so; PaintOverSelect: painted over what the select drew, on an opaque base (its 3D view's hole shows
+// nothing of the select's windows), true when painted.
+bool WaitingOverSelect() noexcept;
+bool PaintOverSelect(unsigned char* ctx) noexcept;
 // The world map's title bar (worldmap.cpp): a tab other than the map's clicked; the select is closed the stock way and
 // the next frame its screen (the HQ / the room) has its input, room_ui opens 整备 at `tab` (TakeOpenAsk: once, -1 none).
 void AskOpen(int tab) noexcept;
