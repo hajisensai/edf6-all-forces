@@ -15,7 +15,10 @@ import calls  # noqa: E402
 import call_weapons as cw  # noqa: E402
 import gamedir  # noqa: E402
 import ported_weapons as pw  # noqa: E402
+import make_runeblade_fx as rune_fx  # noqa: E402
+import make_runeblade_look as rl  # noqa: E402
 import make_zw_classes as zc  # noqa: E402
+import vcobjects as vc  # noqa: E402
 import zw_weapons as zw  # noqa: E402
 
 checks = 0
@@ -77,7 +80,10 @@ for lang in zc.TEXT_LANGS:
 
 # files: every one registered as a placeholder, the paths SoldierInit writes map onto them
 check(set(zc.ASSETS) == {p for c in zc.CLASSES for p in zc.files_of(c)}, 'ASSETS is every file written')
-check(all(state == 'placeholder' for _, state in zc.ASSETS.values()), 'stage 1: all placeholders')
+fx_files = set(rune_fx.files())
+check(all(state == 'placeholder' for rel, (_, state) in zc.ASSETS.items() if rel not in fx_files), 'models: placeholders')
+check(rl.bad_fx() == [], f'motions name unknown fx {rl.bad_fx()}')
+check(fx_files <= set(zc.ASSETS) and all(zc.ASSETS[rel][1] == 'generated' for rel in fx_files), 'rune fx: generated')
 for c in zc.CLASSES:
     for n in range(1, zc.APPEARANCES + 1):
         check('/'.join(zc._rel(c.battle_path(n))) == c.battle(n), f'{c.factory} battle {n}: path')
@@ -100,6 +106,12 @@ else:
     import dsgo  # noqa: E402
     built = zc.build(game_root)
     check(set(built) == set(zc.ASSETS), 'build writes ASSETS')
+    for key in rune_fx.VARIANTS:
+        rune_fx.check(built[f'OBJECT/{rune_fx.out_arc(key)}'], key)
+        check(dsgo.parse(built[f'OBJECT/{rune_fx.out_sgo(key)}']).root.get('xgs_scene_object_class') == 'FarEventObject',
+              f'rune fx {key}: object class')
+    gaps = rl.missing_motions(vc.Game(game_root).read)
+    check(gaps == [], f'runeblade motions the stock CAS lacks: {gaps}')
     for c in zc.CLASSES:
         for n in range(1, zc.APPEARANCES + 1):
             check(dsgo.parse(built[c.battle(n)]).root.get('xgs_scene_object_class') == c.factory,

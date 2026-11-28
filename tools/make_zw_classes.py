@@ -4,6 +4,8 @@
         (ZwVehicler / ZwRuneBlade, src/soldier_factory*: both AssultSoldier-based)
   Mods/MENUOBJECT/ZW_VEHICLER_0N.SGO, ZW_RUNEBLADE_0N.SGO        the menu SGOs [5][1]: the Ranger's four, as they are
   Mods/DEFAULTPACKAGE/CUSTOMCOLORZWVEHICLER.SGO, CUSTOMCOLORZWRUNEBLADE.SGO   [5][0]: the Ranger's colour sets
+  Mods/OBJECT/ZW_RUNE_*.MRAB / .SGO                              the Rune Blade's shared rune circle and light trail
+        (tools/make_runeblade_fx.py; its motions and model source: tools/make_runeblade_look.py)
 The battle SGO carries no movement numbers to change (docs/newclass-re/motion.md §3: the dash's and the walk's attributes are
 the accessories' custom_parameter), so the Vehicler's lost dash is the plugin's (src/vehicler_foot*), not this file's; roll is the
 stock one. Every model is the Ranger's for now: ASSETS marks each file 'placeholder' (plan §3: not a delivery). Built from the
@@ -33,6 +35,8 @@ import modfiles  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
+sys.path.insert(0, HERE)
+import make_runeblade_fx as rune_fx  # noqa: E402
 
 OWNER = 'zwclass'   # pylib/ledger.py
 CONFIG = ('DEFAULTPACKAGE', 'CONFIG.SGO')
@@ -76,9 +80,12 @@ CLASSES: tuple[SoldierClass, ...] = (SoldierClass(4, 'ZwVehicler', 'zw_vehicler'
                                      SoldierClass(5, 'ZwRuneBlade', 'zw_runeblade'))
 
 
+RUNEBLADE = CLASSES[1]
+
+
 def files_of(c: SoldierClass) -> list[str]:
     return ([c.battle(n) for n in range(1, APPEARANCES + 1)] + [c.menu(n) for n in range(1, APPEARANCES + 1)]
-            + [c.custom_color])
+            + [c.custom_color] + (rune_fx.files() if c == RUNEBLADE else []))
 
 
 # Every file this tool writes -> (what it is made from, its state). 'placeholder': the Ranger's model / colours stand in
@@ -87,6 +94,7 @@ ASSETS: dict[str, tuple[str, str]] = {
     **{c.battle(n): (f'SoldierInit[0][2][{n - 1}]', 'placeholder') for c in CLASSES for n in range(1, APPEARANCES + 1)},
     **{c.menu(n): (f'SoldierInit[0][5][1][{n - 1}]', 'placeholder') for c in CLASSES for n in range(1, APPEARANCES + 1)},
     **{c.custom_color: ('SoldierInit[0][5][0]', 'placeholder') for c in CLASSES},
+    **{rel: ('tools/make_runeblade_fx.py', 'generated') for rel in rune_fx.files()},   # drawn here: the class's own
 }
 
 # The text keys (TEXTTABLE_STEAM.<LANG>.TXT_SGO; LANG as the game names them: CN traditional, SC simplified).
@@ -281,6 +289,7 @@ def build(root: str) -> dict[str, bytes]:
             out[c.battle(n)] = battle_sgo(game.read(*_rel(battles[n - 1])), c)
             out[c.menu(n)] = game.read(*_rel(menus[n - 1]))
         out[c.custom_color] = game.read(*_rel(color))
+    out.update(rune_fx.build(game))
     if set(out) != set(ASSETS):
         raise AssertionError('build and ASSETS disagree')
     return out
