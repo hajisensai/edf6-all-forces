@@ -1290,6 +1290,7 @@ def contention_run() -> None:
     check(perfrun.contention(m, 1500.0) is None, 'the game itself on 15 cores: not contended')
     check(perfrun.contention({'machine': {'cores': 16, 'busy_cores': 8.0}}, 100.0) is None, 'cores to spare: not')
     check(perfrun.contention({}, 100.0) is None, 'no machine numbers: not known, not flagged')
+    check(perfrun.wait_quiet(limit=0) < 1.0, 'wait_quiet: no wait past its limit')
     t = perfrun.machine_times()
     check(t is None or (t[1] >= t[0] >= 0), 'machine_times: busy within all')
 

@@ -261,6 +261,24 @@ CONTENDED_BUSY = 0.9
 CONTENDED_OTHERS = 1.0
 
 
+QUIET_WAIT = 180.0   # at most this long before a clean window for the machine to have cores free (others' tests ...)
+
+
+def wait_quiet(limit: float = QUIET_WAIT, probe: float = 1.0) -> float:
+    """Until the machine is not CONTENDED_BUSY busy over `probe` s (another session's ctest, a build at normal
+    priority: the game below normal gets what is left), at most `limit` s; the seconds waited. 2026-11-28 r8: another
+    session's tests on all 16 cores, a leg at 856 ms frames, another with no PERF rows at all."""
+    began = time.monotonic()
+    cores = os.cpu_count() or 1
+    while time.monotonic() - began < limit:
+        a = machine_times()
+        time.sleep(probe)
+        b = machine_times()
+        if not a or not b or b[1] <= a[1] or (b[0] - a[0]) / (b[1] - a[1]) < CONTENDED_BUSY:
+            break
+    return time.monotonic() - began
+
+
 def contention(run: dict, game_cpu_pct: float | None) -> str | None:
     """Why `run`'s clean window was contended (the machine busy, others using cores), None when it was not or is
     not known."""
@@ -285,6 +303,7 @@ def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, mar
     pid = pids[0]
     marks['pid'] = pid
     time.sleep(max(0.0, t0 + warm - time.time()))
+    marks['quiet_wait'] = round(wait_quiet(), 1)   # before typeperf / PresentMon: their windows are the clean one
     # pid_<pid>_ exactly: pid_<pid>* would take in every process whose id starts with the game's
     gpu = subprocess.Popen(['typeperf', rf'\GPU Engine(pid_{pid}_*)\Utilization Percentage', '-si', '1', '-sc',
                             str(cpu_s), '-f', 'CSV', '-o', os.path.join(out, 'gpu.csv'), '-y'],
