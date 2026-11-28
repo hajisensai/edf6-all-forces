@@ -1316,7 +1316,7 @@ HUDTEXT(auraRepair,L"REPAIR %.1f%%/s",L"维修 %.1f%%/秒",L"維修 %.1f%%/秒",
 HUDTEXT(auraAmmo,L"AMMO %.1f%%/s",L"补弹 %.1f%%/秒",L"補彈 %.1f%%/秒",L"補給 %.1f%%/秒")
 HUDTEXT(zwLogTitle,L"LOGISTICS %u / %u",L"后勤 %u / %u",L"後勤 %u / %u",L"兵站 %u / %u")
 HUDTEXT(zwLogWaiting,L"LOGISTICS -- (waiting for the host)",L"后勤 --（等房主数据）",L"後勤 --（等房主資料）",L"兵站 --（ホスト待ち）")
-HUDTEXT(zwLogPick,L"%ls  %u pt",L"%ls  %u 点",L"%ls  %u 點",L"%ls  %u pt")
+HUDTEXT(zwLogPick,L"%ls  %u pt",L"%ls  %u 点",L"%ls  %u 點",L"%ls  %u ポイント")
 HUDTEXT(zwLogCall,L"Hold %ls: call %ls",L"长按 %ls 叫车：%ls",L"長按 %ls 叫車：%ls",L"%ls 長押しで %ls を要請")
 HUDTEXT(zwLogCycle,L"Tap %ls: next vehicle",L"短按 %ls 换车",L"短按 %ls 換車",L"%ls 短押しで車両切替")
 HUDTEXT(zwLogComing,L"Resupply coming: %.0f m",L"补给车接近中 %.0f m",L"補給車接近中 %.0f m",L"補給車 接近中 %.0f m")

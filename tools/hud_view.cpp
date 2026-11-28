@@ -2865,7 +2865,7 @@ int Scenes(const std::wstring& dir) {
     for(int pass=0;pass<4;++pass) {
         sceneVehicler=VehiclerHudView{};
         sceneVehicler.points=pass==1 ? 40u : 180u;sceneVehicler.gauge=200;sceneVehicler.price=150;sceneVehicler.choices=5;
-        std::wcscpy(sceneVehicler.name,L"Bullet Girls Tank");sceneVehicler.key=0x4B;sceneVehicler.button=0x1000|0x0100;
+        wcscpy_s(sceneVehicler.name,L"Bullet Girls Tank");sceneVehicler.key=0x4B;sceneVehicler.button=0x1000|0x0100;
         sceneVehicler.transit=pass==1 || pass==2;sceneVehicler.distance=pass==1 ? 412.0f : -1.0f;
         sceneVehicler.heard=pass!=3;
         sceneVehicler.notice=pass==0 ? VehiclerNotice::poor : pass==2 ? VehiclerNotice::refused : VehiclerNotice::arrived;
@@ -2886,8 +2886,7 @@ int Scenes(const std::wstring& dir) {
             }
         }
         failed+=!(line && inside && apart);
-        std::printf("%s  %ls: the title %d, on the screen %d, no text overlapping %d
-",line && inside && apart ? "ok  " : "FAIL",
+        std::printf("%s  %ls: the title %d, on the screen %d, no text overlapping %d\n",line && inside && apart ? "ok  " : "FAIL",
                     kNames[pass],line,inside,apart);
         sceneVehiclerOn=false;
     }
