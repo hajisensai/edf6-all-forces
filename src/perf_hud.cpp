@@ -4,6 +4,7 @@
 #include <psapi.h>
 
 #include "config.h"
+#include "plugin_log.h"
 
 namespace crew::perfhud {
 
@@ -11,7 +12,7 @@ namespace {
 double tickMs=0;
 bool chained=false;
 Period period{};
-LARGE_INTEGER lastFrame{};
+long long lastFrame=0;
 ULONGLONG periodAt=0,cpuAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 Readout shown{};
@@ -36,6 +37,15 @@ void Publish(ULONGLONG now) noexcept {
     // the game thread after a scene step: the team manager is the scripts' (GetTeamObjectCount takes its lock)
     r.enemies=TeamObjectCount(1);r.team=TeamObjectCount(0);r.friends=TeamObjectCount(2);
     r.at=now;
+    if(Cfg().debug) {   // the raw period (what the panel's means come from)
+        const Period& p=period;
+        Log("PERFHUD frames=%u steps=%u calls %u/%u/%u/%u/%u/%u/%u ms %.1f/%.1f/%.1f/%.1f/%.1f/%.1f/%.1f",p.frames,p.steps,
+            p.calls[0],p.calls[1],p.calls[2],p.calls[3],p.calls[4],p.calls[5],p.calls[6],
+            static_cast<double>(p.scope[0])*tickMs,static_cast<double>(p.scope[1])*tickMs,
+            static_cast<double>(p.scope[2])*tickMs,static_cast<double>(p.scope[3])*tickMs,
+            static_cast<double>(p.scope[4])*tickMs,static_cast<double>(p.scope[5])*tickMs,
+            static_cast<double>(p.scope[6])*tickMs);
+    }
     AcquireSRWLockExclusive(&lock);
     shown=r;
     ReleaseSRWLockExclusive(&lock);
@@ -44,31 +54,30 @@ void Publish(ULONGLONG now) noexcept {
 
 void ScopeEnded(unsigned index,long long ticks) noexcept {
     if(index>=kScopes)return;
+    if(ticks>0)period.scope[index]+=ticks;
+    ++period.calls[index];
+    if(index==kCamera)++period.steps;   // the step's last phase
+}
+
+void FrameMarked(long long now) noexcept {
     if(!tickMs) {
         LARGE_INTEGER hz;QueryPerformanceFrequency(&hz);
         tickMs=1000.0/static_cast<double>(hz.QuadPart);
     }
-    if(ticks>0)period.scope[index]+=ticks;
-    if(index==kRender) {   // once a frame (the render recording, before the frame's steps)
-        LARGE_INTEGER now;QueryPerformanceCounter(&now);
-        if(lastFrame.QuadPart) {
-            const long long d=now.QuadPart-lastFrame.QuadPart;
-            if(d>0 && static_cast<double>(d)*tickMs<1000.0) {   // a load or a pause between: not a frame
-                ++period.frames;period.frameSum+=d;
-                if(d>period.frameWorst)period.frameWorst=d;
-            }
+    if(lastFrame) {
+        const long long d=now-lastFrame;
+        if(d>0 && static_cast<double>(d)*tickMs<1000.0) {   // a load or a pause between: not a frame
+            ++period.frames;period.frameSum+=d;
+            if(d>period.frameWorst)period.frameWorst=d;
         }
-        lastFrame=now;
-        return;
     }
-    if(index!=kCamera)return;
-    ++period.steps;   // the step's last phase
-    const ULONGLONG now=GetTickCount64();
-    if(!periodAt){periodAt=now;cpuAt=ProcessCpu100ns();period=Period{};return;}
-    if(now-periodAt<kPublishMs)return;
-    if(Cfg().perfHud)Publish(now);
+    lastFrame=now;
+    const ULONGLONG at=GetTickCount64();
+    if(!periodAt){periodAt=at;cpuAt=ProcessCpu100ns();period=Period{};return;}
+    if(at-periodAt<kPublishMs)return;
+    if(Cfg().perfHud)Publish(at);
     else cpuAt=ProcessCpu100ns();
-    periodAt=now;
+    periodAt=at;
     period=Period{};
 }
 

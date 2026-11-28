@@ -752,9 +752,10 @@ void CapFrameRate(int cap) noexcept {
 }
 
 void __fastcall InputHook(void* input) {
-    CapFrameRate(Cfg().devFrameCap);
+    CapFrameRate(Cfg().debug ? Cfg().devFrameCap : 0);   // the anchor is in for the panel too: the cap stays Debug's
     const LONGLONG now=Qpc();
     gameThread.store(GetCurrentThreadId(),std::memory_order_relaxed);
+    perfhud::FrameMarked(now);
     if(cur.open)CloseFrame(now);
     const SceneStep s=SceneStepNow();
     cur=Frame{};cur.begin=now;cur.scene=s.scene;cur.step=s.count;cur.open=true;
@@ -945,8 +946,11 @@ template<unsigned I> void* __fastcall ScopeEndAt(void* scope) {
     perfhud::ScopeEnded(I,end-begin);
     return r;
 }
-// The performance panel's scopes, whatever Debug says (PerfHud is read live): all of them or the panel has nothing.
-void InstallScopes() noexcept {
+// The performance panel's scopes and the frame anchor, whatever Debug says (PerfHud is read live): all of them or the
+// panel has nothing.
+bool InstallScopes() noexcept {
+    // each hook's next is the global it calls through, written by Chain before the site is
+    const bool anchor=Chain(kInputCall,kInput,reinterpret_cast<void*>(&InputHook),reinterpret_cast<void**>(&nextInput));
     void* const hooks[]={reinterpret_cast<void*>(&ScopeEndAt<0>),reinterpret_cast<void*>(&ScopeEndAt<1>),
                          reinterpret_cast<void*>(&ScopeEndAt<2>),reinterpret_cast<void*>(&ScopeEndAt<3>),
                          reinterpret_cast<void*>(&ScopeEndAt<4>),reinterpret_cast<void*>(&ScopeEndAt<5>),
@@ -955,20 +959,19 @@ void InstallScopes() noexcept {
     unsigned n=0;
     for(unsigned i=0;i<std::size(kScopeEndCalls);++i)
         n+=Chain(kScopeEndCalls[i],kScopeEnd,hooks[i],reinterpret_cast<void**>(&nextScopeEnd[i]));
-    perfhud::ScopesChained(n==std::size(kScopeEndCalls));
-    Log("HOOK perf scopes=%u/%zu (the performance panel, PerfHud: the step's phases, the render recording's parts)",n,
-        std::size(kScopeEndCalls));
+    perfhud::ScopesChained(anchor && n==std::size(kScopeEndCalls));
+    Log("HOOK perf frame=%d scopes=%u/%zu (the performance panel, PerfHud: frames at the main loop's input sample, the "
+        "step's phases, the render recording's parts)",anchor,n,std::size(kScopeEndCalls));
+    return anchor;
 }
 
 void Install() noexcept {
     LARGE_INTEGER hz;QueryPerformanceFrequency(&hz);
     tickMs=1000.0/static_cast<double>(hz.QuadPart);
-    InstallScopes();
-    if(!Cfg().debug)return;
-    // each hook's next is the global it calls through, written by Chain before the site is
-    const bool anchor=Chain(kInputCall,kInput,reinterpret_cast<void*>(&InputHook),reinterpret_cast<void**>(&nextInput));
+    const bool anchor=InstallScopes();
     anchored=anchor;
-    Log("PERF QPC %lld Hz; HOOK perf frame=%d (the main loop's input sample: frame times, steps a frame, SLOW FRAME)",
+    if(!Cfg().debug)return;
+    Log("PERF QPC %lld Hz; frame anchor %d (the main loop's input sample: frame times, steps a frame, SLOW FRAME)",
         hz.QuadPart,anchor);
     if(!anchor || !Cfg().perfProbe)return;
     // The frame split: all or none (a frame's parts must add up).

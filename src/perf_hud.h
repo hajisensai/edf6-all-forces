@@ -4,8 +4,10 @@
 // The numbers are the game's own profile scopes: each phase of System::update 0x1198DA0 is bracketed by
 // 0x11AA830 (begin: [scope] the QPC base, +8 its name, +0x10 QPC - base) and 0x11AA880 (end: +0x18 QPC - base), so
 // +0x18 - +0x10 is the phase's time in QPC ticks. perf_probe.cpp chains the end calls (kScopeEndCalls) whatever Debug
-// says and hands each here (ScopeEnded, the game thread); every kPublishMs the period's means are published as one
-// Readout under a lock the draw thread only tries (Latest). Docs: docs/perf-hud.md.
+// says and hands each here (ScopeEnded, the game thread). Frames are the main loop's input sample (perf_probe.cpp's
+// frame anchor, FrameMarked): not the render scope, whose recording 0x11978D0 skips the end when a view has nothing to
+// draw. Every kPublishMs the period's means are published as one Readout under a lock the draw thread only tries
+// (Latest). Docs: docs/perf-hud.md.
 #pragma once
 #include <Windows.h>
 #include <cstdint>
@@ -30,6 +32,8 @@ struct Readout {
 
 // The game thread, after the stock end of scope `index` that took `ticks` QPC ticks.
 void ScopeEnded(unsigned index,long long ticks) noexcept;
+// The game thread, once a frame at the main loop's input sample (QPC now).
+void FrameMarked(long long now) noexcept;
 // perf_probe.cpp at load: whether every scope end took its hook (else the panel shows nothing: its sums would not add up).
 void ScopesChained(bool all) noexcept;
 // The draw thread: the latest readout when one was published in the last kFreshMs.
@@ -38,6 +42,7 @@ bool Latest(Readout* out) noexcept;
 // What a period's sums come to (pure; tests/perf_hud_test.cpp).
 struct Period {
     long long scope[kScopes]{};
+    unsigned calls[kScopes]{};       // the ends seen (the draw parts: a frame's views)
     unsigned steps=0,frames=0;
     long long frameSum=0,frameWorst=0;
 };

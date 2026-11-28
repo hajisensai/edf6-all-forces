@@ -5,6 +5,7 @@
     bool enabled=true;
     bool debug=true;
     int perfProbe=0;                // with debug: 1 frame and graph probes, 2 also samples collision tasks
+    bool perfHud=false;             // the performance panel in a mission: frame rate, the step's phases, the population, CPU, memory (perf_hud.h); read live
     int preloadMode=0;              // a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)
     bool syncLoadProbe=true;        // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
     bool autoCrew=true;             // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
@@ -81,7 +82,6 @@
     bool giantContactCap=true;      // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool havokMultithread=true;     // the game's Havok worker pool processes the physics task queue (havok_mt.cpp); read at start only; on since the game tests (docs/havok-mt-re.md §13)
     int objectUpdateMT=1;           // slot5's bones-to-collision-proxy sync (0x6ED800) computed on worker threads, committed in registration order (object_update_mt.cpp); read at start only (docs/object-update-mt-re.md)
-    bool perfHud=false;             // the performance panel in a mission: frame rate, the step's phases, the population, CPU, memory (perf_hud.h); read live
     bool expandCull=true;           // the bullets' broadphase group expansion (addBody 0x109DA0's walk) appends only the parts whose world box the sweep touches (bullet_expand_cull.cpp); read every cast (docs/bullet-expand-cull-re.md)
     int frameRateCap=170;           // ini FrameRateCap (frame_rate_logic.h FixCap): 170 shipped (the maintainer, 2026-11-27), 0 the game's 59.94 Hz, 1 the display's refresh rate, -1 no cap, 61..1000; read at start only (frame_rate.cpp, docs/unlimited-fps-re.md)
     bool frameRateFlip=false;       // ini FrameRateFlip (developer, not in the shipped ini): the flip swap chain, tearing, the waitable object (swap_flip.cpp); untested on the real game
@@ -599,6 +599,7 @@
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
     n.perfProbe=ReadInt(L"PerfProbe",static_cast<DWORD>(n.perfProbe));
+    n.perfHud=ReadBool(L"PerfHud",n.perfHud);
     n.preloadMode=ReadInt(L"PreloadMode",static_cast<DWORD>(n.preloadMode));
     n.syncLoadProbe=ReadBool(L"SyncLoadProbe",n.syncLoadProbe);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
@@ -670,7 +671,6 @@
     n.havokMultithread=ReadBool(L"HavokMultithread",n.havokMultithread);
     n.objectUpdateMT=ReadInt(L"ObjectUpdateMT",static_cast<DWORD>(n.objectUpdateMT));
     n.expandCull=ReadBool(L"ExpandCull",n.expandCull);
-    n.perfHud=ReadBool(L"PerfHud",n.perfHud);
     n.frameRateFlip=ReadBool(L"FrameRateFlip",n.frameRateFlip);
     n.maxFrameLatency=ReadInt(L"MaxFrameLatency",static_cast<DWORD>(n.maxFrameLatency));
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
