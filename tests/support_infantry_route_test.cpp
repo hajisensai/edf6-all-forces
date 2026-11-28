@@ -106,6 +106,7 @@ bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {
 support_net::PlanResult PlanZwVehicle(std::uint32_t,std::uint32_t,const float*,std::uint64_t,SupportPlan*) noexcept {return support_net::PlanResult::refused;}
 bool ValidateZwVehiclePlan(const SupportPlan&) noexcept {return false;}
 bool ApplyZwVehiclePlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
+void NoteZwCrewVehicler(const ObjRef&) noexcept {}   // zw_vehicle_dispatch.cpp: a Vehicler NPC's own vehicle, not under test here
 void DestroyZwVehiclePlan(std::uint64_t) noexcept {}
 bool ZwVehicleRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
 void ZwVehicleTick() noexcept {}

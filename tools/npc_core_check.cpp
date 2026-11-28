@@ -35,6 +35,12 @@ bool NpcPackUse(unsigned char*,int slot) noexcept { ++packUses;packUseSlot=slot;
 bool NpcPackReload(unsigned char*) noexcept { ++packReloads;return true; }
 bool RealDriverNativeReady() noexcept { return true; }
 const unsigned char* ZwVehicleOwner(const void*) noexcept { return nullptr; }   // zw_vehicle_dispatch.cpp: no Vehicler owns a vehicle here
+bool RuneBladeNpcTakeoff(void*) noexcept { return false; }   // runeblade.cpp: no Rune Blade NPC hops here
+namespace soldier { int ZwType(const void*) noexcept { return 0; } }   // soldier_factory.cpp: only stock soldiers here
+namespace runeblade {
+float EtherLevel(const void*) noexcept { return -1.0f; }   // runeblade.cpp: no gauge here
+bool EtherDepleted(const void*) noexcept { return true; }
+}
 bool SaveIniFlag(const char*,const char*) noexcept { return true; }   // loadout_store.cpp: the ini, not written here
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
 int announcedBoards=0;
