@@ -345,14 +345,15 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
 }
 
 namespace {
-Body DroneBody(SupportDroneKind kind) noexcept {
-    return kind==SupportDroneKind::blast ? Body::blast : kind==SupportDroneKind::doll ? Body::doll : Body::drone;
+// The body of a drone of `kind` launched off `parent` (nullptr: none): the gun drone is its carrier's (GunDroneOf).
+Body DroneBody(SupportDroneKind kind,const void* parent) noexcept {
+    return kind==SupportDroneKind::blast ? Body::blast : kind==SupportDroneKind::doll ? Body::doll : GunDroneOf(parent);
 }
 }
 bool SupportDroneReady() noexcept {return SupportDroneReady(SupportDroneKind::gun);}
 bool SupportDroneReady(SupportDroneKind kind) noexcept {
     return static_cast<unsigned>(kind)<=static_cast<unsigned>(SupportDroneKind::doll) &&
-        image && HooksOk() && Cfg().jetPilot && spawnOk && Preloaded(DroneBody(kind)) &&
+        image && HooksOk() && Cfg().jetPilot && spawnOk && Preloaded(DroneBody(kind,nullptr)) &&
         (kind!=SupportDroneKind::doll || DollReady()) && At<void*>(image,kObjectMgr);
 }
 bool CarrierSupportDroneReady(const ObjRef& parent,SupportDroneKind kind,unsigned slot) noexcept {
@@ -361,21 +362,22 @@ bool CarrierSupportDroneReady(const ObjRef& parent,SupportDroneKind kind,unsigne
         const auto* v=static_cast<const unsigned char*>(parent.obj);
         Role role{},drones{};unsigned char nativeId[32]{};
         if(v[kDead] || !IsJetVehicle(v,&role,&drones) || KindOf(role).weapon!=Weapon::drones ||
-           !ReadNativeObjectId(v,nativeId))return false;
+           !Preloaded(DroneBody(kind,v)) || !ReadNativeObjectId(v,nativeId))return false;
         return kind==SupportDroneKind::gun || (kind==SupportDroneKind::blast && drones==Role::blast) ||
             (kind==SupportDroneKind::doll && drones==Role::doll);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 static unsigned char* PrepareDrone(const float* exactMatrix,const float* anchor,const void* parent,SupportDroneKind kind) noexcept {
     __try {
-        if(!exactMatrix || !anchor || !SupportDroneReady(kind) || !SlotFree())return nullptr;
+        if(!exactMatrix || !anchor || !SupportDroneReady(kind) || !Preloaded(DroneBody(kind,parent)) || !SlotFree())return nullptr;
         for(unsigned i=0;i<16;++i)if(!std::isfinite(exactMatrix[i]))return nullptr;
         for(unsigned i=0;i<3;++i)if(!std::isfinite(anchor[i]))return nullptr;
         SupportDroneRecord* slot=nullptr;
         for(auto& item:supportDrones)if(!item.ref){slot=&item;break;}
         if(!slot)return nullptr;
         // Consume the host's exact transform; terrain adjustment belongs to planning alone.
-        unsigned char* const v=SpawnJet(DroneBody(kind),exactMatrix);
+        const Body body=DroneBody(kind,parent);
+        unsigned char* const v=SpawnJet(body,exactMatrix);
         if(!v)return nullptr;
         v[kFireGun]=0;v[kFireMissile]=0;
         const ObjRef child=ObjRef::Of(v);
@@ -388,7 +390,7 @@ static unsigned char* PrepareDrone(const float* exactMatrix,const float* anchor,
         if(!j){PvpForgetSupportObject(child);reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;}
         j->supportDrone=true;j->supportPending=true;j->launched=true;j->mode=Mode::patrol;
         std::memcpy(j->anchor,anchor,12);j->fuelMs=static_cast<ULONGLONG>(Cfg().jetFuelSec)*1000;
-        const float speed=KindOf(Row(DroneBody(kind)).role).cruise;
+        const float speed=KindOf(Row(body).role).cruise;
         for(unsigned i=0;i<3;++i)j->m.vel[i]=exactMatrix[8+i]*speed;
         JoinFlight(*j,FlightFor(parent,GameMs()));
         Put<float>(v,kAreaInset,kNoInset);
@@ -543,16 +545,19 @@ void AddSupportAircraftItems(const SupportAircraft& spec,preload::Set& out) noex
     if(!SupportSpecValid(spec))return;
     const Body body=SupportBody(spec);
     out.Add(preload::Body(static_cast<int>(body)));
-    // A carrier's drones (jet_carrier.cpp: its own blast / doll ones when their body is there, else the gun drone).
+    // A carrier's drones (jet_carrier.cpp: its own blast / doll ones when their body is there, else its gun drone).
     const BodyRow& row=Row(body);
     if(KindOf(row.role).weapon==Weapon::drones) {
-        out.Add(preload::Body(static_cast<int>(Body::drone)));
+        out.Add(preload::Body(static_cast<int>(row.gunDrone)));
         out.Add(preload::Body(static_cast<int>(KindOf(row.drones).body)));
     }
 }
 
 bool SupportAircraftReady(const SupportAircraft& spec) noexcept {
-    return spawnOk && SupportSpecValid(spec) && Preloaded(SupportBody(spec));
+    if(!spawnOk || !SupportSpecValid(spec))return false;
+    // A carrier comes with its gun drone (the Arsenal Bird's M101: the same model pack), or not at all.
+    const BodyRow& row=Row(SupportBody(spec));
+    return Preloaded(row.body) && (KindOf(row.role).weapon!=Weapon::drones || Preloaded(row.gunDrone));
 }
 
 bool SupportRunLoad(const SupportAircraft& spec,const VehicleLoadout* pylons,sortie::RunLoad* load,float* speed) noexcept {
