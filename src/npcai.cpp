@@ -61,6 +61,9 @@
 #include "turretaim.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
+#include "ride_native.h"
+#include "zw_vehicle_dispatch.h"
+#include "vehicler_start_logic.h"
 #include "seat_turret.h"
 #include "seat_events.h"
 #include "support_soldier.h"
@@ -1572,7 +1575,7 @@ Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
 // takes one first. It checks neither team, nor class mask, nor reach: the plugin does (a free seat whose masks take the
 // soldier's class, the seat's riding point within reach). Driver input is preserved by the narrow native
 // seat-clear hook; real soldiers occupy driver seats as well as gunner and passenger seats.
-constexpr unsigned kRideVehicle=0x5765E0;
+using ride_native::kRideVehicle;using ride_native::kRideRelease;using ride_native::kRideSig;using ride_native::kRideReleaseSig;
 constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSeat=0x1540,kHumanRiding=0x1548;
 // A board order that has not brought the soldier kBoardProgress m nearer its seat in this long is dropped (the user's
 // report #12, 2026-10-11: no NPC ever got into the Proteus's driver seat or the Barga). Not a deadline for the whole walk:
@@ -1580,8 +1583,6 @@ constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSe
 // Proteus's driver seat in 48 s), so a fixed 20 s dropped every far order half way and the squad walked them back.
 constexpr ULONGLONG kBoardMs=20000;
 constexpr float kBoardProgress=1.0f;
-const unsigned char kRideSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x48};
-const unsigned char kRideReleaseSig[]={0x49,0x8B,0x5E,0x08,0x48,0x85,0xDB,0x74,0x27,0x8B,0xC7,0xF0,0x0F,0xC1,0x43,0x08};   // 0x57690D
 bool rideOk=false;
 // The vehicle's seat events (seat_events.h): the boarding-sound site 0x632AC6 (mov ecx,[rsi+0x620]; shl al,cl;
 // test [rsi+0x628],al) and the seat scan's 0x62F1AA (mov [rsi+0x628],dx; mov ecx,[rsi+0x620]; shl ax,cl). Not as read:
@@ -1590,15 +1591,13 @@ const unsigned char kSeatSoundSig[]={0x8B,0x8E,0x20,0x06,0x00,0x00,0xD2,0xE0,0x8
 const unsigned char kSeatScanSig[]={0x66,0x89,0x96,0x28,0x06,0x00,0x00,0x8B,0x8E,0x20,0x06,0x00,0x00,0x66,0xD3,0xE0};
 static_assert(seatevt::kMask==0x628 && seatevt::kShift==0x620,"the offsets the signatures read");
 bool seatEventsOk=false;
-struct SharedRef { void* obj; void* ctrl; };
-using RideFn=void(__fastcall*)(void*,SharedRef*,int);
+using ride_native::SharedRef;using ride_native::RideFn;
 // Silent boardings (npcai.h SetNpcMissionCrew; 测试站 #41): the stock SeatRide 0x633C10 marks a new rider's seat taken
 // and changed itself (0x633D90 -> 0x633FE0: or [+0x628], bit; or [+0x628], bit << [+0x620]), so the vehicle's next
 // update (0x674B60 -> 0x632A60) plays the boarding preset unless the change bit is gone first: Quiet right after the ride.
 NpcMissionCrewFn missionCrewJudge=nullptr;
 // A peer's ride message (HUMAN_EVENT_VEHICLE_RIDE, HumanBase slot 15 0x5774C0): `lea rcx,[rsi-0x120]; call 0x5765E0`.
-constexpr unsigned kRemoteRideCall=0x577661;
-const unsigned char kRemoteRideSig[]={0x48,0x8D,0x8E,0xE0,0xFE,0xFF,0xFF,0xE8};   // 0x57765A
+using ride_native::kRemoteRideCall;using ride_native::kRemoteRideSig;
 bool remoteRideHooked=false;
 // The vehicle takes `human`'s seat as held from the start: no boarding sound for it (seat_events.h Quiet).
 void QuietRide(unsigned char* v,const unsigned char* human) noexcept {
@@ -1729,6 +1728,9 @@ bool OwnsNpcSeatInput(unsigned char* seat) noexcept { return NpcSeatInputOwner(s
 bool SeatTakes(const unsigned char* v,unsigned i,const unsigned char* h) noexcept {
     const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),i);
     if(SeatRider(seat)!=Rider::none || (i==0 && !RealDriverNativeReady()))return false;
+    // A Vehicler's own vehicle (zw_vehicle_dispatch.h): its driver seat is its owner's alone (vehicler-plan.md §2.3); the
+    // gunner and passenger seats are offered as any vehicle's.
+    if(vstart::DriverSeatBarred(i,ZwVehicleOwner(v),h))return false;
     return (At<std::uint32_t>(h,kHumanMask)&At<std::uint32_t>(seat,kSeatClass)&At<std::uint32_t>(seat,kSeatEnable))!=0;
 }
 
@@ -3489,7 +3491,7 @@ bool InstallNpcAi() noexcept {
         for(const auto& s:kSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("NPCAI profile mismatch at %#zx: the soldiers' AI stays stock",s.rva);return false;}
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     __try { followOk=Matches(kSetFollow,kSetFollowSig,sizeof(kSetFollowSig)); } __except(EXCEPTION_EXECUTE_HANDLER){followOk=false;}
-    __try { rideOk=Matches(kRideVehicle,kRideSig,sizeof(kRideSig)) && Matches(0x57690D,kRideReleaseSig,sizeof(kRideReleaseSig)); }
+    __try { rideOk=Matches(kRideVehicle,kRideSig,sizeof(kRideSig)) && Matches(kRideRelease,kRideReleaseSig,sizeof(kRideReleaseSig)); }
     __except(EXCEPTION_EXECUTE_HANDLER){rideOk=false;}
     if(!rideOk)Log("NPCAI RideVehicle not as read: squads do not board vehicles");
     __try { hullOk=Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) && Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2)); }
