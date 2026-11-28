@@ -93,6 +93,8 @@ inline constexpr Entry kEntries[]={
     {Category::soldier,How::soldier,"fencer_pile_banker",L"重装兵（打桩）",nullptr,12,0.2f},
     {Category::soldier,How::soldier,"fencer_shotgun",L"重装兵（霰弹）",nullptr,13,0.2f},
     {Category::soldier,How::soldier,"xm_infantry",L"X-Morph 步兵",nullptr,14,0.2f},
+    {Category::soldier,How::soldier,"zw_vehicler",L"载具手（自带车）",nullptr,15,0.2f},
+    {Category::soldier,How::soldier,"zw_runeblade",L"刻印剑士",nullptr,16,0.2f},
 };
 constexpr int kEntryCount=static_cast<int>(sizeof(kEntries)/sizeof(kEntries[0]));
 // Every Mods row lists its files and nothing else does; a list is not empty.

@@ -3057,6 +3057,7 @@ int wmain(int argc,wchar_t** argv) {
     if(argc==2 && !wcscmp(argv[1],L"--check-feed"))return PhysicalInstrumentFeedChecks();
     // the scenes are a full install's (the X-Morph model pack's infantry among the kinds: support_call.h SupportKindInstalled)
     SetSupportKindInstalled(SupportWeapon::xmInfantry,true);
+    SetSupportKindInstalled(SupportWeapon::zwVehicler,true);SetSupportKindInstalled(SupportWeapon::zwRuneBlade,true);   // the new classes' bodies installed too
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH,temp);
     std::wstring dir=std::wstring(temp)+L"edf6_hud_view";
