@@ -10,6 +10,8 @@
 //    a filter functor (its calls too), outside any cast, ExpandCull=0, a blast bullet, casts inside a cast (each its
 //    own sweep); invalid ids / no shape kept; the world changed between steps (a new generation: boxes moved, nodes
 //    on / off, relinked, bodies moved between groups);
+//  - groups expanded again and again in one step (their flat copies used), their lists changed between the casts with
+//    no new generation: as above, and id for id the list walk's cut;
 //  - an exception out of the filter functor through the cave (its unwind info) and the cast's scope;
 //  - the settle: casts left whole until it is chained; chained over a fake damagestats redirect of 0x23426F; one with
 //    entries whose hook moves a body onto the sweep ends the generation (the body kept after it; the control without
@@ -461,6 +463,75 @@ bool RandomWorlds() {
     return true;
 }
 
+// Groups expanded again and again in one step (one generation: the flat copies used), their lists changed between the
+// casts with no new generation (nodes switched, given other bodies, relinked, taken out and freed, new ones put in, at
+// a freed node's address too): each list stock's less only unreachable parts, and id for id the list walk's cut.
+bool InStep() {
+    Rng rng(4321);
+    constexpr float kField=40.0f;
+    Thread* const me=Self();
+    if(!me){++failures;std::puts("FAIL: the thread");return false;}
+    const bool wasCounting=counting;
+    counting=false;   // the thread's counts kept (not flushed per cast)
+    const Stats before=me->stats;
+    unsigned casts=0,changes=0;
+    for(unsigned w=0;w<40;++w) {
+        Fake f;
+        Build(f,rng,1+rng.N(300),1+rng.N(30),1+rng.N(60),50+rng.N(51),rng.N(101),kField);
+        Collector a(1u<<20),b(1u<<20),c(1u<<20);
+        for(unsigned step=0;step<4;++step) {
+            NewStep();
+            for(unsigned round=0;round<30;++round) {
+                const auto ids=Overlaps(f,rng,200);
+                CastArgs args{};
+                RandomArgs(rng,args,kField);
+                args.ids=&ids;
+                a.Reset(nullptr);b.Reset(nullptr);c.Reset(nullptr);
+                StockRun(a,ids);
+                Cast(b,args);
+                flatCopies=false;
+                Cast(c,args);
+                flatCopies=true;
+                if(!Subset(a,b,args,"in step",round) || !Same(c,b,"in step: the flat cut against the list walk's",round)) {
+                    counting=wasCounting;
+                    return false;
+                }
+                ++casts;
+                if(rng.N(2))continue;
+                // A list change within the step (the boxes as they are: a generation's).
+                const unsigned g=rng.N(static_cast<unsigned>(f.groups.size()));
+                auto& list=f.lists[g];
+                const unsigned n=static_cast<unsigned>(list.size());
+                ++changes;
+                switch(rng.N(5)) {
+                case 0: if(n)list[rng.N(n)][kNodeOn]^=1;break;
+                case 1: if(n)Wr<void*>(list[rng.N(n)],kNodeBody,f.bodies[rng.N(static_cast<unsigned>(f.bodies.size()))]);break;
+                case 2: if(n>1){std::swap(list[rng.N(n)],list[rng.N(n)]);f.Link(g);}break;
+                case 3:   // taken out and freed
+                    if(n){const unsigned k=rng.N(n);std::free(list[k]);list.erase(list.begin()+k);f.Link(g);}
+                    break;
+                default: {   // a new node (calloc may hand back a freed node's address)
+                    auto* const node=Zeroed(kNodeBytes);
+                    Wr<void*>(node,kNodeBody,f.bodies[rng.N(static_cast<unsigned>(f.bodies.size()))]);
+                    node[kNodeOn]=rng.N(4) ? 1 : 0;
+                    list.insert(list.begin()+rng.N(n+1),node);
+                    f.Link(g);
+                    break;
+                }
+                }
+            }
+        }
+    }
+    const unsigned long long hits=me->stats.flatHits-before.flatHits,builds=me->stats.flatBuilds-before.flatBuilds,
+                             changed=me->stats.flatChanged-before.flatChanged;
+    counting=wasCounting;
+    Check(hits>0,"in step: walks off a flat copy");
+    Check(changed>0,"in step: a changed list copied again");
+    std::printf("in step: %u casts in %u steps of 30, %u list changes between them; flat copies %llu hits, %llu made, %llu of them "
+                "the list changed\n",casts,40*4,changes,hits,builds,changed);
+    return true;
+}
+
 // Keep-one: a group none of whose parts the sweep reaches, overlapped into an empty list, puts its first active part.
 bool KeepOne() {
     Rng rng(3);
@@ -580,18 +651,30 @@ void Timing(unsigned enemies,bool scattered) {
         return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
     };
     time(0);time(2);   // warm
+    // The least of 5 runs each (a busy machine's noise only adds).
+    Thread* const me=Self();
+    const Stats before=me ? me->stats : Stats{};
     const unsigned long long calls0=aabbCalls;
-    const double s=time(0),w=time(1),h=time(2);
-    const unsigned long long computes=aabbCalls-calls0;
+    double s=1e300,w=1e300,h=1e300,l=1e300;
+    for(unsigned k=0;k<5;++k){s=(std::min)(s,time(0));w=(std::min)(w,time(1));h=(std::min)(h,time(2));}
+    const unsigned long long computes=(aabbCalls-calls0)/5;
+    const Stats after=me ? me->stats : Stats{};
+    const unsigned long long hits=after.flatHits-before.flatHits,builds=after.flatBuilds-before.flatBuilds;
+    flatCopies=false;   // the cut walking the lists (before the flat copies)
+    for(unsigned k=0;k<5;++k)l=(std::min)(l,time(2));
+    flatCopies=true;
     // The parts the walks went over (stock's list lengths) and the cut's kept.
     unsigned long long parts=0,kept=0;
     for(unsigned i=0;i<1024;++i){a.Reset(nullptr);StockRun(a,sweeps[i]);parts+=a.Count();b.Reset(nullptr);Cast(b,args[i]);kept+=b.Count();}
     parts*=5;kept*=5;
     counting=wasCounting;
-    const double perPart=parts ? (h-w)*1e6/static_cast<double>(parts) : 0.0;
-    std::printf("timing %s, %u enemies: %u casts, %llu parts walked, %.1f%% culled, %llu box computes; stock %.2f ms, as stock "
-                "outside a cast %.2f ms, cut %.2f ms: %+.2f ns a part over the walk\n",scattered ? "scattered" : "packed",enemies,5*1024,
-                parts,parts ? 100.0*static_cast<double>(parts-kept)/static_cast<double>(parts) : 0.0,computes,s,w,h,perPart);
+    const double np=parts ? 1e6/static_cast<double>(parts) : 0.0;
+    std::printf("timing %s, %u enemies: %u casts, %llu parts walked, %.1f%% culled, %llu box computes, flat copies %.1f%% hits; "
+                "stock %.2f ms, as stock outside a cast %.2f ms (%.2f ns a part), cut %.2f ms (%.2f ns a part, %+.2f over the "
+                "walk), cut walking the lists %.2f ms (%.2f ns a part, %+.2f)\n",scattered ? "scattered" : "packed",enemies,5*1024,parts,
+                parts ? 100.0*static_cast<double>(parts-kept)/static_cast<double>(parts) : 0.0,computes,
+                hits+builds ? 100.0*static_cast<double>(hits)/static_cast<double>(hits+builds) : 0.0,s,w,w*np,h,h*np,(h-w)*np,
+                l,l*np,(l-w)*np);
     for(auto* p:pads)std::free(p);
 }
 
@@ -841,6 +924,7 @@ int main(int argc,char** argv) {
     if(!SettleChain() || failures){std::printf("FAIL: %d checks\n",failures);return 1;}
     Records();
     RandomWorlds();
+    InStep();
     KeepOne();
     Throws();
     if(failures){std::printf("FAIL: %d checks\n",failures);return 1;}
