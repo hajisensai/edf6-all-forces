@@ -11,12 +11,18 @@
 // in an empty list keeps its first active part (the list's emptiness decides the step's path). Left as stock: a blast
 // bullet (core+0xAF4 bit 0x1000: its point query reads the 0x8D8 list), walks with a filter functor or outside the
 // bullet casts, ExpandCull=0 (read every cast).
-// With debug, 1 bullet cast in 256 is left whole and its step-3 build (0x2382B6) runs the narrowphase on the whole
-// list and on the cut one and compares the hit fields the game reads (EXPANDCULL MISMATCH; the whole list used);
-// PerfProbe: the PERF EXPANDCULL row.
+// Step 1 settles damage between bullets (0x23426F -> 0x543920): a death there may remove / move / reshape bodies, so
+// a settle with entries ends the boxes' generation too (the casts after it fill their boxes again). That call is
+// chained at the load's end (InstallBulletExpandCullSettle, over damagestats' redirect); until it is in, every cast
+// is left whole. A box filled again in the same batch step is compared with the old (EXPANDCULL STALE).
+// With debug, 1 bullet cast in 256 and the first after every 8th settle are left whole; the cut's decisions are
+// recorded at the cast, and its ray build (0x238014) and step-3 build (0x2382B6) run the ray / the narrowphase on the
+// whole list and on the cut one and compare the hit fields the game reads (EXPANDCULL MISMATCH; the whole list
+// used). PerfProbe: the PERF EXPANDCULL row.
 #pragma once
 
 namespace crew {
 bool InstallBulletExpandCull() noexcept;
+bool InstallBulletExpandCullSettle() noexcept;   // kLast: chains the settle call; arms the cut
 void ReportBulletExpandCull(unsigned frames) noexcept;
 }  // namespace crew

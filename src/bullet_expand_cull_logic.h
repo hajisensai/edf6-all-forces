@@ -38,6 +38,20 @@ constexpr unsigned kBuild=0x231720,kBuildCall=0x2382B6;
 constexpr unsigned kShapeBatch=0x11A8E40;     // the narrowphase batch (world, commands, n)
 constexpr unsigned kSystem=0x20B2958;         // the xgs System (+0x10 the world)
 constexpr unsigned kAabbTable=0x20F1930;      // the shape types' function table (+type*0x100+0x18: calcAabb)
+// The damage settle (core+0x6E0 the queue: +8 its 0xA0-byte entries, +0x18 their count; each sent to its target's
+// slots 10 / 9 / 11, where a death is handled, synchronously) and its only call inside step 1: 0x23426F, move type 1,
+// before that type's cast 0x234334 (the other settles of the step, 0x2321B0's from 0x23832D, come after every cast).
+// A settle with entries may change bodies (a death: removed, re-added, moved, another shape): the box cache's
+// generation goes up after it. Chained at the load's end (damagestats redirects the same call).
+constexpr unsigned kSettle=0x543920,kSettleCall=0x23426F;
+constexpr std::size_t kQueueCount=0x18;
+// The ray command build (core, the 0x70-byte command: core+0x8C0 on and 0x8D0 ids at 0x8C8, the collector inline at
+// core+0x8F0 with its count at +0xC and the closest hit at +0x30) and its only call, in the batch step right after
+// each bullet's step 1; the commands' batch 0x11A7AC0 (world, commands, n) after every bullet's, then each command's
+// hits read (0x238700: the hit body +0x48; 0x234D20: the count, core+0x920 to the ray's end). For the shadow check.
+constexpr unsigned kRayBuild=0x231840,kRayBuildCall=0x238014,kRayBatch=0x11A7AC0;
+constexpr std::size_t kCoreRayOn=0x8C0,kCoreRayIds=0x8C8,kCoreRayCount=0x8D0,kCoreRayHits=0x8F0,kCoreRayBest=0x920;
+constexpr std::size_t kRayCommandBytes=0x70;
 
 struct Fingerprint { unsigned begin,end; std::uint64_t fnv; };
 // FNV-1a over [begin, end) of the stock code the cut rests on.
@@ -54,6 +68,11 @@ constexpr Fingerprint kFingerprints[]{
     {0x2321F8,0x232240,0xd15176f36bd07a35ull},   // the hit handling: collector slot 3 the hits, +0xC the count, 0x70 each
     {0xDAB170,0xDAB183,0x40943da61589fbf8ull},   // hknpWorld reader slot 0x80 getBody: bodies + (id & 0xFFFFFF) * 0xB0
     {0xDAC200,0xDAC234,0x52b86e4e8bfbccceull},   // slot 0x68 isValid: index in range, flags & 3, +0x50 == id (int 0 / 1)
+    {0x234250,0x23427C,0x35488a59917b0ebbull},   // step 1 type 1: the settle 0x543920 (rcx core+0x6E0) or the queue cleared
+    {0x543920,0x54396C,0x9cbf22e249abefc8ull},   // the settle's head: the entries +8, their count +0x18 (0: no loop)
+    {0x231840,0x2318DF,0x96c38df7a8a77646ull},   // the ray build: 0x8C0 / 0x8D0, the ids at 0x8C8 fetched as they are
+    {0x237FF0,0x2380AF,0x8a5b473701efeb0full},   // the batch: step 1, the ray build per bullet; the rays' batch; their hits
+    {0x234D20,0x234D49,0xce61e3362f498030ull},   // the ray's hit: core+0x8FC the count, core+0x920 the closest
 };
 
 // The collector (core+0x800), the group, its nodes (a std::list: +0 next), the node's object.
@@ -137,8 +156,8 @@ struct Sweep {
     }
 };
 
-// One step's body boxes on one thread: direct-mapped by the body index (id & 0xFFFFFF), tagged with the whole id and
-// the step's generation (0 never one). An unbounded box (-inf .. +inf: no shape, no calcAabb, not a box) is kept by
+// One generation's body boxes on one thread (a step's, up to a damage settle): direct-mapped by the body index (id & 0xFFFFFF), tagged with the whole id and
+// the generation (0 never one). An unbounded box (-inf .. +inf: no shape, no calcAabb, not a box) is kept by
 // every sweep.
 struct BoxEntry { float lo[3]; unsigned id; float hi[3]; unsigned gen; };
 static_assert(sizeof(BoxEntry)==32);
@@ -167,5 +186,10 @@ struct Stats {
     unsigned long long outside=0,filtered=0;              // walks as stock: outside a bullet cast / with a filter functor
     unsigned long long sampled=0,shadowed=0,mismatches=0,unreadDiffs=0;
     unsigned unreadMask=0;                                // the 0x70-byte hits' dwords that differed but no reader reads
+    unsigned long long unarmed=0;                         // casts left whole: the settle not chained (yet)
+    unsigned long long rechecked=0,stale=0;               // a body's box filled again after a settle in the step; changed
+    unsigned long long settleSampled=0,settleShadowed=0,settleMismatches=0;   // samples: the first cast after a settle
+    unsigned long long spanShadowed=0,spanMismatches=0;   // samples with a settle between the cast and the step-3 build
+    unsigned long long rayShadowed=0,rayMismatches=0,unmatched=0;   // the ray list's check; a list not the record's
 };
 }  // namespace crew::expand_cull

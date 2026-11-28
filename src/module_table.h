@@ -464,6 +464,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kMission,Id::kAirstrikes,[](const LoadContext&) noexcept {Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());}},
     {IP::kMission,Id::kCrew,[](const LoadContext&) noexcept {
         if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");}},
+    {IP::kLast,Id::kBulletExpandCull,&Install<&InstallBulletExpandCullSettle>},   // after damagestats' settle redirect: chains it, arms the cut
     {IP::kLast,Id::kPerfProbe,&Install<&perfprobe::Install>},      // last: it chains call sites other hooks redirect at load (perf_probe.h)
     {IP::kLast,Id::kSyncLoad,&Install<&syncload::Install>},        // after it: the game thread is the frame anchor's (sync_load_probe.h)
 };

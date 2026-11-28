@@ -1,6 +1,7 @@
 // The bullets' broadphase group expansion cut to the parts the sweep can reach (bullet_expand_cull.h,
 // docs/bullet-expand-cull-re.md): the cave at addBody's walk 0x109F6F, the bullet step's three cast calls, the batch
-// step's call (the box cache's generation) and, with debug, the step-3 build's call (the shadow check).
+// step's call (the box cache's generation), step 1's damage settle call (chained at the load's end: a new generation
+// after a settle with entries) and, with debug, the step-3 build's and the ray build's calls (the shadow checks).
 #include "bullet_expand_cull.h"
 #include "bullet_expand_cull_logic.h"
 #include "config.h"
@@ -26,15 +27,30 @@ using CastFn=std::uintptr_t(__fastcall*)(void*,void*,void*,void*,void*);
 using StepFn=std::uintptr_t(__fastcall*)(void*,void*);
 using BuildFn=std::uint64_t(__fastcall*)(unsigned char*,unsigned char*);
 using BatchFn=void(__fastcall*)(void*,void*,unsigned);
+using SettleFn=std::uintptr_t(__fastcall*)(unsigned char*,void*,void*,std::uintptr_t);
 using ValidFn=int(__fastcall*)(void*,unsigned);
 using BodyFn=const unsigned char*(__fastcall*)(void*,unsigned);
 using AabbFn=void(__fastcall*)(const void*,const void*,float*);
 using HitsFn=const unsigned char*(__fastcall*)(void*);
 
-bool counting=false,shadowing=false;
-std::atomic<unsigned> stepGen{1};   // the batch step's calls (0 never a generation)
+bool counting=false,shadowing=false,installed=false;
+// Casts are cut only once the settle is chained (InstallBulletExpandCullSettle): before, a settle would not end the
+// boxes' generation.
+std::atomic<bool> armed{false};
+std::atomic<unsigned> boxGen{1};     // the box cache's generation: up per batch step and per settle with entries (0 never one)
+std::atomic<unsigned> stepStart{1};  // the generation the batch step began with
+std::atomic<unsigned> stepNo{0};     // the batch steps (a sample's step)
+std::atomic<unsigned long long> settleCount{0};   // the settles with entries since the load (a sample's)
+SettleFn settleNext=nullptr;
 LARGE_INTEGER qpc0{},qpcFreq{};
 unsigned long long tsc0=0;
+
+// A new generation (never 0).
+unsigned Bump() noexcept {
+    unsigned g=boxGen.fetch_add(1,std::memory_order_relaxed)+1;
+    if(!g)g=boxGen.fetch_add(1,std::memory_order_relaxed)+1;
+    return g;
+}
 
 // The world's body reader as the cast sees it, and the shape types' calcAabb table.
 struct Bodies {
@@ -43,22 +59,35 @@ struct Bodies {
     BodyFn body=nullptr;
     const unsigned char* table=nullptr;
 };
+// A shadow sample: a cast left whole, its list (core+0x818) after the cast and, per position of it, whether the cut
+// would have kept it (decided at the cast, with the boxes the cut would have used; a position no cut walk put there:
+// kept). The step-3 build and the ray build of the same step check the cut lists against the whole ones.
+struct Sample {
+    const unsigned char* core=nullptr;   // null: free / being recorded
+    unsigned step=0;
+    unsigned long long settles=0;        // settleCount at the cast
+    bool afterSettle=false,rayDone=false,bad=false;
+    std::vector<unsigned> list;
+    std::vector<unsigned char> keep;
+};
 // The bullet cast running on this thread (the innermost).
 struct Cast {
     unsigned char* collector;
     Bodies bodies;
     Sweep sweep;
-    bool cut;   // false: left whole (ExpandCull=0, a blast, no world, a shadow sample)
+    bool cut;                 // false: left whole (ExpandCull=0, a blast, no world, not armed, a shadow sample)
+    Sample* record;           // a shadow sample's: the cut's decisions recorded, the list left whole
+    unsigned dropped;         // the record's positions the cut would have left out so far
 };
-// A shadow sample: a cast left whole, its sweep for the core's step-3 build this step.
-struct Sample { const unsigned char* core; unsigned gen; Bodies bodies; Sweep sweep; };
 
+constexpr unsigned kSamples=16;
 struct Thread {
-    const Cast* cast=nullptr;
+    Cast* cast=nullptr;
     BoxCache cache;
     Stats stats;
-    unsigned tick=0,nextSample=0;
-    Sample samples[16]{};
+    unsigned tick=0,settleTick=0,nextSample=0;
+    bool afterSettle=false;   // a settle with entries since this thread's last bullet cast
+    Sample samples[kSamples];
     explicit Thread(BoxEntry* storage) noexcept : cache(storage) {}
 };
 thread_local Thread* self=nullptr;
@@ -75,10 +104,11 @@ Thread* Self() noexcept {
 struct Totals {
     std::atomic<unsigned long long> casts{0},culling{0},blast{0},off{0},walks{0},parts{0},kept{0},culled{0},keptOne{0},
         lookups{0},misses{0},unbounded{0},walkTicks{0},boxTicks{0},outside{0},filtered{0},sampled{0},shadowed{0},mismatches{0},
-        unreadDiffs{0};
+        unreadDiffs{0},unarmed{0},rechecked{0},stale{0},settleSampled{0},settleShadowed{0},settleMismatches{0},spanShadowed{0},
+        spanMismatches{0},rayShadowed{0},rayMismatches{0},unmatched{0},settleCalls{0},settles{0};
     std::atomic<unsigned> unreadMask{0};
 } totals;
-std::atomic<unsigned> loggedMismatches{0},loggedUnread{0};
+std::atomic<unsigned> loggedMismatches{0},loggedUnread{0},loggedStale{0};
 
 void Flush(Stats& s) noexcept {
     const auto add=[](std::atomic<unsigned long long>& to,unsigned long long v) noexcept { if(v)to.fetch_add(v,std::memory_order_relaxed); };
@@ -88,6 +118,10 @@ void Flush(Stats& s) noexcept {
     add(totals.walkTicks,s.walkTicks);add(totals.boxTicks,s.boxTicks);add(totals.outside,s.outside);
     add(totals.filtered,s.filtered);add(totals.sampled,s.sampled);add(totals.shadowed,s.shadowed);
     add(totals.mismatches,s.mismatches);add(totals.unreadDiffs,s.unreadDiffs);
+    add(totals.unarmed,s.unarmed);add(totals.rechecked,s.rechecked);add(totals.stale,s.stale);
+    add(totals.settleSampled,s.settleSampled);add(totals.settleShadowed,s.settleShadowed);add(totals.settleMismatches,s.settleMismatches);
+    add(totals.spanShadowed,s.spanShadowed);add(totals.spanMismatches,s.spanMismatches);
+    add(totals.rayShadowed,s.rayShadowed);add(totals.rayMismatches,s.rayMismatches);add(totals.unmatched,s.unmatched);
     if(s.unreadMask)totals.unreadMask.fetch_or(s.unreadMask,std::memory_order_relaxed);
     s=Stats{};
 }
@@ -121,18 +155,33 @@ bool ComputeBox(const Bodies& b,unsigned id,float lo[3],float hi[3]) noexcept {
     return true;
 }
 
-// A slot filled with the id's box this step (a miss: once a body a step on a thread), counted.
+// A slot filled with the id's box this generation (a miss), counted. The stale probe: a slot this id filled earlier in
+// the same batch step (before a settle's new generation) is compared with the box now (EXPANDCULL STALE: the settle
+// changed the body's box, the generation's end was needed).
 __declspec(noinline) const BoxEntry& FillBox(Thread& t,const Bodies& b,BoxEntry& e,unsigned id,unsigned gen) noexcept {
     Stats& s=t.stats;
+    const bool again=e.id==id && e.gen && e.gen!=gen &&
+                     static_cast<int>(e.gen-stepStart.load(std::memory_order_relaxed))>=0;
+    const BoxEntry old=e;
     const unsigned long long a=counting ? __rdtsc() : 0;
     const bool ok=ComputeBox(b,id,e.lo,e.hi);
     if(counting)s.boxTicks+=__rdtsc()-a;
     ++s.misses;
     if(!ok)++s.unbounded;
     BoxCache::Fill(e,id,gen,ok);
+    if(again) {
+        ++s.rechecked;
+        if(std::memcmp(old.lo,e.lo,sizeof(e.lo)) || std::memcmp(old.hi,e.hi,sizeof(e.hi))) {
+            ++s.stale;
+            if(loggedStale.fetch_add(1,std::memory_order_relaxed)<8)
+                Log("EXPANDCULL STALE body %08X: its box changed in the step after a damage settle: (%g %g %g)..(%g %g %g) -> "
+                    "(%g %g %g)..(%g %g %g)",id,old.lo[0],old.lo[1],old.lo[2],old.hi[0],old.hi[1],old.hi[2],e.lo[0],e.lo[1],
+                    e.lo[2],e.hi[0],e.hi[1],e.hi[2]);
+        }
+    }
     return e;
 }
-// The id's box this step (cached on this thread). The lookups are counted by the callers (a walk's parts at once).
+// The id's box this generation (cached on this thread). The lookups are counted by the callers (a walk's parts at once).
 inline const BoxEntry& BoxOf(Thread& t,const Bodies& b,unsigned id,unsigned gen) noexcept {
     BoxEntry& e=t.cache.Slot(id);
     return BoxCache::Current(e,id,gen) ? e : FillBox(t,b,e,id,gen);
@@ -174,6 +223,31 @@ template<class Out> void Walk(const unsigned char* group,Out&& out) {
         if(node[kNodeOn])out(Rd<unsigned>(Rd<const unsigned char*>(node,kNodeBody),kBodyId));
 }
 
+// A shadow sample's walk: the whole group appended (as stock), the cut's decision for each position recorded, the
+// keep-one as the cut list would take it (its count: the whole one's less the positions dropped).
+void RecordWalk(Thread& t,Cast& c,unsigned char* collector,const unsigned char* group) {
+    Sample& m=*c.record;
+    const int before=Rd<int>(collector,kCollectorCount);
+    if(before<0 || static_cast<std::size_t>(before)<m.keep.size())m.bad=true;
+    else m.keep.resize(static_cast<std::size_t>(before),1);
+    const unsigned gen=boxGen.load(std::memory_order_relaxed);
+    Gather out{collector};
+    std::size_t first=m.keep.size();
+    unsigned parts=0,kept=0;
+    Walk(group,[&](unsigned v) {
+        const BoxEntry& b=BoxOf(t,c.bodies,v,gen);
+        const bool k=c.sweep.Touches(b.lo,b.hi);
+        if(!parts)first=m.keep.size();
+        ++parts;kept+=k ? 1u : 0u;
+        m.keep.push_back(k ? 1 : 0);
+        out(v);
+    });
+    out.Done();
+    t.stats.lookups+=parts;
+    if(parts && !kept && before-static_cast<int>(c.dropped)==0){m.keep[first]=1;kept=1;}
+    c.dropped+=parts-kept;
+}
+
 // The cave's call, for stock's walk at 0x109F6F: (the collector, the group, the overlapped body's id). Returns to
 // addBody's epilogue. Not noexcept: an exception out of the functor or the append goes on (the cave has unwind info).
 void __fastcall Expand(unsigned char* collector,const unsigned char* group,unsigned id) {
@@ -191,8 +265,9 @@ void __fastcall Expand(unsigned char* collector,const unsigned char* group,unsig
         if(t)++t->stats.filtered;
         return;
     }
-    const Cast* const c=t ? t->cast : nullptr;
+    Cast* const c=t ? t->cast : nullptr;
     if(!c || c->collector!=collector || !c->cut) {
+        if(c && c->collector==collector && c->record){RecordWalk(*t,*c,collector,group);return;}
         Gather out{collector};
         Walk(group,out);
         out.Done();
@@ -201,7 +276,7 @@ void __fastcall Expand(unsigned char* collector,const unsigned char* group,unsig
     }
     Stats& s=t->stats;
     const unsigned long long t0=counting ? __rdtsc() : 0;
-    const unsigned gen=stepGen.load(std::memory_order_relaxed);
+    const unsigned gen=boxGen.load(std::memory_order_relaxed);
     Gather out{collector};
     unsigned first=0,parts=0,kept=0;
     Walk(group,[&](unsigned v) {
@@ -239,40 +314,77 @@ std::uintptr_t __fastcall BulletCast(unsigned char* collector,void* world,float*
     if(!t)return cast(collector,world,from,to,extent);
     Stats& s=t->stats;
     ++s.casts;
+    const bool afterSettle=t->afterSettle;
+    t->afterSettle=false;
     Cast c{};
     c.collector=collector;
-    const unsigned char* const core=collector-kCollectorCore;
+    unsigned char* const core=collector-kCollectorCore;
     if(!Cfg().expandCull || !from || !to || !extent || !BodiesOf(world,c.bodies) || !c.sweep.Set(from,to,extent))++s.off;
     else if(Rd<unsigned>(core,kCoreFlags)&kFlagBlast)++s.blast;
-    else if(shadowing && (++t->tick&255)==0) {
-        Sample& m=t->samples[t->nextSample++%(sizeof(t->samples)/sizeof(t->samples[0]))];
-        m={core,stepGen.load(std::memory_order_relaxed),c.bodies,c.sweep};
-        ++s.sampled;
-    } else {
-        c.cut=true;
-        ++s.culling;
+    else if(!armed.load(std::memory_order_relaxed))++s.unarmed;
+    else {
+        // The debug samples: every 256th cast, and the first cast after every 8th settle with entries on this thread.
+        const bool settleSample=shadowing && afterSettle && (++t->settleTick&7)==0;
+        if(shadowing && (settleSample || (++t->tick&255)==0)) {
+            Sample& m=t->samples[t->nextSample++%kSamples];
+            m.core=nullptr;
+            m.step=stepNo.load(std::memory_order_relaxed);
+            m.settles=settleCount.load(std::memory_order_relaxed);
+            m.afterSettle=settleSample;
+            m.rayDone=m.bad=false;
+            m.list.clear();m.keep.clear();
+            c.record=&m;
+            ++s.sampled;
+            if(settleSample)++s.settleSampled;
+        } else {
+            c.cut=true;
+            ++s.culling;
+        }
     }
     struct Scope {
         Thread* t;
-        const Cast* prev;
+        Cast* prev;
         ~Scope() { t->cast=prev;if(counting)Flush(t->stats); }
     } scope{t,t->cast};
     t->cast=&c;
-    return cast(collector,world,from,to,extent);
+    const std::uintptr_t r=cast(collector,world,from,to,extent);
+    if(Sample* const m=c.record) {
+        const int count=Rd<int>(collector,kCollectorCount);
+        const auto* const list=Rd<const unsigned*>(collector,kCollectorList);
+        if(count>0 && list && !m->bad)m->list.assign(list,list+count);
+        if(!m->bad && m->keep.size()<=m->list.size())m->core=core;   // complete: the step's builds may check it
+    }
+    return r;
 }
 
 // The batch step (0x237CF0 from 0x704ED4): a new generation of body boxes for its casts.
 std::uintptr_t __fastcall Step(void* a,void* b) {
-    unsigned g=stepGen.load(std::memory_order_relaxed)+1;
-    if(!g)g=1;
-    stepGen.store(g,std::memory_order_relaxed);
+    stepNo.fetch_add(1,std::memory_order_relaxed);
+    stepStart.store(Bump(),std::memory_order_relaxed);
     return reinterpret_cast<StepFn>(image+kStep)(a,b);
 }
 
-// ---- the debug shadow check (the step-3 build's call 0x2382B6) ----
-// The collector's hits after a cast: (count, then count * 0x70 bytes).
-void TakeHits(unsigned char* core,std::vector<unsigned char>& out) {
-    auto* const collector=Rd<unsigned char*>(core,kCoreHits);
+// Step 1's damage settle (0x23426F; the queue core+0x6E0). One with entries may have changed bodies (a death:
+// removed / re-added, moved, another shape): a new generation after it, the casts after it fill their boxes again.
+// Not noexcept: the settle's exceptions go on (the generation still ends).
+std::uintptr_t __fastcall Settle(unsigned char* queue,void* flag,void* hitSet,std::uintptr_t r9) {
+    totals.settleCalls.fetch_add(1,std::memory_order_relaxed);
+    struct After {
+        bool any;
+        ~After() {
+            if(!any)return;
+            Bump();
+            settleCount.fetch_add(1,std::memory_order_relaxed);
+            totals.settles.fetch_add(1,std::memory_order_relaxed);
+            if(self)self->afterSettle=true;
+        }
+    } after{queue && Rd<std::uint64_t>(queue,kQueueCount)!=0};
+    return settleNext(queue,flag,hitSet,r9);
+}
+
+// ---- the debug shadow checks (the step-3 build's call 0x2382B6, the ray build's 0x238014) ----
+// A hit collector's hits: (count, then count * 0x70 bytes).
+void TakeHits(unsigned char* collector,std::vector<unsigned char>& out) {
     const int count=Rd<int>(collector,kHitCount);
     const unsigned n=count>0 ? static_cast<unsigned>(count) : 0u;
     out.assign(sizeof(n),0);
@@ -282,18 +394,17 @@ void TakeHits(unsigned char* core,std::vector<unsigned char>& out) {
     out.insert(out.end(),hits,hits+static_cast<std::size_t>(n)*kHitBytes);
 }
 
-// The narrowphase on `ids` (the core's list for the time), its hits into `out`; the command as it was after.
-void CastOn(unsigned char* core,unsigned char* cmd,const unsigned* ids,unsigned n,const unsigned char* saved,
-            std::vector<unsigned char>& out) {
-    std::memcpy(Rd<unsigned*>(core,kCoreIds),ids,static_cast<std::size_t>(n)*sizeof(unsigned));
-    std::memcpy(core+kCoreCount,&n,sizeof(n));
-    out.clear();
-    if(reinterpret_cast<BuildFn>(image+kBuild)(core,cmd)) {
-        reinterpret_cast<BatchFn>(image+kShapeBatch)(Rd<unsigned char*>(image,kSystem)+0x10,cmd,1);
-        TakeHits(core,out);
-    }
-    std::memcpy(cmd,saved,kCommandBodies);
-    std::memcpy(cmd+kCommandBodiesEnd,saved+kCommandBodiesEnd,kCommandBytes-kCommandBodiesEnd);
+// The sample's cut of a list filtered from its 0x818 list (0x1079D0: a per-id test, in order, every copy of an id that
+// passes): the list's ids at the positions the cut kept. False: the list is not a subsequence of the record's.
+bool CutList(const Sample& m,const unsigned* ids,unsigned n,std::vector<unsigned>& cut) {
+    cut.clear();
+    unsigned j=0;
+    for(std::size_t p=0;p<m.list.size() && j<n;++p)
+        if(m.list[p]==ids[j]) {
+            if(p>=m.keep.size() || m.keep[p])cut.push_back(ids[j]);
+            ++j;
+        }
+    return j==n;
 }
 
 bool ReadDword(unsigned dw) noexcept {
@@ -301,32 +412,10 @@ bool ReadDword(unsigned dw) noexcept {
     return false;
 }
 
-// The sampled core's step-3 list whole and cut by the sample's sweep, the narrowphase on each; the hits' read fields
-// compared (a difference: EXPANDCULL MISMATCH), the unread dwords that differ noted. The whole list stays the core's.
-void ShadowBuild(Thread& t,const Sample& m,unsigned char* core,unsigned char* cmd) {
-    const unsigned n=Rd<unsigned>(core,kCoreCount);
-    unsigned* const ids=Rd<unsigned*>(core,kCoreIds);
-    if(!n || !ids)return;
-    thread_local std::vector<unsigned> whole,cut;
-    thread_local std::vector<unsigned char> a,b;
-    whole.assign(ids,ids+n);
-    cut.clear();
-    const unsigned gen=stepGen.load(std::memory_order_relaxed);
-    for(const unsigned id:whole) {
-        const BoxEntry& e=BoxOf(t,m.bodies,id,gen);
-        if(m.sweep.Touches(e.lo,e.hi))cut.push_back(id);
-    }
-    t.stats.lookups+=n;
-    if(cut.empty())cut.push_back(whole[0]);
-    if(cut.size()==whole.size())return;   // nothing the cut would take out of this list
-    unsigned char saved[kCommandBytes];
-    std::memcpy(saved,cmd,sizeof(saved));
-    CastOn(core,cmd,whole.data(),n,saved,a);
-    CastOn(core,cmd,cut.data(),static_cast<unsigned>(cut.size()),saved,b);
-    std::memcpy(ids,whole.data(),static_cast<std::size_t>(n)*sizeof(unsigned));
-    std::memcpy(core+kCoreCount,&n,sizeof(n));
-    Stats& s=t.stats;
-    ++s.shadowed;
+// The whole list's hits `a` against the cut one's `b`: the fields the game reads (a difference: EXPANDCULL MISMATCH,
+// true), the unread dwords that differ noted.
+bool Differs(Stats& s,const char* what,const unsigned char* core,unsigned n,unsigned cutN,const std::vector<unsigned char>& a,
+             const std::vector<unsigned char>& b) {
     const auto countOf=[](const std::vector<unsigned char>& v) noexcept { unsigned c=0;if(v.size()>=sizeof(c))std::memcpy(&c,v.data(),sizeof(c));return c; };
     const unsigned ha=countOf(a),hb=countOf(b);
     const auto dword=[](const std::vector<unsigned char>& v,unsigned hit,unsigned dw) noexcept {
@@ -334,9 +423,8 @@ void ShadowBuild(Thread& t,const Sample& m,unsigned char* core,unsigned char* cm
     if(ha!=hb) {
         ++s.mismatches;
         if(loggedMismatches.fetch_add(1,std::memory_order_relaxed)<32)
-            Log("EXPANDCULL MISMATCH core %p: %u parts, %u cut; hits %u whole, %u cut",static_cast<void*>(core),n,
-                static_cast<unsigned>(cut.size()),ha,hb);
-        return;
+            Log("EXPANDCULL MISMATCH %s core %p: %u parts, %u cut; hits %u whole, %u cut",what,static_cast<const void*>(core),n,cutN,ha,hb);
+        return true;
     }
     unsigned mask=0;
     for(unsigned h=0;h<ha;++h)
@@ -346,13 +434,13 @@ void ShadowBuild(Thread& t,const Sample& m,unsigned char* core,unsigned char* cm
             if(ReadDword(dw)) {
                 ++s.mismatches;
                 if(loggedMismatches.fetch_add(1,std::memory_order_relaxed)<32)
-                    Log("EXPANDCULL MISMATCH core %p: %u parts, %u cut; hit %u of %u, +0x%02X %08X whole, %08X cut",
-                        static_cast<void*>(core),n,static_cast<unsigned>(cut.size()),h,ha,dw*4,x,y);
-                return;
+                    Log("EXPANDCULL MISMATCH %s core %p: %u parts, %u cut; hit %u of %u, +0x%02X %08X whole, %08X cut",what,
+                        static_cast<const void*>(core),n,cutN,h,ha,dw*4,x,y);
+                return true;
             }
             mask|=1u<<dw;
         }
-    if(!mask)return;
+    if(!mask)return false;
     ++s.unreadDiffs;
     s.unreadMask|=mask;
     if(loggedUnread.fetch_add(1,std::memory_order_relaxed)<8) {
@@ -361,25 +449,134 @@ void ShadowBuild(Thread& t,const Sample& m,unsigned char* core,unsigned char* cm
         for(unsigned dw=0;dw<kHitBytes/4 && at<200;++dw)
             if(mask&(1u<<dw))at+=std::snprintf(line+at,sizeof(line)-static_cast<std::size_t>(at)," +0x%02X %08X/%08X",dw*4,dword(a,0,dw),dword(b,0,dw));
         line[at<0 ? 0 : at]=0;
-        Log("EXPANDCULL UNREAD core %p: %u hits the same in the read fields; unread dwords differ (hit 0 whole/cut):%s",
-            static_cast<void*>(core),ha,line);
+        Log("EXPANDCULL UNREAD %s core %p: %u hits the same in the read fields; unread dwords differ (hit 0 whole/cut):%s",what,
+            static_cast<const void*>(core),ha,line);
     }
+    return false;
+}
+
+// The step-3 narrowphase on `ids` (the core's list for the time), its hits into `out`; the command as it was after.
+void CastOn(unsigned char* core,unsigned char* cmd,const unsigned* ids,unsigned n,const unsigned char* saved,
+            std::vector<unsigned char>& out) {
+    if(n)std::memcpy(Rd<unsigned*>(core,kCoreIds),ids,static_cast<std::size_t>(n)*sizeof(unsigned));
+    std::memcpy(core+kCoreCount,&n,sizeof(n));
+    out.clear();
+    if(reinterpret_cast<BuildFn>(image+kBuild)(core,cmd)) {
+        reinterpret_cast<BatchFn>(image+kShapeBatch)(Rd<unsigned char*>(image,kSystem)+0x10,cmd,1);
+        TakeHits(Rd<unsigned char*>(core,kCoreHits),out);
+    }
+    std::memcpy(cmd,saved,kCommandBodies);
+    std::memcpy(cmd+kCommandBodiesEnd,saved+kCommandBodiesEnd,kCommandBytes-kCommandBodiesEnd);
+}
+
+// The ray on `ids` (the core's ray list for the time): its build, the rays' batch on its command alone, its hits and
+// (with any) the closest's position core+0x920 as a last 0x70-byte record; the command as it was after.
+void RayOn(unsigned char* core,unsigned char* cmd,const unsigned* ids,unsigned n,const unsigned char* saved,
+           std::vector<unsigned char>& out) {
+    if(n)std::memcpy(Rd<unsigned*>(core,kCoreRayIds),ids,static_cast<std::size_t>(n)*sizeof(unsigned));
+    std::memcpy(core+kCoreRayCount,&n,sizeof(n));
+    out.clear();
+    if(reinterpret_cast<BuildFn>(image+kRayBuild)(core,cmd)) {
+        reinterpret_cast<BatchFn>(image+kRayBatch)(Rd<unsigned char*>(image,kSystem)+0x10,cmd,1);
+        TakeHits(core+kCoreRayHits,out);
+        unsigned count=0;
+        std::memcpy(&count,out.data(),sizeof(count));
+        if(count) {
+            // the closest as one more hit: its xyz in the position's read dwords
+            const std::size_t at=out.size();
+            out.resize(at+kHitBytes,0);
+            std::memcpy(out.data()+at,core+kCoreRayBest,12);
+            ++count;
+            std::memcpy(out.data(),&count,sizeof(count));
+        }
+    }
+    std::memcpy(cmd,saved,kCommandBodies);
+    std::memcpy(cmd+kCommandBodiesEnd,saved+kCommandBodiesEnd,kRayCommandBytes-kCommandBodiesEnd);
+}
+
+// The sampled core's step-3 list whole and as the cut would have made it at the cast (the record), the narrowphase on
+// each, compared. The whole list stays the core's.
+void ShadowBuild(Thread& t,const Sample& m,unsigned char* core,unsigned char* cmd) {
+    const unsigned n=Rd<unsigned>(core,kCoreCount);
+    unsigned* const ids=Rd<unsigned*>(core,kCoreIds);
+    if(!n || !ids)return;
+    Stats& s=t.stats;
+    thread_local std::vector<unsigned> whole,cut;
+    thread_local std::vector<unsigned char> a,b;
+    whole.assign(ids,ids+n);
+    if(!CutList(m,whole.data(),n,cut)){++s.unmatched;return;}
+    if(cut.size()==whole.size())return;   // nothing the cut would take out of this list
+    unsigned char saved[kCommandBytes];
+    std::memcpy(saved,cmd,sizeof(saved));
+    CastOn(core,cmd,whole.data(),n,saved,a);
+    CastOn(core,cmd,cut.data(),static_cast<unsigned>(cut.size()),saved,b);
+    std::memcpy(ids,whole.data(),static_cast<std::size_t>(n)*sizeof(unsigned));
+    std::memcpy(core+kCoreCount,&n,sizeof(n));
+    // a settle after the cast (a later bullet's, this step): the window between the step-1 cut and this narrowphase
+    const bool span=settleCount.load(std::memory_order_relaxed)!=m.settles;
+    ++s.shadowed;
+    if(m.afterSettle)++s.settleShadowed;
+    if(span)++s.spanShadowed;
+    const char* const what=m.afterSettle ? (span ? "step 3 (after a settle, one since)" : "step 3 (after a settle)")
+                                          : (span ? "step 3 (a settle since)" : "step 3");
+    if(Differs(s,what,core,n,static_cast<unsigned>(cut.size()),a,b)) {
+        if(m.afterSettle)++s.settleMismatches;
+        if(span)++s.spanMismatches;
+    }
+}
+
+// The sampled core's ray list (0x8C8) whole and cut by the record, each ray cast alone, compared. The whole list stays.
+void ShadowRay(Thread& t,const Sample& m,unsigned char* core,unsigned char* cmd) {
+    if(!core[kCoreRayOn])return;
+    const unsigned n=Rd<unsigned>(core,kCoreRayCount);
+    unsigned* const ids=Rd<unsigned*>(core,kCoreRayIds);
+    if(!n || !ids)return;
+    Stats& s=t.stats;
+    thread_local std::vector<unsigned> whole,cut;
+    thread_local std::vector<unsigned char> a,b;
+    whole.assign(ids,ids+n);
+    if(!CutList(m,whole.data(),n,cut)){++s.unmatched;return;}
+    if(cut.size()==whole.size())return;
+    unsigned char saved[kRayCommandBytes];
+    std::memcpy(saved,cmd,sizeof(saved));
+    RayOn(core,cmd,whole.data(),n,saved,a);
+    RayOn(core,cmd,cut.data(),static_cast<unsigned>(cut.size()),saved,b);
+    std::memcpy(ids,whole.data(),static_cast<std::size_t>(n)*sizeof(unsigned));
+    std::memcpy(core+kCoreRayCount,&n,sizeof(n));
+    ++s.rayShadowed;
+    if(m.afterSettle)++s.settleShadowed;
+    if(Differs(s,m.afterSettle ? "ray (after a settle)" : "ray",core,n,static_cast<unsigned>(cut.size()),a,b)) {
+        ++s.rayMismatches;
+        if(m.afterSettle)++s.settleMismatches;
+    }
+}
+
+Sample* SampleOf(Thread& t,const unsigned char* core) noexcept {
+    const unsigned step=stepNo.load(std::memory_order_relaxed);
+    for(Sample& m:t.samples)if(m.core==core && m.step==step)return &m;
+    return nullptr;
 }
 
 // The batch's step-3 build call (debug only). Not noexcept: the build's and the casts' exceptions go on.
 std::uint64_t __fastcall Build(unsigned char* core,unsigned char* cmd) {
-    if(Thread* const t=self) {
-        const unsigned gen=stepGen.load(std::memory_order_relaxed);
-        for(Sample& m:t->samples)
-            if(m.core==core && m.gen==gen) {
-                const Sample copy=m;
-                m.core=nullptr;
-                ShadowBuild(*t,copy,core,cmd);
-                if(counting)Flush(t->stats);
-                break;
-            }
-    }
+    if(Thread* const t=self)
+        if(Sample* const m=SampleOf(*t,core)) {
+            ShadowBuild(*t,*m,core,cmd);
+            m->core=nullptr;
+            if(counting)Flush(t->stats);
+        }
     return reinterpret_cast<BuildFn>(image+kBuild)(core,cmd);
+}
+// The batch's ray build call (debug only): right after the bullet's step 1. The sample stays for its step-3 build.
+std::uint64_t __fastcall RayBuild(unsigned char* core,unsigned char* cmd) {
+    if(Thread* const t=self)
+        if(Sample* const m=SampleOf(*t,core))
+            if(!m->rayDone) {
+                m->rayDone=true;
+                ShadowRay(*t,*m,core,cmd);
+                if(counting)Flush(t->stats);
+            }
+    return reinterpret_cast<BuildFn>(image+kRayBuild)(core,cmd);
 }
 
 // `mov rcx,rbp; mov rdx,rdi; mov r8d,esi; call [rip+11h] (Expand); mov rax,image+0x109FED; jmp rax`: in addBody's frame
@@ -411,6 +608,25 @@ bool CallsTo(unsigned site,unsigned target) noexcept {
     return edf::Readable(p,5) && p[0]==0xE8 && static_cast<long long>(site)+5+Rd<std::int32_t>(p,1)==static_cast<long long>(target);
 }
 
+// Points the call at `rva` to `hook` over whatever it calls now: the stock function, or another hook's near thunk
+// (common/memory.cpp AllocateNearThunk: mov rax,imm64; jmp rax) that ends in it (perf_probe.cpp Chain's way).
+// `*next` gets that target; `*thunk` whether it was another's.
+bool Chain(unsigned rva,unsigned stock,void* hook,void** next,bool* thunk) noexcept {
+    __try {
+        unsigned char* const site=image+rva;
+        if(!edf::Readable(site,5) || site[0]!=0xE8)return false;
+        std::int32_t rel=0;std::memcpy(&rel,site+1,sizeof(rel));
+        unsigned char* const now=site+5+rel;
+        *thunk=now!=image+stock && edf::Readable(now,12) && now[0]==0x48 && now[1]==0xB8 && now[10]==0xFF && now[11]==0xE0;
+        if(now!=image+stock && !*thunk)return false;
+        *next=now;
+        bool changed=false;
+        if(edf::RedirectCall(site,now,hook,changed,edf::Claim::kLayered) || changed)return changed;
+        *next=nullptr;
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 struct Done { unsigned rva; std::size_t size; unsigned char stock[sizeof(kWalkStock)]; };
 bool Undo(const Done* done,unsigned n) noexcept {
     bool ok=true;
@@ -433,7 +649,8 @@ bool InstallBulletExpandCull() noexcept {
         Log("EXPANDCULL REFUSED: addBody's walk or unwind info not the stock, nothing installed");
         return false;
     }
-    bool sites=CallsTo(kStepCall,kStep) && CallsTo(kBuildCall,kBuild);
+    bool sites=CallsTo(kStepCall,kStep) && CallsTo(kBuildCall,kBuild) && CallsTo(kRayBuildCall,kRayBuild) &&
+               CallsTo(kSettleCall,kSettle);
     for(const unsigned site:kCastCalls)sites=sites && CallsTo(site,kCast);
     if(!sites){Log("EXPANDCULL REFUSED: a call site not the stock call, nothing installed");return false;}
     counting=Cfg().perfProbe!=0;
@@ -443,7 +660,7 @@ bool InstallBulletExpandCull() noexcept {
     tsc0=__rdtsc();
     unsigned char* const cave=MakeWalkCave();
     if(!cave){Log("EXPANDCULL REFUSED: no cave page, nothing installed");return false;}
-    Done done[6]{};
+    Done done[8]{};
     unsigned n=0;
     const auto redirect=[&](unsigned site,unsigned target,void* to) noexcept {
         Done& d=done[n];
@@ -453,7 +670,7 @@ bool InstallBulletExpandCull() noexcept {
         ++n;
         return true;
     };
-    // The generation first (the cache's steps), the walk, the casts' scope; the shadow's build last.
+    // The generation first (the cache's steps), the walk, the casts' scope; the shadow's builds last.
     bool ok=redirect(kStepCall,kStep,reinterpret_cast<void*>(&Step));
     if(ok) {
         Done& d=done[n];
@@ -462,15 +679,33 @@ bool InstallBulletExpandCull() noexcept {
         if(ok)++n;
     }
     for(const unsigned site:kCastCalls)ok=ok && redirect(site,kCast,reinterpret_cast<void*>(&BulletCast));
-    if(ok && shadowing)ok=redirect(kBuildCall,kBuild,reinterpret_cast<void*>(&Build));
+    if(ok && shadowing)ok=redirect(kBuildCall,kBuild,reinterpret_cast<void*>(&Build)) &&
+                          redirect(kRayBuildCall,kRayBuild,reinterpret_cast<void*>(&RayBuild));
     if(ok) {
-        Log("EXPANDCULL bullets' sweeps put only the parts they can reach in their lists (ini ExpandCull, now %d)%s",
-            Cfg().expandCull ? 1 : 0,shadowing ? " (shadow check every 256th cast)" : "");
+        installed=true;
+        Log("EXPANDCULL bullets' sweeps put only the parts they can reach in their lists (ini ExpandCull, now %d; cut once the "
+            "damage settle is chained)%s",Cfg().expandCull ? 1 : 0,
+            shadowing ? " (shadow check: every 256th cast and the first after every 8th settle, its step-3 and ray lists)" : "");
         return true;
     }
     const bool undone=Undo(done,n);
     Log("EXPANDCULL REFUSED: hooks not all in (%u), %s",n,undone ? "all put back" : "NOT all put back");
     return false;
+}
+
+bool InstallBulletExpandCullSettle() noexcept {
+    if(!installed)return false;   // InstallBulletExpandCull logged why
+    void* next=nullptr;
+    bool thunk=false;
+    if(!Chain(kSettleCall,kSettle,reinterpret_cast<void*>(&Settle),&next,&thunk)) {
+        Log("EXPANDCULL REFUSED: the damage settle call %X neither stock's nor a near thunk: every cast left whole",kSettleCall);
+        return false;
+    }
+    settleNext=reinterpret_cast<SettleFn>(next);
+    armed.store(true,std::memory_order_release);
+    Log("EXPANDCULL armed: the damage settle %X chained (over %s): a settle with entries ends the boxes' generation",kSettleCall,
+        thunk ? "another hook" : "the stock call");
+    return true;
 }
 
 void ReportBulletExpandCull(unsigned frames) noexcept {
@@ -480,7 +715,12 @@ void ReportBulletExpandCull(unsigned frames) noexcept {
         keptOne=take(totals.keptOne),lookups=take(totals.lookups),misses=take(totals.misses),unbounded=take(totals.unbounded),
         walkTicks=take(totals.walkTicks),boxTicks=take(totals.boxTicks),outside=take(totals.outside),
         filtered=take(totals.filtered),sampled=take(totals.sampled),shadowed=take(totals.shadowed),
-        mismatches=take(totals.mismatches),unreadDiffs=take(totals.unreadDiffs);
+        mismatches=take(totals.mismatches),unreadDiffs=take(totals.unreadDiffs),unarmed=take(totals.unarmed),
+        rechecked=take(totals.rechecked),stale=take(totals.stale),settleSampled=take(totals.settleSampled),
+        settleShadowed=take(totals.settleShadowed),settleMismatches=take(totals.settleMismatches),
+        spanShadowed=take(totals.spanShadowed),spanMismatches=take(totals.spanMismatches),rayShadowed=take(totals.rayShadowed),
+        rayMismatches=take(totals.rayMismatches),unmatched=take(totals.unmatched),settleCalls=take(totals.settleCalls),
+        settles=take(totals.settles);
     const unsigned mask=totals.unreadMask.exchange(0,std::memory_order_relaxed);
     if(!counting || !Cfg().perfProbe || !(casts+outside+filtered))return;
     // TSC ticks to ms: the counter's rate since the install.
@@ -491,12 +731,17 @@ void ReportBulletExpandCull(unsigned frames) noexcept {
     const double msPerTick=tsc>tsc0 && seconds>0 ? seconds*1000.0/static_cast<double>(tsc-tsc0) : 0.0;
     const double n=frames ? frames : 1.0;
     const double walkMs=static_cast<double>(walkTicks)*msPerTick,boxMs=static_cast<double>(boxTicks)*msPerTick;
-    Log("PERF EXPANDCULL %u frames: %llu casts (%llu cut, %llu blast, %llu off, %llu shadow samples); %llu cut walks, %llu parts, "
-        "%llu kept, %llu culled (%.1f%%), %llu kept one; cut %.3f ms (%.3f a frame, %.2f ns a part), of it box computes %.3f ms; "
-        "box cache %llu hits %llu misses (%llu unbounded); walks as stock %llu outside casts, %llu filtered; shadow %llu checked "
-        "%llu mismatched, %llu with unread dwords differing (mask %08X)",
-        frames,casts,culling,blast,off,sampled,walks,parts,kept,culled,parts ? 100.0*static_cast<double>(culled)/static_cast<double>(parts) : 0.0,
-        keptOne,walkMs,walkMs/n,parts ? walkMs*1e6/static_cast<double>(parts) : 0.0,boxMs,lookups-(std::min)(lookups,misses),misses,unbounded,outside,filtered,
-        shadowed,mismatches,unreadDiffs,mask);
+    Log("PERF EXPANDCULL %u frames: %llu casts (%llu cut, %llu blast, %llu off, %llu unarmed, %llu shadow samples, %llu of them "
+        "after a settle); %llu cut walks, %llu parts, %llu kept, %llu culled (%.1f%%), %llu kept one; cut %.3f ms (%.3f a frame, "
+        "%.2f ns a part), of it box computes %.3f ms; box cache %llu hits %llu misses (%llu unbounded); settles %llu, %llu with "
+        "entries (a new generation); boxes filled again after a settle %llu, changed %llu; walks as stock %llu outside casts, "
+        "%llu filtered; shadow step 3 %llu checked (%llu with a settle since the cast: %llu mismatched), ray %llu checked "
+        "(%llu mismatched), after a settle %llu checked (%llu mismatched), %llu mismatched in all, %llu lists not the record's, "
+        "%llu with unread dwords differing (mask %08X)",
+        frames,casts,culling,blast,off,unarmed,sampled,settleSampled,walks,parts,kept,culled,
+        parts ? 100.0*static_cast<double>(culled)/static_cast<double>(parts) : 0.0,keptOne,walkMs,walkMs/n,
+        parts ? walkMs*1e6/static_cast<double>(parts) : 0.0,boxMs,lookups-(std::min)(lookups,misses),misses,unbounded,
+        settleCalls,settles,rechecked,stale,outside,filtered,shadowed,spanShadowed,spanMismatches,rayShadowed,rayMismatches,
+        settleShadowed,settleMismatches,mismatches,unmatched,unreadDiffs,mask);
 }
 }  // namespace crew

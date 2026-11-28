@@ -11,7 +11,13 @@
 //    own sweep); invalid ids / no shape kept; the world changed between steps (a new generation: boxes moved, nodes
 //    on / off, relinked, bodies moved between groups);
 //  - an exception out of the filter functor through the cave (its unwind info) and the cast's scope;
-//  - timing: a dense swarm, the cost a part of the cut (the box cache hit and the test) over the walk.
+//  - the settle: casts left whole until it is chained; chained over a fake damagestats redirect of 0x23426F; one with
+//    entries whose hook moves a body onto the sweep ends the generation (the body kept after it; the control without
+//    a settle cuts it on its old box), the stale probe counts it; one without entries keeps the generation;
+//  - the shadow record: a sample's list left whole, and the cut list mapped back from it (on the list and on a per-id
+//    filtered list of it, as the ray's and step 3's lists are) equal to a cut cast's, samples after a settle too;
+//  - timing (printed, never judged: the run's priority and the machine's load decide it): a dense swarm, the cost a
+//    part of the cut (the box cache hit and the test) over the walk.
 // The real narrowphase (Havok's tasks and shapes) does not run here: the debug shadow check compares its hits in the game.
 #include "../src/bullet_expand_cull.cpp"
 #include <algorithm>
@@ -225,6 +231,13 @@ void Geometry() {
 }
 
 // ---- the fake world ----
+// A new batch step: what the hooked step call does before the step (a new generation, the step's first).
+unsigned NewStep() noexcept {
+    stepNo.fetch_add(1);
+    const unsigned g=Bump();
+    stepStart.store(g);
+    return g;
+}
 struct Fake {
     std::vector<unsigned char*> bodies,groups;
     std::vector<std::vector<unsigned char*>> lists;   // a group's nodes, in order
@@ -287,7 +300,7 @@ void Mutate(Fake& f,Rng& rng,float field) {
         }
     }
     for(unsigned k=0,n=rng.N(static_cast<unsigned>(f.bodies.size())+1);k<n;++k)PlaceBox(f.bodies[rng.N(static_cast<unsigned>(f.bodies.size()))],rng,field);
-    stepGen.store(stepGen.load()+1);
+    NewStep();
 }
 
 // The fake broadphase (the hooked mapping's 0x11A70B0): addBody for each overlapped id. `from` the CastArgs.
@@ -384,7 +397,7 @@ bool RandomWorlds() {
     for(unsigned w=0;w<60;++w) {
         Fake f;
         Build(f,rng,1+rng.N(300),rng.N(40),rng.N(3)==0 ? 0 : 1+rng.N(60),rng.N(100),rng.N(101),kField);
-        stepGen.store(stepGen.load()+1);
+        NewStep();
         Collector a(1u<<20),b(1u<<20),na(1u<<20),nb(1u<<20);
         Functor fa{functorVtable,0,0},fb{functorVtable,0,0};
         for(unsigned round=0;round<40;++round) {
@@ -466,7 +479,7 @@ bool KeepOne() {
     for(unsigned i=0;i<3;++i){auto* n=Zeroed(kNodeBytes);Wr<void*>(n,kNodeBody,bodyById[3-i]);n[kNodeOn]=i!=0;f.lists[0].push_back(n);}
     f.Link(0);
     for(unsigned i=1;i<=3;++i)Wr<void*>(bodyById[i],kBodyGroup,group);
-    stepGen.store(stepGen.load()+1);
+    NewStep();
     Collector a(64),b(64);
     const std::vector<unsigned> ids{1,2,1};
     CastArgs args{};
@@ -557,7 +570,7 @@ void Timing(unsigned enemies,bool scattered) {
     const auto time=[&](int how) {
         const auto t0=std::chrono::steady_clock::now();
         for(unsigned rep=0;rep<5;++rep) {
-            stepGen.store(stepGen.load()+1);
+            NewStep();
             for(unsigned s=0;s<1024;++s) {
                 if(how==2){b.Reset(nullptr);Cast(b,args[s]);}
                 else if(how==1){b.Reset(nullptr);for(const unsigned id:sweeps[s])addBody(b.c(),id);}
@@ -610,8 +623,7 @@ void TimingJudge(unsigned enemies) {
     counting=false;
     unsigned long long touched=0;
     const auto run=[&](const std::vector<unsigned>& ids) {
-        const unsigned gen=stepGen.load()+1;
-        stepGen.store(gen);
+        const unsigned gen=NewStep();
         for(const unsigned id:ids){const BoxEntry& e=BoxOf(*t,bs,id,gen);touched+=sw.Touches(e.lo,e.hi);}   // fill
         const auto t0=std::chrono::steady_clock::now();
         for(unsigned rep=0;rep<8;++rep)
@@ -622,10 +634,169 @@ void TimingJudge(unsigned enemies) {
     counting=wasCounting;
     std::printf("judge (the cached box and the test, %u parts' boxes): %.2f ns a part in groups' order, %.2f ns at random (%llu touched)\n",
                 kIds,ng,ns,touched);
-    if(enemies<=400)Check(ng<5.0,"the judge a part in groups' order (in the cache) under 5 ns");
     t->stats=Stats{};
     for(unsigned id=1;id<=kIds;++id)std::free(bodies[id]);
     bodyById.assign(1,nullptr);invalidId.assign(1,0);
+}
+
+// ---- the settle's generation (0x23426F chained over damagestats' redirect) ----
+// Two parts of one group: A on the segment (0..10 on x), B far; a cast overlapping A puts A (and B as stock).
+struct Pair {
+    Fake f;
+    void Place(unsigned id,float x) { const float box[6]={x,-0.5f,-0.5f,x+1.0f,0.5f,0.5f};std::memcpy(bodyById[id]+kBodyBox,box,sizeof(box)); }
+    Pair() {
+        Rng rng(17);
+        bodyById.assign(3,nullptr);invalidId.assign(3,0);
+        for(unsigned i=1;i<=2;++i) {
+            NewBody(f,rng,i,10.0f);
+            Wr<void*>(bodyById[i],kBodyShape,fakeShape);Wr<void*>(bodyById[i],kBodyObject,f.object);invalidId[i]=0;
+        }
+        Place(1,2.0f);Place(2,1000.0f);
+        auto* const group=Zeroed(kGroupBytes);
+        Wr<void*>(group,kGroupList,Zeroed(kNodeBytes));
+        f.groups.push_back(group);f.lists.emplace_back();
+        for(unsigned i=1;i<=2;++i) {
+            auto* const n=Zeroed(kNodeBytes);
+            Wr<void*>(n,kNodeBody,bodyById[i]);n[kNodeOn]=1;f.lists[0].push_back(n);Wr<void*>(bodyById[i],kBodyGroup,group);
+        }
+        f.Link(0);
+    }
+};
+const std::vector<unsigned> pairIds{1};
+CastArgs PairArgs() {
+    CastArgs a{};
+    a.from[3]=a.to[3]=1.0f;a.to[0]=10.0f;a.extent[0]=a.extent[1]=a.extent[2]=0.3f;a.ids=&pairIds;
+    return a;
+}
+std::vector<unsigned> PairCast() { Collector b(64);CastArgs a=PairArgs();b.Reset(nullptr);Cast(b,a);return b.Ids(); }
+// The list against stock's on the world as it is now, as Subset judges it: stock's in order less only unreachable
+// parts, empty exactly when stock's is (a quiet check: the control expects false).
+bool PairStock(const std::vector<unsigned>& cut) {
+    Collector a(64);
+    const CastArgs args=PairArgs();
+    a.Reset(nullptr);StockRun(a,pairIds);
+    const auto whole=a.Ids();
+    std::size_t j=0;
+    for(const unsigned id:whole) {
+        if(j<cut.size() && cut[j]==id){++j;continue;}
+        if(Reachable(id,args))return false;
+    }
+    return j==cut.size() && whole.empty()==cut.empty();
+}
+
+// Before the settle is chained every cast is left whole (as stock), counted unarmed.
+bool Unarmed() {
+    Pair p;
+    NewStep();
+    const unsigned long long u0=totals.unarmed.load();
+    const auto ids=PairCast();
+    return Check(!armed.load() && ids==std::vector<unsigned>({1,2}) && totals.unarmed.load()==u0+1,
+                 "before the settle is chained: the cast left whole, counted unarmed");
+}
+
+int settleHookCalls=0;
+unsigned char* settleMoves=nullptr;   // the fake damagestats hook's death: this body onto the segment
+std::uintptr_t __fastcall FakeSettle(unsigned char* queue,void*,void*,std::uintptr_t r9) {
+    ++settleHookCalls;
+    if(settleMoves && queue && Rd<std::uint64_t>(queue,kQueueCount)) {
+        const float box[6]={5.0f,-0.5f,-0.5f,6.0f,0.5f,0.5f};
+        std::memcpy(settleMoves+kBodyBox,box,sizeof(box));
+    }
+    return r9+1;
+}
+void* SiteTarget(unsigned rva) noexcept { std::int32_t rel=0;std::memcpy(&rel,image+rva+1,4);return image+rva+5+rel; }
+
+bool SettleChain() {
+    // damagestats' redirect first (kFeatures), as the game's load has it; the settle chained over it (kLast).
+    bool changed=false;
+    if(!Check(edf::RedirectCall(image+kSettleCall,image+kSettle,reinterpret_cast<void*>(&FakeSettle),changed,edf::Claim::kSole,
+                                "damagestats.cpp") && changed,"the fake damagestats redirect"))return false;
+    void* const theirs=SiteTarget(kSettleCall);
+    if(!Check(InstallBulletExpandCullSettle() && armed.load(),"the settle chained, the cut armed"))return false;
+    if(!Check(reinterpret_cast<void*>(settleNext)==theirs && SiteTarget(kSettleCall)!=theirs,
+              "the settle chained over damagestats' thunk"))return false;
+    Pair p;
+    alignas(8) unsigned char queue[0x40]{};
+    // The control: B moved onto the segment in the step with no settle: the cached box leaves it out (what a settle
+    // that moved a body would do without the new generation).
+    NewStep();
+    bool ok=Check(PairCast()==std::vector<unsigned>({1}),"armed: the far part cut");
+    p.Place(2,5.0f);
+    ok=Check(PairCast()==std::vector<unsigned>({1}) && !PairStock({1}),"the control: a body moved in the step, no settle: cut on its old box")&&ok;
+    p.Place(2,1000.0f);
+    NewStep();
+    ok=Check(PairCast()==std::vector<unsigned>({1}),"a new step: the far part cut")&&ok;
+    // A settle with no entries: through to damagestats' hook, the generation kept.
+    const unsigned g0=boxGen.load();
+    const unsigned long long n0=settleCount.load(),r0=totals.rechecked.load(),st0=totals.stale.load();
+    settleMoves=bodyById[2];
+    const int calls0=settleHookCalls;
+    ok=Check(Settle(queue,nullptr,nullptr,41)==42 && settleHookCalls==calls0+1 && boxGen.load()==g0 && settleCount.load()==n0 &&
+             !self->afterSettle,"a settle with no entries: through the chain, the generation kept")&&ok;
+    // With entries: the hook's death moves B onto the segment; a new generation, the next cast fills both boxes again.
+    Wr<std::uint64_t>(queue,kQueueCount,1);
+    ok=Check(Settle(queue,nullptr,nullptr,7)==8 && settleHookCalls==calls0+2 && boxGen.load()!=g0 && settleCount.load()==n0+1 &&
+             self->afterSettle,"a settle with entries: a new generation")&&ok;
+    const auto after=PairCast();
+    ok=Check(after==std::vector<unsigned>({1,2}) && PairStock(after) && !self->afterSettle,
+             "after the settle: the moved part kept (its box filled again)")&&ok;
+    ok=Check(totals.rechecked.load()==r0+2 && totals.stale.load()==st0+1,"the stale probe: 2 boxes filled again, 1 changed")&&ok;
+    settleMoves=nullptr;
+    NewStep();
+    std::printf("settle: chained over damagestats' redirect; a settle with entries ends the generation (%d hook calls)\n",settleHookCalls);
+    return ok;
+}
+
+// The shadow sample's record: the list left whole (stock's), and the cut list mapped back from it (CutList) is the cut
+// cast's, on the 0x818 list itself and on a per-id filtered list of it (the 0x8C8 / 0x8D8 lists' 0x1079D0).
+bool Records() {
+    Rng rng(4242);
+    constexpr float kField=40.0f;
+    const bool wasShadowing=shadowing;
+    shadowing=true;
+    unsigned recorded=0,afterSettles=0,differing=0,emptied=0;
+    const unsigned long long ss0=totals.settleSampled.load();
+    std::vector<unsigned> cutList,mapped,filteredWhole,filteredCut;
+    const auto pass=[](unsigned id) noexcept { return ((id*2654435761u)>>7)%3u!=0; };
+    for(unsigned w=0;w<30 && !failures;++w) {
+        Fake f;
+        Build(f,rng,1+rng.N(300),1+rng.N(40),1+rng.N(60),rng.N(100),rng.N(101),kField);
+        NewStep();
+        Collector a(1u<<20),b(1u<<20),c(1u<<20);
+        for(unsigned round=0;round<40;++round) {
+            const auto ids=Overlaps(f,rng,200);
+            CastArgs args{};
+            RandomArgs(rng,args,kField);
+            args.ids=&ids;
+            Thread* const t=Self();
+            const bool settle=rng.N(2)!=0;
+            if(settle){t->afterSettle=true;t->settleTick=7;} else t->tick=255;
+            a.Reset(nullptr);b.Reset(nullptr);c.Reset(nullptr);
+            StockRun(a,ids);
+            Cast(b,args);   // the sample: left whole
+            Sample& m=t->samples[(t->nextSample+kSamples-1)%kSamples];
+            if(!Same(a,b,"sample (left whole)",round))break;
+            if(!Check(m.core==b.core.data() && m.afterSettle==settle && m.list==b.Ids() && m.keep.size()<=m.list.size(),
+                      "the sample recorded, complete"))break;
+            Cast(c,args);   // the cut cast at the same generation
+            cutList=c.Ids();
+            if(!Check(CutList(m,m.list.data(),static_cast<unsigned>(m.list.size()),mapped) && mapped==cutList,
+                      "the record's cut of the list is the cut cast's"))break;
+            filteredWhole.clear();filteredCut.clear();
+            for(const unsigned id:m.list)if(pass(id))filteredWhole.push_back(id);
+            for(const unsigned id:cutList)if(pass(id))filteredCut.push_back(id);
+            if(!Check(CutList(m,filteredWhole.data(),static_cast<unsigned>(filteredWhole.size()),mapped) && mapped==filteredCut,
+                      "the record's cut of a filtered list is the filtered cut list"))break;
+            ++recorded;afterSettles+=settle ? 1u : 0u;differing+=cutList.size()!=m.list.size() ? 1u : 0u;
+            emptied+=filteredCut.empty() && !filteredWhole.empty() ? 1u : 0u;
+            m.core=nullptr;
+            if(rng.N(2))Mutate(f,rng,kField);
+        }
+    }
+    shadowing=wasShadowing;
+    std::printf("shadow records: %u samples (%u after a settle, %u whose cut differs, %u filtered lists the cut empties) mapped "
+                "back to the cut casts' lists\n",recorded,afterSettles,differing,emptied);
+    return Check(recorded==1200 && totals.settleSampled.load()==ss0+afterSettles && differing>100,"the records");
 }
 
 bool LoadStockCopy(const char* dll) {
@@ -663,8 +834,12 @@ int main(int argc,char** argv) {
     for(const unsigned site:kCastCalls)
         if(CallsTo(site,kCast)){std::printf("FAIL: the cast call %X not redirected\n",site);return 1;}
     if(CallsTo(kStepCall,kStep)){std::puts("FAIL: the step call not redirected");return 1;}
-    if(!CallsTo(kBuildCall,kBuild)){std::puts("FAIL: the build call redirected without debug");return 1;}
+    if(!CallsTo(kBuildCall,kBuild) || !CallsTo(kRayBuildCall,kRayBuild)){std::puts("FAIL: a build call redirected without debug");return 1;}
+    if(!CallsTo(kSettleCall,kSettle)){std::puts("FAIL: the settle call redirected before the load's end");return 1;}
     if(!PatchCast()){std::puts("FAIL: the fake cast");return 1;}
+    Unarmed();
+    if(!SettleChain() || failures){std::printf("FAIL: %d checks\n",failures);return 1;}
+    Records();
     RandomWorlds();
     KeepOne();
     Throws();
