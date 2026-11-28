@@ -29,14 +29,17 @@ bool Ready() noexcept;     // the fingerprints matched and the registration hook
 
 // ---- cloned vtables ---------------------------------------------------------------------------------------------
 constexpr int kSlotDtor=1,kSlotUpdate=5,kSlotMessage=9;
+// The most slots a clone holds: 96 since AssultSoldier (94 slots, src/soldier_factory.cpp) is cloned too; the ports' classes
+// have 45 / 59.
+constexpr int kMostSlots=96;
 struct Clone {
     const char* tag;
     std::size_t vtable;            // the stock class's primary vtable (EDF.dll RVA)
     int slots;
     const std::uint32_t* rvas;     // its slots as the file has them
-    void* orig[64];
-    void* block[65];               // [0] RTTI, then the slots: the objects' vptr is &block[1]
-    std::atomic<std::uint32_t> calls[64];
+    void* orig[kMostSlots];
+    void* block[kMostSlots+1];               // [0] RTTI, then the slots: the objects' vptr is &block[1]
+    std::atomic<std::uint32_t> calls[kMostSlots];
 };
 using DtorFn=std::uint64_t(__fastcall*)(void*,unsigned);   // the deleting destructor (this, flags: bit 0 = operator delete); returns this
 using UpdateFn=std::uint64_t(__fastcall*)(void*,void*);
