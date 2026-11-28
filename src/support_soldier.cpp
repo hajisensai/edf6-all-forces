@@ -77,6 +77,11 @@ constexpr const wchar_t* kBodies[kSupportWeaponCount][2]={
     {L"app:/object/N607_AIHEAVYARMOR_SSG.sgo",L"app:/object/N607_AIHEAVYARMOR_SSG_LEADER.sgo"},
     // The X-Morph infantry: our own bodies, written by the installer (an AssultSoldier on the plugin's model).
     {L"app:/object/EDF6VC_XM_SMALL_INFANTRY.sgo",L"app:/object/EDF6VC_XM_SMALL_INFANTRY_LEADER.sgo"},
+    // The new classes (support_call.h zwVehicler / zwRuneBlade): our own bodies, written by tools/make_zw_classes.py from
+    // the rifle Ranger with xgs_scene_object_class = ZwVehicler / ZwRuneBlade (soldier_factory.h: their clone-vtable
+    // AssultSoldier), each with its class's own weapon (the Gyrojet pistol / the rune carbine).
+    {L"app:/object/EDF6VC_ZW_VEHICLER.sgo",L"app:/object/EDF6VC_ZW_VEHICLER_LEADER.sgo"},
+    {L"app:/object/EDF6VC_ZW_RUNEBLADE.sgo",L"app:/object/EDF6VC_ZW_RUNEBLADE_LEADER.sgo"},
 };
 const wchar_t* Body(std::uint32_t resource) noexcept {
     return IsSupportSoldierResource(resource) ?
@@ -339,7 +344,7 @@ void NoteSupportKindsInstalled() noexcept {
     for(int k=0;k<kSupportWeaponCount;++k) {
         const bool here=BodyInstalled(kBodies[k][0]) && BodyInstalled(kBodies[k][1]);
         SetSupportKindInstalled(static_cast<SupportWeapon>(k),here);
-        if(!here)Log("SUPPORT soldier kind %d not installed (%ls / %ls missing in Mods/OBJECT: the X-Morph model pack): not offered, never planned",
+        if(!here)Log("SUPPORT soldier kind %d not installed (%ls / %ls missing in Mods/OBJECT: the X-Morph model pack / make_zw_classes): not offered, never planned",
                      k,OurFile(kBodies[k][0]),OurFile(kBodies[k][1]));
     }
 }

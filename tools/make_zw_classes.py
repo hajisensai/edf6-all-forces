@@ -49,6 +49,7 @@ class SoldierClass:
     type: int
     factory: str     # xgs_scene_object_class, the name src/soldier_factory* registers
     stem: str        # zw_vehicler -> OBJECT/zw_vehicler_0N.sgo, MENUOBJECT/zw_vehicler_0N.SGO
+    npc_weapon: str  # the support soldier's weapon (tools/zw_weapons.py row id: WEAPON/<ID>.SGO)
 
     @property
     def name_key(self) -> str:
@@ -75,9 +76,20 @@ class SoldierClass:
     def custom_color_path(self) -> str:
         return f'App:/DefaultPackage/CustomColor{self.factory}.sgo'
 
+    # The class's support soldier (src/support_soldier.cpp kBodies, support_call.h SupportWeapon::zwVehicler /
+    # zwRuneBlade): the rifle Ranger NPC template with this factory and the class's own weapon.
+    def npc(self, leader: bool) -> str:
+        return f'OBJECT/EDF6VC_{self.stem.upper()}{"_LEADER" if leader else ""}.SGO'
 
-CLASSES: tuple[SoldierClass, ...] = (SoldierClass(4, 'ZwVehicler', 'zw_vehicler'),
-                                     SoldierClass(5, 'ZwRuneBlade', 'zw_runeblade'))
+    @property
+    def npc_weapon_path(self) -> str:
+        return f'app:/weapon/{self.npc_weapon}.sgo'
+
+
+CLASSES: tuple[SoldierClass, ...] = (SoldierClass(4, 'ZwVehicler', 'zw_vehicler', 'ZW_Gyrojet01'),
+                                     SoldierClass(5, 'ZwRuneBlade', 'zw_runeblade', 'ZW_RuneCarbine01'))
+# The support soldiers' template (support_loadout.KINDS' rifle): an AI soldier, one weapon (AiSoldierRifle01) in one set.
+NPC_TEMPLATE = 'N601_COMMON_RANGER_AF'
 
 
 RUNEBLADE = CLASSES[1]
@@ -85,7 +97,7 @@ RUNEBLADE = CLASSES[1]
 
 def files_of(c: SoldierClass) -> list[str]:
     return ([c.battle(n) for n in range(1, APPEARANCES + 1)] + [c.menu(n) for n in range(1, APPEARANCES + 1)]
-            + [c.custom_color] + (rune_fx.files() if c == RUNEBLADE else []))
+            + [c.custom_color, c.npc(False), c.npc(True)] + (rune_fx.files() if c == RUNEBLADE else []))
 
 
 # Every file this tool writes -> (what it is made from, its state). 'placeholder': the Ranger's model / colours stand in
@@ -94,6 +106,7 @@ ASSETS: dict[str, tuple[str, str]] = {
     **{c.battle(n): (f'SoldierInit[0][2][{n - 1}]', 'placeholder') for c in CLASSES for n in range(1, APPEARANCES + 1)},
     **{c.menu(n): (f'SoldierInit[0][5][1][{n - 1}]', 'placeholder') for c in CLASSES for n in range(1, APPEARANCES + 1)},
     **{c.custom_color: ('SoldierInit[0][5][0]', 'placeholder') for c in CLASSES},
+    **{c.npc(leader): (NPC_TEMPLATE + ('_LEADER' if leader else ''), 'placeholder') for c in CLASSES for leader in (False, True)},
     **{rel: ('tools/make_runeblade_fx.py', 'generated') for rel in rune_fx.files()},   # drawn here: the class's own
 }
 
@@ -276,6 +289,23 @@ def battle_sgo(template: bytes, c: SoldierClass) -> bytes:
     return dsgo.compact(doc)
 
 
+def npc_sgo(template: bytes, c: SoldierClass) -> bytes:
+    """The class's support soldier: the rifle Ranger NPC (an AssultSoldier, one weapon) made by the class's factory, its
+    weapon the class's own (soldier_load_weapon [0]; its one weapon set keeps index 0). Every other value (AI, model,
+    voice) as the template's."""
+    if template[:4] != b'DSGO':
+        raise ValueError(f'{NPC_TEMPLATE} is not a DSGO')
+    doc = dsgo.parse(template)
+    if doc.root.get('xgs_scene_object_class') != 'AssultSoldier':
+        raise ValueError(f'{NPC_TEMPLATE} is a {doc.root.get("xgs_scene_object_class")}, not an AssultSoldier')
+    loads = doc.root.get('soldier_load_weapon')
+    if not isinstance(loads, dsgo.Node) or len(loads.items) != 1 or not isinstance(loads.items[0], str):
+        raise ValueError(f'{NPC_TEMPLATE} does not load exactly one weapon')
+    doc.root.set('xgs_scene_object_class', c.factory)
+    loads.items[0] = c.npc_weapon_path
+    return dsgo.compact(doc)
+
+
 def build(root: str) -> dict[str, bytes]:
     """Every file this tool writes, {path under Mods: bytes}, from the game's Root.cpk (only read)."""
     game = vc.Game(root)
@@ -289,6 +319,8 @@ def build(root: str) -> dict[str, bytes]:
             out[c.battle(n)] = battle_sgo(game.read(*_rel(battles[n - 1])), c)
             out[c.menu(n)] = game.read(*_rel(menus[n - 1]))
         out[c.custom_color] = game.read(*_rel(color))
+        for leader in (False, True):
+            out[c.npc(leader)] = npc_sgo(game.read('OBJECT', NPC_TEMPLATE + ('_LEADER' if leader else '') + '.SGO'), c)
     out.update(rune_fx.build(game))
     if set(out) != set(ASSETS):
         raise AssertionError('build and ASSETS disagree')

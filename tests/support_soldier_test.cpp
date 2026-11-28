@@ -106,13 +106,14 @@ int main() {
     }
     asked=0;Setup();Check(preloads==2*kSupportWeaponCount && SupportSoldiersReady(),
           "every stock template a load may hold (member and leader) queued: five Rangers, five Wing Divers, four Fencers");
-    Check(asked==2,"only our own body files (the X-Morph infantry's member and leader) are asked for, never a stock template");
+    Check(asked==6,"only our own body files (the X-Morph infantry's, the Vehicler's, the Rune Blade's member and leader) are asked for, never a stock template");
     // Our own bodies are preloaded and spawned only when the installer wrote them; no stand-in, one log line, nothing made.
     Check(SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle),"both bodies there: the kind is installed");
     ourFilesThere=false;Setup();
     Check(!SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle) &&
           SupportKindInstalled(SupportWeapon::fencerShotgun),"its bodies missing: the X-Morph infantry is not installed, every stock kind is");
-    Check(preloads==2*(kSupportWeaponCount-1) && SupportSoldiersReady(),"the X-Morph infantry's missing bodies are not preloaded, the stock ones are");
+    Check(preloads==2*(kSupportWeaponCount-3) && SupportSoldiersReady() && !SupportKindInstalled(SupportWeapon::zwVehicler) &&
+          !SupportKindInstalled(SupportWeapon::zwRuneBlade),"our own missing bodies (X-Morph infantry, the new classes) are not preloaded, the stock ones are");
     {ObjRef xm;const int madeBefore=made,logsBefore=logLines;
      Check(!ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::xmInfantry,false),nullptr,true,&xm) && made==madeBefore &&
            logLines==logsBefore+1 && SupportSoldierLastFailure()==SupportSpawnFailure::notInstalled && !xm &&

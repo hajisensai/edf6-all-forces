@@ -57,10 +57,16 @@ bodies = re.findall(r'L"app:/object/(\w+)\.sgo",L"app:/object/(\w+)\.sgo"', read
 check([(t, t + '_LEADER') for _, _, t in sl.KINDS] == bodies, 'each kind\'s template (and its _LEADER) is the plugin\'s')
 # The X-Morph infantry (the last kind): a Ranger's class, no looks (no stock template to recolour, no change-colour material).
 call_header = read('src/support_call.h')
-lookless = re.search(r'SupportKindHasLooks\(SupportWeapon k\) noexcept \{ return k!=SupportWeapon::(\w+); \}', call_header)
-check(lookless is not None and (lookless.group(1).lower(),) == sl.LOOKLESS, 'the kinds without looks equal the plugin\'s')
-check(sl.KIND_NAMES[-1] == 'xminfantry' and sl.KIND_CLASS['xminfantry'] == 0 and not sl.has_looks('xminfantry') and sl.has_looks('rifle'),
-      'xminfantry: the last kind, a Ranger\'s class, no looks')
+lookless = re.search(r'SupportKindHasLooks\(SupportWeapon k\) noexcept \{ return k!=SupportWeapon::(\w+) && !SupportKindIsZw\(k\); \}', call_header)
+zw = re.search(r'SupportKindIsZw\(SupportWeapon w\) noexcept \{ return w==SupportWeapon::(\w+) \|\| w==SupportWeapon::(\w+); \}', call_header)
+check(lookless is not None and zw is not None and
+      (lookless.group(1).lower(), zw.group(1).lower(), zw.group(2).lower()) == sl.LOOKLESS, 'the kinds without looks equal the plugin\'s')
+check(sl.KIND_NAMES[-3] == 'xminfantry' and sl.KIND_CLASS['xminfantry'] == 0 and not sl.has_looks('xminfantry') and sl.has_looks('rifle'),
+      'xminfantry: a Ranger\'s class, no looks')
+check(sl.KIND_NAMES[-2:] == ('zwvehicler', 'zwruneblade') and all(sl.KIND_CLASS[k] == 3 and not sl.has_looks(k) for k in sl.KIND_NAMES[-2:]),
+      'the new classes: last, class 3, no looks')
+check(refused(sl.parse_preset, 'zwvehicler@1E3A8A', 12) and refused(sl.parse_preset, 'zwruneblade+aHandGrenade01', 12),
+      'a colour or a backpack on a new class is refused')
 check(re.search(r'w==SupportWeapon::xmInfantry \? 0 :', call_header) is not None, 'the plugin gives it the Ranger class too')
 check([s[0] for s in sl.parse_preset('xminfantry*4,rifle', 12)] == ['xminfantry'] * 4 + ['rifle'], 'xminfantry parses')
 check(refused(sl.parse_preset, 'xminfantry@1E3A8A', 12) and refused(sl.parse_preset, 'xminfantry+aHandGrenade01', 12) and

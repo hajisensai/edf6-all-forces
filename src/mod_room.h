@@ -93,8 +93,11 @@ namespace crew {
 //      SoldierInit 4 / 5, its factories and its name-tag table: an older build has none of them and would read the
 //      record's class past the game's four. And every member needs EDF6Coop 2.10.0 (coop_attr.h kRoomCoop*), whose
 //      loadout guard and armor copy know six classes.
+//  28 (2026-11-28): the new classes as support soldiers (support_call.h SupportWeapon::zwVehicler / zwRuneBlade, 17
+//      kinds): the room loadout packs 5 bits a soldier (it was 4) and the preload set's words moved (preload_set_logic.h
+//      soldier0+16, zwVehicle0=96). An older build would read every packed loadout and preload word wrong.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=27;  // soldier classes 4 / 5 in the MissionSync records
+constexpr std::int64_t kAllForcesRoomProtocol=28;  // 17 support soldier kinds, 5-bit loadout packing
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

@@ -13,7 +13,7 @@ bool Point(const float* p) noexcept {
     for(int i=0;i<3;++i)if(!std::isfinite(p[i]) || std::fabs(p[i])>1.0e6f)return false;
     return true;
 }
-static_assert(kArmsKinds==static_cast<std::uint32_t>(kSupportWeaponCount),"a requester's arms: one word a soldier kind");
+static_assert(kArmsKinds==static_cast<std::uint32_t>(kSupportArmedKindCount),"a requester's arms: one word an armed soldier kind");
 // A unit's weapons: none, or what its soldier kind carries (npc_tier.h UnpackArms; never on a vehicle); a second hand
 // only a Fencer kind's (UnpackHand) and only with a main one.
 bool UnitArms(const Unit& u) noexcept {
@@ -523,8 +523,9 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
                 const bool soldier=IsSupportSoldierResource(unit.resourceId);
                 if(soldier && unit.arms && unit.offhand)continue;
                 const auto k=static_cast<std::uint32_t>(SupportSoldierWeapon(unit.resourceId));
-                unit.arms=soldier ? t.arms.kind[k] : 0;
-                unit.offhand=soldier ? t.arms.offhand[k] : 0;
+                const bool armed=soldier && k<kArmsKinds;  // the new classes (past kArmsKinds) carry their body's own weapon
+                unit.arms=armed ? t.arms.kind[k] : 0;
+                unit.offhand=armed ? t.arms.offhand[k] : 0;
             }
             t.planned=true;
         }

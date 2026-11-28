@@ -1250,7 +1250,7 @@ int main() {
         check(UnpackSupportLoadout(PackSupportLoadout(l),&back) && back.count==8 && back.soldier[0]==SupportWeapon::wingLance &&
               back.soldier[7]==SupportWeapon::fencerCannon,"a load packs into a request's 64 bits and back");
         check(PackSupportLoadout(SupportLoadout{})==0 && !UnpackSupportLoadout(0,&back) && back.count==0,"no load: 0, the call's own");
-        check(!UnpackSupportLoadout(0xDu,&back) && !UnpackSupportLoadout(0x1u|(0xFull<<4),&back) &&
+        check(!UnpackSupportLoadout(0xDu,&back) && !UnpackSupportLoadout(0x1u|(0x1Full<<4),&back) &&
               !UnpackSupportLoadout(PackSupportLoadout(l)|(1ull<<60),&back),
               "malformed: thirteen soldiers, a kind past the table, bits past the count");
         check(SupportLoadoutResource(l,0)==SupportSoldierResource(SupportWeapon::wingLance,true) &&

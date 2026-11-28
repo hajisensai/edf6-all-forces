@@ -89,6 +89,14 @@ for c in zc.CLASSES:
         check('/'.join(zc._rel(c.battle_path(n))) == c.battle(n), f'{c.factory} battle {n}: path')
         check('/'.join(zc._rel(c.menu_path(n))) == c.menu(n), f'{c.factory} menu {n}: path')
     check('/'.join(zc._rel(c.custom_color_path)) == c.custom_color, f'{c.factory}: colour path')
+# the support soldiers (support_call.h zwVehicler / zwRuneBlade): the bodies the plugin's kBodies names, a weapon of ours
+import re  # noqa: E402
+bodies = re.findall(r'L"app:/object/(EDF6VC_ZW_\w+)\.sgo",L"app:/object/(EDF6VC_ZW_\w+)\.sgo"',
+                    (ROOT / 'src' / 'support_soldier.cpp').read_text(encoding='utf-8'))
+check([(f'OBJECT/{a.upper()}.SGO', f'OBJECT/{b.upper()}.SGO') for a, b in bodies] ==
+      [(c.npc(False), c.npc(True)) for c in zc.CLASSES], 'the support soldiers\' bodies are support_soldier.cpp\'s')
+check([c.npc_weapon for c in zc.CLASSES] == ['ZW_Gyrojet01', 'ZW_RuneCarbine01'] and
+      all(c.npc_weapon in zw.IDS for c in zc.CLASSES), 'each support soldier carries its class\'s own weapon row')
 
 # ledger lifecycle in a scratch game dir: write, refresh, release
 with tempfile.TemporaryDirectory(prefix='edf6vc-zw-') as game:
@@ -116,6 +124,10 @@ else:
         for n in range(1, zc.APPEARANCES + 1):
             check(dsgo.parse(built[c.battle(n)]).root.get('xgs_scene_object_class') == c.factory,
                   f'{c.factory} battle {n}: factory class')
+        for leader in (False, True):
+            npc = dsgo.parse(built[c.npc(leader)]).root
+            check(npc.get('xgs_scene_object_class') == c.factory and
+                  npc.get('soldier_load_weapon').items == [c.npc_weapon_path], f'{c.factory} support soldier: factory, weapon')
     sgos = zw.build(lambda rel: cw.stock(game_root, rel))
     check(set(sgos) == {rel for w in zw.WEAPONS for rel in zw.files(w)}, 'every zw weapon SGO built')
     check(all(data[:4] == b'DSGO' or data[:3] == b'SGO' for data in sgos.values()), 'zw weapon SGOs are SGOs')

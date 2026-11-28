@@ -20,7 +20,7 @@ namespace crew::roompreview {
 inline constexpr int kRangerClass=0,kWingDiverClass=1,kFencerClass=3;
 constexpr int MenuClassOf(SupportWeapon k) noexcept {
     const int c=SupportSoldierClass(k);
-    return c==0 ? kRangerClass : c==1 ? kWingDiverClass : kFencerClass;
+    return c==0 || c==3 ? kRangerClass : c==1 ? kWingDiverClass : kFencerClass;   // 3: the new classes' NPCs, on the Ranger's body
 }
 // --- The unified model file (docs/unified-model-re.md; pylib/menu_model.py) ---
 // The preview shows a unit from the very file the battle loads: each carries the keys only the menu reads, and the
@@ -30,12 +30,13 @@ inline constexpr const wchar_t* kMenuModelKey=L"menu_animation_model";
 inline constexpr std::uint16_t kDocClassic=0,kDocDsgo=2;   // doc variant tags (+0x10) whose member lookup the hook asks
 // The support soldiers' AI templates (tools/support_loadout.py KINDS; src/support_soldier.cpp kBodies), SupportWeapon
 // order; tools/menu_preview.py writes each and its _LEADER into Mods/OBJECT as a unified file. The X-Morph infantry
-// (its body the installer's own, no menu keys) previews as the rifle Ranger.
+// (its body the installer's own, no menu keys) previews as the rifle Ranger, and so do the new classes' NPCs (their
+// bodies the AF Ranger template's with the class's factory and weapon: tools/make_zw_classes.py).
 inline constexpr const wchar_t* kSoldierTemplates[kSupportWeaponCount]={
     L"N601_COMMON_RANGER_AF",L"N601_COMMON_RANGER_FL",L"N601_COMMON_RANGER_RL",L"N601_COMMON_RANGER_SG",
     L"N601_COMMON_RANGER_SN",L"N606_AIPALEWING_LANCE",L"N606_AIPALEWING_LR",L"N606_AIPALEWING_MS",L"N606_AIPALEWING_IZN",
     L"N606_AIPALEWING_TB",L"N607_AIHEAVYARMOR_SC",L"N607_AIHEAVYARMOR_SMC",L"N607_AIHEAVYARMOR_SP",L"N607_AIHEAVYARMOR_SSG",
-    L"N601_COMMON_RANGER_AF",
+    L"N601_COMMON_RANGER_AF",L"N601_COMMON_RANGER_AF",L"N601_COMMON_RANGER_AF",
 };
 namespace detail {
 inline std::size_t Join(wchar_t* out,std::size_t capacity,std::initializer_list<const wchar_t*> parts,bool lower) noexcept {
@@ -95,7 +96,9 @@ struct MenuWeapons { int count; const wchar_t* name[2]; };
 constexpr MenuWeapons MenuWeaponsOf(SupportWeapon k) noexcept {
     switch(k) {
         case SupportWeapon::rifle:
-        case SupportWeapon::xmInfantry: return {1,{L"aWeapon003",nullptr}};   // the X-Morph infantry previews as the rifle Ranger
+        case SupportWeapon::xmInfantry:   // the X-Morph infantry previews as the rifle Ranger
+        case SupportWeapon::zwVehicler:   // the new classes' NPCs too (their bodies are the AF Ranger template's, support_call.h)
+        case SupportWeapon::zwRuneBlade: return {1,{L"aWeapon003",nullptr}};
         case SupportWeapon::flame: return {1,{L"aWeapon197",nullptr}};
         case SupportWeapon::rocket: return {1,{L"RocketLauncher01",nullptr}};
         case SupportWeapon::shotgun: return {1,{L"aWeapon046",nullptr}};
@@ -136,11 +139,13 @@ inline constexpr StockColours kKindStock[kSupportWeaponCount]={
     {{{{0.278f,0.251f,0.251f,1.f}},{{0.251f,0.243f,0.251f,1.f}}}},   // pilebanker
     {{{{0.709f,0.286f,0.094f,1.f}},{{0.788f,0.0f,0.0f,1.f}}}},       // fshotgun
     kRangerStock,                                                     // xminfantry: previewed as the rifle Ranger
+    kRangerStock,kRangerStock,                                        // zwvehicler, zwruneblade: the same
 };
 constexpr const StockColours& StockOf(SupportWeapon k,bool leader) noexcept {
     const int i=static_cast<int>(k);
     if(leader && SupportSoldierClass(k)==0)
         return k==SupportWeapon::rifle || k==SupportWeapon::xmInfantry ? kRangerLeaderBody : kRangerLeaderHead;
+    if(leader && SupportKindIsZw(k))return kRangerLeaderBody;
     return kKindStock[i>=0 && i<kSupportWeaponCount ? i : 0];
 }
 // 0xRRGGBB as the generator writes it (tools/support_loadout.py recolour: each byte / 255, alpha 1); kStockColour: `stock`.
