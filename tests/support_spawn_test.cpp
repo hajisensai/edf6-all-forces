@@ -9,8 +9,7 @@ inline bool DrillFileThere(const wchar_t* dir,const wchar_t* file) noexcept {
     ++drillFileAsked;
     if(!dir || !file || std::wcscmp(dir,L"OBJECT")!=0)return false;
     if(std::wcscmp(file,L"EDF6VC_DRILL_TRANSPORT.SGO")==0)return drillFile;
-    return zwFiles && (std::wcscmp(file,L"EDF6VC_ZW_HSTVL.SGO")==0 || std::wcscmp(file,L"EDF6VC_ZW_M247.SGO")==0 ||
-                       std::wcscmp(file,L"EDF6VC_ZW_MBT70.SGO")==0);
+    return zwFiles && std::wcsncmp(file,L"EDF6VC_ZW_",10)==0;   // every Vehicler vehicle's file (zw_vehicles.inc)
 }
 }
 #define EDF6_SUPPORT_SPAWN_MOD_FILE(dir,file) fixture::DrillFileThere(dir,file)
@@ -52,10 +51,11 @@ unsigned char* Create(void*,const float* matrix,const wchar_t* path,crew::InitPa
     lastPath=path;
     // A loaded tank (support_loadout.h VehicleVariantFile): the stock tank's class and seats, holders past the stock one.
     const bool loaded=std::wcscmp(path,kLoaded)==0;
-    static constexpr crew::SupportVehicleSpec zw[]={crew::ZwHullSpec(crew::kZwVehicles[0]),crew::ZwHullSpec(crew::kZwVehicles[1]),
-                                                    crew::ZwHullSpec(crew::kZwVehicles[2])};
-    const crew::SupportVehicleSpec* const rows[]={&crew::kSupportVehicles[0],&crew::kSupportVehicles[1],&crew::kSupportVehicles[2],
-                                                &crew::kSupportDrillTransport,&zw[0],&zw[1],&zw[2]};
+    static crew::SupportVehicleSpec zw[crew::kZwVehicleCount]{};   // every Vehicler vehicle (zw_vehicles.inc)
+    for(int k=0;k<crew::kZwVehicleCount;++k)zw[k]=crew::ZwHullSpec(crew::kZwVehicles[k]);
+    const crew::SupportVehicleSpec* rows[4+crew::kZwVehicleCount]={&crew::kSupportVehicles[0],&crew::kSupportVehicles[1],
+                                                                   &crew::kSupportVehicles[2],&crew::kSupportDrillTransport};
+    for(int k=0;k<crew::kZwVehicleCount;++k)rows[4+k]=&zw[k];
     for(const auto* each:rows)if(const auto& row=*each;std::wcscmp(path,row.sgo)==0 || (loaded && &row==&crew::kSupportVehicles[0])) {
         edf::Put<const void*>(object,0,crew::image+row.vtable+(badClass || (loaded && variantBadClass) ? 8 : 0));
         edf::Put<unsigned>(object,edf::kSeatCount,row.seats);
@@ -223,10 +223,10 @@ int main() {
             Check(DeleteSupportVehicle(v),"a Vehicler vehicle's rollback");
         }
         // Not wanted by this mission's set: not preloaded, not ready.
-        preload::detail::missionSet[0].store(~(std::uint64_t{1}<<static_cast<int>(preload::Item::zwVehicle0)));
+        {constexpr int b=static_cast<int>(preload::Item::zwVehicle0);preload::detail::missionSet[b>>6].store(~(std::uint64_t{1}<<(b&63)));}
         PreloadSupportVehicles();
         Check(!ZwVehicleReady(0) && ZwVehicleReady(1),"a kind this mission's set lacks is not preloaded; the others are");
-        preload::detail::missionSet[0].store(~std::uint64_t{0});PreloadSupportVehicles();
+        preload::detail::missionSet[0].store(~std::uint64_t{0});preload::detail::missionSet[1].store(~std::uint64_t{0});PreloadSupportVehicles();
         // The game made another class of it: deleted, that kind off until restart, the others and the stock hulls stay.
         fixture::badClass=true;const int deletes=fixture::deletes;
         Check(!SpawnZwVehicle(1,at,forward,nullptr) && fixture::deletes==deletes+1,"a Vehicler vehicle of another class: refused, deleted");

@@ -38,7 +38,8 @@ void CallRows() {
     for(const wchar_t* none:{L"ZW_VehicleNone",L"ZW_V1_HSTV",L"zw_v1_hstvl",L"ZW_V1_HSTVL_",L"ZW_P1_GYROJET"})AddCallItems(none,s);
     Expect(s.Empty(),"no vehicle for the empty slot, a near name or the Vehicler's pistol");
     Expect(crew::ZwVehicleKindOfRow(L"ZW_V1_HSTVL")==0 && crew::ZwVehicleKindOfRow(L"ZW_V2_M247")==1 &&
-           crew::ZwVehicleKindOfRow(L"ZW_V3_MBT70")==2 && crew::kZwVehicleCount==3,"the kinds in the registry's order");
+           crew::ZwVehicleKindOfRow(L"ZW_V3_MBT70")==2 && crew::ZwVehicleKindOfRow(L"ZW_V9_VZ9")==8 &&
+           crew::kZwVehicleCount==9,"the kinds in the registry's order");
 }
 
 void Sets() {

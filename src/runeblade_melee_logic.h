@@ -35,10 +35,10 @@ constexpr std::uint8_t kArmsMost=8;
 constexpr int kMeleeCategory=500,kRangedCategory=501;
 struct ArmRow { Arm arm; const wchar_t* id; int category; };
 constexpr ArmRow kArmRows[]={
-    {Arm::daybreak,L"ZW_M1Daybreak",kMeleeCategory},   {Arm::firmament,L"ZW_M2Firmament",kMeleeCategory},
-    {Arm::stars,L"ZW_M3Stars",kMeleeCategory},         {Arm::fallstar,L"ZW_M4Fallstar",kMeleeCategory},
-    {Arm::afterglow,L"ZW_M5Afterglow",kMeleeCategory}, {Arm::firefly,L"ZW_R2Firefly",kRangedCategory},
-    {Arm::septenary,L"ZW_R3Septenary",kRangedCategory},
+    {Arm::daybreak,L"ZW_RuneSaber01",kMeleeCategory},   {Arm::firmament,L"ZW_RuneLance01",kMeleeCategory},
+    {Arm::stars,L"ZW_RuneRing01",kMeleeCategory},         {Arm::fallstar,L"ZW_RuneHammer01",kMeleeCategory},
+    {Arm::afterglow,L"ZW_RuneIai01",kMeleeCategory}, {Arm::firefly,L"ZW_RuneRevolver01",kRangedCategory},
+    {Arm::septenary,L"ZW_RuneStars01",kRangedCategory},
 };
 inline Arm ArmOf(const wchar_t* id) noexcept {
     if(!id)return Arm::none;

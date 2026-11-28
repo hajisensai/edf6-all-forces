@@ -28,8 +28,8 @@ rb::Out HoldRelease(rb::Machine& m,rb::Frame f,int frames) {
 }
 
 void Names() {
-    Check(rb::ArmOf(L"ZW_M1Daybreak")==rb::Arm::daybreak,"M1 row");
-    Check(rb::ArmOf(L"ZW_R3Septenary")==rb::Arm::septenary,"R3 row");
+    Check(rb::ArmOf(L"ZW_RuneSaber01")==rb::Arm::daybreak,"M1 row");
+    Check(rb::ArmOf(L"ZW_RuneStars01")==rb::Arm::septenary,"R3 row");
     Check(rb::ArmOf(L"ZW_MeleeNone")==rb::Arm::none && rb::ArmOf(nullptr)==rb::Arm::none,"other rows none");
     for(const auto& r:rb::kArmRows)Check(rb::IsMelee(r.arm)==(r.category==rb::kMeleeCategory),"melee rows are category 500");
 }

@@ -65,6 +65,9 @@ const unsigned char* ZwVehicleOwner(const void* vehicle) noexcept;
 int ZwVehicleKind(const void* vehicle) noexcept;
 // `human`'s current vehicle (the last one made for it and still its), nullptr when none.
 unsigned char* ZwOwnedVehicle(const unsigned char* human) noexcept;
+// Every Vehicler hull made and active on this machine that is still in the scene, alive or a wreck (zw_vehicle_gear.cpp:
+// capture, V8's zone): out[i] the hull, kinds[i] its kind. Returns how many (at most `most`).
+int ZwMadeHulls(unsigned char** out,int* kinds,int most) noexcept;
 
 // ---- M4: the resupply ----
 // What may be called: zw_vehicle_catalog.h ZwUnlockedKinds (the request carries it), at ZwVehiclePrice each.

@@ -24,7 +24,6 @@ import vcobjects as vc  # noqa: E402
 import zw_vehicles as zv  # noqa: E402
 
 OWNER = 'zwvehicle'   # pylib/ledger.py
-GUN_CLASS = 'Weapon_VehicleShoot'
 
 
 def _need(ok: bool, what: str) -> None:
@@ -36,7 +35,8 @@ def gun_sgo(g: zv.Gun, stock: bytes) -> bytes:
     """A gun from its stock vehicle weapon (a DSGO): its values and names over the stock's."""
     _need(stock[:4] == b'DSGO', f'{g.stock}: not a DSGO')
     doc = dsgo.parse(stock)
-    _need(doc.root.get('xgs_scene_object_class') == GUN_CLASS, f'{g.stock}: not a native vehicle gun')
+    _need(g.cls in zv.GUN_CLASSES and doc.root.get('xgs_scene_object_class') == g.cls,
+          f'{g.stock}: not a {g.cls} (a native vehicle gun)')
     for key, value in g.values.items():
         doc.root.get(key)   # KeyError: not the stock gun this was written for
         doc.root.set(key, float(value))
@@ -46,17 +46,28 @@ def gun_sgo(g: zv.Gun, stock: bytes) -> bytes:
     return dsgo.compact(doc)
 
 
+def _kept(stock_gun: list) -> bool:
+    return any(str(stock_gun[0]).lower() == f'app:/weapon/{w}.sgo' for w in zv.KEPT_WEAPONS)
+
+
 def _setup_plain(setup: list, v: zv.ZwVehicle) -> list:
-    """The vehicle's setup from its stock hull's vehicle_setup (plain values): multipliers, speed, force, guns."""
-    _need(isinstance(setup, list) and len(setup) == 3, f'{v.stock}: vehicle_setup is not [multipliers, params, guns]')
-    multipliers, params, guns = setup
+    """The vehicle's setup from its stock hull's vehicle_setup (plain values): multipliers, speed and force (a ground
+    hull: [multipliers, params, guns]; a flying one, [multipliers, params, flight, guns], keeps its params and flight),
+    guns (the stock KEPT_WEAPONS past them kept)."""
+    parts = 4 if v.flying else 3
+    _need(isinstance(setup, list) and len(setup) == parts,
+          f'{v.stock}: vehicle_setup is not {parts} parts ([multipliers, params, {"flight, " if v.flying else ""}guns])')
+    multipliers, params, *flight, guns = setup
     _need(len(multipliers) == 2 and len(params) >= 3, f'{v.stock}: vehicle_setup multipliers / params')
+    kept = [x for x in guns if _kept(x)]
+    guns = [x for x in guns if not _kept(x)]
     _need(len(guns) == len(v.guns), f'{v.stock}: {len(guns)} weapons in its setup, {len(v.guns)} guns registered')
     for stock_gun, g in zip(guns, v.guns):
         _need(str(stock_gun[0]).lower() == f'app:/weapon/{g.stock.lower()}.sgo',
               f'{v.stock}: setup weapon {stock_gun[0]}, want {g.stock} (changed by another mod?)')
-    return [list(zv.MULTIPLIERS), [params[0], v.speed, v.force, *params[3:]],
-            [[g.path, *stock_gun[1:]] for stock_gun, g in zip(guns, v.guns)]]
+    params = list(params) if v.flying else [params[0], v.speed, v.force, *params[3:]]
+    return [list(zv.MULTIPLIERS), params, *flight,
+            [*([g.path, *stock_gun[1:]] for stock_gun, g in zip(guns, v.guns)), *kept]]
 
 
 def _as_sgo(value):  # noqa: ANN001, ANN202 - a plain value back into the old SGO's (floats stay floats)

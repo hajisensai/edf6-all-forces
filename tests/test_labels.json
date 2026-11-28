@@ -7056,14 +7056,6 @@
    ],
    "scripts": []
   },
-  "runeblade_melee": {
-   "labels": [
-    "plugin-core",
-    "plugin-native",
-    "plugin-net"
-   ],
-   "scripts": []
-  },
   "save_backup": {
    "labels": [
     "autoturret-tools",

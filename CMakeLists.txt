@@ -156,6 +156,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_na
 target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp src/support_firepower.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/zw_vehicle_catalog.cpp src/zw_vehicle_dispatch.cpp)
+# The Vehicler's V4..V9: unlocks by progress and capture, 1K17's heat, TV-8's fallout (src/zw_vehicle_gear.h).
+target_sources(EDF6VehicleCrew PRIVATE src/zw_vehicle_gear.cpp)
 # The generated variant files (coloured soldiers, loaded vehicles) a mission preloads (src/support_variants.h).
 target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 # The debug spawn tool (ini DebugSpawn, off by default; src/debug_spawn.h, docs/debug-spawn.md).
@@ -1038,6 +1040,11 @@ add_executable(zw_dispatch_test tests/zw_dispatch_test.cpp)
 target_include_directories(zw_dispatch_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(zw_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME zw_dispatch COMMAND zw_dispatch_test)
+# The Vehicler's V4..V9 (src/zw_unlock_logic.h, src/zw_heat_logic.h): unlock stages, capture, the beam's heat, the zone.
+add_executable(zw_v4v9_test tests/zw_v4v9_test.cpp)
+target_include_directories(zw_v4v9_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(zw_v4v9_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME zw_v4v9 COMMAND zw_v4v9_test)
 # The vehicles' weapon SGOs queued with them (src/vehicle_weapons_logic.h): the scan, the stock rows of the hitch2 SYNC
 # LOAD list; the stock table covers every stock vehicle the plugin preloads; against the game's SGOs (skip 77 without it).
 add_executable(vehicle_weapons_test tests/vehicle_weapons_test.cpp)
@@ -1631,7 +1638,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks lazy_rows_test preload_set_test zw_dispatch_test)
+add_dependencies(offline_checks lazy_rows_test preload_set_test zw_dispatch_test zw_v4v9_test)
 add_dependencies(offline_checks soldier_type_test soldier_classes_test soldier_save_test worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test support_pages_test weapon_list_logic_test weapon_page_logic_test armory_look_logic_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)

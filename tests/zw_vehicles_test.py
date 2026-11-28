@@ -31,27 +31,48 @@ def check(ok: bool, why: str) -> None:
 
 # rows <-> vehicles: each vehicle row (category 400, aSupportNone, its texts) names its vehicle, in the registry's order
 rows = [w for w in zw.WEAPONS if w.kind == 'vehicle']
-check([w.id for w in rows] == ['ZW_V1_HSTVL', 'ZW_V2_M247', 'ZW_V3_MBT70'], 'vehicle rows, in order')
+check([w.id for w in rows] == ['ZW_V1_HSTVL', 'ZW_V2_M247', 'ZW_V3_MBT70', 'ZW_V4_OBJ279', 'ZW_V5_OBJ760', 'ZW_V6_AH56',
+                               'ZW_V7_1K17', 'ZW_V8_TV8', 'ZW_V9_VZ9'], 'vehicle rows, in order')
 check([w.vehicle for w in rows] == [v.row for v in zv.VEHICLES] == [w.id for w in rows], 'row -> vehicle')
 for w in rows:
     check(w.category == 400 and w.template == zw.NONE_TEMPLATE and set(w.text) == set(zw.LANGS), f'{w.id}: a V row')
+    check((w.acquire == zw.ACQUIRE) == (zv.BY_ROW[w.vehicle].unlock == 'start'), f'{w.id}: owned by a new save only when a start vehicle')
+check(all(w.acquire == zw.ACQUIRE for w in zw.WEAPONS if w.kind not in ('vehicle', 'tuned')),
+      'only later vehicles and the Rune Blade rows still without their run time are not owned at the start')
 check(zw.BY_ID['ZW_VehicleNone'].kind == 'none', 'ZW_VehicleNone stays: on foot')
 check(all(w.vehicle == '' for w in zw.WEAPONS if w.kind != 'vehicle'), 'only vehicle rows name a vehicle')
-check(zw.RELEASED['vehicler stage 2 (2026-11-28)'][0] == 8 <= len(zw.IDS), 'stage 2 released at 8 rows (later rows after them)')
+check(zw.RELEASED['vehicler stage 2 (2026-11-28)'][0] == 8 <= len(zw.IDS), 'stage 2 released at 8 rows, later ones after')
+check(zw.RELEASED['vehicler stage 4 (2026-11-28)'][0] == 22 == len(zw.IDS), 'stage 4 (V4..V9) released at 22 rows')
+check(zw.IDS[16:22] == tuple(w.id for w in rows[3:]), 'V4..V9 appended after the Rune Blade rows')
 
 # the registry: class known, guns one per stock weapon, files once each, the V3 todo kept, placeholders marked
 check(mzv.OWNER in ledger.OWNERS, 'zwvehicle is a ledger owner')
 for v in zv.VEHICLES:
     check(v.cls in zv.CLASS_VTABLES and v.seats >= 1 and all(x > 0 for x in v.envelope), f'{v.row}: spec')
     check(v.state == 'placeholder', f'{v.row}: stage 2 model is a placeholder')
-    check(v.logistics_cost > 0 and v.speed > 0 and v.durability > 0, f'{v.row}: numbers')
+    check(v.logistics_cost > 0 and v.durability > 0 and (v.speed == v.force == 0 if v.flying else v.speed > 0),
+          f'{v.row}: numbers (a flying hull keeps its stock flight)')
+    check(v.unlock in zv.UNLOCKS and v.behavior in zv.BEHAVIORS and all(g.cls in zv.GUN_CLASSES for g in v.guns),
+          f'{v.row}: unlock / behaviour / gun classes known')
     check(v.curve in zv.CURVES, f'{v.row}: a firepower curve the plugin has')
     check(0 < v.logistics_cost <= zv.LOGISTICS_GAUGE, f'{v.row}: its price fits the gauge')
 gauge = re.search(r'kZwLogisticsGauge=(\d+)u', (ROOT / 'src' / 'zw_vehicle_catalog.h').read_text(encoding='utf-8'))
 check(gauge is not None and int(gauge.group(1)) == zv.LOGISTICS_GAUGE, 'the plugin gauge is the registry one')
 check(any('液压' in t for t in zv.BY_ROW['ZW_V3_MBT70'].todo), 'V3: hydraulic suspension left as todo')
 check(all(g.values['LockonTargetType'] == zv.MARK_AIR for g in zv.BY_ROW['ZW_V2_M247'].guns), 'V2: radar air mark')
-check(zv.BY_ROW['ZW_V1_HSTVL'].speed > max(v.speed for v in zv.VEHICLES if v.row != 'ZW_V1_HSTVL'), 'V1 fastest')
+start = [v for v in zv.VEHICLES if v.unlock == 'start']
+check([v.row for v in start] == ['ZW_V1_HSTVL', 'ZW_V2_M247', 'ZW_V3_MBT70'], 'V1..V3 at the start')
+check(zv.BY_ROW['ZW_V1_HSTVL'].speed > max(v.speed for v in start if v.row != 'ZW_V1_HSTVL'), 'V1 fastest at the start')
+check(zv.BY_ROW['ZW_V5_OBJ760'].speed == max(v.speed for v in zv.VEHICLES), 'V5 the hovercraft fastest')
+check([v.unlock for v in zv.VEHICLES[3:]] == ['mid', 'mid', 'mid', 'late', 'late', 'final'], 'V4..V9 unlock stages')
+check([v.row for v in zv.VEHICLES if v.capture] == ['ZW_V4_OBJ279'], 'V4 alone can be captured')
+check(zv.BY_ROW['ZW_V7_1K17'].behavior == 'heat' and zv.BY_ROW['ZW_V8_TV8'].behavior == 'fallout', 'V7 heat, V8 fallout')
+check(zv.BY_ROW['ZW_V6_AH56'].flying and zv.BY_ROW['ZW_V9_VZ9'].flying, 'V6 / V9 fly')
+check(zv.BY_ROW['ZW_V4_OBJ279'].durability > zv.BY_ROW['ZW_V3_MBT70'].durability
+      and zv.BY_ROW['ZW_V4_OBJ279'].logistics_cost == zv.LOGISTICS_GAUGE == zv.BY_ROW['ZW_V8_TV8'].logistics_cost,
+      'the later 279 / TV-8 heavier and at a full gauge')
+for v in zv.VEHICLES[3:]:
+    check(any(('尚未' in t or '要' in t or '真模型' in t or '代替' in t) for t in v.todo), f'{v.row}: its gaps listed')
 check(len(zv.files()) == len(set(zv.files())), 'files once each')
 
 # the generated table is current and says the registry
@@ -96,12 +117,18 @@ else:
         check(len(m['vehicle_riding_position']) == v.seats, f'{v.row}: seats')
         check(m['mission_setup'] == m['vehicle_setup'], f'{v.row}: mission_setup == vehicle_setup')
         setup = m['vehicle_setup']
-        check(abs(setup[1][1] - v.speed) < 1e-4 and abs(setup[1][2] - v.force) < 1e-6, f'{v.row}: speed / force')
+        stock_setup = sgo.load(data=game.read('OBJECT', f'{v.stock.upper()}.SGO'))['vehicle_setup']
+        if v.flying:
+            check(len(setup) == 4 and setup[1] == stock_setup[1] and setup[2] == stock_setup[2], f'{v.row}: stock flight kept')
+        else:
+            check(abs(setup[1][1] - v.speed) < 1e-4 and abs(setup[1][2] - v.force) < 1e-6, f'{v.row}: speed / force')
         check(m['game_object_durability'] == v.durability, f'{v.row}: durability')
-        check(gen_vehicle_weapons.weapons_of(built[v.rel]) == [g.path for g in v.guns], f'{v.row}: weapon scan')
+        kept = [w[0] for w in setup[-1] if any(w[0] == f'app:/weapon/{k}.sgo' for k in zv.KEPT_WEAPONS)]
+        scanned = [p for p in gen_vehicle_weapons.weapons_of(built[v.rel]) if p not in kept]
+        check(scanned == [g.path for g in v.guns], f'{v.row}: weapon scan')
         for g in v.guns:
             gm = sgo.load(data=built[g.rel])
-            check(gm['xgs_scene_object_class'] == 'Weapon_VehicleShoot', f'{g.file}: a vehicle gun')
+            check(gm['xgs_scene_object_class'] == g.cls, f'{g.file}: a vehicle gun')
             check(all(abs(gm[k] - x) < 1e-4 for k, x in g.values.items()), f'{g.file}: values')
             check(all(gm[zv.NAME_KEYS[lang]] == g.names[lang] for lang in zv.LANGS), f'{g.file}: names')
         # the envelope covers the stock model's bind-pose bounds (rounded out)
