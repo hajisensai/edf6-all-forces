@@ -1033,10 +1033,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Hit and Run (DN Bomber)', 'Sortie: a DN Bomber comes in low, drops two bombs on the mark and climbs steeply away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_missile_rain': {
-        'SC': ('武库鸟', '整舱导弹齐射模式：武库鸟从远处进场，机背四具发光挂架一次齐射至多 256 枚子母弹，每枚释放 4 枚追踪子弹。锁定框内每个敌人先分一枚，余弹均分，打完后飞出地图边界。'),
-        'CN': ('武庫鳥', '整艙飛彈齊射模式：武庫鳥從遠處進場，機背四具發光掛架一次齊射至多 256 枚子母彈，每枚釋放 4 枚追蹤子彈。鎖定框內每個敵人先分一枚，餘彈均分，打完後飛出地圖邊界。'),
-        'JA': ('アーセナルバード', '全弾ミサイル斉射モード。アーセナルバードが遠方から進入し、機背の発光する4基の発射器から分裂ミサイルを最大256発一斉発射する。親弾1発から誘導子弾4発を放つ。範囲内の敵に1発ずつ割り当て、残りを均等に配分し、マップ端から離脱する。'),
-        'EN': ('Arsenal Bird', 'Full missile bay salvo: the Arsenal Bird comes in from afar and fires up to 256 cluster missiles at once from the four lit pods on its back. Each launches four guided submunitions. Enemies in the lock box receive one lock each before repeats. It then flies out of the mission area.'),
+        'SC': ('武库鸟', '整舱导弹齐射模式：武库鸟从远处进场，从机腹一次齐射至多 256 枚发光的子母弹，每枚释放 4 枚追踪子弹。锁定框内每个敌人先分一枚，余弹均分，打完后飞出地图边界。'),
+        'CN': ('武庫鳥', '整艙飛彈齊射模式：武庫鳥從遠處進場，從機腹一次齊射至多 256 枚發光的子母彈，每枚釋放 4 枚追蹤子彈。鎖定框內每個敵人先分一枚，餘彈均分，打完後飛出地圖邊界。'),
+        'JA': ('アーセナルバード', '全弾ミサイル斉射モード。アーセナルバードが遠方から進入し、機腹から発光する分裂ミサイルを最大256発一斉発射する。親弾1発から誘導子弾4発を放つ。範囲内の敵に1発ずつ割り当て、残りを均等に配分し、マップ端から離脱する。'),
+        'EN': ('Arsenal Bird', 'Full missile bay salvo: the Arsenal Bird comes in from afar and fires up to 256 glowing cluster missiles at once from its belly. Each launches four guided submunitions. Enemies in the lock box receive one lock each before repeats. It then flies out of the mission area.'),
     },
     'arsenal_bird': {
         'SC': ('武库鸟', '无人机模式：呼叫武库鸟在空中盘旋，从机腹逐架放出 M101 无人机攻击范围内的敌人；无人机弹药或燃料耗尽、受损时飞回机腹回收，装弹后再次出动。'),
