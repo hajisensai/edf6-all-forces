@@ -1,4 +1,4 @@
-"""The Vehicler's (class 4, ZwVehicler) vehicles (docs/newclass-re/vehicler.md §1.2, plan-2026-11-28-zero-worldline-gear
+"""The Vehicler's (class 4, ZwVehicler) vehicles (docs/newclass-re/vehicler-plan.md §1.2, plan-2026-11-28-zero-worldline-gear
 §1): one entry per vehicle its vehicle slot can carry. Its weapon row (tools/zw_weapons.py, category 400) is only the
 tag of the choice; the vehicle is the plugin's own Mods/OBJECT SGO here, made by tools/make_zw_vehicles.py from a
 stock hull, and src/zw_vehicles.inc (tools/gen_zw_vehicles.py) tells the plugin which row is which vehicle.
@@ -7,7 +7,7 @@ Not vcobjects.GroundVehicle / GROUND_VEHICLES: those are the requested vehicles 
 levels and store kinds call_weapons and gen_stores build from; these are no request, have no family and carry their own
 guns. Their own registry keeps them out of every request path.
 
-Stage 2 models: every vehicle is its stock hull's model (`state` 'placeholder', vehicler.md: the real ones are being
+Stage 2 models: every vehicle is its stock hull's model (`state` 'placeholder', vehicler-plan.md: the real ones are being
 found); `todo` lists what the vehicle is meant to have and this stage does not build.
 
   setup        the vehicle_setup = mission_setup the plugin applies (support_spawn ApplyMissionSetup: 0x62D6E0 reads
@@ -30,7 +30,7 @@ LOGISTICS_GAUGE = 40   # the logistics gauge's size (src/zw_vehicle_catalog.h kZ
 NAME_KEYS = {'JA': 'name.ja', 'EN': 'name.en', 'CN': 'name.cn', 'KR': 'name.kr', 'SC': 'name.sc'}
 
 # The native vehicle classes a hull may be, and their vtables (EDF.dll 0x678CCB46): what src/zw_vehicles.inc gives the
-# plugin, derived from the built SGO's xgs_scene_object_class (vehicler.md §1.2: not typed into C++ by hand). The same
+# plugin, derived from the built SGO's xgs_scene_object_class (vehicler-plan.md §1.2: not typed into C++ by hand). The same
 # constants as src/support_spawn.h kSupportVehicles[0] (Vehicle505_Tank) and autoturret/src/turret.h kFlakVtable.
 CLASS_VTABLES: dict[str, int] = {'Vehicle505_Tank': 0x17DADB0, 'Vehicle603_Flak': 0x17DC620}
 

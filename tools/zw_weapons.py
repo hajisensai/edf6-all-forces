@@ -13,8 +13,9 @@ class's default weapon has to be owned, or the stock 0xDC550 rewrites the slot. 
 templates below, edited), so no game file is in this repository:
   none rows  the stock aSupportNone's (Weapon_Accessory, 'No Equipment'), as plan §3 asks
   Gyrojet01  Cascade 0's (RocketBullet01: Ammo_CustomParameter [mode, a, b, accel], docs/edf41-ufomother301.md: the
-             rocket leaves the muzzle at AmmoSpeed and speeds up by accel each frame), six rounds, single shots
-  vehicle rows  the Vehicler's vehicle choices (docs/newclass-re/vehicler.md §1.2): as a none row, inert Weapon_Accessory
+             rocket leaves the muzzle at AmmoSpeed and speeds up by accel each frame), six rounds, single shots, its
+             damage growing with its flight (AmmoDamageReduce a > 1: src/vehicler_foot_logic.h)
+  vehicle rows  the Vehicler's vehicle choices (docs/newclass-re/vehicler-plan.md §1.2): as a none row, inert Weapon_Accessory
              clones of aSupportNone (no fire, empty custom_parameter), only the tag of which vehicle the class brings;
              the vehicle is pylib/zw_vehicles.py's (row -> vehicle: src/zw_vehicles.inc), named and described here
   RuneCarbine01  Blazer's (LaserBullet02, the Ranger's ray gun), bolt-action single shots of a blue-violet beam that
@@ -70,19 +71,25 @@ NONE_TEMPLATE = 'aSupportNone'
 WEAPONS: tuple[Weapon, ...] = (
     Weapon('ZW_VehicleNone', 400, NONE_TEMPLATE, 'none', {}),
     Weapon('ZW_Gyrojet01', 401, 'aWeapon109', 'gyrojet', {
-        'SC': ('陀螺喷射手枪', '载具手的随身手枪。发射小型火箭弹，弹头离膛时很慢，随后一路加速，射程约 280 m。\n'
-                            '装弹 6 发，逐发射击，命中时小范围爆炸。\n\n模型暂用火箭弹发射器代替。'),
-        'CN': ('陀螺噴射手槍', '載具手的隨身手槍。發射小型火箭彈，彈頭離膛時很慢，隨後一路加速，射程約 280 m。\n'
-                            '裝彈 6 發，逐發射擊，命中時小範圍爆炸。\n\n模型暫用火箭彈發射器代替。'),
-        'JA': ('ジャイロジェット・ピストル', 'ヴィークラーの携行拳銃。小型ロケット弾を撃ち出す。弾頭は銃口をゆっくり離れ、'
-                                   'そこから加速していく。射程は約 280m。\n装弾数 6 発の単発射撃で、着弾時に小さく爆発する。'
-                                   '\n\nモデルは仮にロケットランチャーを使用。'),
-        'EN': ('Gyrojet Pistol', "The Vehicler's sidearm. It fires small rockets that leave the muzzle slowly and "
-                                 'speed up from there; range about 280 m.\nSix rounds, single shots; each round explodes '
-                                 "on impact in a small radius.\n\nA rocket launcher's model stands in for its own."),
-        'KR': ('자이로젯 권총', '비클러의 휴대 권총. 소형 로켓탄을 발사하며, 탄두는 총구를 천천히 떠난 뒤 점점 가속한다. '
-                            '사거리 약 280m.\n장탄수 6발, 단발 사격. 착탄 시 좁은 범위에 폭발한다.\n\n모델은 임시로 '
-                            '로켓 런처를 사용한다.'),
+        'SC': ('陀螺喷射手枪（试作型）', '载具手的随身手枪。发射小型火箭弹，弹头离膛时很慢，随后一路加速。\n'
+                                  '装弹 6 发，逐发射击，命中时小范围爆炸。贴脸威力很低，飞得越远威力越高（最高 5 倍）。'
+                                  '\n\n试作型，模型暂用火箭弹发射器代替。'),
+        'CN': ('陀螺噴射手槍（試作型）', '載具手的隨身手槍。發射小型火箭彈，彈頭離膛時很慢，隨後一路加速。\n'
+                                  '裝彈 6 發，逐發射擊，命中時小範圍爆炸。貼臉威力很低，飛得越遠威力越高（最高 5 倍）。'
+                                  '\n\n試作型，模型暫用火箭彈發射器代替。'),
+        'JA': ('ジャイロジェット・ピストル（試作型）', 'ヴィークラーの携行拳銃。小型ロケット弾を撃ち出す。弾頭は銃口を'
+                                          'ゆっくり離れ、そこから加速していく。\n装弾数 6 発の単発射撃で、着弾時に小さく爆発する。'
+                                          '至近距離では威力が低く、遠くまで飛ぶほど威力が上がる（最大 5 倍）。'
+                                          '\n\n試作型。モデルは仮にロケットランチャーを使用。'),
+        'EN': ('Gyrojet Pistol (Prototype)', "The Vehicler's sidearm. It fires small rockets that leave the muzzle "
+                                             'slowly and speed up from there.\nSix rounds, single shots; each round '
+                                             'explodes on impact in a small radius. Weak point-blank, it hits '
+                                             'harder the farther it has flown (up to five times).\n\nPrototype: a rocket '
+                                             "launcher's model stands in for its own."),
+        'KR': ('자이로젯 권총(시제형)', '비클러의 휴대 권총. 소형 로켓탄을 발사하며, 탄두는 총구를 천천히 떠난 뒤 점점 '
+                                 '가속한다.\n장탄수 6발, 단발 사격. 착탄 시 좁은 범위에 폭발한다. '
+                                 '근거리에서는 위력이 낮고, 멀리 날아갈수록 위력이 오른다(최대 5배).\n\n시제형: 모델은 임시로 '
+                                 '로켓 런처를 사용한다.'),
     }),
     Weapon('ZW_MeleeNone', 500, NONE_TEMPLATE, 'none', {}),
     Weapon('ZW_RuneCarbine01', 501, 'aWeapon014', 'carbine', {
@@ -194,19 +201,25 @@ def class_of(category: int) -> int:
 
 # ---------------------------------------------------------------- the SGOs
 
-# Gyrojet01 (frames at 60/s; scalars: no star growth until stage 4). Out of the muzzle at 0.4 m/frame (24 m/s), then
-# 0.06 m/frame faster each frame: its 90 frames of life reach about 280 m (gyrojet_range), at 5.8 m/frame (348 m/s).
+# Gyrojet01 (frames at 60/s; scalars: a prototype has no star growth; plan §1.3, docs/newclass-re/vehicler-plan.md M5). Speed
+# 0.2 m/frame (12 m/s) at the muzzle, +0.02 a frame (72 m/s²): 15 m after 0.5 s, 255 m when it expires (150 frames).
 GYROJET = {
     'AmmoCount': 6.0, 'FireInterval': 20.0, 'ReloadTime': 120.0, 'FireAccuracy': 0.01, 'FireRecoil': 0.15,
-    'AmmoSpeed': 0.4, 'AmmoAlive': 90.0, 'AmmoDamage': 120.0, 'AmmoExplosion': 2.0, 'AmmoSize': 0.15,
+    'AmmoSpeed': 0.2, 'AmmoAlive': 150.0, 'AmmoDamage': 40.0, 'AmmoExplosion': 2.0, 'AmmoSize': 0.1,
 }
-GYROJET_CUSTOM = [0.0, 8.0, 40.0, 0.06]   # RocketBullet01 [mode 0, trail a, trail b, accel per frame]
+GYROJET_CUSTOM = [0.0, 12.0, 36.0, 0.02]   # RocketBullet01 [mode 0, trail a, trail b, accel per frame]: a thin, short trail
+# AmmoDamageReduce [a, b]: the core's falloff 0x231080 gives damage * (a + (1 - a) * (1 - t)^b), t = age / AmmoAlive. a > 1 is
+# growth (src/vehicler_foot_logic.h: the plugin widens the stock gate, which only refreshes a < 0.99): 40 point-blank, ~98 at
+# 15 m, ~142 at 48 m, 200 at the end of its life.
+GYROJET_DAMAGE_REDUCE = [5.0, 2.0]
 
 
 def gyrojet_range(speed: float = GYROJET['AmmoSpeed'], accel: float = GYROJET_CUSTOM[3],
                   alive: float = GYROJET['AmmoAlive']) -> float:
     """Metres a round flies in its life (frame by frame: it moves at its speed, then speeds up by accel)."""
     return sum(speed + accel * f for f in range(int(alive)))
+
+
 # RuneCarbine01
 CARBINE = {
     'AmmoCount': 5.0, 'FireInterval': 45.0, 'ReloadTime': 150.0, 'FireAccuracy': 0.0, 'FireRecoil': 0.3,
@@ -241,6 +254,8 @@ def build_sgo(w: Weapon, template: bytes) -> bytes:
             root.get(k)
             root.set(k, v)
         root.set('Ammo_CustomParameter', Node(list(GYROJET_CUSTOM)))
+        root.get('AmmoDamageReduce')
+        root.set('AmmoDamageReduce', Node(list(GYROJET_DAMAGE_REDUCE)))
     elif w.kind == 'carbine':
         if root.get('AmmoClass') != 'LaserBullet02':
             raise ValueError(f'{w.template}: AmmoClass {root.get("AmmoClass")}, want LaserBullet02')
@@ -285,7 +300,7 @@ def _value(text: str, value: str) -> str:
 
 
 # Each stat line of the template's text row (by its index) -> the value shown (the row's own unit text keeps '$0').
-GYROJET_STATS = {0: '6', 1: '3.0', 2: '120', 3: '2.0', 4: '2.0', 5: 'A'}         # Cascade: capacity .. accuracy
+GYROJET_STATS = {0: '6', 1: '3.0', 2: '40-200', 3: '2.0', 4: '2.0', 5: 'A'}      # Cascade: capacity .. accuracy
 CARBINE_STATS = {0: '5', 1: '1.3', 2: '300', 3: '2.5', 4: '600', 5: '1800', 6: 'S++'}   # Blazer
 
 

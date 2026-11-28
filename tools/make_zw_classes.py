@@ -4,7 +4,9 @@
         (ZwVehicler / ZwRuneBlade, src/soldier_factory*: both AssultSoldier-based)
   Mods/MENUOBJECT/ZW_VEHICLER_0N.SGO, ZW_RUNEBLADE_0N.SGO        the menu SGOs [5][1]: the Ranger's four, as they are
   Mods/DEFAULTPACKAGE/CUSTOMCOLORZWVEHICLER.SGO, CUSTOMCOLORZWRUNEBLADE.SGO   [5][0]: the Ranger's colour sets
-Every model is the Ranger's for now: ASSETS marks each file 'placeholder' (plan §3: not a delivery). Built from the
+The battle SGO carries no movement numbers to change (docs/newclass-re/motion.md §3: the dash's and the walk's attributes are
+the accessories' custom_parameter), so the Vehicler's lost dash is the plugin's (src/vehicler_foot*), not this file's; roll is the
+stock one. Every model is the Ranger's for now: ASSETS marks each file 'placeholder' (plan §3: not a delivery). Built from the
 player's own Root.cpk (only read), written atomically and recorded in the ledger as this tool's (pylib/ledger.py
 'zwclass'); --remove releases them. The weapon rows are tools/zw_weapons.py's (call_weapons stacks them). The texts
 (TEXTS: class, weapon category and slot names, the keys SoldierInit and SoldierWeaponCategory name) are this tool's own

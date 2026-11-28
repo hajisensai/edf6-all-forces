@@ -62,7 +62,7 @@ bool SupportDrillTransportReady() noexcept;
 // An empty drill transport at the verified entry, as SpawnSupportVehicle makes a stock hull (the same class and seats
 // required of what the game made); rolled back by DeleteSupportVehicle.
 unsigned char* SpawnSupportDrillTransport(const float* entry,const float* heading,const void* owner) noexcept;
-// The Vehicler's vehicles (zw_vehicle_catalog.h; docs/newclass-re/vehicler.md §2.2): the installer's files (Mods/OBJECT,
+// The Vehicler's vehicles (zw_vehicle_catalog.h; docs/newclass-re/vehicler-plan.md §2.2): the installer's files (Mods/OBJECT,
 // tools/make_zw_vehicles.py), preloaded when this mission's set has their item (preload_set_logic.h Item::zwVehicle0 + kind),
 // made as the stock hulls are (MakeHull: the class and seats of the generated table required of what the game made, the
 // guns' firepower marked on the vehicle's curve, its mission setup, friend team, level 1). Not wasteland-capable, armed.
