@@ -9,5 +9,7 @@
 #pragma once
 
 namespace crew {
-bool InstallSoldierTypePatches() noexcept;   // module "soldier type patches" (src/module_table.h), the kFeatures phase
+bool InstallSoldierTypePatches() noexcept;   // module "soldier type patches" (src/module_table.h), kBeforeGameStatus before "soldier classes"
+// All three patches are in (InstallSoldierTypePatches returned true): types 4 / 5 stay inside the tables.
+bool SoldierTypePatchesActive() noexcept;
 }

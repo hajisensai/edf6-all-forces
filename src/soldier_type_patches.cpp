@@ -12,6 +12,7 @@
 
 namespace crew {
 namespace {
+std::atomic<bool> typePatches{false};   // InstallSoldierTypePatches put all three in
 namespace st=soldier_type;
 
 bool Print(std::size_t rva,const char* tag) noexcept {
@@ -132,6 +133,9 @@ bool InstallSoldierTypePatches() noexcept {
     const bool damage=InstallDamageColour();
     const bool script=InstallScriptType();
     Log("ZWTYPE nameplates=%d damage colour=%d script type=%d",plates,damage,script);
+    typePatches.store(plates && damage && script,std::memory_order_release);
     return plates && damage && script;
 }
+
+bool SoldierTypePatchesActive() noexcept { return typePatches.load(std::memory_order_acquire); }
 }  // namespace crew

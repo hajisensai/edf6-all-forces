@@ -21,6 +21,7 @@
 //  - Online (proteus_net.inc): the driver's machine publishes stance / shield / field; the registered owner the shield's HP.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "edf/input_source.h"
+#include "soldier_factory.h"
 #include "edf_layout.h"
 #include "config.h"
 #include "plugin_log.h"
@@ -356,6 +357,8 @@ bool Pressed(Unit& u,const unsigned char* seat,int b,const Config& c) noexcept {
 bool SoldierVt(const void* vt,unsigned* which) noexcept {
     const unsigned kVts[]={kVtRanger,kVtWingDiver,kVtFencer,kVtAirRaider};
     for(unsigned x:kVts)if(vt==image+x){*which=x;return true;}
+    // classes 4 / 5 (src/soldier_factory.h) are AssultSoldier underneath: the field treats them as the Ranger
+    if(soldier::IsZwVtable(vt)){*which=kVtRanger;return true;}
     return false;
 }
 

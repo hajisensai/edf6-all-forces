@@ -21,4 +21,15 @@ bool InstallSoldierClasses() noexcept;
 // Whether the game reads six classes (the SoldierInit / category reads are redirected and the per-class counts
 // clamped). Set by the install; the copies themselves are made when the game loads its mode data.
 bool SoldierClassesActive() noexcept;
+
+// The classes' slot defaults (soldier_classes_logic.h kClasses: ZW_VehicleNone, ZW_Gyrojet01, ZW_MeleeNone,
+// ZW_RuneCarbine01, ZW_SupportNone; tools/zw_weapons.py) owned in the game status `gs` (record flags bit0, NEW the first
+// time, weapon_records.h WeaponRecord): their acquire 1 owns them in a new save only, and a save made before has them
+// unowned, which 0xDC550's last pass would put back on the default. Rows found by name (0xE1BA0); one not in the table
+// is logged and left. Called by airstrike.cpp's two 0xDC550 entries right before the game's pass (after every save load,
+// and in a new game's reset). How many were not owned yet (-1: no weapon table, or the classes are not active).
+int GrantSoldierClassWeapons(unsigned char* gs) noexcept;
+// airstrike.cpp: both 0xDC550 entries are redirected (GrantSoldierClassWeapons runs before every pass). Read by the
+// SoldierInit read (after EML6_Load): without it the classes are not added.
+void SetSoldierClassWeaponsHooked(bool hooked) noexcept;
 }  // namespace crew

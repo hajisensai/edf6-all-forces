@@ -16058,6 +16058,34 @@ def edf41_kill_counters_save_slots() -> None:
             assert text[kills.TEXT_PREFIX + c.key] == kills.label(c, lang), (rel, c.key)
 
 
+@test
+def zw_class_texts_without_packs() -> None:
+    """The new classes' text keys (make_zw_classes.TEXTS) are installed whatever packs are (2026-11-28): with no pack
+    build, make_edf5_campaign.install_texts writes them into the text tables (another mod's kept to put back, its keys
+    untouched), a second run writes nothing, remove() puts the tables back byte for byte. No game needed (the tables
+    are in Mods)."""
+    import make_zw_classes as zw
+    import sgo
+    with tempfile.TemporaryDirectory(prefix='edf6vc-zwtext-') as root, \
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False):
+        before = {}
+        for lang, rel in e5c.TEXTS.items():
+            before[rel] = sgo.write_depth_first(258, {'OtherModKey': f'other {lang}'})
+            modfiles.atomic_write(e5c.rel_path(root, rel), before[rel])
+        assert len(e5c.install_texts(root)) == len(e5c.TEXTS)
+        for lang, rel in e5c.TEXTS.items():
+            text = sgo.read(modfiles.read(e5c.rel_path(root, rel)))[1]
+            assert text['OtherModKey'] == f'other {lang}', (rel, 'another mod\'s key changed')
+            for key, by_lang in zw.TEXTS.items():
+                assert text[key] == by_lang[lang], (rel, key)
+        assert e5c.install_texts(root) == [], 'written again'
+        assert not e5c.enabled(root) and not e5c.range_installed(root), 'texts alone are not a pack'
+        done, kept = e5c.remove(root)
+        assert not kept and len(done) == len(e5c.TEXTS)
+        for rel, data in before.items():
+            assert modfiles.read(e5c.rel_path(root, rel)) == data, (rel, 'not put back')
+
+
 def _rows_copy(rows: list) -> list:
     return [list(r) for r in rows]
 

@@ -18,6 +18,7 @@
 //    (IsPlayer), or a vehicle, one of whose seats has it among its holders (seat +0xC8, count +0xD8, the weapon at
 //    holder +0x10) with the player in it (docs/lockon-re.md §5).
 #include "lockon.h"
+#include "soldier_factory.h"
 #include "edf_layout.h"
 #include "config.h"
 #include "plugin_log.h"
@@ -117,7 +118,7 @@ bool IsSoldier(const unsigned char* o) noexcept {
     if(!Readable(o,8))return false;
     const auto vt=At<const unsigned char*>(o,0);
     for(const unsigned v:kSoldierVts)if(vt==image+v)return true;
-    return false;
+    return soldier::IsZwVtable(vt);   // classes 4 / 5 (their own vtables, src/soldier_factory.h)
 }
 
 bool SeatHolds(unsigned char* seat,const unsigned char* w) noexcept {

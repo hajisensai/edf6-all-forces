@@ -58,6 +58,7 @@
 // frame without ticks that does not fit leaves the rest as stepped and asks for more at the next tick. Online: only what
 // is drawn changes, on frames that send nothing.
 #include "frame_rate_objects.h"
+#include "soldier_factory.h"
 #include "fp_view.h"
 #include "thermal_models.h"
 #include "scene_object.h"
@@ -244,7 +245,7 @@ bool IsSoldier(const unsigned char* h) noexcept {
     if(!h)return false;
     const auto vt=At<const unsigned char*>(h,0);
     for(unsigned v:kSoldierVts)if(vt==image+v)return true;
-    return false;
+    return soldier::IsZwVtable(vt);   // classes 4 / 5 (their own vtables, src/soldier_factory.h)
 }
 // A live soldier's weapon in slot `i`, null when the list does not hold one there.
 const unsigned char* SoldierWeapon(const unsigned char* h,std::uint64_t i) noexcept {

@@ -41,6 +41,7 @@
 // Not covered: other soldiers in the same vehicle, and frames with ticks (the render thread can read a pose the step
 // is writing, the stock race the 60 Hz frame hides; R1 in the plan).
 #include "frame_rate_view.h"
+#include "soldier_factory.h"
 #include "frame_rate_objects.h"
 #include "render_record.h"
 #include "frame_rate_logic.h"
@@ -115,7 +116,7 @@ bool IsSoldier(const unsigned char* h) noexcept {
     if(!h || !Readable(h,kWeaponCount+8))return false;
     const auto vt=At<const unsigned char*>(h,0);
     for(unsigned v:kSoldierVts)if(vt==image+v)return true;
-    return false;
+    return soldier::IsZwVtable(vt);   // classes 4 / 5 (their own vtables, src/soldier_factory.h)
 }
 const unsigned char* RiddenBy(const unsigned char* h) noexcept {
     if(HumanOnFoot(h))return nullptr;

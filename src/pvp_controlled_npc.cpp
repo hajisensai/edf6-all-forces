@@ -68,6 +68,8 @@ constexpr std::uint32_t kShieldBulletSlots[]={
     0x22F390,0x22F0B0,
 };
 struct Type {const char* name;unsigned table;const std::uint32_t* slots=nullptr;unsigned count=0;bool actor=false;};
+// The controlled NPC actors this module creates itself (exact slot census of the stock tables). Classes 4 / 5
+// (src/soldier_factory.h) are player classes only, never spawned as these actors: deliberately not listed.
 constexpr Type kActors[]={{"AssultSoldier",0x17CDF28,kActor0Slots,94,true},{"PaleWing",0x17D0FF8,kActor1Slots,94,true},{"HeavyArmor",0x17CF5B8,kActor2Slots,94,true}};
 constexpr Type kWeapons[]={{"Weapon_BasicShoot",0x17E36E0,kWeapon0Slots,41},{"Weapon_HeavyShoot",0x17E3F18,kWeapon1Slots,41},{"Weapon_Swing",0x17E5950,kWeapon2Slots,41},{"Weapon_Shield",0x17E51A0,kWeapon3Slots,41}};
 constexpr Type kBasic=kWeapons[0],kShieldBullet={"ShieldBashBullet01",0x17A5658,kShieldBulletSlots,14};

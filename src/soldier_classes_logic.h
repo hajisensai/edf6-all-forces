@@ -167,6 +167,22 @@ inline const char* ExtendCategories(const sgob::Value& stock,sgob::Value& out) {
     return nullptr;
 }
 
+// Why a mode data load must keep the stock four even though the reads are redirected (null: classes 4 / 5 may be added).
+// Each is a module installed at load before this one (module_table.h kBeforeGameStatus): without the save's stand-in a
+// class past 3 reaches MAIN.GST, and the stock game indexes SoldierInit with it unchecked; without the factories a
+// class 4 / 5 SGO names a class the game cannot make (no player, the dynamic_cast at 0x5A4065 fails); without the
+// per-type patches the HUD's nameplate read and the damage colour index past their tables.
+// `weapons`: the save load's ownership pass (airstrike.cpp's 0xDC550 entries) owns the classes' default weapons
+// (GrantSoldierClassWeapons): without it a save made before they were installed has them unowned, and 0xDC550 puts an
+// unowned slot back on that same default.
+constexpr const char* MissingPrerequisite(bool save,bool factories,bool typeTables,bool weapons) noexcept {
+    return !save ? "the save's stand-in (soldier save) is not installed"
+         : !factories ? "the factories ZwVehicler / ZwRuneBlade (soldier factory) are not registered"
+         : !typeTables ? "the per-type tables (soldier type patches) do not hold types 4 / 5"
+         : !weapons ? "the save load's ownership pass (0xDC550's entries, airstrike.cpp) does not own the classes' weapons"
+         : nullptr;
+}
+
 // Counts of per-class code that has room (or cases) for the stock four only: the armor statistics, the key config
 // menu, the play counts (docs/newclass-re/count.md).
 constexpr int StockClassesOf(int count) noexcept { return count<kStockClassCount?count:kStockClassCount; }
