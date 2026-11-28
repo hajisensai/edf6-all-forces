@@ -259,9 +259,15 @@
   },
   "armory_look_native": {
    "labels": [
-    "test-data"
+    "plugin-hud",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
    ],
-   "scripts": []
+   "scripts": [
+    "tests/armory_look_native_audit.py"
+   ]
   },
   "armory_native": {
    "labels": [
@@ -8721,6 +8727,30 @@
    ],
    "scripts": []
   },
+  "vehicler_foot": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehicler_foot_native": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/vehicler_foot_native_audit.py"
+   ]
+  },
   "vehsound_gun": {
    "labels": [
     "plugin-air",
@@ -9320,6 +9350,26 @@
    ],
    "scripts": [
     "tests/zw_classes_test.py"
+   ]
+  },
+  "zw_vehicler_sgo": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/zw_vehicler_sgo_test.py"
    ]
   }
  },

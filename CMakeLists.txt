@@ -174,6 +174,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/soldier_classes.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/soldier_factory.cpp src/soldier_type_patches.cpp)
 # The new classes' save: a stock stand-in in MAIN.GST, the real class back after a load (src/soldier_save_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/soldier_save.cpp)
+# The Vehicler on foot: no dash, the Gyrojet's damage growing with its flight (src/vehicler_foot_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/vehicler_foot.cpp)
 # 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
@@ -913,6 +915,11 @@ add_executable(soldier_save_test tests/soldier_save_test.cpp)
 target_include_directories(soldier_save_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(soldier_save_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME soldier_save COMMAND soldier_save_test)
+# The Vehicler on foot (src/vehicler_foot_logic.h): the sites decode, the gate rule, the falloff mirror, the gate's code run.
+add_executable(vehicler_foot_test tests/vehicler_foot_test.cpp)
+target_include_directories(vehicler_foot_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicler_foot_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicler_foot COMMAND vehicler_foot_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 # The menu as the game's own dialogs: pages, buttons, paging, cancel, the edits and saves they make
@@ -1186,6 +1193,10 @@ add_test(NAME cockpit_tub COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/t
 add_test(NAME cockpit_panoramic COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_panoramic_test.py")
 # The new player classes' weapon rows and resources (tools/zw_weapons.py, tools/make_zw_classes.py); the Root.cpk part skips without the game.
 add_test(NAME zw_classes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_classes_test.py")
+# The Vehicler's Gyrojet SGO (tools/zw_weapons.py): six single shots, slow then fast, damage growing with flight, a thin trail;
+# the Root.cpk part skips without the game.
+add_test(NAME zw_vehicler_sgo COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_vehicler_sgo_test.py")
+set_tests_properties(zw_vehicler_sgo PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
 add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
@@ -1248,6 +1259,9 @@ set_tests_properties(soldier_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-
 # The new classes' save hooks against the game's EDF.dll (read only; skipped without the game).
 add_test(NAME soldier_save_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_save_native_audit.py")
 set_tests_properties(soldier_save_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The Vehicler on foot's sites and the falloff 0x231080 run natively with a growing AmmoDamageReduce (read only; skipped without the game).
+add_test(NAME vehicler_foot_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicler_foot_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(vehicler_foot_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
