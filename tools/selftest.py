@@ -16060,29 +16060,92 @@ def edf41_kill_counters_save_slots() -> None:
 
 @test
 def zw_class_texts_without_packs() -> None:
-    """The new classes' text keys (make_zw_classes.TEXTS) are installed whatever packs are (2026-11-28): with no pack
-    build, make_edf5_campaign.install_texts writes them into the text tables (another mod's kept to put back, its keys
-    untouched), a second run writes nothing, remove() puts the tables back byte for byte. No game needed (the tables
-    are in Mods)."""
+    """The new classes' text keys (make_zw_classes.TEXTS) are make_zw_classes' own layer on top of the text tables
+    (2026-11-28), whatever the mission packs do: not installed (or refused: the packs write nothing), installed beneath
+    it, turned off (the packs' tables put back), installed again. The packs' install reads its tables through the layer
+    (make_edf5_campaign.on_disk): it neither keeps the classes' keys as what it replaced nor rewrites a table that is
+    unchanged beneath them, and the layer is not rewritten either; removing the classes puts back exactly what was
+    beneath, the packs' removal then the other mod's tables. No game needed (the tables are in Mods), no Root.cpk read."""
+    import base64
     import make_zw_classes as zw
+    import rootcpk
     import sgo
+    assert set(zw.TEXT_TABLES.values()) == set(e5c.TEXTS.values()), 'the two writers name other tables'
+
+    def no_game(root: str) -> None:
+        raise AssertionError('Root.cpk read')
+
     with tempfile.TemporaryDirectory(prefix='edf6vc-zwtext-') as root, \
-            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False):
-        before = {}
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), patched(rootcpk, Game=no_game), patched(vc, Game=no_game):
+        other = {}
         for lang, rel in e5c.TEXTS.items():
-            before[rel] = sgo.write_depth_first(258, {'OtherModKey': f'other {lang}'})
-            modfiles.atomic_write(e5c.rel_path(root, rel), before[rel])
-        assert len(e5c.install_texts(root)) == len(e5c.TEXTS)
+            other[rel] = sgo.write_depth_first(258, {'OtherModKey': f'other {lang}'})
+            modfiles.atomic_write(e5c.rel_path(root, rel), other[rel])
+
+        def tables() -> dict[str, dict]:
+            return {rel: sgo.read(modfiles.read(e5c.rel_path(root, rel)))[1] for rel in e5c.TEXTS.values()}
+
+        def stamps() -> dict[str, int]:
+            return {rel: os.stat(e5c.rel_path(root, rel)).st_mtime_ns for rel in e5c.TEXTS.values()}
+
+        def has_classes(packs: bool) -> None:
+            for lang, rel in e5c.TEXTS.items():
+                text = tables()[rel]
+                assert text['OtherModKey'] == f'other {lang}', (rel, 'another mod\'s key changed')
+                for key, by_lang in zw.TEXTS.items():
+                    assert text[key] == by_lang[lang], (rel, key, 'packs' if packs else 'no packs')
+                assert (e5c.PACKS[0].keys(e5c.OFFLINE)[0] in text) == packs, (rel, 'the packs\' keys')
+
+        assert zw.install_texts(root) == ([], []), 'written while the classes are not installed'
+        zw.install(root, {'OBJECT/ZW_VEHICLER_01.SGO': b'zw battle'})
+        # no packs (or refused: they wrote nothing)
+        written, notes = zw.install_texts(root)
+        assert len(written) == len(e5c.TEXTS) and not notes, (written, notes)
+        has_classes(False)
+        before = stamps()
+        assert zw.install_texts(root) == ([], []), 'written again'
+        assert stamps() == before, 'rewritten'
+
+        # the packs installed beneath the layer: what they replaced is the other mod's table, not the classes' keys
+        def built() -> tuple:
+            manifest = e5c.load_manifest(root)
+            files = {e5c.CONFIG: b'stub config'}
+            for lang, rel in e5c.TEXTS.items():
+                files[rel] = e5c.text_table(e5c.base_bytes(root, None, rel, manifest), lang, e5c.PACKS)
+            return files, e5c.Contents(65, 0), {'rows': [], 'skipped': []}
+        e5c.install(root, built())
+        for rel, entry in e5c.load_manifest(root)['files'].items():
+            if rel in other:
+                assert base64.b64decode(entry['original']) == other[rel], (rel, 'the layer kept as what was replaced')
+        zw.install_texts(root)
+        has_classes(True)
+        for rel, entry in e5c.load_manifest(root)['files'].items():
+            assert modfiles.sha256(e5c.on_disk(root, rel)) == entry['sha'], (rel, 'the packs\' table not seen beneath')
+        before = stamps()
+        e5c.install(root, built())   # an update with the same packs: neither writer rewrites a table
+        assert zw.install_texts(root) == ([], [])
+        assert stamps() == before, 'an unchanged update rewrote a table'
+        has_classes(True)
+
+        # turned off (no pack left: the packs' tables put back, beneath nothing), then the layer again
+        e5c.disable(root)
+        assert not e5c.installed(root) and not e5c.enabled(root)
+        assert all(modfiles.read(e5c.rel_path(root, rel)) == data for rel, data in other.items()), 'not put back'
+        zw.install_texts(root)
+        has_classes(False)
+
+        # installed again, then the classes removed (uninstall: before the packs), then the packs
+        e5c.install(root, built())
+        zw.install_texts(root)
+        has_classes(True)
+        done, kept = zw.remove(root)
+        assert not kept and len([p for p in done if p.upper().endswith('TXT_SGO')]) == len(e5c.TEXTS), (done, kept)
         for lang, rel in e5c.TEXTS.items():
-            text = sgo.read(modfiles.read(e5c.rel_path(root, rel)))[1]
-            assert text['OtherModKey'] == f'other {lang}', (rel, 'another mod\'s key changed')
-            for key, by_lang in zw.TEXTS.items():
-                assert text[key] == by_lang[lang], (rel, key)
-        assert e5c.install_texts(root) == [], 'written again'
-        assert not e5c.enabled(root) and not e5c.range_installed(root), 'texts alone are not a pack'
+            assert not any(key in tables()[rel] for key in zw.TEXTS), (rel, 'the classes\' keys left')
+        assert not os.path.exists(os.path.join(root, 'Mods', zw.TEXT_RECORD))
         done, kept = e5c.remove(root)
-        assert not kept and len(done) == len(e5c.TEXTS)
-        for rel, data in before.items():
+        assert not kept
+        for rel, data in other.items():
             assert modfiles.read(e5c.rel_path(root, rel)) == data, (rel, 'not put back')
 
 

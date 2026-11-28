@@ -6,17 +6,20 @@
   Mods/DEFAULTPACKAGE/CUSTOMCOLORZWVEHICLER.SGO, CUSTOMCOLORZWRUNEBLADE.SGO   [5][0]: the Ranger's colour sets
 Every model is the Ranger's for now: ASSETS marks each file 'placeholder' (plan §3: not a delivery). Built from the
 player's own Root.cpk (only read), written atomically and recorded in the ledger as this tool's (pylib/ledger.py
-'zwclass'); --remove releases them. No shared table is touched here: the weapon rows are tools/zw_weapons.py's
-(call_weapons stacks them), the texts (TEXTS: class, weapon category and slot names, the keys SoldierInit and
-SoldierWeaponCategory name) go into the game's text tables through their one writer, make_edf5_campaign (text_table ->
-add_texts): with the mission packs' when those are built, else alone (install_texts), so they are there whatever packs
-are installed.
+'zwclass'); --remove releases them. The weapon rows are tools/zw_weapons.py's (call_weapons stacks them). The texts
+(TEXTS: class, weapon category and slot names, the keys SoldierInit and SoldierWeaponCategory name) are this tool's own
+layer on the game's text tables (TEXT_TABLES), whatever mission packs are installed (install_texts): the top one. The
+tables' other writer, make_edf5_campaign (the packs' mode names), writes beneath it and reads its own tables through it
+(beneath); the installer runs install_texts after every other step that writes a table, so the keys are there with the
+packs installed, without them, refused or turned off; remove() takes the layer off again.
   python tools/make_zw_classes.py [game dir]            write / refresh
   python tools/make_zw_classes.py [game dir] --remove   release them
 """
 from __future__ import annotations
 
+import base64
 import os
+import struct
 import sys
 from dataclasses import dataclass
 
@@ -24,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+import modfiles  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -104,12 +108,138 @@ TEXTS: dict[str, dict[str, str]] = {
                        'KR': '지원 장비'},
 }
 TEXT_LANGS = ('CN', 'EN', 'JA', 'KR', 'SC')
+# The tables the keys go into, under Mods (app:/etc/TextTable_steam.%LOCALE%.txt_sgo; make_edf5_campaign.TEXTS too).
+TEXT_TABLES = {lang: f'ETC/TEXTTABLE_STEAM.{lang}.TXT_SGO' for lang in TEXT_LANGS}
+# This tool's layer on them: per table the sha of what it wrote ('also': the one it is replacing, while an install
+# writes) and the bytes beneath it ('under', base64; None: there was no table in Mods, the game's own was the base).
+TEXT_RECORD = '.edf6vc_zw_texts.json'
+UNREADABLE = (ValueError, KeyError, IndexError, TypeError, AssertionError, struct.error, UnicodeDecodeError)
 
 
 def add_texts(members: dict, lang: str) -> None:
     """The new classes' text keys into a text table's members (other keys untouched)."""
     for key, by_lang in TEXTS.items():
         members[key] = by_lang[lang]
+
+
+def _record_path(root: str) -> str:
+    return os.path.join(root, 'Mods', TEXT_RECORD)
+
+
+def _table_path(root: str, rel: str) -> str:
+    return os.path.join(root, 'Mods', *rel.split('/'))
+
+
+def _on_top(entry: dict | None, data: bytes | None) -> bool:
+    return bool(entry) and data is not None and sha256(data) in (entry['sha'], *entry.get('also', ()))
+
+
+def _under(entry: dict) -> bytes | None:
+    return None if entry['under'] is None else base64.b64decode(entry['under'])
+
+
+def beneath(root: str, rel: str, data: bytes | None) -> bytes | None:
+    """`data` (the file `rel` under Mods as it is on disk) without this tool's text layer: what was there before the
+    layer while the layer is what is on disk (None: no table was), else `data` itself (no layer, or someone wrote the
+    file since). make_edf5_campaign reads its own tables through this."""
+    if rel not in TEXT_TABLES.values():
+        return data
+    entry = modfiles.load_json(_record_path(root), {}).get(rel)
+    return _under(entry) if _on_top(entry, data) else data
+
+
+def _has_keys(data: bytes, rel: str) -> bool:
+    lang = next(lang for lang, r in TEXT_TABLES.items() if r == rel)
+    try:
+        members = sgo.read(data)[1]
+    except UNREADABLE:
+        return False
+    return any(members.get(key) == by_lang[lang] for key, by_lang in TEXTS.items())
+
+
+def texts_installed(root: str) -> bool:
+    """The classes are installed (this tool owns files in the ledger): their names belong in the tables."""
+    return bool(ledger.Ledger(root).owned_by(OWNER))
+
+
+def install_texts(root: str) -> tuple[list[str], list[str]]:
+    """Puts this tool's text layer on top of each table as it is now (the packs' or another mod's in Mods, else the
+    game's own from Root.cpk, only read), or takes it off when the classes are not installed (remove_texts). A table
+    already holding exactly that is not rewritten. Run after every other writer of the tables (the installer: after
+    the mission packs). Returns (paths written or put back, notes: a table that does not read as one, left as it is)."""
+    if not texts_installed(root):
+        return remove_texts(root)[0], []
+    path = _record_path(root)
+    stored = modfiles.load_json(path, {})
+    record = dict(stored)
+    game = None   # opened only for a table that is nowhere in Mods
+    files: dict[str, bytes] = {}
+    entries: dict[str, dict] = {}
+    notes = []
+    for lang, rel in TEXT_TABLES.items():
+        on_disk = modfiles.read(_table_path(root, rel))
+        entry = record.get(rel)
+        under = _under(entry) if _on_top(entry, on_disk) else on_disk
+        if under is None:
+            if game is None:
+                game = vc.Game(root)
+            base = game.read(*rel.split('/'))
+        else:
+            base = under
+        try:
+            ver, members = sgo.read(base)
+            add_texts(members, lang)
+            data = sgo.write_depth_first(ver, members)
+        except UNREADABLE as e:
+            notes.append(f'Mods/{rel} 读不了（{type(e).__name__}: {e}），可能是别的 MOD 用了别的格式：'
+                         '不改动它，这个语言里新兵种没有名字。')
+            if entry is not None and not _on_top(entry, on_disk):
+                del record[rel]   # the layer is gone from it (someone wrote it since)
+            continue
+        new = {'sha': sha256(data), 'under': None if under is None else base64.b64encode(under).decode('ascii')}
+        if data == on_disk:
+            record[rel] = new
+            continue
+        files[rel] = data
+        entries[rel] = {**new, 'also': [] if on_disk is None else [sha256(on_disk)]}
+    if not files:
+        if record != stored:
+            modfiles.save_json(path, record)
+        return [], notes
+    # The record first, accepting the old bytes and the new: a run cut short leaves each table's layer recognised.
+    modfiles.save_json(path, {**record, **entries})
+    written = []
+    for rel, data in files.items():
+        written.append(_table_path(root, rel))
+        modfiles.atomic_write(written[-1], data)
+    for entry in entries.values():
+        del entry['also']
+    modfiles.save_json(path, {**record, **entries})
+    return written, notes
+
+
+def remove_texts(root: str) -> tuple[list[str], list[str]]:
+    """Takes this tool's text layer off: each table it is still on top of back to what was beneath (deleted when there
+    was none). Returns (paths put back, paths kept: written by someone since, left as they are)."""
+    path = _record_path(root)
+    record = modfiles.load_json(path, {})
+    done, kept = [], []
+    for rel, entry in record.items():
+        table = _table_path(root, rel)
+        data = modfiles.read(table)
+        if not _on_top(entry, data):
+            if data is not None and _has_keys(data, rel):   # written over since, the keys still in it
+                kept.append(table)
+            continue
+        under = _under(entry)
+        if under is None:
+            os.remove(table)
+        else:
+            modfiles.atomic_write(table, under)
+        done.append(table)
+    if os.path.isfile(path):
+        os.remove(path)
+    return done, kept
 
 
 def _config(game: vc.Game) -> list:
@@ -172,9 +302,11 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
-    """Releases this tool's files: (deleted, kept changed)."""
+    """Takes the text layer off and releases this tool's files: (deleted or put back, kept changed)."""
+    done, kept = remove_texts(root)
     led = ledger.Ledger(root)
-    return led.release(OWNER, sorted(set(led.owned_by(OWNER))), writer=True)
+    deleted, changed = led.release(OWNER, sorted(set(led.owned_by(OWNER))), writer=True)
+    return done + deleted, kept + changed
 
 
 def main(argv: list[str]) -> int:
@@ -189,6 +321,11 @@ def main(argv: list[str]) -> int:
         return 0
     for path in install(root, build(root)):
         print('写入', path)
+    written, notes = install_texts(root)
+    for path in written:
+        print('写入', path)
+    for note in notes:
+        print('！', note)
     return 0
 
 
