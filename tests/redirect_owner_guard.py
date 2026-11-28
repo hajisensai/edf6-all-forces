@@ -30,7 +30,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import srcscan  # noqa: E402  (the one C++ reader: comments, literals, bodies, calls)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LAYERED_OK = {"src/perf_probe.cpp"}   # Chain: on top of whatever a site calls now, by design (perf_probe.h)
+LAYERED_OK = {
+    "src/perf_probe.cpp",           # Chain: on top of whatever a site calls now, by design (perf_probe.h)
+    "src/bullet_expand_cull.cpp",   # the damage settle 0x23426F chained at kLast over damagestats' redirect (its own Chain)
+}
 failures = []
 
 
@@ -109,7 +112,7 @@ for top in ("src", "autoturret"):
                 layered += 1
                 check(rel in LAYERED_OK, f"{rel}: chains over another's patch (Claim::kLayered) only where listed")
 check(scanned >= 100, f"the plugin sources scanned ({scanned})")
-check(layered == len(LAYERED_OK), "perf_probe.cpp's Chain is layered")
+check(layered == len(LAYERED_OK), "the listed files' Chains are layered")
 
 for rel in ("src/plugin.cpp", "autoturret/src/plugin.cpp"):
     text = read(rel)
