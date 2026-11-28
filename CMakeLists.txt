@@ -179,6 +179,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/soldier_save.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/vehicler_foot.cpp)
 # The Vehicler's start seat: its start vehicle asked for, the owner seated in the driver seat (src/vehicler_start_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicler_start.cpp)
+# The Vehicler's logistics points, its HUD gauge and the resupply call (src/vehicler_logistics_logic.h, docs/newclass-re/vehicler-plan.md §3).
+target_sources(EDF6VehicleCrew PRIVATE src/vehicler_logistics.cpp)
 # 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
@@ -929,6 +931,11 @@ add_executable(vehicler_start_test tests/vehicler_start_test.cpp)
 target_include_directories(vehicler_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(vehicler_start_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME vehicler_start COMMAND vehicler_start_test)
+# The Vehicler's logistics (src/vehicler_logistics_logic.h / _net.h): kill worth and attribution, the host's book, the ZWLG codec.
+add_executable(vehicler_logistics_test tests/vehicler_logistics_test.cpp)
+target_include_directories(vehicler_logistics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicler_logistics_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicler_logistics COMMAND vehicler_logistics_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 # The menu as the game's own dialogs: pages, buttons, paging, cancel, the edits and saves they make
