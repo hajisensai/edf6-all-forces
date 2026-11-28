@@ -1,8 +1,10 @@
 """Writes the new player classes' files (docs/plan-2026-11-28-new-classes-impl.md §1) into <game>/Mods:
   Mods/OBJECT/ZW_VEHICLER_0N.SGO, ZW_RUNEBLADE_0N.SGO (N=1..4)   the battle SGOs SoldierInit [2] names: the stock
         Ranger's four (CONFIG.SGO SoldierInit[0][2], in order) with xgs_scene_object_class set to the class's factory
-        (ZwVehicler / ZwRuneBlade, src/soldier_factory*: both AssultSoldier-based)
-  Mods/MENUOBJECT/ZW_VEHICLER_0N.SGO, ZW_RUNEBLADE_0N.SGO        the menu SGOs [5][1]: the Ranger's four, as they are
+        (ZwVehicler / ZwRuneBlade, src/soldier_factory*: both AssultSoldier-based) and its hand / backpack slots the
+        class's (SoldierClass hands / subs)
+  Mods/MENUOBJECT/ZW_VEHICLER_0N.SGO, ZW_RUNEBLADE_0N.SGO        the menu SGOs [5][1]: the Ranger's four with the slot
+        list the preview hangs on the hand the class's (menu_hands; docs/newclass-re/preview-slots.md)
   Mods/DEFAULTPACKAGE/CUSTOMCOLORZWVEHICLER.SGO, CUSTOMCOLORZWRUNEBLADE.SGO   [5][0]: the Ranger's colour sets
   Mods/OBJECT/ZW_RUNE_*.MRAB / .SGO                              the Rune Blade's shared rune circle and light trail
         (tools/make_runeblade_fx.py; its motions and model source: tools/make_runeblade_look.py)
@@ -53,6 +55,15 @@ class SoldierClass:
     # Its second weapon in the same hand slot (the Ranger template's one slot already lists loads [0, 1]): the AI
     # (src/npcai.cpp ChooseArm) takes whichever reaches the target; '' none.
     npc_second: str = ''
+    # Which of the class's slots (src/soldier_classes_logic.h kClasses, SoldierInit [4]) a soldier holds and which are
+    # its backpack: the stock contract (docs/newclass-re/preview-slots.md) is hands = the support-0 slots, subs = the
+    # support-1 ones, in both the battle SGO (soldier_weapon_slot [0][0] / soldier_sub_weapon_slot) and the menu's.
+    hands: tuple[int, ...] = ()
+    subs: tuple[int, ...] = ()
+    # The menu SGO's soldier_weapon_slot [0][0]: the preview (0x940100) takes entry [edited slot % 3] as the slot whose
+    # weapon it hangs on the hand, and hangs that row's animation_model without a test (a row with none throws on the
+    # preview's thread). So every entry names a hand slot, and three of them: no edited slot leaves the hand empty.
+    menu_hands: tuple[int, ...] = ()
 
     @property
     def name_key(self) -> str:
@@ -93,9 +104,15 @@ class SoldierClass:
         return [self.npc_weapon_path] + ([f'app:/weapon/{self.npc_second}.sgo'] if self.npc_second else [])
 
 
-CLASSES: tuple[SoldierClass, ...] = (SoldierClass(4, 'ZwVehicler', 'zw_vehicler', 'ZW_Gyrojet01'),
+# The Vehicler holds its pistol (slot 1); the vehicle slot (0, the Air Raider's like) is its backpack. The Rune Blade
+# holds its melee and ranged weapons (runeblade_melee.cpp SlotInHand), its support slot (2) on the back; the menu shows
+# the ranged one (the melee slot's default, ZW_MeleeNone, has no model).
+CLASSES: tuple[SoldierClass, ...] = (SoldierClass(4, 'ZwVehicler', 'zw_vehicler', 'ZW_Gyrojet01',
+                                                  hands=(1,), subs=(0,), menu_hands=(1, 1, 1)),
                                      SoldierClass(5, 'ZwRuneBlade', 'zw_runeblade', 'ZW_RuneCarbine01',
-                                                  'ZW_RuneSaber01'))
+                                                  'ZW_RuneSaber01', hands=(0, 1), subs=(2,), menu_hands=(1, 1, 1)))
+# The Ranger's (the template's), checked before they are rewritten.
+RANGER_HANDS, RANGER_SUBS = (0, 1), (2, 3)
 # The support soldiers' template (support_loadout.KINDS' rifle): an AI soldier, one weapon (AiSoldierRifle01) in one set.
 NPC_TEMPLATE = 'N601_COMMON_RANGER_AF'
 
@@ -294,7 +311,38 @@ def battle_sgo(template: bytes, c: SoldierClass) -> bytes:
     if doc.root.get('xgs_scene_object_class') != 'AssultSoldier':
         raise ValueError(f'the Ranger battle SGO is a {doc.root.get("xgs_scene_object_class")}, not an AssultSoldier')
     doc.root.set('xgs_scene_object_class', c.factory)
+    hand, subs = _battle_slots(doc.root)
+    hand.items[0].items[0].items[:] = [float(i) for i in c.hands]
+    subs.items[:] = [dsgo.Node([float(i), 'weapon', 0.0]) for i in c.subs]
     return dsgo.compact(doc)
+
+
+def _battle_slots(root: dsgo.Node) -> tuple[dsgo.Node, dsgo.Node]:
+    """The Ranger battle SGO's soldier_weapon_slot (one hand set [[0, 1], 'weapon', 0, 0]) and soldier_sub_weapon_slot
+    ([2, 'weapon', 0], [3, 'weapon', 0]); any other layout is not the template this was written for."""
+    hand, subs = root.get('soldier_weapon_slot'), root.get('soldier_sub_weapon_slot')
+    if (not isinstance(hand, dsgo.Node) or len(hand.items) != 1 or not isinstance(hand.items[0], dsgo.Node)
+            or not isinstance(hand.items[0].items[0], dsgo.Node)
+            or hand.items[0].items != [hand.items[0].items[0], 'weapon', 0.0, 0.0]
+            or hand.items[0].items[0].items != [float(i) for i in RANGER_HANDS]):
+        raise ValueError("the Ranger battle SGO's soldier_weapon_slot is not [[[0, 1], 'weapon', 0, 0]]")
+    if (not isinstance(subs, dsgo.Node) or
+            [x.items if isinstance(x, dsgo.Node) else x for x in subs.items] !=
+            [[float(i), 'weapon', 0.0] for i in RANGER_SUBS]):
+        raise ValueError("the Ranger battle SGO's soldier_sub_weapon_slot is not [2, 'weapon', 0], [3, 'weapon', 0]")
+    return hand, subs
+
+
+def menu_sgo(template: bytes, c: SoldierClass) -> bytes:
+    """The class's menu SGO (classic SGO): the Ranger's, its soldier_weapon_slot's slot list the class's menu_hands."""
+    version, members = sgo.read(template)
+    slots = members.get('soldier_weapon_slot')
+    if slots != [[list(RANGER_HANDS), 'weapon', 0, 0]]:
+        raise ValueError(f"the Ranger menu SGO's soldier_weapon_slot is {slots}, not [[[0, 1], 'weapon', 0, 0]]")
+    slots[0][0] = list(c.menu_hands)
+    # write(): its raw blocks 16-aligned as the stock files have them (the 3rd / 4th appearance embed a MAB, at 0x280);
+    # write_depth_first() would pack it at 0x26C.
+    return sgo.write(version, members)
 
 
 def npc_sgo(template: bytes, c: SoldierClass) -> bytes:
@@ -330,7 +378,7 @@ def build(root: str) -> dict[str, bytes]:
     for c in CLASSES:
         for n in range(1, APPEARANCES + 1):
             out[c.battle(n)] = battle_sgo(game.read(*_rel(battles[n - 1])), c)
-            out[c.menu(n)] = game.read(*_rel(menus[n - 1]))
+            out[c.menu(n)] = menu_sgo(game.read(*_rel(menus[n - 1])), c)
         out[c.custom_color] = game.read(*_rel(color))
         for leader in (False, True):
             out[c.npc(leader)] = npc_sgo(game.read('OBJECT', NPC_TEMPLATE + ('_LEADER' if leader else '') + '.SGO'), c)

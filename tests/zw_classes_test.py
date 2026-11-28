@@ -18,6 +18,7 @@ import ported_weapons as pw  # noqa: E402
 import make_runeblade_fx as rune_fx  # noqa: E402
 import make_runeblade_look as rl  # noqa: E402
 import make_zw_classes as zc  # noqa: E402
+import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
 import zw_weapons as zw  # noqa: E402
 
@@ -65,6 +66,26 @@ for k, slots in enumerate(zw.SLOTS):
         cells = ','.join([str(c) for c in cats] + ['-1'] * (8 - len(cats)))
         rule = '{%d,%d,%s,{%s}},   // %s' % (zw.FIRST_CLASS + k, i, 'true' if two else 'false', cells, name)
         check(rule in inc, f'{name}: slot rule generated')
+
+# hands and backpack (docs/newclass-re/preview-slots.md): the stock contract, hand slots = the support-0 slots of the
+# class's table (src/soldier_classes_logic.h kClasses, SoldierInit [4][i][4]), backpack = the support-1 ones; the menu
+# preview hangs the row of slot menu_hands[edited % 3] on the hand by its animation_model, unchecked (0x940100 ->
+# 0x93AA00: a row without one throws on the preview thread, the crash of 11-28 with ZW_V9_VZ9 in the vehicle slot)
+import re  # noqa: E402
+table = (ROOT / 'src' / 'soldier_classes_logic.h').read_text(encoding='utf-8')
+for c in zc.CLASSES:
+    entry = re.search(r'\{k\w+,L"%s",(.*?)\n\s*(\d)\},' % c.factory, table, re.S)
+    check(entry is not None, f'{c.factory}: in kClasses')
+    support = [int(f) for f in re.findall(r'\{L"ZW_Slot\w+",L"\w+",\d+,\d+,(\d)\}', entry.group(1))]
+    check(len(support) == int(entry.group(2)) == len(zw.SLOTS[c.type - zw.FIRST_CLASS]), f'{c.factory}: slot count')
+    check(c.hands == tuple(i for i, f in enumerate(support) if f == 0), f'{c.factory}: hands are the support-0 slots')
+    check(c.subs == tuple(i for i, f in enumerate(support) if f == 1), f'{c.factory}: backpack the support-1 slots')
+    check(len(c.menu_hands) == 3 and set(c.menu_hands) <= set(c.hands), f'{c.factory}: menu shows 3 hand entries')
+    shown = {cat for i in c.menu_hands for cat in zw.SLOTS[c.type - zw.FIRST_CLASS][i][1]}
+    empty = [w.id for w in zw.WEAPONS if w.category in shown and (w.kind in ('none', 'vehicle') or
+                                                                   w.template == zw.NONE_TEMPLATE)]
+    check(not empty, f'{c.factory}: rows without a model in a slot the menu hangs on the hand: {empty}')
+check(zc.CLASSES[1].hands[0] == 0, 'the Rune Blade melee slot (runeblade_melee.cpp SlotInHand) stays a hand slot')
 
 # texts: every key SoldierInit / SoldierWeaponCategory / the slots name, in every language the game has
 needed = {c.name_key for c in zc.CLASSES} | set(zw.CATEGORY_KEYS.values())
@@ -132,7 +153,36 @@ else:
             npc = dsgo.parse(built[c.npc(leader)]).root
             check(npc.get('xgs_scene_object_class') == c.factory and
                   npc.get('soldier_load_weapon').items == c.npc_weapon_paths, f'{c.factory} support soldier: factory, weapons')
+    # the stock contract itself, on the game's four classes: battle hand lists = support-0 slots, subs = support-1
+    init = sgo.plain(sgo.read(vc.Game(game_root).read(*zc.CONFIG))[1])['SoldierInit']
+    for entry in init[:4]:
+        support = [s[4] for s in entry[4]]
+        stock = dsgo.parse(vc.Game(game_root).read(*zc._rel(entry[2][0]))).root
+        held = sorted(int(i) for hand in stock.get('soldier_weapon_slot').items for i in hand.items[0].items)
+        backs = sorted(int(x.items[0]) for x in stock.get('soldier_sub_weapon_slot').items)
+        check(held == [i for i, f in enumerate(support) if f == 0] and backs == [i for i, f in enumerate(support) if f == 1],
+              f'stock {entry[1]}: hands the support-0 slots, backpack the support-1 ones')
+    for c in zc.CLASSES:
+        for n in range(1, zc.APPEARANCES + 1):
+            root = dsgo.parse(built[c.battle(n)]).root
+            check(root.get('soldier_weapon_slot').items[0].items[0].items == [float(i) for i in c.hands] and
+                  [x.items for x in root.get('soldier_sub_weapon_slot').items] ==
+                  [[float(i), 'weapon', 0.0] for i in c.subs], f'{c.factory} battle {n}: hands / backpack')
+            menu = built[c.menu(n)]
+            members = sgo.read(menu)[1]
+            check(members['soldier_weapon_slot'] == [[list(c.menu_hands), 'weapon', 0, 0]], f'{c.factory} menu {n}: slots')
+            stock_menu = sgo.read(vc.Game(game_root).read(*zc._rel(zc._config(vc.Game(game_root))[5][1][n - 1])))[1]
+            check({k: v for k, v in members.items() if k != 'soldier_weapon_slot'} ==
+                  {k: v for k, v in stock_menu.items() if k != 'soldier_weapon_slot'}, f'{c.factory} menu {n}: rest stock')
+            mab = menu.find(b'MAB\0')
+            check(mab < 0 or mab % 16 == 0, f'{c.factory} menu {n}: embedded MAB 16-aligned')
     sgos = zw.build(lambda rel: cw.stock(game_root, rel))
+    for c in zc.CLASSES:
+        shown = {cat for i in c.menu_hands for cat in zw.SLOTS[c.type - zw.FIRST_CLASS][i][1]}
+        for w in zw.WEAPONS:
+            if w.category in shown:
+                model = sgo.load(data=sgos[zw.files(w)[0]]).get('animation_model')
+                check(isinstance(model, list) and model, f'{w.id}: the menu hangs it on the hand, it has a model')
     check(set(sgos) == {rel for w in zw.WEAPONS for rel in zw.files(w)}, 'every zw weapon SGO built')
     check(all(data[:4] == b'DSGO' or data[:3] == b'SGO' for data in sgos.values()), 'zw weapon SGOs are SGOs')
 print(f'zw_classes: {checks} checks passed')
