@@ -81,7 +81,8 @@ else:
     check(built['AmmoDamageReduce'] == [a, b], 'AmmoDamageReduce written as a list')
     check(built['Ammo_CustomParameter'] == list(zw.GYROJET_CUSTOM), 'custom parameter')
     check(all(built[k] == v for k, v in g.items()), 'every Gyrojet scalar')
-    # the Vehicler battle SGO is the Ranger's but for xgs_scene_object_class
+    # the Vehicler battle SGO is the Ranger's but for xgs_scene_object_class and its hand / backpack slots (pistol in hand,
+    # the vehicle slot on the back: tests/zw_classes_test.py checks those against the class table)
     game = vc.Game(game_root)
     ranger = zc._config(game)
     files = zc.build(game_root)
@@ -90,7 +91,10 @@ else:
         stock = dsgo.to_py(dsgo.parse(game.read(*zc._rel(ranger[2][n - 1]))).root)
         mine = dsgo.to_py(dsgo.parse(files[vehicler.battle(n)]).root)
         check(mine['xgs_scene_object_class'] == 'ZwVehicler', f'battle {n}: ZwVehicler')
-        check({k: v for k, v in mine.items() if k != 'xgs_scene_object_class'}
-              == {k: v for k, v in stock.items() if k != 'xgs_scene_object_class'}, f'battle {n}: otherwise the Ranger')
+        own = ('xgs_scene_object_class', 'soldier_weapon_slot', 'soldier_sub_weapon_slot')
+        check({k: v for k, v in mine.items() if k not in own} == {k: v for k, v in stock.items() if k not in own},
+              f'battle {n}: otherwise the Ranger')
+        check(mine['soldier_weapon_slot'] == [[[1.0], 'weapon', 0.0, 0.0]] and
+              mine['soldier_sub_weapon_slot'] == [[0.0, 'weapon', 0.0]], f'battle {n}: the pistol in hand, the vehicle on the back')
         check(not any('dash' in k.lower() for k in mine), f'battle {n}: no dash field in the class SGO')
 print(f'zw_vehicler_sgo: {checks} checks passed')
