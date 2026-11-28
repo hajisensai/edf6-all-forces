@@ -72,6 +72,7 @@ import cpk  # noqa: E402
 import dsgo  # noqa: E402
 from i18n import is_zh, tr  # noqa: E402
 import edf41kills  # noqa: E402
+import make_zw_classes  # noqa: E402
 import mdb  # noqa: E402
 import modfiles  # noqa: E402
 import rootcpk  # noqa: E402
@@ -798,8 +799,8 @@ def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, di
 
 
 def text_table(data: bytes, lang: str, packs: tuple[Pack, ...] = PACKS) -> bytes:
-    """The game's text table with the packs' mode names and descriptions and the EDF4.1 kill counters' battle record
-    labels (other keys untouched)."""
+    """The game's text table with the packs' mode names and descriptions, the EDF4.1 kill counters' battle record
+    labels and the new player classes' names (make_zw_classes.TEXTS; other keys untouched)."""
     ver, members = sgo.read(data)
     for pack in packs:
         for kind in pack.kinds:
@@ -807,6 +808,7 @@ def text_table(data: bytes, lang: str, packs: tuple[Pack, ...] = PACKS) -> bytes
             members[name_key] = pack.name[lang]
             members[desc_key] = pack.desc[lang]
     edf41kills.add_texts(members, lang)
+    make_zw_classes.add_texts(members, lang)
     return sgo.write_depth_first(ver, members)
 
 

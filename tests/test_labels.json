@@ -9218,6 +9218,26 @@
    "scripts": [
     "tests/xmorph_registry_guard.py"
    ]
+  },
+  "zw_classes": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/zw_classes_test.py"
+   ]
   }
  },
  "selftest": {

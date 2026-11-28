@@ -102,7 +102,7 @@ def audit_data(game) -> None:
     import sgo
     config = sgo.load(data=game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))
     have = tuple(tuple((s[0], tuple(s[2]), bool(s[3])) for s in c[4]) for c in config['SoldierInit'])
-    check(have == gen.SLOTS, 'gen_weapon_series SLOTS is CONFIG.SGO SoldierInit')
+    check(have == gen.STOCK_SLOTS, 'gen_weapon_series STOCK_SLOTS is CONFIG.SGO SoldierInit')
     table = dsgo.parse(game.read('WEAPON', 'WEAPONTABLE.SGO')).root.get('table').items
     stock = gen.stock_rows()
     check(len(table) == len(stock) == gen.STOCK_ROWS, 'stock row count')
