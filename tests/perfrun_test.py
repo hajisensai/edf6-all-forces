@@ -1331,7 +1331,14 @@ def flip_run() -> None:
         drive.run = fake_run
         drive.rows = lambda game_: ['[ 9.0 s] RUNNING: the mission runs (row 0, difficulty 1, mode 7, content id 0)']
         drive.command = lambda *a, **k: calls.append(('command',))
-        drive.replace_placed = lambda game_, dest, payload: calls.append(('ini', dest, payload.decode()))
+        reload = [True]   # the plugin answers a written ini with its CONFIG reloaded row
+
+        def fake_replace(game_, dest, payload):
+            calls.append(('ini', dest, payload.decode()))
+            if reload[0]:
+                with open(perfrun.plugin_log(game_), 'ab') as f:
+                    f.write(b'[00:00:01.000] CONFIG reloaded (the write time changed)\r\n')
+        drive.replace_placed = fake_replace
         drive.restore_placed = lambda game_: calls.append(('placed',)) or True
         drive.anything_left = lambda game_: False
         gen.installed = lambda game_: True
@@ -1363,6 +1370,17 @@ def flip_run() -> None:
                 v = 10.0 if n[-2] == 'A' else 20.0
                 json.dump({'frames': {'mean_ms': v}, 'objects': {'enemies': [100.0, 100]},
                            'phases': {'pre_update ms/step': v / 2}}, f)
+        calls.clear()
+        reload[0] = False
+        saved_timeout, perfrun.RELOAD_TIMEOUT = perfrun.RELOAD_TIMEOUT, 0.5
+        with contextlib.redirect_stdout(io.StringIO()):
+            bad = perfrun.multi_run(game, opts['legs'], os.path.join(d, 'out-noreload'), None, opts)
+        perfrun.RELOAD_TIMEOUT = saved_timeout
+        with open(os.path.join(d, 'out-noreload', 'stress_1-B1', 'run.json'), encoding='utf-8') as f:
+            why = json.load(f).get('error', '')
+        check(bad == 1 and 'did not reload the ini' in why and
+              [c[1] for c in calls if c[0] == 'sample'] == ['stress_1-A1'],
+              'a stay leg the plugin never reloaded for: failed, not sampled as if it were B')
         check([r['variant'] for r in runs] == ['A', 'B', 'A', 'B'] and [r['stay'] for r in runs] ==
               [False, True, True, True] and all('asked' in r for r in runs[1:]), "run.json: the leg's variant, stay")
         table = perf_report.flip_table([os.path.join(out, n) for n in ('stress_1-A1', 'stress_1-B1', 'stress_1-A2',

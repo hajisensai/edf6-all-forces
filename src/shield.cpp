@@ -126,10 +126,58 @@ float Glance(const Sphere& s,const float* pos,float* vel) noexcept {
 
 struct PassLog { ULONGLONG at; unsigned passed,stopped; };
 PassLog passLog{};
+
+// The bearers' layer bodies (their xgs ids, a layer up or down) this period, gathered on the game thread at the
+// period's first ask: ShieldLetsThrough compares a round's candidate body with these before it asks the body's owner
+// (bench:4000, 2026-11-28: the owner lookup 0x108260 and Bearer for every candidate body of every round, 18.8 ms a
+// frame of the bullets' 0x237CF0 with no bearer in the scene). Every valid lock point's object, whatever its side
+// (VisitLockPoints): a bearer on either team. Only a body that is one of these goes on to the full check below, so a
+// layer whose body is made after the gather lets that body's slow rounds through from the next period on.
+constexpr int kMaxLayerIds=2*kMaxShields;
+std::uint64_t layerPeriod=0;
+std::uint32_t layerIds[kMaxLayerIds];
+int layerCount=0;
+bool layerFull=false;
+const void* layerLast=nullptr;   // the visit's last bearer: its several lock points counted once
+
+void GatherLayers(void*,const void* object,const float*) noexcept {
+    if(object==layerLast || !Bearer(object))return;
+    layerLast=object;
+    const auto bearer=static_cast<const unsigned char*>(object);
+    for(int i=0;i<2;++i) {
+        const auto body=At<const unsigned char*>(bearer+kLayers[i],kLayerBody);
+        if(!body || !Readable(body,kBodyId+4))continue;
+        const std::uint32_t id=At<std::uint32_t>(body,kBodyId);
+        bool seen=false;
+        for(int k=0;k<layerCount && !seen;++k)seen=layerIds[k]==id;
+        if(seen)continue;
+        if(layerCount>=kMaxLayerIds){layerFull=true;return;}
+        layerIds[layerCount++]=id;
+    }
+}
+
+// Whether `body` may be a bearer's layer: false only when this period's gather says it is none of them (off the game
+// thread, before a period, or with more layers than kMaxLayerIds: true, the full check decides).
+bool MaybeLayer(std::uint32_t body) noexcept {
+    const std::uint64_t period=stepobj::Period();
+    if(!period)return true;
+    if(period!=layerPeriod) {
+        layerPeriod=period;
+        layerCount=0;
+        layerFull=false;
+        layerLast=nullptr;
+        bool walked=false;
+        __try { walked=VisitLockPoints(&GatherLayers,nullptr); } __except(EXCEPTION_EXECUTE_HANDLER){walked=false;}
+        if(!walked)layerFull=true;   // not walked: no claim this period
+    }
+    if(layerFull)return true;
+    for(int k=0;k<layerCount;++k)if(layerIds[k]==body)return true;
+    return false;
+}
 }  // namespace
 
 bool ShieldLetsThrough(void* collector,std::uint32_t body) noexcept {
-    if(!ok)return false;
+    if(!ok || !MaybeLayer(body))return false;
     const auto target=static_cast<const unsigned char*>(reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body));
     if(!Bearer(target))return false;
     bool layer=false;

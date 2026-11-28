@@ -480,7 +480,9 @@ void CrashLog(const char* text,std::size_t size) noexcept {
 }
 
 void ReloadConfigIfChanged() noexcept {
-    if(ini.Changed())LoadConfig();
+    if(!ini.Changed())return;
+    LoadConfig();
+    Log("CONFIG reloaded (the ini's write time changed)");   // tools/perfrun.py's stay legs wait for this row
 }
 
 // The in-game loadout menu wrote the ini (loadout_store.cpp): its values now, not at the next poll; the watch takes

@@ -443,6 +443,27 @@ def wait_population(game: str, log: str, timeout: float, gate=None, want: int = 
     return 'no live enemy wave before the readiness deadline (--leg-timeout)'
 
 
+RELOADED = re.compile(rb'\] CONFIG reloaded')
+RELOAD_TIMEOUT = 15.0   # the plugin looks at the ini's write time once a second, once a frame (a bench's 3 a second)
+
+
+def wait_reload(log: str, mark: tuple[int, int], timeout: float, gate=None) -> str | None:
+    """A stay leg's ini written: until the plugin logs that it reloaded it (src/plugin.cpp ReloadConfigIfChanged)
+    after `mark`; why not, when it does not within `timeout` s (the leg's windows would be the leg before's)."""
+    import drive
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if gate is not None and gate.state != drive.Gate.OPEN:
+            return 'the run ended before the plugin reloaded the ini'
+        try:
+            if RELOADED.search(run_log(log, mark) or b''):
+                return None
+        except OSError:
+            pass   # the logger may be rotating the file
+        time.sleep(0.25)
+    return f'the plugin did not reload the ini within {timeout:.0f} s (no CONFIG reloaded row): the leg would be the last one'
+
+
 def check_wave_window(plan, opts: dict, marks: dict, log: str) -> None:
     """A successful spawn before warm-up is insufficient when the battle is empty during the measurement."""
     window = marks.get('windows', {}).get('cpu')
@@ -699,9 +720,15 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
             mission = leg_mission(leg['scenario'])
             seen = 0   # the first: every row of the launch (its `running` went with the mission)
             if leg['stay']:   # the mission the leg before is in: its ini only, reloaded by the plugin
+                mark = log_mark(plugin_log(game))
                 with gate.writing():
                     drive.replace_placed(game, INI_DEST, drive.ini_text_with(state['ini'], tuple(leg['ini'])))
-                marks['asked'] = marks['entered'] = time.time()
+                marks['asked'] = time.time()
+                why = wait_reload(plugin_log(game), mark, RELOAD_TIMEOUT, gate)
+                if why:
+                    marks['error'] = why
+                    return
+                marks['entered'] = time.time()
                 _sample(dirs[i], warms[i], opts['cpu'], 0, opts['interval'], marks, opts.get('presentmon'))
                 if marks.get('error') or 'windows' not in marks:
                     marks.setdefault('error', 'not sampled')
