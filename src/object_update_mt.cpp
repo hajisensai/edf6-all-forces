@@ -73,6 +73,8 @@ void WindowOpen(void* arg) noexcept {
     engine.stock.lock(arg);
     ReadLayers();
     engine.Open();
+    // ini 热重载关掉 ObjectUpdateMT（启动时开着才装上）：这一窗全由游戏线程当场做，与原版同（perfrun 一次启动内 A/B）
+    if(!Cfg().objectUpdateMT)engine.open=false;
 }
 void WindowClose(void* arg) noexcept {
     engine.Close();

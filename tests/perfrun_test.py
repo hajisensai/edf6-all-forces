@@ -19,6 +19,8 @@
     gen.rewrite_scenario keeping the first originals, one launch of three legs with drive.run faked (the range written
     once before the launch, rewritten for the later range leg, put back once; the keys timed from the leg's entry; a
     leg that never comes in ends the run), and summary.md's row a leg.
+  - --flip (an A/B in one launch): stay legs with no `next` and no stack window, each one's ini over the launch's,
+    the variants in run.json, flip_table's means; drive.replace_placed's rewrite still put back byte for byte.
 Exit code 1 when one fails.
 """
 from __future__ import annotations
@@ -1280,6 +1282,123 @@ def legs_run() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def flip_run() -> None:
+    """--flip: one launch, A then B, A, B as stay legs (no `next`, no population wait, no stack window, STAY_SETTLE s
+    of warm-up), each stay leg's ini written over the launch's (B with the flip, A the launch's again), the variants in
+    run.json; flip_table's means a variant; drive.replace_placed keeps restore_placed putting the original back."""
+    import contextlib
+    import io
+    import drive
+    # Debug=0: no object rows to wait on or check (legs_run covers those); the A/B's own steps only
+    _, opts = perfrun.options(['stress:1', '--flip', 'ObjectUpdateMT=0;NpcParallelThink=0', '--dll', 'installed',
+                               '--ini', 'Debug=0'])
+    check(opts['cpu'] == perfrun.FLIP_CPU and [(x['name'], x['variant'], x['stay']) for x in opts['legs']] ==
+          [('stress_1-A1', 'A', False), ('stress_1-B1', 'B', True), ('stress_1-A2', 'A', True),
+           ('stress_1-B2', 'B', True)], '--flip: A as given, then B / A / B stay legs, its own clean window')
+    for bad in (['stress:1,stay'], ['stress:1', '--flip', 'x'], ['stress:1', '--flip', 'A=1', '--cycle', '2']):
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                perfrun.options(bad)
+            check(False, f'{bad} refused')
+        except SystemExit:
+            pass
+    names = ('game_pids', 'run', 'rows', 'command', 'replace_placed', 'restore_placed', 'anything_left')
+    saved = {k: getattr(drive, k) for k in names}
+    gsaved = {k: getattr(gen, k) for k in ('installed', 'check_scenario', 'write_scenario', 'restore_scenario')}
+    sample_saved, population_saved = perfrun._sample, perfrun.wait_population
+    d = tempfile.mkdtemp()
+    try:
+        game = os.path.join(d, 'game')
+        os.makedirs(os.path.join(game, 'Mods', 'Plugins'))
+        os.environ['EDF6_QUEUE_DIR'] = os.path.join(d, 'queues')
+        with open(os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.ini'), 'w', encoding='utf-8') as f:
+            f.write('[VehicleCrew]\nObjectUpdateMT=1\nNpcParallelThink=1\n')
+        calls: list = []
+        running: list[int] = []
+
+        def fake_run(game_, mission, difficulty, seconds, keep, **k):
+            calls.append(('run', k.get('ini')))
+            running.append(1)
+            k['during']()
+            running.clear()
+            return 0
+
+        def fake_sample(out, warm, cpu_s, stacks_s, interval, marks, presentmon=None):
+            calls.append(('sample', os.path.basename(out), warm, cpu_s, stacks_s))
+            marks['pid'] = 1
+            marks['windows'] = {'cpu': [time.time() - cpu_s, time.time()]}
+        drive.game_pids = lambda: list(running)
+        drive.run = fake_run
+        drive.rows = lambda game_: ['[ 9.0 s] RUNNING: the mission runs (row 0, difficulty 1, mode 7, content id 0)']
+        drive.command = lambda *a, **k: calls.append(('command',))
+        drive.replace_placed = lambda game_, dest, payload: calls.append(('ini', dest, payload.decode()))
+        drive.restore_placed = lambda game_: calls.append(('placed',)) or True
+        drive.anything_left = lambda game_: False
+        gen.installed = lambda game_: True
+        gen.check_scenario = lambda game_, plan: []
+        gen.write_scenario = lambda game_, plan: []
+        gen.restore_scenario = lambda game_: True
+        perfrun._sample = fake_sample
+        perfrun.wait_population = lambda *a, **k: calls.append(('population',)) or None
+        out = os.path.join(d, 'out')
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
+        check(rc == 0, '--flip: the run passes')
+        samples = [c for c in calls if c[0] == 'sample']
+        check([c[1] for c in samples] == ['stress_1-A1', 'stress_1-B1', 'stress_1-A2', 'stress_1-B2']
+              and samples[0][4] == 20 and all(c[4] == 0 and c[2] == perfrun.STAY_SETTLE for c in samples[1:])
+              and all(c[3] == perfrun.FLIP_CPU for c in samples), 'stay legs: settle only, the same clean window, '
+              'no stack window')
+        check(('command',) not in calls and ('population',) not in calls, 'stay legs: no `next`')
+        inis = [c for c in calls if c[0] == 'ini']
+        check(len(inis) == 3 and all(c[1] == perfrun.INI_DEST for c in inis)
+              and 'ObjectUpdateMT=0' in inis[0][2] and 'NpcParallelThink=0' in inis[0][2]
+              and 'ObjectUpdateMT=1' in inis[1][2] and 'NpcParallelThink=1' in inis[1][2] and 'PerfProbe=1' in inis[1][2]
+              and inis[0][2] == inis[2][2], 'B: the flip over the launch ini; A: the launch ini again')
+        runs = []
+        for n in ('stress_1-A1', 'stress_1-B1', 'stress_1-A2', 'stress_1-B2'):
+            with open(os.path.join(out, n, 'run.json'), encoding='utf-8') as f:
+                runs.append(json.load(f))
+            with open(os.path.join(out, n, 'metrics.json'), 'w', encoding='utf-8') as f:
+                v = 10.0 if n[-2] == 'A' else 20.0
+                json.dump({'frames': {'mean_ms': v}, 'objects': {'enemies': [100.0, 100]},
+                           'phases': {'pre_update ms/step': v / 2}}, f)
+        check([r['variant'] for r in runs] == ['A', 'B', 'A', 'B'] and [r['stay'] for r in runs] ==
+              [False, True, True, True] and all('asked' in r for r in runs[1:]), "run.json: the leg's variant, stay")
+        table = perf_report.flip_table([os.path.join(out, n) for n in ('stress_1-A1', 'stress_1-B1', 'stress_1-A2',
+                                                                        'stress_1-B2')], opts['flip'])
+        row = table.splitlines()[-1]
+        check(row.startswith('| stress:1 | 2 / 2 | 100 / 100 | 10.00 / 20.00 (200%) |') and '5.00 / 10.00 (200%)' in row,
+              f'flip_table: the means a variant and B as a share of A ({row})')
+    finally:
+        for k, v in saved.items():
+            setattr(drive, k, v)
+        for k, v in gsaved.items():
+            setattr(gen, k, v)
+        perfrun._sample, perfrun.wait_population = sample_saved, population_saved
+    # the placed ini rewritten mid-run, then put back byte for byte
+    pids = drive.game_pids
+    try:
+        drive.game_pids = lambda: []
+        game = os.path.join(d, 'game2')
+        os.makedirs(os.path.join(game, 'Mods', 'Plugins'))
+        path = os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.ini')
+        with open(path, 'wb') as f:
+            f.write(b'original')
+        with contextlib.redirect_stdout(io.StringIO()):
+            drive.place_file(game, perfrun.INI_DEST, b'launch')
+            drive.replace_placed(game, perfrun.INI_DEST, b'flipped')
+            with open(path, 'rb') as f:
+                now = f.read()
+            whole = drive.restore_placed(game)
+        with open(path, 'rb') as f:
+            check(now == b'flipped' and whole and f.read() == b'original', 'replace_placed: restored byte for byte')
+    finally:
+        drive.game_pids = pids
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
 scenario_files()
 log_turnover()
 both_plugins()
@@ -1297,5 +1416,6 @@ legs_options()
 legs_logs()
 wave_ready()
 legs_run()
+flip_run()
 print(f'{len(failures)} failed' if failures else 'all passed')
 sys.exit(1 if failures else 0)

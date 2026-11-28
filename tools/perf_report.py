@@ -1431,6 +1431,43 @@ def scaling_table(run_dirs: list[str]) -> str:
     return '\n'.join(out) + '\n'
 
 
+def flip_table(run_dirs: list[str], flip: list[str]) -> str:
+    """summary.md's A/B of perfrun --flip (one launch, the variants' windows by turns): a row a scenario and column,
+    A's and B's means over their windows (metrics.json) and B as a share of A. Windows of one launch, the same
+    population, the halves interleaved: a change of the machine or the fight over the run falls on both."""
+    groups: dict[str, dict[str, list[dict]]] = {}
+    for d in run_dirs:
+        try:
+            with open(os.path.join(d, 'run.json'), encoding='utf-8') as f:
+                run = json.load(f)
+            with open(os.path.join(d, 'metrics.json'), encoding='utf-8') as f:
+                m = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if run.get('variant') in ('A', 'B'):
+            groups.setdefault(run.get('scenario', '?'), {}).setdefault(run['variant'], []).append(m)
+    out = [f'## A/B in one launch (B: {"; ".join(flip)})', '',
+           '| scenario | windows A / B | enemies A / B | ' + ' | '.join(c for c, _ in SCALING_COLUMNS) + ' |',
+           '|' + '---|' * (3 + len(SCALING_COLUMNS))]
+    for scenario, by in groups.items():
+        a, b = by.get('A', []), by.get('B', [])
+
+        def mean(ms: list[dict], get) -> float | None:
+            vs = [v for v in (get(m) for m in ms) if v is not None]
+            return statistics.mean(vs) if vs else None
+        enemies = [mean(ms, lambda m: ((m.get('objects') or {}).get('enemies') or [None])[0]) for ms in (a, b)]
+        cells = []
+        for _, get in SCALING_COLUMNS:
+            va, vb = mean(a, get), mean(b, get)
+            if va is None or vb is None:
+                cells.append('')
+            else:
+                cells.append(f'{va:.2f} / {vb:.2f}' + (f' ({vb / va * 100:.0f}%)' if va else ''))
+        pop = ' / '.join('' if e is None else f'{e:.0f}' for e in enemies)
+        out.append(f'| {scenario} | {len(a)} / {len(b)} | {pop} | ' + ' | '.join(cells) + ' |')
+    return '\n'.join(out) + '\n'
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__)
