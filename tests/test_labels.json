@@ -448,6 +448,14 @@
    ],
    "scripts": []
   },
+  "bullet_sweep_cull": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "bvm41_dataflow": {
    "labels": [
     "cockpit",
