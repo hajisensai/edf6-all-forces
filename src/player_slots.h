@@ -34,7 +34,7 @@ constexpr bool SlotAccepts(int cls,int slot,int c) noexcept {
     }
     return false;
 }
-static_assert(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(4)==0,
+static_assert(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(4)==2 && SlotsOf(5)==3 && SlotsOf(6)==0,
               "SoldierInit's slot counts (docs/loadout-re.md §1.2)");
 static_assert(SlotsOf(3)<=kSlotsMost,"a class has at most kSlotsMost slots");
 

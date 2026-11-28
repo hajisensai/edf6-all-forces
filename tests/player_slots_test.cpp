@@ -15,7 +15,7 @@ using namespace crew::playerslots;
 }  // namespace
 
 int main() {
-    Check(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(4)==0 && SlotsOf(-1)==0,"slot counts");
+    Check(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(4)==2 && SlotsOf(5)==3 && SlotsOf(6)==0 && SlotsOf(-1)==0,"slot counts");
     static_assert(SlotsOf(3)<=kSlotsMost && crew::preset::kSlots==kSlotsMost,"a preset holds every slot");
     // Ranger
     Check(SlotAccepts(0,0,0) && SlotAccepts(0,1,6) && !SlotAccepts(0,0,7),"ranger main weapons 0..6");
