@@ -1981,7 +1981,8 @@ SupportIcon SupportCallIcon(int index) noexcept {
         if(spec.heli>=0)return SupportIcon::heli;
         const auto role=static_cast<JetRole>(spec.jet);
         if(role==JetRole::gunship)return SupportIcon::gunship;
-        return role==JetRole::carrier || role==JetRole::blastCarrier || role==JetRole::dollCarrier ? SupportIcon::carrier : SupportIcon::jet;
+        return role==JetRole::carrier || role==JetRole::blastCarrier || role==JetRole::dollCarrier || role==JetRole::arsenalCarrier ?
+            SupportIcon::carrier : SupportIcon::jet;
     }
     if(InfantryCatalog(static_cast<std::uint32_t>(index)))return index==AirCount() ? SupportIcon::squad : SupportIcon::platoon;
     if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))return plane ? SupportIcon::jet : SupportIcon::heli;

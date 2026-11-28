@@ -349,6 +349,15 @@ CALLS: tuple[Call, ...] = (
          ground='aura_rep'),
     Call('EDF6VC_CALL_AURA_AMO', 0, 'aura_amo', False, 0, 3000, 0.5, 'vehicle', vehicle='EDF6VC_AURA_AMO',
          ground='aura_amo'),
+    # Appended 2026-11-28 (the user: 「天顶飞机换成这个。名字可以改一下，这个底下是无人机。一个是无人机模式，一个是全是导弹
+    # 的模式。」, docs/feedback-2026-11-28-arsenal-bird.md): the Arsenal Bird's drone mode, its carrier (src/jet_internal.h
+    # Body::arsenalCarrier, mark 7071) hovering over the point / with the caller and launching M101s (Body::m101Drone) from
+    # under its belly as the Helicarrier launches its gun drones; its missile mode is EDF6VC_CALL_SORTIE_MISSILE_RAIN's
+    # sortie, the same airframe's 「·出击」 (_catalog: one row, 守点 / 跟随 / 出击).
+    Call('EDF6VC_CALL_ARSENAL_BIRD', 7122, 'arsenal_bird', False, 1, 3400, 2.0, 'jets', 'Arsenal Bird drones (guard)', 600,
+         'arsenalCarrier'),
+    Call('EDF6VC_CALL_ARSENAL_BIRD_F', 7123, 'arsenal_bird', True, 1, 3900, 2.2, 'jets', 'Arsenal Bird drones (follow)', 600,
+         'arsenalCarrier'),
 )
 
 
@@ -442,6 +451,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'X-Morph walkers (2026-10-30)': IDS[:110],
     'Andryusha (2026-11-10)': IDS[:111],
     'aura trucks (2026-11-27)': IDS[:114],
+    'Arsenal Bird drone mode (2026-11-28)': IDS[:116],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -1023,10 +1033,16 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Hit and Run (DN Bomber)', 'Sortie: a DN Bomber comes in low, drops two bombs on the mark and climbs steeply away. It flies the pylons configured for that airframe before the battle (installer menu 7, the armory or the room menu).'),
     },
     'sortie_missile_rain': {
-        'SC': ('天顶截击机', '四具发光挂架可一次齐射 256 枚子母弹，每枚释放 4 枚追踪子弹。锁定框内每个敌人先分一枚，余弹均分，打完后飞出地图边界。'),
-        'CN': ('天頂截擊機', '四具發光掛架可一次齊射 256 枚子母彈，每枚釋放 4 枚追蹤子彈。鎖定框內每個敵人先分一枚，餘彈均分，打完後飛出地圖邊界。'),
-        'JA': ('天頂迎撃機', '発光する4基の発射器から分裂ミサイル256発を一斉発射する。親弾1発から誘導子弾4発を放つ。範囲内の敵に1発ずつ割り当て、残りを均等に配分し、マップ端から離脱する。'),
-        'EN': ('Zenith Interceptor', 'Fires up to 256 cluster missiles from four lit pods. Each launches four guided submunitions. Enemies in the lock box receive one lock each before repeats. The interceptor then flies out of the mission area.'),
+        'SC': ('武库鸟', '整舱导弹齐射模式：武库鸟从远处进场，机背四具发光挂架一次齐射至多 256 枚子母弹，每枚释放 4 枚追踪子弹。锁定框内每个敌人先分一枚，余弹均分，打完后飞出地图边界。'),
+        'CN': ('武庫鳥', '整艙飛彈齊射模式：武庫鳥從遠處進場，機背四具發光掛架一次齊射至多 256 枚子母彈，每枚釋放 4 枚追蹤子彈。鎖定框內每個敵人先分一枚，餘彈均分，打完後飛出地圖邊界。'),
+        'JA': ('アーセナルバード', '全弾ミサイル斉射モード。アーセナルバードが遠方から進入し、機背の発光する4基の発射器から分裂ミサイルを最大256発一斉発射する。親弾1発から誘導子弾4発を放つ。範囲内の敵に1発ずつ割り当て、残りを均等に配分し、マップ端から離脱する。'),
+        'EN': ('Arsenal Bird', 'Full missile bay salvo: the Arsenal Bird comes in from afar and fires up to 256 cluster missiles at once from the four lit pods on its back. Each launches four guided submunitions. Enemies in the lock box receive one lock each before repeats. It then flies out of the mission area.'),
+    },
+    'arsenal_bird': {
+        'SC': ('武库鸟', '无人机模式：呼叫武库鸟在空中盘旋，从机腹逐架放出 M101 无人机攻击范围内的敌人；无人机弹药或燃料耗尽、受损时飞回机腹回收，装弹后再次出动。'),
+        'CN': ('武庫鳥', '無人機模式：呼叫武庫鳥在空中盤旋，從機腹逐架放出 M101 無人機攻擊範圍內的敵人；無人機彈藥或燃料耗盡、受損時飛回機腹回收，裝彈後再次出動。'),
+        'JA': ('アーセナルバード', 'ドローンモード。アーセナルバードを要請する。上空を旋回し、機腹から M101 ドローンを1機ずつ放って範囲内の敵を攻撃させる。弾薬や燃料が尽きるか損傷したドローンは機腹に戻って回収され、再装填ののち再出撃する。'),
+        'EN': ('Arsenal Bird', 'Drone mode: calls the Arsenal Bird, which circles overhead and releases M101 drones one by one from its belly to attack enemies in range. A drone out of ammo or fuel, or damaged, flies back to its belly to be recovered and rearmed, then goes out again.'),
     },
     'sortie_hammer': {
         'SC': ('锤与砧（Eros 506／DN 轰炸机）', '出击组合：两架 Eros 直升机先低空扫射压制，25 秒后再呼叫一架 DN 轰炸机低空投弹收尾（相当于「直升机扫射」接「打了就跑」）。'),

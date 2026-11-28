@@ -334,20 +334,22 @@ constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r
 
 // The roles a launch asks for (jet.h JetRole) and the body each flies in. The blast and doll carriers are
 // carriers whose own bodies' marks name their drones. The support deployment's strike jet, fighter, interceptor and
-// multirole fly their kinds' Dreadnought-model bodies, its carriers the Helicarrier ones and its gunship the AC-130
+// multirole fly their kinds' Dreadnought-model bodies, its carriers the Helicarrier ones and its gunship the AC-130; the
+// Arsenal Bird's two modes its salvo and its M101 carrier, one model
 // (Body::sup*, Body::c130Gunship; the plain bodies stay the player's parked / requested twins' and the test range's).
 struct LaunchRow { JetRole as; Body body; };
 inline constexpr LaunchRow kLaunchRows[]={
     {JetRole::strike,Body::supStrike},{JetRole::fighter,Body::supFighter},{JetRole::interceptor,Body::supInterceptor},
     {JetRole::multirole,Body::supMultirole},{JetRole::carrier,Body::supCarrier},{JetRole::blastCarrier,Body::supBlastCarrier},
     {JetRole::dollCarrier,Body::supDollCarrier},{JetRole::gunship,Body::c130Gunship},{JetRole::salvo,Body::salvoInterceptor},
+    {JetRole::arsenalCarrier,Body::arsenalCarrier},
 };
 constexpr int kLaunchCount=static_cast<int>(sizeof(kLaunchRows)/sizeof(kLaunchRows[0]));
 constexpr bool LaunchRowsInOrder() noexcept {
     for(int i=0;i<kLaunchCount;++i)if(static_cast<int>(kLaunchRows[i].as)!=i || Row(kLaunchRows[i].body).mark<=0.0f)return false;
     return true;
 }
-static_assert(kLaunchCount==static_cast<int>(JetRole::salvo)+1,"a launch row per JetRole");
+static_assert(kLaunchCount==static_cast<int>(JetRole::arsenalCarrier)+1,"a launch row per JetRole");
 static_assert(LaunchRowsInOrder(),"kLaunchRows is indexed by JetRole, each a jet body");
 
 // --- A jet's state ---

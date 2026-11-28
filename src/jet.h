@@ -39,8 +39,9 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // `role`: the jet.cpp Role it flies as (same order); one whose SGO is not installed flies as a fighter.
 // `escort`: it works round the player (while seen), not round `target`.
 // blastCarrier / dollCarrier: a carrier whose drones blow up next to the enemy (the doll ones carrying a
-// singing, dancing hololive doll); after `carrier`, as they are no role of their own.
-enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship, salvo };
+// singing, dancing hololive doll); after `carrier`, as they are no role of their own. arsenalCarrier: the Arsenal Bird's
+// drone mode, a carrier launching M101s (appended: the order is the calls' and the room's).
+enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship, salvo, arsenalCarrier };
 bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort=false) noexcept;
 // A gun drone (the carrier's drone body, EDF6VC_JET_DRONE.SGO) with no carrier: launched as JetLaunch launches
