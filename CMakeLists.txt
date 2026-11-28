@@ -177,6 +177,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/soldier_factory.cpp src/soldier_type_
 target_sources(EDF6VehicleCrew PRIVATE src/soldier_save.cpp)
 # The Vehicler on foot: no dash, the Gyrojet's damage growing with its flight (src/vehicler_foot_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicler_foot.cpp)
+# The Vehicler's start seat: its start vehicle asked for, the owner seated in the driver seat (src/vehicler_start_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/vehicler_start.cpp)
 # 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
@@ -922,6 +924,11 @@ add_executable(vehicler_foot_test tests/vehicler_foot_test.cpp)
 target_include_directories(vehicler_foot_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(vehicler_foot_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME vehicler_foot COMMAND vehicler_foot_test)
+# The Vehicler's start seat (src/vehicler_start_logic.h): the request's gate, what follows it, the NPCs' driver-seat bar.
+add_executable(vehicler_start_test tests/vehicler_start_test.cpp)
+target_include_directories(vehicler_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicler_start_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicler_start COMMAND vehicler_start_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 # The menu as the game's own dialogs: pages, buttons, paging, cancel, the edits and saves they make
@@ -1271,6 +1278,9 @@ set_tests_properties(soldier_save_native PROPERTIES ENVIRONMENT PYTHONIOENCODING
 # The Vehicler on foot's sites and the falloff 0x231080 run natively with a growing AmmoDamageReduce (read only; skipped without the game).
 add_test(NAME vehicler_foot_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicler_foot_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(vehicler_foot_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
+# The start ride's natives (src/ride_native.h) against the game's EDF.dll (read only; skipped without it).
+add_test(NAME vehicler_start_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicler_start_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(vehicler_start_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)

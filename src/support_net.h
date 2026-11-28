@@ -89,6 +89,9 @@ void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
 bool SupportTransactionActive(std::uint64_t transaction) noexcept;
+// Whether SubmitSupportRequest would take a request now: the session running, its handshake done, not paused for the
+// mission (the same gate it refuses by). A request made at a mission's start waits on this (vehicler_start.cpp).
+bool SupportRequestsOpen() noexcept;
 // Whether every peer of the running support session accepts configured soldier weapons and aircraft counts
 // (support_protocol.h kCapSoldierVariants); true offline / with no session. The host's planner falls back to the
 // protocol v2 plan (rifles, each call's own number of aircraft) otherwise, and says so.
