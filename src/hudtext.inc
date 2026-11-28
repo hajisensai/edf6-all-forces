@@ -1161,6 +1161,7 @@ HUDTEXT(kbAutoTurret,L"Vehicle: auto turrets on / off",L"载具：自动炮塔�
 HUDTEXT(kbCruiseUp,L"Vehicle: cruise gear up",L"载具：定速挡位升挡",L"載具：定速檔位升檔",L"車両：クルーズ段 アップ")
 HUDTEXT(kbCruiseDown,L"Vehicle: cruise gear down",L"载具：定速挡位降挡",L"載具：定速檔位降檔",L"車両：クルーズ段 ダウン")
 HUDTEXT(kbHeliHover,L"Helicopter: hover toggle",L"直升机：切换悬停",L"直升機：切換懸停",L"ヘリ：ホバリング切替")
+HUDTEXT(kbVehiclerLogistics,L"Vehicler: resupply (tap: next, hold: call)",L"载具手：补车（短按换车，长按叫车）",L"載具手：補車（短按換車，長按叫車）",L"ヴィークラー：補給（短押し切替、長押し要請）")
 HUDTEXT(heliHoverActive,L"HOVER",L"悬停",L"懸停",L"ホバー")
 HUDTEXT(cmdRunDrag,L"Attack line %.0f m (at least %.0f m): let go to call it",L"攻击线 %.0f 米（最短 %.0f 米）：松开即呼叫",L"攻擊線 %.0f 公尺（最短 %.0f 公尺）：放開即呼叫",L"攻撃線 %.0fm（最短 %.0fm）：離すと要請")
 HUDTEXT(cmdRunStart,L"%ls: press at the attack line's start and drag its way and length (at least %.0f m; a click: G's way)",L"%ls：在攻击线起点按下，拖动定方向和长度（最短 %.0f 米；直接点击按 G 的方向）",L"%ls：在攻擊線起點按下，拖動定方向和長度（最短 %.0f 公尺；直接點擊按 G 的方向）",L"%ls：攻撃線の始点で押し、ドラッグで方向と長さを指定（最短 %.0fm／クリックは G の方向）")

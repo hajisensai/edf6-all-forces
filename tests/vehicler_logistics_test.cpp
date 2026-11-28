@@ -1,4 +1,4 @@
-// src/vehicler_logistics_logic.h / _net.h offline (docs/newclass-re/vehicler.md §5 M4): a kill's worth and whose it is, the
+// src/vehicler_logistics_logic.h / _net.h offline (docs/newclass-re/vehicler-plan.md §5 M4): a kill's worth and whose it is, the
 // host's book (one book a killed object, the gauge's cap, Hold / Settle / Refund balanced, a second hold refused, a new
 // mission clears it), the ZWLG codec (round trips; a wrong size, magic, version, kind or field refused), a guest's mirror.
 #include "../src/vehicler_logistics_net.h"

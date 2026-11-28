@@ -1,7 +1,7 @@
-// The Vehicler's logistics points online (docs/newclass-re/vehicler.md §3.2): plugin_net.h channel "vehicler logistics",
+// The Vehicler's logistics points online (docs/newclass-re/vehicler-plan.md §3.2): plugin_net.h channel "vehicler logistics",
 // magic 'ZWLG'. Pure (wire.h, little-endian, fixed sizes a kind); tests/vehicler_logistics_test.cpp round-trips it.
 // The host keeps the book (vehicler_logistics_logic.h Ledger); the machine that settles a kill (the victim's authority,
-// docs/newclass-re/vehicler.md §3.1) and is not the host reports it, the host books it once by the victim and answers.
+// docs/newclass-re/vehicler-plan.md §3.1) and is not the host reports it, the host books it once by the victim and answers.
 //   credit (settling guest -> host): magic, version, kind 1 @8, victim @12 (a NetId reference: a player is no kill of
 //                                    theirs), player @44 (a player reference: whose kill), points @76 (1..kMostCredit)
 //   ack    (host -> that guest):     magic, version, kind 3 @8, victim @12, the rest zero (kCreditWire bytes): the

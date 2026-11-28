@@ -1,4 +1,4 @@
-// The stock human-side ride (docs/newclass-re/vehicler.md §2.2): its addresses and the bytes they are checked against,
+// The stock human-side ride (docs/newclass-re/vehicler-plan.md §2.2): its addresses and the bytes they are checked against,
 // shared by npcai.cpp (NPC boardings, a peer's ride replayed) and vehicler_start.cpp (the Vehicler's start seat).
 // tests/vehicler_start_native_audit.py reads them from EDF.dll (TimeDateStamp 0x678CCB46).
 //

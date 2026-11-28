@@ -1,4 +1,4 @@
-// The Vehicler's logistics points (docs/newclass-re/vehicler.md §3.1, §3.2, §5 M4): pure, no game, no transport
+// The Vehicler's logistics points (docs/newclass-re/vehicler-plan.md §3.1, §3.2, §5 M4): pure, no game, no transport
 // (tests/vehicler_logistics_test.cpp drives it offline; vehicler_logistics.cpp feeds it the damage hook's kills and the
 // plugin channel, vehicler_logistics_net.h the wire).
 //  - A kill is worth Credit(victim): an enemy's body 1 point, a part of one (a weak spot that dies on its own) or anything

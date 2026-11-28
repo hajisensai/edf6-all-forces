@@ -7068,11 +7068,12 @@ def map_wired() -> None:
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp',
-                                      'drivegear.cpp', 'andryusha.cpp', 'worldmap.cpp', 'armory.cpp', 'pack_switch.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'drivegear.cpp', 'andryusha.cpp', 'worldmap.cpp', 'armory.cpp', 'pack_switch.cpp', 'vehicler_logistics.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/worldmap.cpp'), "the world map select's keys give way to the map"
     assert 'if(!InFront() || MapHoldsKeys()){in.ntyped=0;return in;}' in src('src/armory.cpp'), "整备's keys give way to the map"
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     assert 'Keys k;\n    if(MapHoldsKeys())return k;' in src('src/pack_switch.cpp'), "the HQ's pack switch keys give way to the map"
+    assert 'if(MapHoldsKeys())return false;' in src('src/vehicler_logistics.cpp'), "the Vehicler's resupply key gives way to the map"
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]
     assert 'if(MapHoldsHumanKeys(human))return false;' in key_input
