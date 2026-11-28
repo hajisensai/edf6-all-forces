@@ -19,6 +19,7 @@
 // 2 nothing of the plugin's (A/B of the plugin's cost; the calls then do not come). Online the host's set decides, so
 // a member's PreloadMode only changes what it contributes as the host.
 #pragma once
+#include "zw_crew_vehicle_logic.h"
 #include "zw_vehicle_catalog.h"
 #include <cstddef>
 #include <cstdint>
@@ -124,12 +125,14 @@ inline void AddCallItems(std::wstring_view row,Set& out) noexcept {
 // What every mission takes whatever the room can call: the rounds a vehicle of the player's may fire any time (a Proteus
 // may be called any time, ProteusRework switched on mid-mission), the parachute's canopy (an ejection out of any jet the
 // player flies), and every support soldier kind (the soldiers also crew the mission's own vehicles and the composition
-// panel picks any installed kind mid-mission: support_soldier.cpp keeps one flag for them all, so they are not narrowed).
+// panel picks any installed kind mid-mission: support_soldier.cpp keeps one flag for them all, so they are not narrowed),
+// with the vehicle a support Vehicler soldier gets (zw_crew_vehicle_logic.h kCrewKind: such a soldier may come any time).
 constexpr Set Always() noexcept {
     Set s;
     s.Add(Item::vehicleRounds);
     s.Add(Item::chute);
     for(int k=0;k<kSoldierItems;++k)s.Add(Soldier(k));
+    s.Add(ZwVehicle(zwcrew::kCrewKind));
     return s;
 }
 

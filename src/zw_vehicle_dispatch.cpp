@@ -14,6 +14,8 @@
 //    waypoints through NpcPrepareVehicleRoutePost, the stop and NpcReleaseVehicleCrew; the old vehicle the same way out.
 #include "zw_vehicle_dispatch.h"
 #include "zw_vehicle_dispatch_logic.h"
+#include "zw_crew_vehicle_logic.h"
+#include "ride_native.h"
 #include "command_identity.h"
 #include "edf_layout.h"
 #include "ground_navigation.h"
@@ -96,6 +98,8 @@ struct Made {
     WeakRef owner{};                 // offline: the human it was made for
     int kind=-1;
     bool own=false,active=false,remote=false;
+    // A support Vehicler's (kZwCrewCatalog): `owner` the soldier, on the host / offline only (the guests: none).
+    bool crew=false;
     // Its owner's from the courier's hand-over on (a start vehicle at once); no longer once a resupply replaced it.
     bool handed=true,replaced=false;
     // A resupply's: its courier, the NetIds every machine knows them by, the vehicle it replaces, the held price.
@@ -124,6 +128,17 @@ struct Planned {
     Footprint spot{};
 };
 Planned planned[kMostPlanned]{};
+// Host (offline this machine): the support Vehiclers noted for a vehicle of their own (zw_crew_vehicle_logic.h).
+struct Crew {
+    WeakRef soldier{};
+    zwcrew::Entry entry{};
+    std::uint16_t generation=0;   // this slot's: the ticket a plan carries (stale once the slot is taken again)
+    std::uint32_t request=0;
+};
+Crew crews[zwcrew::kMostCrews]{};
+Crew* submittingCrew=nullptr;
+static_assert(zwcrew::kCrewKind>=0 && zwcrew::kCrewKind<kZwVehicleCount,"the crew's kind is a Vehicler's vehicle");
+static_assert(zwdispatch::kZwCrewCatalog<support_net::kMissionCrewCatalog,"a support transaction catalog");
 // This machine's own start and resupply requests (the split screen's two players offline).
 struct Local {
     WeakRef human{};
@@ -190,8 +205,16 @@ Local* LocalFor(unsigned char* human) noexcept {
     for(auto& l:locals)if(!l.human || !objref::Exists(l.human)){l=Local{};l.human=ObjRef::Of(human);return &l;}
     return nullptr;
 }
+// The crew slot a ticket (zwcrew::Encode: a crew request's loadout, its plan's variant) names, still that soldier's.
+Crew* CrewOf(std::uint64_t ticket) noexcept {
+    zwcrew::Ticket t{};
+    if(!zwcrew::Decode(ticket,&t))return nullptr;
+    Crew& c=crews[t.slot];
+    return c.soldier && c.generation==t.generation ? &c : nullptr;
+}
 // The owner a made record's vehicle answers to now, live; nullptr when not (or no longer) found.
 const unsigned char* OwnerOf(const Made& m) noexcept {
+    if(m.crew)return Alive(m.owner) ? m.owner.Obj() : nullptr;
     if(!InSession())return Alive(m.owner) ? m.owner.Obj() : nullptr;
     if(NoRequester(m.requester))return nullptr;
     MarkIdentities ids{};
@@ -313,14 +336,34 @@ bool Apply(std::uint64_t tx,const SupportPlan& plan,bool remote) noexcept {
     std::memcpy(m->requester,plan.requester,sizeof(m->requester));
     if(!networked && offlineOwner)m->owner=ObjRef::Of(offlineOwner);
     m->own=!networked || SupportPlanRequesterIsLocal(plan);
+    m->crew=plan.catalogId==zwdispatch::kZwCrewCatalog;
+    // A crew vehicle's owner is the soldier its ticket names: the host's (offline this machine's) own table; a guest has none.
+    if(m->crew && (!networked || OnlineHostOnly()))
+        if(Crew* c=CrewOf(u.variant))m->owner=c->soldier;
     std::memcpy(m->hullNet,u.netId,sizeof(m->hullNet));
-    if(m->own && networked)
+    if(m->own && networked && !m->crew)
         if(Local* l=FindLocal(PlayerHuman()))if(l->state==ZwStartState::pending)l->transaction=tx;
     Log("ZW VEHICLE spawn %llu: %ls at (%.1f,%.1f,%.1f), %s%s",static_cast<unsigned long long>(tx),kZwVehicles[kind].row,
         u.matrix[12],u.matrix[13],u.matrix[14],networked ? "networked" : "offline",m->own ? " (this machine's player's)" : "");
     return true;
 }
 void ActivateDelivery(Made& m) noexcept;
+// A crew vehicle active: the host (offline this machine) sends its soldier aboard, to its driver seat (NpcBoardCrew: it
+// walks the few metres; the guests follow the native ride). Its slot is done either way (one vehicle a soldier).
+void ActivateCrew(Made& m) noexcept {
+    const bool authority=!InSession() || OnlineHostOnly();
+    Crew* c=nullptr;
+    for(auto& k:crews)if(k.soldier && m.owner && k.soldier.Is(m.owner.Obj())){c=&k;break;}
+    if(c)zwcrew::Made(c->entry);
+    if(!authority) {
+        Log("ZW CREW %llu active: %ls (the host's soldier boards it)",static_cast<unsigned long long>(m.transaction),kZwVehicles[m.kind].row);
+        return;
+    }
+    unsigned char* soldier[]={Alive(m.owner) ? m.owner.Obj() : nullptr};
+    const bool boarded=soldier[0] && Alive(m.vehicle) && NpcBoardCrew(m.vehicle.Obj(),soldier,1)==1;
+    Log("ZW CREW %llu active: %ls, its soldier %s",static_cast<unsigned long long>(m.transaction),kZwVehicles[m.kind].row,
+        boarded ? "sent aboard" : !soldier[0] ? "gone (the hull is left empty)" : "not sent aboard (it fights on foot)");
+}
 // Every machine, every frame: a made hull active once its transaction is (offline at once); its owner's request ready.
 void Activate() noexcept {
     for(auto& m:made) {
@@ -328,6 +371,7 @@ void Activate() noexcept {
         if(InSession() && !SupportTransactionActive(m.transaction))continue;
         m.active=true;
         if(m.deliver){ActivateDelivery(m);continue;}
+        if(m.crew){ActivateCrew(m);continue;}
         Local* l=nullptr;
         if(!InSession())l=m.owner ? FindLocal(m.owner.Obj()) : nullptr;
         else if(m.own)l=FindLocal(PlayerHuman());
@@ -339,7 +383,8 @@ void Activate() noexcept {
 void Forget(const Made& m) noexcept {
     for(auto& p:planned) {
         if(!p.used)continue;
-        const bool same=InSession() ? !NoRequester(m.requester) && !std::memcmp(p.requester,m.requester,sizeof(p.requester)) :
+        // A crew vehicle's spot is its soldier's (its requester is the host's, whose own start is another record).
+        const bool same=m.crew ? m.owner && p.human.Is(m.owner.Obj()) : InSession() ? !NoRequester(m.requester) && !std::memcmp(p.requester,m.requester,sizeof(p.requester)) :
                                       m.owner && p.human.Is(m.owner.Obj());
         if(same){p=Planned{};break;}
     }
@@ -817,7 +862,95 @@ void OfflineDeliveries() noexcept {
         Activate();
     }
 }
+
+// --- a support Vehicler's own vehicle (kZwCrewCatalog) ---
+int SlotOf(const Crew& c) noexcept { return static_cast<int>(&c-crews); }
+// In no vehicle (the native ride's weak pointer, ride_native.h kHumanRiding, empty).
+bool OnFoot(const unsigned char* soldier) noexcept {
+    __try {
+        return Readable(soldier,ride_native::kHumanRiding+sizeof(void*)) && !At<const void*>(soldier,ride_native::kHumanRiding);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// Its hull beside it, as a player's start vehicle (BuildStart), the plan carrying its ticket.
+bool BuildCrew(const Crew& c,SupportPlan* out,Footprint* spot,const char** why) noexcept {
+    if(!BuildStart(c.soldier.Obj(),zwcrew::kCrewKind,out,spot,why))return false;
+    out->catalogId=zwdispatch::kZwCrewCatalog;
+    out->units[0].variant=zwcrew::Encode(zwcrew::kCrewKind,SlotOf(c),c.generation);
+    return true;
+}
+void NotePlannedCrew(const Crew& c,const Footprint& spot) noexcept {
+    if(Planned* p=FreePlanned()){p->used=true;p->human=c.soldier;p->spot=spot;}
+}
+Crew* CrewOwning(const Made& m) noexcept {
+    if(!m.owner)return nullptr;
+    for(auto& c:crews)if(c.soldier && c.soldier.Is(m.owner.Obj()))return &c;
+    return nullptr;
+}
+bool PositionOf(const unsigned char* soldier,float* at) noexcept {
+    __try {std::memcpy(at,soldier+kPosition,3*sizeof(float));return std::isfinite(at[0]+at[1]+at[2]);}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// Host (offline this machine), every frame: each noted soldier on its feet long enough asks for its vehicle.
+void CrewVehicles() noexcept {
+    if(InSession() && !OnlineHostOnly())return;
+    const ULONGLONG now=GameMs();
+    // Online one ask at a time: the session takes one map request of the host's at a time, 2 s apart
+    // (support_protocol.cpp HostRequest); the others wait their turn (their clocks run on).
+    bool asking=false;
+    for(const auto& c:crews)asking=asking || (c.soldier && c.entry.phase==zwcrew::Phase::asked);
+    for(auto& c:crews) {
+        if(!c.soldier)continue;
+        if(!Alive(c.soldier)){const auto g=c.generation;c=Crew{};c.generation=g;continue;}   // dead / gone: the slot is free
+        if(c.entry.phase!=zwcrew::Phase::waiting || (InSession() && asking))continue;
+        const auto act=zwcrew::Step(c.entry,now,OnFoot(c.soldier.Obj()));
+        if(act==zwcrew::Act::giveUp){Log("ZW CREW slot %d: no vehicle after %d tries: the soldier fights on foot",SlotOf(c),c.entry.tries);continue;}
+        if(act!=zwcrew::Act::ask)continue;
+        if(UnderGround() || !ZwVehicleReady(zwcrew::kCrewKind)) {
+            c.entry.phase=zwcrew::Phase::givenUp;
+            Log("ZW CREW slot %d: no vehicle: %s",SlotOf(c),UnderGround() ? "underground (no vehicle is made there)" :
+                "ZW_V1_HSTVL not installed / preloaded here (EDF6VC_ZW_HSTVL.SGO: reinstall)");
+            continue;
+        }
+        if(!InSession()) {
+            SupportPlan plan{};Footprint spot{};const char* why="";
+            if(!BuildCrew(c,&plan,&spot,&why) || !ValidateZwVehiclePlan(plan)) {
+                Log("ZW CREW slot %d (offline): not planned (%s), asks again",SlotOf(c),why);
+                zwcrew::Refused(c.entry,now);continue;
+            }
+            const std::uint64_t tx=nextOffline++;
+            if(!Apply(tx,plan,false)){zwcrew::Refused(c.entry,now);continue;}
+            NotePlannedCrew(c,spot);
+            Activate();
+            continue;
+        }
+        float at[3]{};
+        if(!PositionOf(c.soldier.Obj(),at)){zwcrew::Refused(c.entry,now);continue;}
+        wchar_t note[128]{};
+        c.request=0;
+        submittingCrew=&c;
+        const bool sent=SubmitSupportRequest(static_cast<int>(zwdispatch::kZwCrewCatalog),at,note,_countof(note),
+                                             zwcrew::Encode(zwcrew::kCrewKind,SlotOf(c),c.generation));
+        submittingCrew=nullptr;
+        if(!sent && c.entry.phase==zwcrew::Phase::asked)zwcrew::Refused(c.entry,now);
+        asking=asking || c.entry.phase==zwcrew::Phase::asked;
+        Log("ZW CREW slot %d: request %s (request %u, try %d)",SlotOf(c),sent ? "submitted" : "not taken now",c.request,c.entry.tries);
+    }
+}
 }  // namespace
+
+void NoteZwCrewVehicler(const ObjRef& soldier) noexcept {
+    if((InSession() && !OnlineHostOnly()) || !soldier || soldier::ZwType(soldier.obj)!=zwclass::kVehicler)return;
+    Crew* free=nullptr;
+    for(auto& c:crews) {
+        if(c.soldier && c.soldier.Is(soldier.obj))return;   // noted already
+        if(!free && (!c.soldier || !objref::Exists(c.soldier)))free=&c;
+    }
+    if(!free){Log("ZW CREW: no slot free for a support Vehicler (%d at once): it fights on foot",zwcrew::kMostCrews);return;}
+    const auto g=zwcrew::NextGeneration(free->generation);
+    *free=Crew{};free->generation=g;free->soldier=soldier;
+    zwcrew::Note(free->entry,GameMs());
+    Log("ZW CREW slot %d: a support Vehicler noted, its vehicle asked once it stands",SlotOf(*free));
+}
 
 bool RequestZwStart(unsigned char* human,int kind) noexcept {
     if(!human || !ZwVehicleInfo(kind))return false;
@@ -977,6 +1110,20 @@ support_net::PlanResult PlanZwVehicle(std::uint32_t peer,std::uint32_t catalog,c
     using support_net::PlanResult;
     (void)target;
     if(!out)return PlanResult::refused;
+    if(catalog==zwdispatch::kZwCrewCatalog) {
+        // The host's own request only (peer 0, support_protocol.cpp Session::Submit): its ticket names its own table's soldier.
+        Crew* c=peer==0 ? CrewOf(loadout) : nullptr;
+        if(!c || !Alive(c->soldier)) {
+            Log("ZW CREW plan for peer %u refused: %s",peer,peer ? "only the host asks for a support soldier's vehicle" : "its soldier is gone");
+            return PlanResult::refused;
+        }
+        Footprint spot{};const char* why="";
+        if(!BuildCrew(*c,out,&spot,&why)){Log("ZW CREW plan slot %d refused: %s",SlotOf(*c),why);return PlanResult::refused;}
+        NotePlannedCrew(*c,spot);
+        Log("ZW CREW plan slot %d: %ls at (%.1f,%.1f,%.1f)",SlotOf(*c),kZwVehicles[zwcrew::kCrewKind].row,out->units[0].matrix[12],
+            out->units[0].matrix[13],out->units[0].matrix[14]);
+        return PlanResult::ready;
+    }
     ObjRef requester{};
     unsigned char id[32]{};
     const char* what=catalog==zwdispatch::kZwDeliverCatalog ? "DELIVER" : "START";
@@ -1014,10 +1161,14 @@ support_net::PlanResult PlanZwVehicle(std::uint32_t peer,std::uint32_t catalog,c
 
 bool ValidateZwVehiclePlan(const SupportPlan& plan) noexcept {
     if(plan.catalogId==zwdispatch::kZwDeliverCatalog)return ValidDeliver(plan);
-    if(plan.catalogId!=zwdispatch::kZwStartCatalog || plan.count!=1 || UnderGround())return false;
+    const bool crew=plan.catalogId==zwdispatch::kZwCrewCatalog;
+    if((plan.catalogId!=zwdispatch::kZwStartCatalog && !crew) || plan.count!=1 || UnderGround())return false;
     const auto& u=plan.units[0];
     const int kind=ZwVehicleKindOfResource(u.resourceId);
-    if(kind<0 || !ZwVehicleReady(kind) || u.role || u.variant || u.arms || u.offhand || !MatrixOk(u.matrix))return false;
+    // A start carries no variant; a crew vehicle its ticket (its kind the crew's, the one every machine preloads).
+    zwcrew::Ticket ticket{};
+    const bool variantOk=crew ? zwcrew::Decode(u.variant,&ticket) && ticket.kind==kind && kind==zwcrew::kCrewKind : !u.variant;
+    if(kind<0 || !ZwVehicleReady(kind) || u.role || !variantOk || u.arms || u.offhand || !MatrixOk(u.matrix))return false;
     const float dx=u.matrix[12]-plan.target[0],dz=u.matrix[14]-plan.target[2];
     return std::isfinite(dx+dz) && dx*dx+dz*dz<=kPlanReach*kPlanReach;
 }
@@ -1042,6 +1193,8 @@ void DestroyZwVehiclePlan(std::uint64_t tx) noexcept {
             for(auto& l:locals)
                 if(l.delivering && (InSession() ? l.human.Is(PlayerHuman()) : m->owner && l.human.Is(m->owner.Obj())))l.delivering=false;
     }
+    if(m->crew && !m->active)
+        if(Crew* c=CrewOwning(*m))zwcrew::Refused(c->entry,GameMs());   // the host's: its soldier asks again
     for(auto& l:locals)if(l.transaction==tx && l.state!=ZwStartState::none)l.state=ZwStartState::refused;
     if(!m->deliver)Forget(*m);
     Log("ZW VEHICLE %llu rolled back",static_cast<unsigned long long>(tx));
@@ -1052,7 +1205,16 @@ bool ZwVehicleRequestNotice(std::uint32_t req,support_net::RequestStatus status)
     using support_net::RequestStatus;
     if(submitting && submittingFor && status==RequestStatus::accepted && req){submittingFor->request=req;return true;}
     if(submittingDeliver && submittingFor && status==RequestStatus::accepted && req){submittingFor->deliverRequest=req;return true;}
+    if(submittingCrew && status==RequestStatus::accepted && req){submittingCrew->request=req;return true;}
     if(!req)return false;
+    for(auto& c:crews) {
+        if(!c.soldier || c.request!=req)continue;
+        if(status>=RequestStatus::refused && c.entry.phase==zwcrew::Phase::asked) {
+            Log("ZW CREW request %u ended without a vehicle (status %u): asks again",req,static_cast<unsigned>(status));
+            zwcrew::Refused(c.entry,GameMs());
+        }
+        return true;
+    }
     for(auto& l:locals) {
         if(l.request==req) {
             if(status>=RequestStatus::refused && l.state==ZwStartState::pending) {
@@ -1077,6 +1239,7 @@ void ZwVehicleTick() noexcept {
     OfflineDeliveries();
     if(!InSession() || OnlineHostOnly())ExpireHolds();
     Couriers();
+    CrewVehicles();
     VehiclerLogisticsTick();
 }
 
@@ -1086,6 +1249,8 @@ void ResetZwVehicles() noexcept {
     for(auto& p:planned)p=Planned{};
     for(auto& l:locals)l=Local{};
     for(auto& h:held)h=Held{};
+    for(auto& c:crews){const auto g=c.generation;c=Crew{};c.generation=g;}
+    submittingCrew=nullptr;
     if(planningRow.Allocated())Renew(planningRow[0]);
     submitting=submittingDeliver=false;submittingFor=nullptr;offlineOwner=nullptr;serial=0;
     ResetVehiclerLogistics();
