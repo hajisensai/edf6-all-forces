@@ -91,6 +91,9 @@ class Vehicle:
     # A store slot's muzzles (make_tracked_combat slot: a weapon besides the gun pair, firing from them) where no node
     # of its own gives them: slot -> (bone, [model-space points]). The PzH 2000's roof MG3: its barrel's front face.
     stores: dict[str, tuple[str, list[tuple[float, float, float]]]] = field(default_factory=dict)
+    # Source materials left out with their triangles: a glass the export gave no map at all (the HSTV-L's sight and
+    # periscope panes: black, `d 0.17`, no map_Kd), which texture_set cannot take.
+    drop_materials: tuple[str, ...] = ()
 
 
 M163 = Vehicle(
@@ -299,8 +302,102 @@ TOS1 = Vehicle(
     collision={'cannon_l': [r'^launcher$'], 'cannon_r': [r'^launcher$']},
 )
 
+# The Vehicler's cars (docs/plan-2026-11-28-zero-worldline-gear.md §1.1 V1..V3, docs/newclass-re/vehicler.md §1.2:
+# KojfDiscord's War Thunder exports like the M163's, 2026-11-28). Their folders are prepared and shipped
+# (tools/build_release.py RELEASE_MODELS); the kinds are not make_tracked_combat's yet: pylib/wt_tracked.py FOLDERS
+# takes them when the Vehicler's generator (tools/make_zw_vehicles.py) builds them. The pivots are read off the nodes'
+# boxes and a circle fit of the turret's basket, not off side renders as the M163's / BMPT's were: an in-game look is due.
+#
+# V1 HSTV-L: the 75 mm ARES gun on an overhead cradle (gun_mask) over a low turret; the idler in front (A), five road
+# wheels (B..F), the sprocket behind (G, split onto H as the M163's idler: the V603 has eight stations).
+HSTVL = Vehicle(
+    kind='hstvl', folder='wt_hstvl', title='HSTV-L (War Thunder)',
+    source_url='https://sketchfab.com/3d-models/hstv-l-war-thunder-b030a4928dc04736acc71a31f2d1fd37',
+    rules=[
+        (r'^wheel_([lr])_front$', 'tire_moveA_{0}'),
+        (r'^wheel_([lr])_0([1-5])$', 'tire_move{B}_{0}'),
+        (r'^wheel_([lr])_drive$', 'tire_moveG_{0}'),
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^gun_barrel$', 'cannon_slide_l'),
+        # the cradle, its cable, the hatch on its top and the coaxial MG elevate with the gun
+        (r'^(gun_mask|gun_mask_cable|hatch_04|bone_mg_twin_01)$', 'cannon_l'),
+        (r'^optic_commander$', 'doppler_radar'),                 # the commander's sight
+        (r'^hatch_03$', 'tracking_radar'),                       # the commander's hatch
+        # the turret's own texture (a9c8...): its bustle racks, side boxes and the roof AA MG with its ammunition
+        (r'^(bone_turret|bone_turret_02|ex_decor_0[23]|ex_decor_l_0[456]|bone_mg_aa_v_01|ammo)$', 'cannon_main'),
+    ],
+    turret=(0.0, 1.45, -0.52),       # basket circle fit at y 0.9..1.4: centre z -0.51..-0.53, r 0.75..0.86; hull roof 1.45
+    trunnion={'cannon_l': (1.75, 0.80), 'cannon_r': (1.75, 0.80)},    # the cradle's trunnion block (z 0.81 slice)
+    barrels={'left': 'gun_barrel', 'right': 'gun_barrel'},
+    split_idler='tire_moveG',
+    drop_materials=('dd9583da-d732-4249-8e84-d5f4469bde1e',),
+    collision={'cannon_l': [r'^(gun_barrel|gun_mask|gun_mask_cable|hatch_04|bone_mg_twin_01)$'],
+               'cannon_r': [r'^gun_mask$']},
+)
+
+# V2 M247 Sergeant York: twin 40 mm L/70 on an M48 turret, the search radar on its back, the tracking radar on the
+# right front; the M48's running gear: the idler in front (A), six road wheels (B..G), the sprocket behind (H).
+M247 = Vehicle(
+    kind='m247', folder='wt_m247', title='M247 Sergeant York (War Thunder)',
+    source_url='https://sketchfab.com/3d-models/m247-sergeant-york-war-thunder-d5dea5cc896648fbb2e55a6670c3c712',
+    rules=[
+        (r'^wheel_([lr])_front$', 'tire_moveA_{0}'),
+        (r'^wheel_([lr])_0([1-6])$', 'tire_move{B}_{0}'),
+        (r'^wheel_([lr])_drive$', 'tire_moveH_{0}'),
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^gun_barrel_02$', 'cannon_slide_l'),                  # +x: the left gun
+        (r'^gun_barrel_01$', 'cannon_slide_r'),
+        (r'^bone_gun$', 'cannon_l'),                             # the guns' common cradle
+        (r'^antenna_target_location$', 'doppler_radar'),         # the search radar on the turret's back
+        (r'^antenna_target_tagging$', 'tracking_radar'),         # the tracking radar
+        # the turret's own texture (b048...): sights, hatches, side boxes, the radar mounts; the whip antennas
+        (r'^(bone_turret|ex_armor_02|ex_decor_l_0[45]|ex_decor_r_0[47]|hatch_0[345]|optic_commander|roll_0[12]|'
+         r'antenna_0[12]|antenna_target_location_mount|antenna_target_tagging_mount)$', 'cannon_main'),
+    ],
+    turret=(0.0, 1.80, 0.54),        # basket circle fit at y 1.45..1.85: centre z 0.53..0.55, r 0.96..1.26; roof 1.80
+    trunnion={'cannon_l': (2.40, 1.00), 'cannon_r': (2.40, 1.00)},    # the barrels' axis behind the cradle's face plate
+    barrels={'left': 'gun_barrel_02', 'right': 'gun_barrel_01'},
+    # each barrel node also carries its breech and feed inside the turret (x 0..1.14 at z < 0.5): the bore is the
+    # front slices' middle (x +-0.18, y 2.40 at z 3.2..3.74), not the node's box
+    mouths={'left': (0.175, 2.40, 3.74), 'right': (-0.175, 2.40, 3.74)},
+    # the cradle's collision is the turret's (on cannon_l it would wrap the right barrel, its sibling); each barrel's
+    # body is its barrel ahead of the turret's face
+    collision={'cannon_l': [r'^gun_barrel_02$'], 'cannon_r': [r'^gun_barrel_01$'],
+               'cannon_main': [r'^(bone_turret|ex_armor_02|ex_decor_l_0[45]|ex_decor_r_0[47]|hatch_0[345]|'
+                               r'optic_commander|roll_0[12]|antenna_target_location_mount|'
+                               r'antenna_target_tagging_mount|bone_gun)$']},
+    clip={'cannon_l': (2, 'min', 1.95), 'cannon_r': (2, 'min', 1.95)},
+)
+
+# V3 MBT-70 (the US version: the 152 mm XM150 gun / launcher, the remote 20 mm on the turret's right); the hull node is
+# `root`; the idler in front (A), six road wheels (B..G), the sprocket behind (H). The 20 mm's barrel front is a store
+# slot's muzzle as the PzH 2000's MG3. The hydropneumatic lift is not modelled (docs/newclass-re/vehicler.md §6.4).
+MBT70 = Vehicle(
+    kind='mbt70', folder='wt_mbt70', title='MBT-70 (War Thunder)',
+    source_url='https://sketchfab.com/3d-models/mbt-70-war-thunder-3cc1dbc72f724d1887e52998c86b9fa6',
+    rules=[
+        (r'^wheel_([lr])_front$', 'tire_moveA_{0}'),
+        (r'^wheel_([lr])_0([1-6])$', 'tire_move{B}_{0}'),
+        (r'^wheel_([lr])_drive$', 'tire_moveH_{0}'),
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^gun_barrel$', 'cannon_slide_l'),
+        (r'^(bone_gun|bone_mg_gun_twin|ex_lantern_06)$', 'cannon_l'),    # the mantlet, the coaxial MG, its searchlight
+        (r'^bone_turret_02$', 'doppler_radar'),                  # the commander's cupola
+        (r'^hatch_03$', 'tracking_radar'),                       # the loader's hatch
+        # the turret's own texture (6e79...) and the 20 mm mount (d2e5...): armour, boxes, smoke mortars, lamps, hatches
+        (r'^(bone_turret|bone_turret_01|ex_armor_0[3-6]|ex_decor_1[1-5]|ex_lantern_0[345]|ex_mortar_.*|'
+         r'hatch_0[4-7]|antenna_0[1-3]|cannon_breech_01|gun_barrel_01|gun_mount_0[12])$', 'cannon_main'),
+    ],
+    turret=(0.0, 1.20, 0.87),        # basket circle fit at y 0.7..1.3: centre z 0.86..0.88, r 0.82..0.93; skirt from 1.18
+    trunnion={'cannon_l': (1.72, 2.30), 'cannon_r': (1.72, 2.30)},    # the barrel's axis behind the gun shield
+    barrels={'left': 'gun_barrel', 'right': 'gun_barrel'},
+    hull='root',
+    collision={'cannon_l': [r'^(gun_barrel|bone_gun)$'], 'cannon_r': [r'^bone_gun$']},
+    stores={'mg': ('cannon_main', [(1.10, 2.56, 2.18)])},      # the 20 mm's barrel front (gun_barrel_01's box)
+)
+
 VEHICLES = {'m163': M163, 'bmpt': BMPT, 'tunguska': TUNGUSKA, 'pzh2000': PZH2000, 'sturmtiger': STURMTIGER,
-            'apocalypse': APOCALYPSE, 'tos1': TOS1}
+            'apocalypse': APOCALYPSE, 'tos1': TOS1, 'hstvl': HSTVL, 'm247': M247, 'mbt70': MBT70}
 LETTERS = 'ABCDEFGH'
 
 
@@ -438,8 +535,12 @@ def triangle_bones(v: Vehicle, src: Source) -> np.ndarray:
 
 
 def drop(v: Vehicle, src: Source) -> None:
-    """Leave out the triangles of every node a rule sends to DROP."""
+    """Leave out the triangles of every node a rule sends to DROP and of every material in v.drop_materials."""
     gone = np.asarray([bone_of(v, node(o)) == DROP for o in src.objects])[src.tri_obj]
+    for m in v.drop_materials:
+        if m not in src.materials:
+            raise ValueError(f'drop_materials: no material {m}')
+        gone |= src.tri_mat == src.materials.index(m)
     if gone.any():
         keep = ~gone
         src.tri_v, src.tri_t, src.tri_obj, src.tri_mat = (a[keep] for a in (src.tri_v, src.tri_t, src.tri_obj, src.tri_mat))
