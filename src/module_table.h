@@ -86,6 +86,7 @@
 #include "soldier_classes.h"
 #include "vehicler_foot.h"
 #include "runeblade.h"
+#include "runeblade_melee.h"
 #include "vehicler_start.h"
 #include "weapon_equip.h"
 #include "loadout_store.h"
@@ -257,6 +258,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kSoldierFactory,"soldier factory",kLoadOnly) \
     M(kVehiclerFoot,"vehicler foot",kLoadOnly) \
     M(kRuneBlade,"runeblade",kLoadOnly) \
+    M(kRuneBladeMelee,"runeblade melee",kLoadOnly) \
     M(kSoldierTypePatches,"soldier type patches",kLoadOnly) \
     M(kEnemyControlRadar,"enemy control radar",kLoadOnly) \
     M(kControlledPvpSpawn,"controlled pvp spawn",kLoadOnly) \
@@ -360,6 +362,8 @@ constexpr InstallEntry kInstalls[]={
     // and the bullet falloff gate widened to AmmoDamageReduce a > 1 (the Gyrojet's damage growing with its flight)
     {IP::kBeforeGameStatus,Id::kVehiclerFoot,&Install<&InstallVehiclerFoot>},
     {IP::kBeforeGameStatus,Id::kRuneBlade,&Install<&InstallRuneBlade>},
+    // the RuneBlade's melee and special arms (runeblade_melee.cpp): AssultSoldier's live frame slot chained after the one above
+    {IP::kBeforeGameStatus,Id::kRuneBladeMelee,&Install<&InstallRuneBladeMelee>},
     // six player classes (soldier_classes.cpp): before the game status, whose constructor reads the mode data's
     // SoldierInit (SetMode 0xDC460 from 0xD6722)
     {IP::kBeforeGameStatus,Id::kSoldierClasses,&Install<&InstallSoldierClasses>},
