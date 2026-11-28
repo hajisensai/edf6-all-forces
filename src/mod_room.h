@@ -87,8 +87,13 @@ namespace crew {
 //      pass under each entry.
 //  26 (2026-11-27): the map command card trimmed (command protocol v12: FAST MOVE / SMOKE retired, BOARD's vehicle in
 //      the request's focus). An older build would send orders the host refuses and board another vehicle.
+//  27 (2026-11-28): the TU-1600 became the Arsenal Bird (docs/feedback-2026-11-28-arsenal-bird.md): the catalog gained its
+//      drone mode's guard / follow (tools/calls.py ARSENAL_BIRD / _F, JetRole::arsenalCarrier, mark 7071) before its sortie,
+//      so every entry after them moved by two, and a gun drone is its carrier's (jet_spawn.cpp DroneBody: the Arsenal
+//      Bird's resolve to the M101, mark 7072). An older build would read another catalog id and make the gun drone a
+//      carrier launches in the stock drone body.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=26;  // the map card trimmed: FAST MOVE / SMOKE retired, BOARD names its vehicle
+constexpr std::int64_t kAllForcesRoomProtocol=27;  // the Arsenal Bird: two catalog entries, M101 gun drones
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

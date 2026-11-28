@@ -1610,7 +1610,7 @@ int ExtendFlipSuite(const char* outDir) {
 }
 }  // namespace
 
-// --rain-suite (the user, 2026-11-27: 「这个天顶飞机 飞行有问题吧」): the zenith interceptor's missile rain (jet_sortie.cpp
+// --rain-suite (the user, 2026-11-27: 「这个天顶飞机 飞行有问题吧」): the salvo sortie's missile rain (then the zenith interceptor, now the Arsenal Bird) (jet_sortie.cpp
 // SortiePass::missileRain) flown through the production PickTarget / SortieGuide / Wing / Fire, as in the 2026-11-27
 // 17:44:07 log (heights over this world's ground, the log's less 23 m): in from (-1950, 203, -343) on its lane through the
 // mark (113, 0, -176), its magazine's burden holding it at 113 m/s, one enemy on the ground under its way in `back` m

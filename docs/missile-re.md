@@ -142,7 +142,7 @@ MissileBullet02：vtable `0x17A1E28`，构造 `0x26AF70`，update `0x26E4C0`；�
 | 子弹 CP[15][12] | [1.15, 1.1, 1.05, 0.55] | 子弹的 AmmoColor，烟更淡更细 |
 | 子弹 CP[2] | 240 帧 | 子弹烟尾寿命（原 160） |
 
-AI（`src/jet_combat.cpp`）：天顶导弹雨的开火门用 `sortie::kRainFireCone` = 0.8 rad；HoldFire 按子弹速度 `kRainRoundSpeed` = 660 m/s、重力 0 判断（母弹 AmmoSpeed 0.15 m/帧和 4 倍重力只是出膛那 24 帧，按它们算会把射线目标的瞄点抬高、飞行时间算长）。
+AI（`src/jet_combat.cpp`）：武库鸟（原天顶）导弹雨的开火门用 `sortie::kRainFireCone` = 0.8 rad；HoldFire 按子弹速度 `kRainRoundSpeed` = 660 m/s、重力 0 判断（母弹 AmmoSpeed 0.15 m/帧和 4 倍重力只是出膛那 24 帧，按它们算会把射线目标的瞄点抬高、飞行时间算长）。
 
 做不到的：
 

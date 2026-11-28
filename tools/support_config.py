@@ -22,7 +22,8 @@ WEAPONS_EN = {'rifle': 'rifle', 'flame': 'flamethrower', 'rocket': 'rocket', 'sh
 AIR_KEYS = ('INTERCEPTOR', 'INTERCEPTOR_F', 'STRIKE', 'STRIKE_F', 'SORTIE_DIVE', 'MULTIROLE', 'MULTIROLE_F',
             'SORTIE_MISSILE_PASS', 'FIGHTER', 'FIGHTER_F', 'SORTIE_WOLFPACK', 'CARRIER', 'CARRIER_F', 'HELI',
             'SORTIE_HELI_CIRCLE', 'HELI_F', 'SORTIE_HELI_STRAFE', 'BLAST_CARRIER', 'BLAST_CARRIER_F', 'DOLL_CARRIER',
-            'DOLL_CARRIER_F', 'SUB', 'GUNSHIP', 'GUNSHIP_F', 'SORTIE_GUIDED', 'MEDIC_HELI', 'MEDIC_HELI_F', 'SORTIE_MISSILE_RAIN')
+            'DOLL_CARRIER_F', 'SUB', 'GUNSHIP', 'GUNSHIP_F', 'SORTIE_GUIDED', 'MEDIC_HELI', 'MEDIC_HELI_F', 'ARSENAL_BIRD',
+            'ARSENAL_BIRD_F', 'SORTIE_MISSILE_RAIN')
 GROUND_KEYS = ('SQUAD', 'PLATOON', 'TANK_CREWED', 'TANK_DELIVERY', 'TRANSPORT_CREWED', 'TRANSPORT_DELIVERY', 'TRUCK_CREWED',
                'TRUCK_DELIVERY', 'SQUAD_HELI', 'PLATOON_HELI',
                'SQUAD_AIRDROP', 'PLATOON_AIRDROP', 'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP')
@@ -33,7 +34,7 @@ LABELS = dict(zip(AIR_KEYS + GROUND_KEYS, (
     '多用途机·出击', '制空战斗机·守点', '制空战斗机·跟随', '制空战斗机·出击', '无人机母舰·守点', '无人机母舰·跟随',
     '直升机·守点', '直升机·出击（Brute 410）', '直升机·跟随', '直升机·出击（Eros 506）', '自爆无人机母舰·守点',
     '自爆无人机母舰·跟随', '人偶无人机母舰·守点', '人偶无人机母舰·跟随', '潜水母舰', '炮艇机·守点', '炮艇机·跟随',
-    '炮艇机·出击', '医疗直升机·守点', '医疗直升机·跟随', '天顶截击机',
+    '炮艇机·出击', '医疗直升机·守点', '医疗直升机·跟随', '武库鸟·守点', '武库鸟·跟随', '武库鸟·出击',
     '步兵小队（4人）', '步兵大队（12人）', '坦克·有人', '坦克·空车交付',
     '装甲运兵车·有人', '装甲运兵车·空车交付', '民用轻卡·有人', '民用轻卡·空车交付',
     '直升机机降·小队（4人）', '直升机机降·大队（12人）', '运输机空降·小队（4人）', '运输机空降·大队（12人）',
@@ -48,7 +49,8 @@ LABELS_EN = dict(zip(AIR_KEYS + GROUND_KEYS, (
     'Drone carrier (hold)', 'Drone carrier (follow)', 'Helicopter (hold)', 'Helicopter, Brute 410 (sortie)',
     'Helicopter (follow)', 'Helicopter, Eros 506 (sortie)', 'Suicide drone carrier (hold)', 'Suicide drone carrier (follow)',
     'Doll drone carrier (hold)', 'Doll drone carrier (follow)', 'Submarine carrier', 'Gunship (hold)', 'Gunship (follow)',
-    'Gunship (sortie)', 'Medical helicopter (hold)', 'Medical helicopter (follow)', 'Zenith interceptor',
+    'Gunship (sortie)', 'Medical helicopter (hold)', 'Medical helicopter (follow)', 'Arsenal Bird (hold)',
+    'Arsenal Bird (follow)', 'Arsenal Bird (sortie)',
     'Infantry squad (4)',
     'Infantry platoon (12)', 'Tank, crewed', 'Tank, delivered empty', 'APC, crewed', 'APC, delivered empty',
     'Light truck, crewed', 'Light truck, delivered empty', 'Helicopter insertion: squad (4)',

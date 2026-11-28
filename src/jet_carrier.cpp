@@ -171,9 +171,11 @@ bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const 
     const float from[3]={pos[0],pos[1]-kLaunchBelow,pos[2]};
     float heading[3]={aim[0]-from[0],0.0f,aim[2]-from[2]};
     if(!Normalize(heading)){heading[0]=nose[0];heading[2]=nose[2];}
-    // Its own drones (blast, doll: its body's mark says which) when their body is there this mission, else the gun drone.
+    // Its own drones (blast, doll: its body's mark says which) when their body is there this mission, else its gun drone
+    // (its body's mark's: the Arsenal Bird's M101, every other carrier's the drone; online SupportDroneKind::gun, which
+    // every peer makes of the carrier's mark: jet_spawn.cpp GunDroneOf).
     const Kind& own=KindOf(cs.drones);
-    const Body b=own.weapon==Weapon::charge && Preloaded(own.body) ? own.body : Body::drone;
+    const Body b=own.weapon==Weapon::charge && Preloaded(own.body) ? own.body : cs.gunDrone;
     if(InSession()) {
         const SupportDroneKind kind=b==Body::blast ? SupportDroneKind::blast : b==Body::doll ? SupportDroneKind::doll : SupportDroneKind::gun;
         const auto token=SubmitCarrierSupportDrone(c.ref,from,heading,aim,kind,static_cast<unsigned>(i));

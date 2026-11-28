@@ -364,7 +364,7 @@ Jet* NewEntry(unsigned char* v,ULONGLONG ms) noexcept {
     if(!j)return nullptr;
     *j=Jet{};
     j->ref=ref;HoldRef(ref);
-    j->role=role;j->carrier.drones=drones;j->carrier.sorties=kCarrierSorties;j->drone.slot=-1;
+    j->role=role;j->carrier.drones=drones;j->carrier.gunDrone=GunDroneOf(v);j->carrier.sorties=kCarrierSorties;j->drone.slot=-1;
     j->crewless=CrewlessJet(v);
     j->liftFans=LiftFanJet(v);
     j->bornAt=j->modeAt=j->seen=ms;
@@ -393,6 +393,13 @@ bool CrewlessJet(const unsigned char* v) noexcept {
     const float k=BodyMark(v);
     for(const auto& b:kBodies)if(b.mark>0.0f && k==b.mark)return b.crewless;
     return false;
+}
+Body GunDroneOf(const void* v) noexcept {
+    const auto* const p=static_cast<const unsigned char*>(v);
+    if(!p || crew::BodyOf(p)!=PluginBody::jet)return Body::drone;
+    const float k=BodyMark(p);
+    for(const auto& b:kBodies)if(b.mark>0.0f && k==b.mark)return b.gunDrone;
+    return Body::drone;
 }
 bool LiftFanJet(const unsigned char* v) noexcept {
     if(crew::BodyOf(v)!=PluginBody::jet)return false;

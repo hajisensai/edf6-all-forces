@@ -81,6 +81,9 @@ FILES: dict[str, str] = {
     'EDF6VC_JET_BLAST_CARRIER.SGO': 'edf6tr_jet_blast_carrier_mission',
     'EDF6VC_JET_DOLL_CARRIER.SGO': 'edf6tr_jet_doll_carrier_mission',
     vc.SALVO_OBJECT: vc.SALVO_JET,
+    # The Arsenal Bird's drone mode and the M101 it launches (src/jet_internal.h Body::arsenalCarrier, Body::m101Drone).
+    vc.ARSENAL_CARRIER_OBJECT: vc.ARSENAL_CARRIER_JET,
+    vc.M101_OBJECT: vc.M101_JET,
     # The jets the player flies (src/playerjet.cpp), which the Air Raider's EDF6VC_CALL_PJET_* weapons bring
     # (tools/call_weapons.py): with vehicle_setup as well as mission_setup.
     'EDF6VC_PJET_FIGHTER.SGO': 'edf6tr_pjet_fighter_mission',
@@ -407,23 +410,25 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
 
 
 def salvo_files(game, out: dict[str, bytes]) -> set[str]:  # noqa: ANN001 - rootcpk.Game
-    """The salvo interceptor's TU-1600 (pylib/salvo_model.py, made from the model pack's folder) and its collision, measured
-    off it as built (pylib/aircraft_collision.py SALVO_FILES), into `out`; the files of FILES not to write: without the
-    model folder its SGO (that call then does not deploy: src/jet_internal.h Body::salvoInterceptor's SGO is not there)."""
+    """The Arsenal Bird and its M101 (pylib/salvo_model.py, made from the model pack's folder) and their collision,
+    measured off them as built (pylib/aircraft_collision.py SALVO_FILES), into `out`; the files of FILES not to write:
+    without the model folder their SGOs (those calls then do not deploy: src/jet_internal.h Body::salvoInterceptor's,
+    Body::arsenalCarrier's and Body::m101Drone's SGOs are not there)."""
     import aircraft_collision
     import salvo_model
     if salvo_model.model_dir() is None:
-        print(tr(f'未找到天顶截击机模型（{salvo_model.MODEL_SUBDIR}/{salvo_model.MANIFEST}，可用环境变量 EDF6VC_MODELS 指定模型'
-                 '目录）：天顶截击机的呼叫不会出动。放好模型包后重新安装即可。',
-                 f'The salvo interceptor model was not found ({salvo_model.MODEL_SUBDIR}/{salvo_model.MANIFEST}; the '
-                 'environment variable EDF6VC_MODELS can name the model folder): the salvo interceptor call will not '
+        print(tr(f'未找到武库鸟模型（{salvo_model.MODEL_SUBDIR}/{salvo_model.MANIFEST}，可用环境变量 EDF6VC_MODELS 指定模型'
+                 '目录）：武库鸟的呼叫不会出动。放好模型包后重新安装即可。',
+                 f'The Arsenal Bird model was not found ({salvo_model.MODEL_SUBDIR}/{salvo_model.MANIFEST}; the '
+                 'environment variable EDF6VC_MODELS can name the model folder): the Arsenal Bird calls will not '
                  'deploy. Put the model pack in place and install again.'))
-        return {vc.SALVO_OBJECT}
-    arc, _info, md = salvo_model.build_archive(game)
-    out[f'OBJECT/{vc.SALVO_MODEL}'] = arc
-    jet_models._MODELS_MADE[(id(game), vc.SALVO_MODEL)] = md   # what jet_sgo measures (model_box, _model_of): this one
-    out[f'OBJECT/{aircraft_collision.SALVO_FILES[vc.SALVO_MODEL]}'] = aircraft_collision.airframe(
-        game, md, jet_models.model_box(game, vc.SALVO_MODEL)[0])
+        return {vc.SALVO_OBJECT, vc.ARSENAL_CARRIER_OBJECT, vc.M101_OBJECT}
+    for file, name in jet_models.SALVO_MODEL_NAMES.items():
+        arc, _info, md = salvo_model.build_archive(game, name)
+        out[f'OBJECT/{file}'] = arc
+        jet_models._MODELS_MADE[(id(game), file)] = md   # what jet_sgo measures (model_box, _model_of): this one
+        out[f'OBJECT/{aircraft_collision.SALVO_FILES[file]}'] = aircraft_collision.airframe(
+            game, md, jet_models.model_box(game, file)[0])
     return set()
 
 
@@ -431,7 +436,7 @@ def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
     objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, TRANSPORT_HELI_FILE, MODEL_FILE, *MODEL_FILES,
-               vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE, vc.SALVO_MODEL,
+               vc.GUNSHIP_MODEL_FILE, TRANSPORT_HELI_MODEL_FILE, *jet_models.SALVO_MODEL_NAMES,
                *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values(), *aircraft_collision.SALVO_FILES.values(),
                *jet_models.ANIMATIONS.values()]
     return texshare.names([f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)])

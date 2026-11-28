@@ -146,6 +146,7 @@ bool HooksOk() noexcept {return fixture::hookOk;}
 void JoinFlight(Jet& j,unsigned flight) noexcept {j.flight=flight;}
 Arms ReadArms(unsigned char*) noexcept {Arms a{};a.pick=-1;a.rocket=-1;return a;}   // jet_combat.cpp (not linked here)
 void AirborneStart(Jet& j,const Kind& k,const float* nose) noexcept {for(int i=0;i<3;++i)j.m.vel[i]=nose[i]*k.cruise;}   // jet_flight.cpp (not linked here)
+Body GunDroneOf(const void*) noexcept {return Body::drone;}
 bool IsJetVehicle(const unsigned char* object,Role* role,Role* drones) noexcept {
     if(object==fixture::parent && !fixture::carrierClass)return false;
     if(role)*role=object==fixture::parent ? Role::carrier : fixture::role;

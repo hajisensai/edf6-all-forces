@@ -41,9 +41,9 @@ DN_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.DN_FILES
 C130_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.C130_FILES}
 # ...and the support's air carrier (pylib/helicarrier_model.py): tools/make_helicarrier.py writes it the same way.
 HELICARRIER_FILES = {jet_models.HELICARRIER_FILE: jet_models.HELICARRIER_FILE.replace('.MRAB', '_AIRFRAME.SHKT')}
-# ...and the salvo interceptor's TU-1600 (pylib/salvo_model.py): tools/make_jets.py writes it next to the model, only when
-# the model folder is there (not in its FILES, which it always writes).
-SALVO_FILES = {jet_models.SALVO_FILE: jet_models.SALVO_FILE.replace('.MRAB', '_AIRFRAME.SHKT')}
+# ...and the Arsenal Bird and its M101 (pylib/salvo_model.py): tools/make_jets.py writes them next to the models, only
+# when the model folder is there (not in its FILES, which it always writes).
+SALVO_FILES = {f: f.replace('.MRAB', '_AIRFRAME.SHKT') for f in jet_models.SALVO_MODEL_NAMES}
 # Every airframe made from the model pack (not tools/make_jets.py's FILES): its SGO's body is its ragdoll's mesh compound
 # (vcobjects.AIRFRAME_MEMBER).
 PACK_FILES = {**DN_FILES, **C130_FILES, **HELICARRIER_FILES, **SALVO_FILES}

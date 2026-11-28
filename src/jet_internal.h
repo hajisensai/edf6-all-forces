@@ -109,8 +109,8 @@ enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirol
                   gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
                   heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor, xmFighter, xmAttack,
                   xmHeavyAttack, xmBomber, supStrike, supFighter, supInterceptor, supMultirole, c130Gunship, supCarrier,
-                  supBlastCarrier, supDollCarrier, salvoInterceptor };
-constexpr int kBodyCount=39;
+                  supBlastCarrier, supDollCarrier, salvoInterceptor, arsenalCarrier, m101Drone };
+constexpr int kBodyCount=41;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -123,6 +123,8 @@ struct BodyRow {
                                     // player's side round the player, as a friendly one guards them
     bool crewless=false;            // flown with no one in it whatever its role (Unmanned): the Dreadnought's fighters,
                                     // which its hangar launches (dreadnought_hangar.inc) and the player may board
+    Body gunDrone=Body::drone;      // a carrier's gun drone (what it launches when not its own charge drones, and the
+                                    // online SupportDroneKind::gun of a carrier of this mark: jet_spawn.cpp GunDroneOf)
 };
 // The strike jets that take over a BOMBER401 or BOMBER501_2 fly that bomber's own model with the strike jet's
 // mark; tools/make_jets.py writes them all (testrange/gen.py JETS has the marks of the mission-placed ones).
@@ -210,6 +212,14 @@ inline constexpr BodyRow kBodies[kBodyCount]={
      Role::doll,"supDollCarrier"},
     {Body::salvoInterceptor,L"app:/object/edf6vc_jet_salvo_interceptor.sgo",L"EDF6VC_JET_SALVO_INTERCEPTOR.SGO",
      7070.0f,Role::interceptor,Role::drone,"salvoInterceptor"},
+    // The Arsenal Bird's drone mode (the maintainer, 2026-11-28: 「一个是无人机模式，一个是全是导弹的模式」; its missile mode is
+    // Body::salvoInterceptor in the same model): the support carrier's arms, durability and AI under a mark of its own,
+    // launching the M101s under its wing instead of the gun drone (pylib/vcobjects.py ARSENAL_CARRIER_JET, M101_JET;
+    // tools/make_jets.py salvo_files). It has no lift fans: Thrusters finds none and leaves it be. Only with the model pack
+    // installed (pylib/salvo_model.py): without, neither is there.
+    {Body::arsenalCarrier,L"app:/object/edf6vc_jet_arsenal_carrier.sgo",L"EDF6VC_JET_ARSENAL_CARRIER.SGO",7071.0f,
+     Role::carrier,Role::drone,"arsenalCarrier",false,false,Body::m101Drone},
+    {Body::m101Drone,L"app:/object/edf6vc_jet_m101.sgo",L"EDF6VC_JET_M101.SGO",7072.0f,Role::drone,Role::drone,"m101Drone"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -226,6 +236,12 @@ constexpr bool MarksUnique() noexcept {
 }
 static_assert(MarksUnique(),"a mark names one role");
 constexpr const BodyRow& Row(Body b) noexcept { return kBodies[static_cast<int>(b)]; }
+// A carrier's gun drone is a drone (jet_carrier.cpp LaunchOne flies it as one).
+constexpr bool GunDronesAreDrones() noexcept {
+    for(const auto& b:kBodies)if(Row(b.gunDrone).role!=Role::drone)return false;
+    return true;
+}
+static_assert(GunDronesAreDrones(),"a gun drone's body is a drone's");
 
 struct Kind {
     Role role;
@@ -318,20 +334,22 @@ constexpr const Kind& KindOf(Role r) noexcept { return kKinds[static_cast<int>(r
 
 // The roles a launch asks for (jet.h JetRole) and the body each flies in. The blast and doll carriers are
 // carriers whose own bodies' marks name their drones. The support deployment's strike jet, fighter, interceptor and
-// multirole fly their kinds' Dreadnought-model bodies, its carriers the Helicarrier ones and its gunship the AC-130
+// multirole fly their kinds' Dreadnought-model bodies, its carriers the Helicarrier ones and its gunship the AC-130; the
+// Arsenal Bird's two modes its salvo and its M101 carrier, one model
 // (Body::sup*, Body::c130Gunship; the plain bodies stay the player's parked / requested twins' and the test range's).
 struct LaunchRow { JetRole as; Body body; };
 inline constexpr LaunchRow kLaunchRows[]={
     {JetRole::strike,Body::supStrike},{JetRole::fighter,Body::supFighter},{JetRole::interceptor,Body::supInterceptor},
     {JetRole::multirole,Body::supMultirole},{JetRole::carrier,Body::supCarrier},{JetRole::blastCarrier,Body::supBlastCarrier},
     {JetRole::dollCarrier,Body::supDollCarrier},{JetRole::gunship,Body::c130Gunship},{JetRole::salvo,Body::salvoInterceptor},
+    {JetRole::arsenalCarrier,Body::arsenalCarrier},
 };
 constexpr int kLaunchCount=static_cast<int>(sizeof(kLaunchRows)/sizeof(kLaunchRows[0]));
 constexpr bool LaunchRowsInOrder() noexcept {
     for(int i=0;i<kLaunchCount;++i)if(static_cast<int>(kLaunchRows[i].as)!=i || Row(kLaunchRows[i].body).mark<=0.0f)return false;
     return true;
 }
-static_assert(kLaunchCount==static_cast<int>(JetRole::salvo)+1,"a launch row per JetRole");
+static_assert(kLaunchCount==static_cast<int>(JetRole::arsenalCarrier)+1,"a launch row per JetRole");
 static_assert(LaunchRowsInOrder(),"kLaunchRows is indexed by JetRole, each a jet body");
 
 // --- A jet's state ---
@@ -413,6 +431,7 @@ struct Aim {
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
 struct CarrierState {
     Role drones;             // what it launches (blast, doll; else the drone): its body's mark's
+    Body gunDrone=Body::drone;   // ...its gun drone (BodyRow::gunDrone): its body's mark's (NewEntry)
     float hpSeen,evadeTo[3];
     ULONGLONG evadeUntil,evadeAgain;
     bool docking;
@@ -717,6 +736,8 @@ void JoinFlight(Jet& j,unsigned flight) noexcept;   // its flight and its place 
 bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept;
 bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's (BodyRow::hostile)
 bool CrewlessJet(const unsigned char* v) noexcept;  // a jet body flown with no one in it (BodyRow::crewless)
+Body GunDroneOf(const void* v) noexcept;           // the gun drone a carrier `v` launches (BodyRow::gunDrone by its
+                                                   // mark; Body::drone for anything else: the submarine carrier)
 bool LiftFanJet(const unsigned char* v) noexcept;   // the support's Helicarrier (Body::supCarrier ..): its lift fans tilt
 void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).

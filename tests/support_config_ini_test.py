@@ -48,7 +48,7 @@ check(tuple(re.findall(r'\{StrikeKind::\w+,-?\d+,[\d.]+f,\d+u,"[^"]*",L"(\w+)",'
       "src/calls.inc kStrikes' keys are the strike keys, in order")
 check(sc.UNIT_KEYS == sc.AIR_KEYS + sc.GROUND_KEYS + sc.STRIKE_KEYS + ('RESCUE',),
       'the catalog: flown calls, ground / infantry / airdrops, strikes, the sea rescue')
-check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 54 and set(sc.LABELS) == set(sc.UNIT_KEYS),
+check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 56 and set(sc.LABELS) == set(sc.UNIT_KEYS),
       'one label per catalog entry (the sea rescue last)')
 check(all(sc.LABELS[c.id[len(calls.ID_PREFIX):]] == calls.call_name(c, 'SC') for c in calls.STRIKES),
       "the strikes' labels are their SC names (kStrikes')")

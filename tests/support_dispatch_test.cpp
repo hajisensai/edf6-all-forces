@@ -520,7 +520,10 @@ int main() {
     airSortie=static_cast<int>(SortiePass::missileRain);
     airJet=static_cast<int>(JetRole::salvo);
     check(SupportCallTab(0)==SupportTab::sortie && SupportCallIcon(0)==SupportIcon::jet,
-          "the Zenith is an aircraft in the one sortie tab (no separate air tab)");
+          "the Arsenal Bird's sortie is an aircraft in the one sortie tab (no separate air tab)");
+    airSortie=0;airJet=static_cast<int>(JetRole::arsenalCarrier);
+    check(SupportCallTab(0)==SupportTab::sortie && SupportCallIcon(0)==SupportIcon::carrier,
+          "the Arsenal Bird's drone mode is a carrier (its M101s off its belly)");
     airSortie=0;airJet=static_cast<int>(JetRole::interceptor);
     check(SupportCallTab(0)==SupportTab::sortie,"an aircraft that stays (guard / follow) is in the sortie tab too");
     airSortie=0;airJet=-1;airHeli=static_cast<int>(HeliBody::eros506);

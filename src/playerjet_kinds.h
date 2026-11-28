@@ -77,6 +77,8 @@ constexpr const char* kDnCatch="a Dreadnought fighter (no player twin of its own
 constexpr const char* kXmCatch="an X-Morph jet (its twin is the model pack's, not always there): the player fighter";
 constexpr const char* kC130Catch="a support C-130 (no twin of its own): the player strike jet";
 constexpr const char* kHelicarrierCatch="a support Helicarrier, 46 x 80 m (no twin of its own; the catch is a wing's flight): the player fighter";
+constexpr const char* kArsenalCatch="the Arsenal Bird, 107 x 23 m (no twin of its own; the catch is a wing's flight): the player fighter";
+constexpr const char* kM101Catch="an Arsenal Bird's M101 drone (the model pack's, no twin of its own): the player fighter";
 constexpr const char* kSupportCatch="a support call's aircraft (its kind in a Dreadnought model, no twin of its own): a player jet";
 constexpr const char* kChargeCatch="a rotor drone its own charge destroys (the catch is a wing's flight): the player fighter";
 
@@ -171,6 +173,10 @@ inline constexpr Boardable kBoardable[]={
     {Body::supCarrier,Airframe::rotor,Arm::drones,Rotor("supCarrier",MarkOf(Body::supCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kHelicarrierCatch},
     {Body::supBlastCarrier,Airframe::rotor,Arm::drones,Rotor("supBlastCarrier",MarkOf(Body::supBlastCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kHelicarrierCatch},
     {Body::supDollCarrier,Airframe::rotor,Arm::drones,Rotor("supDollCarrier",MarkOf(Body::supDollCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kHelicarrierCatch},
+    // The Arsenal Bird's drone mode (jet_internal.h Body::arsenalCarrier: 107 m across, 23 m long; 2026-11-28) flown as the
+    // Helicarriers are, a carrier; its M101 (Body::m101Drone) as the carrier's gun drone is (the gun drone's numbers).
+    {Body::arsenalCarrier,Airframe::rotor,Arm::drones,Rotor("arsenalCarrier",MarkOf(Body::arsenalCarrier),Npc(jet::Role::carrier),50.0f),kCatchPlayerFighter,kArsenalCatch},
+    {Body::m101Drone,Airframe::wing,Arm::none,Wing("m101Drone",MarkOf(Body::m101Drone),Npc(jet::Role::drone),3.0f),kCatchPlayerFighter,kM101Catch},
 };
 constexpr int kBoardableCount=static_cast<int>(sizeof(kBoardable)/sizeof(kBoardable[0]));
 

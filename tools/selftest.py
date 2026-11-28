@@ -456,7 +456,8 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     import jet_models
     import rootcpk
     assert vc.HARDPOINT_FILES == {vc.JET_ELEVON_FILE, *(f for f, r in jet_models.MODELS.items() if r.grounded),
-                                  vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}, sorted(vc.HARDPOINT_FILES)
+                                  vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL, vc.M101_MODEL}, sorted(vc.HARDPOINT_FILES)
+    assert set(jet_models.SALVO_MODEL_NAMES) == {vc.SALVO_MODEL, vc.M101_MODEL}
     assert jet_models.ELEVON_FILE == vc.JET_ELEVON_FILE
     seen = 0
     for name, jet in vc.JETS.items():
@@ -487,10 +488,10 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     muzzles = vc.hardpoint_muzzles(game)
     assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
     from mdb import mdb_read, rab_read
-    import salvo_model   # the salvo's TU-1600: made from the model pack's folder (pylib/salvo_model.py), where it is there
+    import salvo_model   # the Arsenal Bird and its M101: made from the model pack's folder (pylib/salvo_model.py), where it is
     models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
               for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE
-              and (f != vc.SALVO_MODEL or salvo_model.model_dir() is not None)}
+              and (f not in jet_models.SALVO_MODEL_NAMES or salvo_model.model_dir() is not None)}
     raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
     models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
     for f, md in models.items():
@@ -1331,7 +1332,8 @@ def supports_on_map_pt() -> None:
     on_map = [c for c in calls.CALLS if c.on_map]
     assert {c.brings for c in on_map} == {'jets', 'helis', 'sub', 'barrage', 'ultimate'}
     # FLOWN: the flown calls, each sortie beside its airframe (calls._catalog); the retired sorties' rows kept, not flown.
-    assert len(on_map) == 42 and sorted(c.id for c in on_map if c.flown) == sorted(c.id for c in calls.FLOWN), len(on_map)
+    # 44: the Arsenal Bird's drone mode (guard / follow) appended 2026-11-28.
+    assert len(on_map) == 44 and sorted(c.id for c in on_map if c.flown) == sorted(c.id for c in calls.FLOWN), len(on_map)
     on_map = [c for c in on_map if not c.retired]
     assert list(calls.STRIKES) == [c for c in on_map if c.brings == 'barrage'] + [c for c in on_map if c.brings == 'ultimate']
     inc = src('src/calls.inc')
@@ -2968,8 +2970,15 @@ def every_npc_aircraft_boardable() -> None:
     # kBoardable, so an aircraft added later is flown by the player too (or is left out on purpose here, saying why);
     # the enemy's are not; the ini keys of the feature are read and documented.
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
-    rows = re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,[^}]*?"(\w+)"(,true)?\}', re.sub(r'\s+', ' ', table))
-    assert len(rows) >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
+    flat = re.sub(r'\s+', ' ', table)
+    rows = [(body, mark, name, flags.replace(' ', '').startswith(',true')) for body, mark, name, flags in re.findall(
+        r'\{Body::(\w+), ?L"[^"]*", ?L"[^"]*", ?(\d+)\.0f,[^}]*?"(\w+)"((?:, ?(?:true|false))*)(?:, ?Body::\w+)?\}', flat)]
+    # Every row read (a row wrapped before its mark, or with its gun drone, had been skipped unseen: the salvo's).
+    assert len(rows) == flat.count('{Body::') >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
+    # Left out on purpose: the Arsenal Bird's missile mode (the salvo interceptor) makes one pass and leaves the map: it
+    # never stays for the player to board. Its drone mode (arsenalCarrier) and its M101s are boarded as the Helicarriers
+    # and the gun drone are (2026-11-28).
+    unboarded = {'salvoInterceptor'}
     boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
     # A body that is another row's airframe under the same mark is boarded as that row: playerjet_kinds.inc BoardRowOf
     # finds the row by the mark, a strike-mark jet then by its model's bones, so a row of its own could never be found.
@@ -2987,6 +2996,8 @@ def every_npc_aircraft_boardable() -> None:
             continue   # a heli: the stock heli flight
         if hostile:
             assert body not in boardable, f'{body} is the enemy\'s: not boardable'
+        elif body in unboarded:
+            assert body not in boardable, f'{body} is boardable now: drop it from the left-out ones'
         else:
             assert body in boardable or boarded_as.get(body) in boardable, \
                 f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
@@ -3214,6 +3225,8 @@ def every_boardable_aircraft_requested() -> None:
         'transportPlane': "the paratroop plane (vcobjects.C130_JETS): it carries the support's paratroopers, not a pilot's",
         **{b: "the support's Helicarrier (vcobjects.HELICARRIER_JETS): the carrier requests bring their kinds' own twins"
            for b in ('supCarrier', 'supBlastCarrier', 'supDollCarrier')},
+        'arsenalCarrier': "the Arsenal Bird's drone mode (vcobjects.ARSENAL_CARRIER_JET): its model is the model pack's",
+        'm101Drone': "the Arsenal Bird's M101 (vcobjects.M101_JET): its model is the model pack's; the gun drone request flies",
     }
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
     marks = {body: float(mark) for body, mark in
