@@ -16,6 +16,7 @@
 #pragma once
 #include "armory_logic.h"
 #include "armory_skin.h"
+#include "armory_tabs.h"
 #include "hudtext.h"
 #include "menu_callouts.h"
 #include "preview_camera.h"
@@ -387,7 +388,7 @@ protected:
 // their chips), backpack (the classes that carry one), then 复制 / 移除.
 class SquadPage final : public UnitsPage {
 public:
-    const wchar_t* Name() const noexcept override { return hudtext::Tr(Tx::armoryTabSquad); }
+    const wchar_t* Name() const noexcept override { return crew::armory::tabs::Name(crew::armory::tabs::kSquad); }
     int Items(const ar::Pos& p) const noexcept override {
         const rm::Unit* u=UnitAt(p.row);
         return u ? Soldiers(*u)+2 : 0;
@@ -634,7 +635,7 @@ struct ItemRef { It kind=It::reset; int row=0; };   // row: the room_menu.h row 
 
 class VehiclePage final : public UnitsPage {
 public:
-    const wchar_t* Name() const noexcept override { return hudtext::Tr(Tx::armoryTabVehicle); }
+    const wchar_t* Name() const noexcept override { return crew::armory::tabs::Name(crew::armory::tabs::kVehicle); }
     // The items of unit `u`: a crew unit its crew row; a mech its seven rows (or the stock line); a vehicle its gun row
     // and pylons (or the stock line), ＋添加挂架; the crew's colours; 恢复默认.
     static int ItemsOf(const rm::Unit& u,ItemRef* out) noexcept {

@@ -1,4 +1,4 @@
-"""The Vehicler's vehicles (docs/newclass-re/vehicler.md §1.2, §5 M1; pylib/zw_vehicles.py, tools/make_zw_vehicles.py,
+"""The Vehicler's vehicles (docs/newclass-re/vehicler-plan.md §1.2, §5 M1; pylib/zw_vehicles.py, tools/make_zw_vehicles.py,
 tools/gen_zw_vehicles.py): every vehicle row has its vehicle and the other way round, the generated src/zw_vehicles.inc
 is current, the files' ledger lifecycle, the Gyrojet's final numbers, and, when Root.cpk is at hand, the built SGOs:
 mission_setup == vehicle_setup, class / seats / vtable as the table says, each gun found by the vehicle-weapon scan, the

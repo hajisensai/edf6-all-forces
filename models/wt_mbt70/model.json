@@ -1,0 +1,1042 @@
+{
+ "format": 1,
+ "kind": "mbt70",
+ "title": "MBT-70 (War Thunder)",
+ "source": "https://sketchfab.com/3d-models/mbt-70-war-thunder-3cc1dbc72f724d1887e52998c86b9fa6",
+ "prepared_from": "MBT-70.obj",
+ "winding_flipped": true,
+ "normals": "auto_smooth 45",
+ "materials": [
+  {
+   "name": "wt_mbt_70_body_c_us_camo_olive",
+   "template": "v603_body",
+   "albedo": "textures/mbt_70_body_c_us_camo_olive.jpg",
+   "normal": "textures/mbt_70_body_n.jpg",
+   "occlusion": "textures/mbt_70_body_ao_occ.png",
+   "specular": "textures/mbt_70_body_n_s.jpg"
+  },
+  {
+   "name": "wt_mbt_70_turret_c_us_camo_olive",
+   "template": "v603_body",
+   "albedo": "textures/mbt_70_turret_c_us_camo_olive.jpg",
+   "normal": "textures/mbt_70_turret_n.jpg",
+   "occlusion": "textures/mbt_70_turret_ao_occ.png",
+   "specular": "textures/mbt_70_turret_n_s.jpg"
+  },
+  {
+   "name": "wt_us_turret_glass_c",
+   "template": "v603_body",
+   "albedo": "textures/us_turret_glass_c.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 1.0,
+    "map": "textures/us_turret_glass_c_a.png"
+   }
+  },
+  {
+   "name": "wt_mbt_70_gun_c_us_camo_olive",
+   "template": "v603_body",
+   "albedo": "textures/mbt_70_gun_c_us_camo_olive.jpg",
+   "normal": "textures/mbt_70_gun_n.jpg",
+   "occlusion": "textures/mbt_70_gun_ao_occ.png",
+   "specular": "textures/mbt_70_gun_n_s.jpg"
+  },
+  {
+   "name": "wt_rifled_barrel_c_c",
+   "template": "v603_body",
+   "albedo": "textures/rifled_barrel_c_c.jpg",
+   "normal": "textures/rifled_barrel_c_n.jpg",
+   "specular": "textures/rifled_barrel_c_n_s.jpg"
+  },
+  {
+   "name": "wt_mg_browning_m1919a4_c",
+   "template": "v603_body",
+   "albedo": "textures/mg_browning_m1919a4_c.jpg",
+   "normal": "textures/mg_browning_m1919a4_n.jpg",
+   "occlusion": "textures/mg_browning_m1919a4_ao_occ.png",
+   "specular": "textures/mg_browning_m1919a4_n_s.jpg",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/mg_browning_m1919a4_c_a.png"
+   }
+  },
+  {
+   "name": "wt_rh_202_c_us_camo_olive",
+   "template": "v603_body",
+   "albedo": "textures/rh_202_c_us_camo_olive.jpg",
+   "normal": "textures/rh_202_n.jpg",
+   "occlusion": "textures/rh_202_ao_occ.png",
+   "specular": "textures/rh_202_n_s.jpg"
+  },
+  {
+   "name": "wt_headlight_glass_c",
+   "template": "v603_body",
+   "albedo": "textures/headlight_glass_c.jpg",
+   "normal": "textures/headlight_glass_n.jpg",
+   "specular": "textures/headlight_glass_n_s.jpg"
+  },
+  {
+   "name": "wt_headlight_glass_c_8",
+   "template": "v603_body",
+   "albedo": "textures/headlight_glass_c.jpg",
+   "normal": "textures/headlight_glass_n.jpg",
+   "specular": "textures/headlight_glass_n_s.jpg",
+   "alpha": {
+    "mode": "blend",
+    "factor": 0.1,
+    "map": "textures/headlight_glass_c_a.png"
+   }
+  },
+  {
+   "name": "v603_kyata_L",
+   "template": "v603_kyata_L",
+   "albedo": "textures/us_mbt_70_track_c.jpg",
+   "normal": "textures/us_mbt_70_track_n.jpg",
+   "occlusion": "textures/us_mbt_70_track_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/us_mbt_70_track_c_a.png"
+   }
+  },
+  {
+   "name": "v603_kyata_R",
+   "template": "v603_kyata_R",
+   "albedo": "textures/us_mbt_70_track_c.jpg",
+   "normal": "textures/us_mbt_70_track_n.jpg",
+   "occlusion": "textures/us_mbt_70_track_ao_occ.png",
+   "alpha": {
+    "mode": "mask",
+    "cutoff": 0.5,
+    "map": "textures/us_mbt_70_track_c_a.png"
+   }
+  }
+ ],
+ "parts": [
+  {
+   "name": "body.wt_mbt_70_body_c_us_camo_olive",
+   "bone": "body",
+   "material": 0,
+   "triangles": 64577,
+   "vertices": 84929
+  },
+  {
+   "name": "body.wt_headlight_glass_c",
+   "bone": "body",
+   "material": 7,
+   "triangles": 544,
+   "vertices": 332
+  },
+  {
+   "name": "body.wt_headlight_glass_c_8",
+   "bone": "body",
+   "material": 8,
+   "triangles": 128,
+   "vertices": 100
+  },
+  {
+   "name": "cannon_l.wt_mbt_70_gun_c_us_camo_olive",
+   "bone": "cannon_l",
+   "material": 3,
+   "triangles": 3066,
+   "vertices": 3335
+  },
+  {
+   "name": "cannon_l.wt_mg_browning_m1919a4_c",
+   "bone": "cannon_l",
+   "material": 5,
+   "triangles": 1852,
+   "vertices": 2397
+  },
+  {
+   "name": "cannon_main.wt_mbt_70_turret_c_us_camo_olive",
+   "bone": "cannon_main",
+   "material": 1,
+   "triangles": 35616,
+   "vertices": 45472
+  },
+  {
+   "name": "cannon_main.wt_us_turret_glass_c",
+   "bone": "cannon_main",
+   "material": 2,
+   "triangles": 41,
+   "vertices": 49
+  },
+  {
+   "name": "cannon_main.wt_rh_202_c_us_camo_olive",
+   "bone": "cannon_main",
+   "material": 6,
+   "triangles": 15791,
+   "vertices": 22795
+  },
+  {
+   "name": "cannon_slide_l.wt_mbt_70_gun_c_us_camo_olive",
+   "bone": "cannon_slide_l",
+   "material": 3,
+   "triangles": 896,
+   "vertices": 858
+  },
+  {
+   "name": "cannon_slide_l.wt_rifled_barrel_c_c",
+   "bone": "cannon_slide_l",
+   "material": 4,
+   "triangles": 94,
+   "vertices": 112
+  },
+  {
+   "name": "catapi_body.v603_kyata_L",
+   "bone": "catapi_body",
+   "material": 9,
+   "triangles": 5700,
+   "vertices": 5925
+  },
+  {
+   "name": "catapi_body.v603_kyata_R",
+   "bone": "catapi_body",
+   "material": 10,
+   "triangles": 5700,
+   "vertices": 5928
+  },
+  {
+   "name": "doppler_radar.wt_mbt_70_turret_c_us_camo_olive",
+   "bone": "doppler_radar",
+   "material": 1,
+   "triangles": 1478,
+   "vertices": 1720
+  },
+  {
+   "name": "wheel_A_l",
+   "bone": "tire_moveA_l",
+   "material": 0,
+   "triangles": 1856,
+   "vertices": 2506
+  },
+  {
+   "name": "wheel_A_r",
+   "bone": "tire_moveA_r",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2202
+  },
+  {
+   "name": "wheel_B_l",
+   "bone": "tire_moveB_l",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2202
+  },
+  {
+   "name": "wheel_B_r",
+   "bone": "tire_moveB_r",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2202
+  },
+  {
+   "name": "wheel_C_l",
+   "bone": "tire_moveC_l",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2208
+  },
+  {
+   "name": "wheel_C_r",
+   "bone": "tire_moveC_r",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2208
+  },
+  {
+   "name": "wheel_D_l",
+   "bone": "tire_moveD_l",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2206
+  },
+  {
+   "name": "wheel_D_r",
+   "bone": "tire_moveD_r",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2206
+  },
+  {
+   "name": "wheel_E_l",
+   "bone": "tire_moveE_l",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2208
+  },
+  {
+   "name": "wheel_E_r",
+   "bone": "tire_moveE_r",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2208
+  },
+  {
+   "name": "wheel_F_l",
+   "bone": "tire_moveF_l",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2204
+  },
+  {
+   "name": "wheel_F_r",
+   "bone": "tire_moveF_r",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2204
+  },
+  {
+   "name": "wheel_G_l",
+   "bone": "tire_moveG_l",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2202
+  },
+  {
+   "name": "wheel_G_r",
+   "bone": "tire_moveG_r",
+   "material": 0,
+   "triangles": 1696,
+   "vertices": 2202
+  },
+  {
+   "name": "wheel_H_l",
+   "bone": "tire_moveH_l",
+   "material": 0,
+   "triangles": 3434,
+   "vertices": 4155
+  },
+  {
+   "name": "wheel_H_r",
+   "bone": "tire_moveH_r",
+   "material": 0,
+   "triangles": 3432,
+   "vertices": 4151
+  },
+  {
+   "name": "tracking_radar.wt_mbt_70_turret_c_us_camo_olive",
+   "bone": "tracking_radar",
+   "material": 1,
+   "triangles": 602,
+   "vertices": 781
+  }
+ ],
+ "origins": {
+  "cannon_main": [
+   0.0,
+   1.2,
+   0.87
+  ],
+  "cannon_l": [
+   -7.900000000000962e-05,
+   1.72,
+   2.3
+  ],
+  "cannon_slide_l": [
+   -7.900000000000962e-05,
+   1.719049,
+   5.644331
+  ],
+  "cannon_r": [
+   -7.900000000000962e-05,
+   1.72,
+   2.3
+  ],
+  "cannon_slide_r": [
+   -7.900000000000962e-05,
+   1.719049,
+   5.644331
+  ],
+  "tire_moveA_l": [
+   1.4423080000000001,
+   0.798095,
+   3.028078
+  ],
+  "tire_moveA_r": [
+   -1.442348,
+   0.798095,
+   3.028021
+  ],
+  "tire_moveB_l": [
+   1.4423059999999999,
+   0.3053265,
+   2.2249220000000003
+  ],
+  "catapiB_l": [
+   1.4423059999999999,
+   0.3053265,
+   2.2249220000000003
+  ],
+  "tire_moveB_r": [
+   -1.4423475,
+   0.305327,
+   2.2249220000000003
+  ],
+  "catapiB_r": [
+   -1.4423475,
+   0.305327,
+   2.2249220000000003
+  ],
+  "tire_moveC_l": [
+   1.4423059999999999,
+   0.287453,
+   1.323189
+  ],
+  "catapiC_l": [
+   1.4423059999999999,
+   0.287453,
+   1.323189
+  ],
+  "tire_moveC_r": [
+   -1.4423475,
+   0.287453,
+   1.323189
+  ],
+  "catapiC_r": [
+   -1.4423475,
+   0.287453,
+   1.323189
+  ],
+  "tire_moveD_l": [
+   1.4423059999999999,
+   0.2874975,
+   0.421082
+  ],
+  "catapiD_l": [
+   1.4423059999999999,
+   0.2874975,
+   0.421082
+  ],
+  "tire_moveD_r": [
+   -1.4423475,
+   0.287497,
+   0.421082
+  ],
+  "catapiD_r": [
+   -1.4423475,
+   0.287497,
+   0.421082
+  ],
+  "tire_moveE_l": [
+   1.4423075,
+   0.28746700000000003,
+   -0.479562
+  ],
+  "catapiE_l": [
+   1.4423075,
+   0.28746700000000003,
+   -0.479562
+  ],
+  "tire_moveE_r": [
+   -1.4423475,
+   0.287468,
+   -0.479562
+  ],
+  "catapiE_r": [
+   -1.4423475,
+   0.287468,
+   -0.479562
+  ],
+  "tire_moveF_l": [
+   1.4423075,
+   0.287447,
+   -1.3769930000000001
+  ],
+  "catapiF_l": [
+   1.4423075,
+   0.287447,
+   -1.3769930000000001
+  ],
+  "tire_moveF_r": [
+   -1.4423475,
+   0.28744800000000004,
+   -1.3769925
+  ],
+  "catapiF_r": [
+   -1.4423475,
+   0.28744800000000004,
+   -1.3769925
+  ],
+  "tire_moveG_l": [
+   1.4423075,
+   0.287484,
+   -2.273868
+  ],
+  "catapiG_l": [
+   1.4423075,
+   0.287484,
+   -2.273868
+  ],
+  "tire_moveG_r": [
+   -1.4423475,
+   0.287484,
+   -2.273869
+  ],
+  "catapiG_r": [
+   -1.4423475,
+   0.287484,
+   -2.273869
+  ],
+  "tire_moveH_l": [
+   1.438501,
+   0.766719,
+   -3.01462
+  ],
+  "tire_moveH_r": [
+   -1.438441,
+   0.766718,
+   -3.014621
+  ],
+  "doppler_radar": [
+   0.592843,
+   2.2638185,
+   0.90488
+  ],
+  "tracking_radar": [
+   -0.6288425,
+   2.219252,
+   1.023882
+  ]
+ },
+ "visual_bones": [],
+ "wheels": {
+  "tire_moveA_l": {
+   "centre": [
+    1.4423080000000001,
+    0.798095,
+    3.028078
+   ],
+   "radius": 0.33925999999999995
+  },
+  "tire_moveA_r": {
+   "centre": [
+    -1.442348,
+    0.798095,
+    3.028021
+   ],
+   "radius": 0.338805
+  },
+  "tire_moveB_l": {
+   "centre": [
+    1.4423059999999999,
+    0.3053265,
+    2.2249220000000003
+   ],
+   "radius": 0.338805
+  },
+  "tire_moveB_r": {
+   "centre": [
+    -1.4423475,
+    0.305327,
+    2.2249220000000003
+   ],
+   "radius": 0.338805
+  },
+  "tire_moveC_l": {
+   "centre": [
+    1.4423059999999999,
+    0.287453,
+    1.323189
+   ],
+   "radius": 0.33915
+  },
+  "tire_moveC_r": {
+   "centre": [
+    -1.4423475,
+    0.287453,
+    1.323189
+   ],
+   "radius": 0.33915
+  },
+  "tire_moveD_l": {
+   "centre": [
+    1.4423059999999999,
+    0.2874975,
+    0.421082
+   ],
+   "radius": 0.33797499999999997
+  },
+  "tire_moveD_r": {
+   "centre": [
+    -1.4423475,
+    0.287497,
+    0.421082
+   ],
+   "radius": 0.33797499999999997
+  },
+  "tire_moveE_l": {
+   "centre": [
+    1.4423075,
+    0.28746700000000003,
+    -0.479562
+   ],
+   "radius": 0.33926
+  },
+  "tire_moveE_r": {
+   "centre": [
+    -1.4423475,
+    0.287468,
+    -0.479562
+   ],
+   "radius": 0.33925999999999995
+  },
+  "tire_moveF_l": {
+   "centre": [
+    1.4423075,
+    0.287447,
+    -1.3769930000000001
+   ],
+   "radius": 0.3376450000000001
+  },
+  "tire_moveF_r": {
+   "centre": [
+    -1.4423475,
+    0.28744800000000004,
+    -1.3769925
+   ],
+   "radius": 0.33764550000000004
+  },
+  "tire_moveG_l": {
+   "centre": [
+    1.4423075,
+    0.287484,
+    -2.273868
+   ],
+   "radius": 0.33773000000000003
+  },
+  "tire_moveG_r": {
+   "centre": [
+    -1.4423475,
+    0.287484,
+    -2.273869
+   ],
+   "radius": 0.33773000000000003
+  },
+  "tire_moveH_l": {
+   "centre": [
+    1.438501,
+    0.766719,
+    -3.01462
+   ],
+   "radius": 0.35189499999999996
+  },
+  "tire_moveH_r": {
+   "centre": [
+    -1.438441,
+    0.766718,
+    -3.014621
+   ],
+   "radius": 0.35189500000000007
+  }
+ },
+ "muzzles": {
+  "left": [
+   {
+    "bone": "cannon_slide_l",
+    "point": [
+     -7.900000000000962e-05,
+     1.719049,
+     5.644331
+    ]
+   }
+  ],
+  "right": [
+   {
+    "bone": "cannon_slide_r",
+    "point": [
+     -7.900000000000962e-05,
+     1.719049,
+     5.644331
+    ]
+   }
+  ],
+  "missiles": [],
+  "mg": [
+   {
+    "bone": "cannon_main",
+    "point": [
+     1.1,
+     2.56,
+     2.18
+    ]
+   }
+  ]
+ },
+ "ejections": {
+  "left": {
+   "bone": "cannon_slide_l",
+   "point": [
+    0.19992100000000002,
+    1.719049,
+    3.007861
+   ]
+  },
+  "right": {
+   "bone": "cannon_slide_r",
+   "point": [
+    -0.200079,
+    1.719049,
+    3.007861
+   ]
+  }
+ },
+ "collision": {
+  "body": {
+   "target": [
+    [
+     -1.789485,
+     0.192394,
+     -3.706041
+    ],
+    [
+     1.7878,
+     1.61333,
+     3.54662
+    ]
+   ],
+   "source_triangles": 65249,
+   "hull_triangles": 5142
+  },
+  "cannon_main": {
+   "target": [
+    [
+     -1.6525,
+     0.680353,
+     -2.477282
+    ],
+    [
+     1.697974,
+     4.779014,
+     2.655638
+    ]
+   ],
+   "source_triangles": 51448,
+   "hull_triangles": 5422
+  },
+  "cannon_l": {
+   "target": [
+    [
+     -0.51724,
+     1.365383,
+     0.984872
+    ],
+    [
+     0.51724,
+     2.072023,
+     5.644331
+    ]
+   ],
+   "source_triangles": 3480,
+   "hull_triangles": 1896
+  },
+  "cannon_r": {
+   "target": [
+    [
+     -0.51724,
+     1.365383,
+     0.984872
+    ],
+    [
+     0.51724,
+     2.072023,
+     3.029062
+    ]
+   ],
+   "source_triangles": 2490,
+   "hull_triangles": 1602
+  },
+  "doppler_radar": {
+   "target": [
+    [
+     0.123563,
+     2.093017,
+     0.431615
+    ],
+    [
+     1.062123,
+     2.43462,
+     1.378145
+    ]
+   ],
+   "source_triangles": 1478,
+   "hull_triangles": 1036
+  },
+  "tracking_radar": {
+   "target": [
+    [
+     -0.899777,
+     2.111269,
+     0.773325
+    ],
+    [
+     -0.357908,
+     2.327235,
+     1.274439
+    ]
+   ],
+   "source_triangles": 602,
+   "hull_triangles": 252
+  },
+  "tire_moveA_l": {
+   "target": [
+    [
+     1.260138,
+     0.458835,
+     2.688778
+    ],
+    [
+     1.624478,
+     1.137355,
+     3.367378
+    ]
+   ],
+   "source_triangles": 1856,
+   "hull_triangles": 486
+  },
+  "tire_moveA_r": {
+   "target": [
+    [
+     -1.624518,
+     0.459275,
+     2.689216
+    ],
+    [
+     -1.260178,
+     1.136915,
+     3.366826
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 522
+  },
+  "tire_moveB_l": {
+   "target": [
+    [
+     1.260136,
+     -0.033493,
+     1.886117
+    ],
+    [
+     1.624476,
+     0.644146,
+     2.563727
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 478
+  },
+  "tire_moveB_r": {
+   "target": [
+    [
+     -1.624518,
+     -0.033493,
+     1.886117
+    ],
+    [
+     -1.260177,
+     0.644147,
+     2.563727
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 530
+  },
+  "tire_moveC_l": {
+   "target": [
+    [
+     1.260136,
+     -0.051697,
+     0.983999
+    ],
+    [
+     1.624476,
+     0.626603,
+     1.662379
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 522
+  },
+  "tire_moveC_r": {
+   "target": [
+    [
+     -1.624518,
+     -0.051697,
+     0.983999
+    ],
+    [
+     -1.260177,
+     0.626603,
+     1.662379
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 494
+  },
+  "tire_moveD_l": {
+   "target": [
+    [
+     1.260136,
+     -0.050508,
+     0.083107
+    ],
+    [
+     1.624476,
+     0.625503,
+     0.759057
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 488
+  },
+  "tire_moveD_r": {
+   "target": [
+    [
+     -1.624518,
+     -0.050508,
+     0.083107
+    ],
+    [
+     -1.260177,
+     0.625502,
+     0.759057
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 512
+  },
+  "tire_moveE_l": {
+   "target": [
+    [
+     1.260137,
+     -0.051793,
+     -0.818862
+    ],
+    [
+     1.624478,
+     0.626727,
+     -0.140262
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 526
+  },
+  "tire_moveE_r": {
+   "target": [
+    [
+     -1.624518,
+     -0.051792,
+     -0.818862
+    ],
+    [
+     -1.260177,
+     0.626728,
+     -0.140262
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 542
+  },
+  "tire_moveF_l": {
+   "target": [
+    [
+     1.260137,
+     -0.050233,
+     -1.714638
+    ],
+    [
+     1.624478,
+     0.625127,
+     -1.039348
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 524
+  },
+  "tire_moveF_r": {
+   "target": [
+    [
+     -1.624518,
+     -0.050232,
+     -1.714638
+    ],
+    [
+     -1.260177,
+     0.625128,
+     -1.039347
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 532
+  },
+  "tire_moveG_l": {
+   "target": [
+    [
+     1.260137,
+     -0.050246,
+     -2.611623
+    ],
+    [
+     1.624478,
+     0.625214,
+     -1.936113
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 504
+  },
+  "tire_moveG_r": {
+   "target": [
+    [
+     -1.624518,
+     -0.050246,
+     -2.611624
+    ],
+    [
+     -1.260177,
+     0.625214,
+     -1.936114
+    ]
+   ],
+   "source_triangles": 1696,
+   "hull_triangles": 494
+  },
+  "tire_moveH_l": {
+   "target": [
+    [
+     1.125771,
+     0.414824,
+     -3.36761
+    ],
+    [
+     1.751231,
+     1.118614,
+     -2.66163
+    ]
+   ],
+   "source_triangles": 3434,
+   "hull_triangles": 1024
+  },
+  "tire_moveH_r": {
+   "target": [
+    [
+     -1.751171,
+     0.414823,
+     -3.367611
+    ],
+    [
+     -1.125711,
+     1.118613,
+     -2.661631
+    ]
+   ],
+   "source_triangles": 3432,
+   "hull_triangles": 1014
+  }
+ },
+ "triangles": 166855
+}

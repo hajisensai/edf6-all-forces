@@ -1,4 +1,4 @@
-// The Vehicler's vehicles made and handed out, host-authoritative (docs/newclass-re/vehicler.md §2.2, §2.3, §3.3, §5 M2).
+// The Vehicler's vehicles made and handed out, host-authoritative (docs/newclass-re/vehicler-plan.md §2.2, §2.3, §3.3, §5 M2).
 // The interface M3 (vehicler_start: the start seat, the NPC driver-seat filter) and M4 (vehicler_logistics: the resupply)
 // call; the implementation is zw_vehicle_dispatch.cpp, the plan's pure part zw_vehicle_dispatch_logic.h.
 //
@@ -10,7 +10,7 @@
 // records whose it is. No driver: the owner boards it itself (M3, on its own machine).
 //
 // ZwDeliver (catalog kZwDeliverCatalog): a resupply driven in from the map's edge (§3.3), as the maintainer set it on
-// 2026-11-28 (over vehicler.md §2.3 / §5 decision 6 "the old one stays a friendly vehicle"):
+// 2026-11-28 (over vehicler-plan.md §2.3 / §5 decision 6 "the old one stays a friendly vehicle"):
 //  - any vehicle the player has unlocked (its row owned: weapon_records.h flag bit 0), each at its own price
 //    (ZwVehiclePrice, zw_vehicle_catalog.h); the host checks the kind is in the requester's unlocked set and holds the
 //    price of its points (M4's ledger, SetZwDeliverLedger) before it plans, settles on commit, refunds on any failure;
@@ -48,7 +48,7 @@ enum class ZwStartState : std::uint8_t {
     refused,   // the host refused it / the transaction failed / the hull was not made: the player walks in (logged why)
 };
 // Where `human`'s start request stands; `vehicle` (may be null) gets the hull when ready, else null. The hull stays the
-// world's: the caller adds its own reference when it keeps one (RideVehicle's contract, vehicler.md §2.2).
+// world's: the caller adds its own reference when it keeps one (RideVehicle's contract, vehicler-plan.md §2.2).
 ZwStartState ZwStartStatus(const unsigned char* human,unsigned char** vehicle) noexcept;
 
 // ---- M3 / M4: whose vehicle ----
