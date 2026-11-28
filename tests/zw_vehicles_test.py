@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-zwv-') as game:
     check(len(written) == len(files) and all(os.path.isfile(p) for p in written), 'install writes every file')
     dropped = zv.files()[-1]
     again = mzv.install(game, {k: b for k, b in files.items() if k != dropped})
-    check(len(again) == len(files) - 1 and not os.path.exists(written[-1]), 'refresh releases what it no longer writes')
+    check(not again and not os.path.exists(written[-1]), 'refresh rewrites nothing unchanged and releases what it no longer writes')
     deleted, kept = mzv.remove(game)
     check(len(deleted) == len(files) - 1 and not kept and not any(os.path.exists(p) for p in written), 'remove all')
 

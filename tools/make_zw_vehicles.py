@@ -18,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+from modfiles import sha256, sha256_file  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
 import zw_vehicles as zv  # noqa: E402
@@ -111,10 +112,18 @@ def build(root: str) -> dict[str, bytes]:
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:
-    """Writes `files` (build) as this tool's; what it wrote before and does not now is released."""
+    """Writes `files` (build) as this tool's, each one only when it is not already exactly that (every install rebuilds
+    them: an unchanged file is not rewritten, as make_zw_classes.install); what it wrote before and does not now is
+    released. Returns the paths written."""
     led = ledger.Ledger(root)
     before = set(led.owned_by(OWNER))
-    paths = [led.put(OWNER, rel, data) for rel, data in files.items()]
+    paths = []
+    for rel, data in files.items():
+        if sha256_file(led.disk(rel)) == sha256(data) and (ledger.key(rel) in before or led.owners(rel)):
+            if ledger.key(rel) not in before:
+                led.need(OWNER, rel)
+            continue
+        paths.append(led.put(OWNER, rel, data))
     led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files}))
     return paths
 
