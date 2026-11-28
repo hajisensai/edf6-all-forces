@@ -165,6 +165,12 @@ plugin_net::Channel VehiclerLogisticsNetChannel() noexcept {
     plugin_net::Channel c;c.name="vehicler logistics";c.magic=0x474C575Au;c.version=1;
     c.minSize=80;c.maxSize=152;c.receive=&ReceiveVehiclerLogistics;return c;
 }
+// The RuneBlade's arms (runeblade_melee.cpp): ZWRB messages, not under test here.
+bool ReceiveRuneBladeMelee(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel RuneBladeMeleeNetChannel() noexcept {
+    plugin_net::Channel c;c.name="runeblade melee";c.magic=0x4252575Au;c.version=1;
+    c.minSize=c.maxSize=96;c.receive=&ReceiveRuneBladeMelee;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}

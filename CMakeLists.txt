@@ -181,6 +181,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/vehicler_foot.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/vehicler_start.cpp)
 # The Vehicler's logistics points, its HUD gauge and the resupply call (src/vehicler_logistics_logic.h, docs/newclass-re/vehicler-plan.md §3).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicler_logistics.cpp)
+
+# The RuneBlade's melee and special arms: the combo extras, the lance, the ring, the smash, the iaido, R2 / R3 (src/runeblade_melee_logic.h, docs/newclass-re/runeblade-melee-plan.md).
+target_sources(EDF6VehicleCrew PRIVATE src/runeblade_melee.cpp)
 # 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
@@ -936,6 +939,12 @@ add_executable(vehicler_logistics_test tests/vehicler_logistics_test.cpp)
 target_include_directories(vehicler_logistics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(vehicler_logistics_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME vehicler_logistics COMMAND vehicler_logistics_test)
+
+# The RuneBlade's arms (src/runeblade_melee_logic.h / _net.h, src/runeblade_ether.h): each arm's frames, the strike queue, the ring, the ZWRB codec.
+add_executable(runeblade_melee_test tests/runeblade_melee_test.cpp)
+target_include_directories(runeblade_melee_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(runeblade_melee_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME runeblade_melee COMMAND runeblade_melee_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 # The menu as the game's own dialogs: pages, buttons, paging, cancel, the edits and saves they make

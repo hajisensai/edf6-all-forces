@@ -26,6 +26,7 @@
 #include "jet_lever_net.h"
 #include "aura.h"
 #include "vehicler_logistics.h"
+#include "runeblade_melee.h"
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "npc_arms.h"
@@ -218,6 +219,7 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(JetLeverNetChannel());
     plugin_net::RegisterChannel(AuraNetChannel());
     plugin_net::RegisterChannel(VehiclerLogisticsNetChannel());
+    plugin_net::RegisterChannel(RuneBladeMeleeNetChannel());
 }
 // A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
 // said once a magic (a few magics), never once a message.
