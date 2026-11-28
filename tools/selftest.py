@@ -2969,8 +2969,14 @@ def every_npc_aircraft_boardable() -> None:
     # kBoardable, so an aircraft added later is flown by the player too (or is left out on purpose here, saying why);
     # the enemy's are not; the ini keys of the feature are read and documented.
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
-    rows = re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,[^}]*?"(\w+)"(,true)?\}', re.sub(r'\s+', ' ', table))
-    assert len(rows) >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
+    flat = re.sub(r'\s+', ' ', table)
+    rows = [(body, mark, name, flags.replace(' ', '').startswith(',true')) for body, mark, name, flags in re.findall(
+        r'\{Body::(\w+), ?L"[^"]*", ?L"[^"]*", ?(\d+)\.0f,[^}]*?"(\w+)"((?:, ?(?:true|false))*)(?:, ?Body::\w+)?\}', flat)]
+    # Every row read (a row wrapped before its mark, or with its gun drone, had been skipped unseen: the salvo's).
+    assert len(rows) == flat.count('{Body::') >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
+    # Left out on purpose: the Arsenal Bird's three bodies (its salvo, its drone carrier and their M101): the player's
+    # flight of a 106 m flying wing and its calls come with the Arsenal Bird's second stage (none flies it before).
+    unboarded = {'salvoInterceptor', 'arsenalCarrier', 'm101Drone'}
     boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
     # A body that is another row's airframe under the same mark is boarded as that row: playerjet_kinds.inc BoardRowOf
     # finds the row by the mark, a strike-mark jet then by its model's bones, so a row of its own could never be found.
@@ -2988,6 +2994,8 @@ def every_npc_aircraft_boardable() -> None:
             continue   # a heli: the stock heli flight
         if hostile:
             assert body not in boardable, f'{body} is the enemy\'s: not boardable'
+        elif body in unboarded:
+            assert body not in boardable, f'{body} is boardable now: drop it from the left-out ones'
         else:
             assert body in boardable or boarded_as.get(body) in boardable, \
                 f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'

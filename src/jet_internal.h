@@ -429,7 +429,7 @@ struct Aim {
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
 struct CarrierState {
     Role drones;             // what it launches (blast, doll; else the drone): its body's mark's
-    Body gunDrone;           // ...its gun drone (BodyRow::gunDrone): its body's mark's
+    Body gunDrone=Body::drone;   // ...its gun drone (BodyRow::gunDrone): its body's mark's (NewEntry)
     float hpSeen,evadeTo[3];
     ULONGLONG evadeUntil,evadeAgain;
     bool docking;
