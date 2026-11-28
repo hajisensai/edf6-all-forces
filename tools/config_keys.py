@@ -87,7 +87,7 @@ K('PerfHud', 'perfHud', BOOL, False,
   note=('the performance panel in a mission: frame rate, the step\'s phases, the population, CPU, memory (perf_hud.h); '
         'read live',),
   ini=(
-      '; 性能面板：任务中在屏幕右上角显示帧率、每帧耗时（含最差一帧）、每步各阶段耗时（AI / 前置 / Havok / 对象 / 镜头）、',
+      '; 性能面板：任务中在屏幕左侧（血条下方）显示帧率、每帧耗时（含最差一帧）、每步各阶段耗时（AI / 前置 / Havok / 对象 / 镜头）、',
       '; 每帧的绘制部分、敌人与友军数、游戏进程的 CPU（按核数计）和内存。数据取自游戏自带的分段计时，每 0.5 秒刷新。',
       '; 1 = 显示，0 = 不显示（默认）。游戏运行中改了保存即生效，与 Debug / PerfProbe 无关')),
 K('PreloadMode', 'preloadMode', INT, '0',
