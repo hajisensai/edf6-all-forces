@@ -15,7 +15,12 @@ using namespace crew::playerslots;
 }  // namespace
 
 int main() {
-    Check(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(4)==0 && SlotsOf(-1)==0,"slot counts");
+    Check(SlotsOf(0)==4 && SlotsOf(1)==4 && SlotsOf(2)==5 && SlotsOf(3)==6 && SlotsOf(6)==0 && SlotsOf(-1)==0,"slot counts");
+    // the plugin's classes (docs/plan-2026-11-28-new-classes-impl.md §1), once their rules are in the generated table
+    if(SlotsOf(4))Check(SlotsOf(4)==2 && SlotAccepts(4,0,400) && SlotAccepts(4,1,401) && !SlotAccepts(4,0,401) &&
+                        !SlotAccepts(4,1,0),"vehicler: 400 vehicle, 401 pistol");
+    if(SlotsOf(5))Check(SlotsOf(5)==3 && SlotAccepts(5,0,500) && SlotAccepts(5,1,501) && SlotAccepts(5,2,502) &&
+                        !SlotAccepts(5,0,200),"rune blade: 500 melee, 501 ranged, 502 support");
     static_assert(SlotsOf(3)<=kSlotsMost && crew::preset::kSlots==kSlotsMost,"a preset holds every slot");
     // Ranger
     Check(SlotAccepts(0,0,0) && SlotAccepts(0,1,6) && !SlotAccepts(0,0,7),"ranger main weapons 0..6");
@@ -35,11 +40,11 @@ int main() {
     // Fencer (2xx: class 3)
     Check(SlotAccepts(3,0,200) && SlotAccepts(3,3,205) && !SlotAccepts(3,3,206),"fencer weapons");
     Check(SlotAccepts(3,4,206) && SlotAccepts(3,5,209) && !SlotAccepts(3,5,210) && !SlotAccepts(3,6,206),"fencer support");
-    Check(!SlotAccepts(-1,0,0) && !SlotAccepts(4,0,0),"no other class");
+    Check(!SlotAccepts(-1,0,0) && !SlotAccepts(6,0,0) && !SlotAccepts(4,0,0) && !SlotAccepts(5,0,200),"no other class");
     // one table: every category of every wlist::kWeaponSlotRules slot accepted, nothing else in that class
     for(const crew::wlist::WeaponSlotRule& r:crew::wlist::kWeaponSlotRules) {
         Check(r.slot<SlotsOf(r.cls),"each rule's slot counted");
-        for(int c=-1;c<400;++c) {
+        for(int c=-1;c<600;++c) {
             bool listed=false;
             for(int k=0;k<crew::wlist::kSlotCategoriesMost && r.categories[k]>=0;++k)listed=listed || r.categories[k]==c;
             Check(SlotAccepts(r.cls,r.slot,c)==listed,"SlotAccepts is kWeaponSlotRules");
@@ -75,6 +80,13 @@ int main() {
         shield=shield || (w.cls==3 && w.slot==0 && w.row==1200);
     }
     Check(rifle && grenade && drone && shield,"each write at its class and slot");
+    // a preset of the plugin's class 5: selected; slots past its 3 (or all, before its rules are in) never looked at
+    crew::preset::Player q;
+    q.cls=5;
+    q.weapon[5][3]="AssultRifle01";
+    q.weapon[4][2]="AssultRifle01";
+    const Plan rune=PlanWrites(q,lookup);
+    Check(rune.cls==5 && rune.n==0 && rune.unknown==0 && rune.wrongSlot==0,"class 5 selected, no slot it lacks");
     std::printf("player_slots: %d checks passed\n",checks);
     return 0;
 }

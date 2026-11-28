@@ -7,17 +7,25 @@
 //     OWN_MECH, SupportCrewColour[_<KEY>]): every such key the preset has, with its value; a key it does not have is the
 //     stock load. Switching makes the ini exactly that (SwitchEdits: absent keys removed), each value checked by the
 //     plugin's own parsers when loadout_store.h SaveSupportLoadouts writes it;
-//   - optionally the player's class and the 6 weapon slots of each of the 4 classes, by WeaponTable row *name* (a row's
-//     index moves with every weapon table install; the name does not). An empty name leaves that slot as it is.
+//   - optionally the player's class and the 6 weapon slots of each of the kClasses classes (the 4 stock ones and the
+//     plugin's 4 载具手 / 5 刻印剑士, docs/plan-2026-11-28-new-classes-impl.md §1), by WeaponTable row *name* (a row's
+//     index moves with every weapon table install; the name does not). An empty name leaves that slot as it is; the
+//     slots a class does not have (载具手 2 of 6, 刻印剑士 3 of 6) stay empty.
 // The book (Mods/Plugins/EDF6VehicleCrew.presets.ini, UTF-8, written atomically by the caller) keeps at most kPresetMost
 // presets, the current one and which preset each mission was last started with (the map's 本关出动 row):
-//   [Book]          Current=<1-based, 0 none>
-//   [Preset<n>]     Name=<UTF-8, 1..kPresetNameMost bytes>   Class=<0..3, absent: player not stored>
-//                   Weapons<c>=<name>,<name>,<name>,<name>,<name>,<name>   (c 0..3)
+//   [Book]          Format=<kFormat>   Current=<1-based, 0 none>
+//   [Preset<n>]     Name=<UTF-8, 1..kPresetNameMost bytes>   Class=<0..5, absent: player not stored>
+//                   Weapons<c>=<name>,<name>,<name>,<name>,<name>,<name>   (c 0..5; a line not there: all 6 empty)
 //                   S.<ini key>=<value>                                     (one per support key)
 //   [Missions]      <mission key>=<1-based preset>
 // Parse refuses the whole file on any malformed line (the caller keeps the book it has and says why); a mission naming a
 // preset that does not exist is dropped, not an error (a preset deleted by hand).
+//
+// Format versions. 1 (no Format line; until 2026-11-28): classes 0..3, Weapons0..3. 2: classes 0..5, Weapons0..5.
+// Migrating a version 1 book: it is read as it is (all it can hold is valid in 2; the new classes' lines are absent, so
+// their slots are left as they are) and the next write is version 2 (Serialize always writes kFormat). Nothing else
+// differs, so there is no version 1 path. A Format other than kFormat (a book of a newer plugin, a hand edit) is refused
+// like any malformed line: the caller keeps the book it has.
 #pragma once
 #include <algorithm>
 #include <cstddef>
@@ -31,7 +39,10 @@ namespace crew::preset {
 
 inline constexpr int kPresetMost=8;
 inline constexpr std::size_t kPresetNameMost=48;   // bytes of UTF-8
-inline constexpr int kClasses=4,kSlots=6;
+inline constexpr int kFormat=2;
+// The classes a preset holds: SoldierInit 0..3 stock, 4 载具手 (ZwVehicler), 5 刻印剑士 (ZwRuneBlade); GameStatus keeps
+// 10 per player (+0x6E98 + class*0x18), so 0..5 are all real cells.
+inline constexpr int kClasses=6,kSlots=6;
 inline constexpr std::size_t kMissionsMost=1024;
 inline constexpr std::size_t kValueMost=240;       // loadout_ini.h ValidLoadoutValue's limit
 inline constexpr std::size_t kTokenMost=64;
@@ -202,7 +213,9 @@ inline bool ValidPreset(const Preset& p,std::string* why) {
 }
 
 inline std::string Serialize(const Book& b) {
-    std::string out="; EDF6 全军出击 整备方案（游戏内整备界面写入；手改请保持格式）\r\n[Book]\r\nCurrent=";
+    std::string out="; EDF6 全军出击 整备方案（游戏内整备界面写入；手改请保持格式）\r\n[Book]\r\nFormat=";
+    out+=std::to_string(kFormat);
+    out+="\r\nCurrent=";
     out+=std::to_string(b.current<0 ? 0 : b.current+1);
     out+="\r\n";
     for(std::size_t i=0;i<b.presets.size();++i) {
@@ -230,6 +243,7 @@ inline bool Parse(std::string_view text,Book* out,std::string* why) {
     auto no=[&](const std::string& w){if(why)*why=w;return false;};
     Book b;
     int current=0;
+    bool formatSeen=false;   // no Format line: version 1, read as it is (see the top)
     std::vector<std::pair<std::string,int>> missions;
     enum class Sec { none, book, preset, missions } sec=Sec::none;
     Preset* p=nullptr;
@@ -267,7 +281,14 @@ inline bool Parse(std::string_view text,Book* out,std::string* why) {
         switch(sec) {
         case Sec::none: return no(where+"在任何节之前");
         case Sec::book:
-            if(key!="Current" || !detail::ParseInt(value,0,kPresetMost,&current))return no(where+"[Book] 只认 Current=0–8");
+            if(key=="Format") {
+                int format=0;
+                if(formatSeen || !detail::ParseInt(value,1,9999,&format) || format!=kFormat)
+                    return no(where+"方案文件格式版本不是 "+std::to_string(kFormat)+"（更新的插件写的？）");
+                formatSeen=true;
+            }
+            else if(key!="Current" || !detail::ParseInt(value,0,kPresetMost,&current))
+                return no(where+"[Book] 只认 Format="+std::to_string(kFormat)+" 和 Current=0–8");
             break;
         case Sec::missions: {
             int n=0;
