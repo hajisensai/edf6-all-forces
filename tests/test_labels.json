@@ -1192,7 +1192,8 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports"
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -6257,7 +6258,8 @@
   "preload_set": {
    "labels": [
     "plugin-core",
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -9326,6 +9328,34 @@
    ],
    "scripts": [
     "tests/zw_classes_test.py"
+   ]
+  },
+  "zw_dispatch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "zw_vehicles": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/zw_vehicles_test.py"
    ]
   }
  },

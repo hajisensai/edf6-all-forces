@@ -5662,6 +5662,9 @@ def pack_install_upgrade_uninstall() -> None:
             # the new classes' SGOs (tools/make_zw_classes.py): its Root.cpk reader stubbed, its install / remove real
             enter(patched(importlib.import_module('make_zw_classes'),
                           build=lambda game: {'OBJECT/ZW_VEHICLER_01.SGO': b'zw battle'}))
+            # the Vehicler's vehicles (tools/make_zw_vehicles.py): the same, its Root.cpk reader stubbed
+            enter(patched(importlib.import_module('make_zw_vehicles'),
+                          build=lambda game: {'OBJECT/EDF6VC_ZW_HSTVL.SGO': b'zw vehicle'}))
             enter(patched(buildcache, recipes=lambda: {g: 'recipe' for g in buildcache.GROUPS}))
             enter(patched(installer.model_workers, group_workers=lambda: 1))   # the stand-in builders are this process's
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
