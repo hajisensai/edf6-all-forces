@@ -793,7 +793,8 @@ SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
 # Body::arsenalCarrier: the carrier kind's arms, durability and AI under a mark of its own), launching M101s (M101_JET,
 # Body::m101Drone: the gun drone's arms, durability and AI in the M101's model). Both only with the model folder.
 ARSENAL_CARRIER_MARK = 7071.0
-ARSENAL_CARRIER_JET = 'edf6tr_jet_arsenal_carrier_mission'
+# Named as the Helicarriers are (no '_mission': the range parks no twin of it, the model pack's model).
+ARSENAL_CARRIER_JET = 'edf6tr_arsenal_carrier'
 ARSENAL_CARRIER_OBJECT = 'EDF6VC_JET_ARSENAL_CARRIER.SGO'
 M101_MARK = 7072.0
 M101_JET = 'edf6tr_jet_m101'
@@ -1125,7 +1126,7 @@ PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0,
                              7041.0, 7042.0, 7043.0, 7044.0, *(u.air['mark'] for u in xm_units.ported('jet')),
                              *(mark for _n, mark, *_r in SUPPORT_JETS.values()), C130_GUNSHIP_MARK,
-                             C130_TRANSPORT_MARK, *HELICARRIER_MARKS.values()})
+                             C130_TRANSPORT_MARK, *HELICARRIER_MARKS.values(), ARSENAL_CARRIER_MARK, M101_MARK})
 
 
 @dataclass(frozen=True)

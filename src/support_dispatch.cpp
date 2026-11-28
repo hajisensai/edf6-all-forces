@@ -451,7 +451,7 @@ void PresetHands(std::uint32_t catalog,const SupportLoadout& load,int i,support_
 // names a body (support_loadout.h kVehicleKeys: the tank's, the strike jet's, ...); a jet sortie's (SORTIE_*, no key of
 // its own) the first guarding call of the same jet role that has one (the bomber's sortie the strike jet's
 // STRIKE, the defender's MULTIROLE, the fighter's FIGHTER); -1 none (the helicopters take no pylons, the
-// gunship and the Zenith none either). Derived from the call table alone, so the same on every machine of the room.
+// gunship and the Arsenal Bird's sortie none either). Derived from the call table alone, so the same on every machine of the room.
 int HullOf(int catalog) noexcept {
     if(catalog<0 || catalog>=kSupportConfigUnits)return -1;
     if(VehicleBodyOfKey(SupportCallKey(catalog))!=VehicleBody::none)return catalog;

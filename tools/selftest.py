@@ -2974,9 +2974,10 @@ def every_npc_aircraft_boardable() -> None:
         r'\{Body::(\w+), ?L"[^"]*", ?L"[^"]*", ?(\d+)\.0f,[^}]*?"(\w+)"((?:, ?(?:true|false))*)(?:, ?Body::\w+)?\}', flat)]
     # Every row read (a row wrapped before its mark, or with its gun drone, had been skipped unseen: the salvo's).
     assert len(rows) == flat.count('{Body::') >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
-    # Left out on purpose: the Arsenal Bird's three bodies (its salvo, its drone carrier and their M101): the player's
-    # flight of a 106 m flying wing and its calls come with the Arsenal Bird's second stage (none flies it before).
-    unboarded = {'salvoInterceptor', 'arsenalCarrier', 'm101Drone'}
+    # Left out on purpose: the Arsenal Bird's missile mode (the salvo interceptor) makes one pass and leaves the map: it
+    # never stays for the player to board. Its drone mode (arsenalCarrier) and its M101s are boarded as the Helicarriers
+    # and the gun drone are (2026-11-28).
+    unboarded = {'salvoInterceptor'}
     boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
     # A body that is another row's airframe under the same mark is boarded as that row: playerjet_kinds.inc BoardRowOf
     # finds the row by the mark, a strike-mark jet then by its model's bones, so a row of its own could never be found.
@@ -3223,6 +3224,8 @@ def every_boardable_aircraft_requested() -> None:
         'transportPlane': "the paratroop plane (vcobjects.C130_JETS): it carries the support's paratroopers, not a pilot's",
         **{b: "the support's Helicarrier (vcobjects.HELICARRIER_JETS): the carrier requests bring their kinds' own twins"
            for b in ('supCarrier', 'supBlastCarrier', 'supDollCarrier')},
+        'arsenalCarrier': "the Arsenal Bird's drone mode (vcobjects.ARSENAL_CARRIER_JET): its model is the model pack's",
+        'm101Drone': "the Arsenal Bird's M101 (vcobjects.M101_JET): its model is the model pack's; the gun drone request flies",
     }
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
     marks = {body: float(mark) for body, mark in
