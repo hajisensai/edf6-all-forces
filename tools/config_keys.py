@@ -83,6 +83,13 @@ K('PerfProbe', 'perfProbe', INT, '0',
   ini=(
       '; 测量用（tools/perfrun.py 测试时自动打开）：Debug=1 时再把每帧拆成各段计时、记呈现间隔与输入到呈现的延迟、按 pass 数绘制提交。2 还抽样碰撞任务。平时保持 0。',
       '; 注意：PerfProbe=0 时只要 Debug=1，帧锚点（主循环输入采样处的钩子，PERF 行按帧计时用）照样会装；联机通道的消息计数（PERF NET 行）也一直在计数，与这个开关无关')),
+K('PerfHud', 'perfHud', BOOL, False,
+  note=('the performance panel in a mission: frame rate, the step\'s phases, the population, CPU, memory (perf_hud.h); '
+        'read live',),
+  ini=(
+      '; 性能面板：任务中在屏幕左侧（血条下方）显示帧率、每帧耗时（含最差一帧）、每步各阶段耗时（AI / 前置 / Havok / 对象 / 镜头）、',
+      '; 每帧的绘制部分、敌人与友军数、游戏进程的 CPU（按核数计）和内存。数据取自游戏自带的分段计时，每 0.5 秒刷新。',
+      '; 1 = 显示，0 = 不显示（默认）。游戏运行中改了保存即生效，与 Debug / PerfProbe 无关')),
 K('PreloadMode', 'preloadMode', INT, '0',
   lo='0', hi='2',
   note=("a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)",),

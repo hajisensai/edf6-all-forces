@@ -45,10 +45,26 @@ for site, target in (('kInputCall', 'kInput'), ('kFenceCall', 'kFence'), ('kPres
                      ('kCollideConstructCall', 'kCollideConstruct'), ('kCollideSleepCall', 'kCollideSleep')):
     call(value(site), value(target))
     checked += 1
-for sites, target in (('kSubmitCalls', 'kSubmit'), ('kMeshCalls', 'kMesh')):
+for sites, target in (('kSubmitCalls', 'kSubmit'), ('kMeshCalls', 'kMesh'), ('kScopeEndCalls', 'kScopeEnd')):
     for at in values(sites):
         call(at, value(target))
         checked += 1
+# The performance panel's scopes (src/perf_hud.h): each end is the first scope end after its begin, a call to 0x11AA830
+# after `lea rdx, <the phase's name>` (UTF-16), in perfhud::Scope's order; begin writes +8 / +0x10, end +0x18.
+BEGIN = 0x11AA830
+NAMES = ('xgs_scene_object_ai_update', 'xgs_scene_object_pre_update', 'xgs_havok_update', 'xgs_scene_object_update',
+         'xgs_scene_camera_update', 'xgs_scene_object_safe_update', 'xgs_scene_render_command')
+assert binary[BEGIN + 0x18:BEGIN + 0x1C] == bytes.fromhex('48895f08')     # mov [rdi+8], rbx (the name)
+assert binary[BEGIN + 0x36:BEGIN + 0x3A] == bytes.fromhex('48894710')     # mov [rdi+0x10], rax (the start)
+assert binary[value('kScopeEnd') + 0xE:value('kScopeEnd') + 0x12] == bytes.fromhex('48894318')   # mov [rbx+0x18], rax
+for end, name in zip(values('kScopeEndCalls'), NAMES):
+    begin = next(a for a in range(end - 5, end - 0x1000, -1)
+                 if binary[a] == 0xE8 and a + 5 + struct.unpack_from('<i', binary, a + 1)[0] in (BEGIN, value('kScopeEnd')))
+    assert begin + 5 + struct.unpack_from('<i', binary, begin + 1)[0] == BEGIN, (hex(end), 'not after a begin')
+    lea = next(a for a in range(begin - 3, begin - 40, -1) if binary[a:a + 3] == bytes.fromhex('488d15'))
+    text = lea + 7 + struct.unpack_from('<i', binary, lea + 3)[0]
+    assert binary[text:text + 2 * len(name) + 2].decode('utf-16-le') == name + chr(0), (hex(end), name)
+    checked += 1
 # Both dispatch calls use the same argument setup and secondary queue vtable slot.
 sig = bytes.fromhex('488b06488d5424204533c0488bceff90a8000000')
 for at in values('kCollideDispatchCalls'):

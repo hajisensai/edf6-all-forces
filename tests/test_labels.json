@@ -5896,6 +5896,13 @@
    ],
    "scripts": []
   },
+  "perf_hud": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
   "perf_probe_native": {
    "labels": [
     "plugin-core",
