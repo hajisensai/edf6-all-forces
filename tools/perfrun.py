@@ -80,10 +80,10 @@ LEGS (more than one positional argument): one launch, the scenarios one after th
   stay              the leg stays in the mission the leg before it is in (no `next`, no loading, no new wave): only its
                     ini written, the plugin reloads it (a hot-reloaded switch: ObjectUpdateMT, NpcParallelThink and
                     the other per-frame ones; a launch-only key changes nothing), STAY_SETTLE s of warm-up (warm=),
-                    the clean window, no stack window
+                    the clean window, a FLIP_STACKS s stack window (the phases a leg)
   --flip "KEY=VALUE[;KEY=VALUE]"
-                    each scenario leg becomes A (as given) then B (these settings), A, B ... as stay legs (2 x --rounds
-                    windows, default ABAB) in one launch, summary.md's A/B table of the means a phase; --cpu defaults
+                    each scenario leg becomes A (as given) then B (these settings), B, A, A, B ... as stay legs
+                    (2 x --rounds windows, default ABBA: a drift of the scene over the launch falls on both alike), summary.md's A/B table of the means a phase; --cpu defaults
                     to FLIP_CPU there. e.g. perfrun.py bench:2000 bench:4000 --flip "ObjectUpdateMT=0;NpcParallelThink=0"
   --normal-priority the game at normal priority (default below normal: tests/autopilot/drive.py BELOW_NORMAL, so the
                     desktop stays usable under a bench of thousands)
@@ -119,6 +119,7 @@ import gamelease  # noqa: E402
 BENCH_SOLDIERS, BENCH_SETTLE, BENCH_PLATEAU = 120, 30.0, 30.0
 STAY_SETTLE = 6.0   # a stay leg's warm-up: the ini reloaded (the next frame) and the old setting's frames out of the rows
 FLIP_CPU = 12       # --flip's clean window a leg (four of them a scenario), unless --cpu says
+FLIP_STACKS = 8     # a stay leg's stack window: its phases (pre_update ...) for the A/B table, shorter than --stacks
 BENCH_PINNED = 0.95   # the window's mean enemies under this share of E: the report says the count was not held
 WARM = {'grand': 45.0, 'swarm': 30.0, 'horde': 40.0, 'blast': 40.0}   # the waves need this long to fill up; a stock mission's start: 25 s
 # (past drive.run's real-mouse nudge at 20 s, which must not fall into the clean window)
@@ -730,7 +731,7 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
                     marks['error'] = why
                     return
                 marks['entered'] = time.time()
-                _sample(dirs[i], warms[i], opts['cpu'], 0, opts['interval'], marks, opts.get('presentmon'))
+                _sample(dirs[i], warms[i], opts['cpu'], FLIP_STACKS, opts['interval'], marks, opts.get('presentmon'))
                 if marks.get('error') or 'windows' not in marks:
                     marks.setdefault('error', 'not sampled')
                     return
@@ -1013,16 +1014,23 @@ def options(argv: list[str]) -> tuple[str, dict]:
 
 
 def flip_legs(legs: list[dict], flip: list[str], rounds: int) -> list[dict]:
-    """--flip: each leg as A, then 2 x `rounds` - 1 stay legs of it, B (`flip` over its ini=) and A by turns."""
+    """--flip: each leg as A, then 2 x `rounds` - 1 stay legs of it, B (`flip` over its ini=) and A in the order
+    AB BA AB BA ...: a steady drift of the scene over the launch (the bench's wave thinning, the camera's view) weighs
+    on A's and B's windows alike."""
     out = []
     for leg in legs:
         base = leg['scenario'].replace(':', '_')
-        out.append({**leg, 'variant': 'A', 'name': f'{base}-A1'})
-        for k in range(1, 2 * rounds):
-            b = k % 2 == 1
+        order = [v for r in range(rounds) for v in (('A', 'B') if r % 2 == 0 else ('B', 'A'))]
+        seen = {'A': 0, 'B': 0}
+        for k, v in enumerate(order):
+            seen[v] += 1
+            name = f'{base}-{v}{seen[v]}'
+            if not k:
+                out.append({**leg, 'variant': 'A', 'name': name})
+                continue
             out.append({'scenario': leg['scenario'], 'keys': [], 'warm': None, 'difficulty': leg['difficulty'],
-                        'ini': [*leg['ini'], *flip] if b else list(leg['ini']), 'stay': True,
-                        'variant': 'B' if b else 'A', 'name': f'{base}-{"B" if b else "A"}{k // 2 + 1}'})
+                        'ini': [*leg['ini'], *flip] if v == 'B' else list(leg['ini']), 'stay': True,
+                        'variant': v, 'name': name})
     return out
 
 

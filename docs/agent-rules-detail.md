@@ -36,7 +36,7 @@
 
 - 测前备份、测后逐字节还原：`drive.py` / `run_test.py` / `perfrun.py` 已经逐文件做了（带清单，结束后自动放回）。不要整份复制 `Mods/`（约 10 GB）或游戏目录再逐个算 sha256，那样每次测试要写十几 GB，硬盘会卡死。
 - 游戏排队的细节见 README「实测排队」。
-- 开关对照（性能 A/B）一次启动做完：`python tools/perfrun.py bench:2000 bench:4000 --flip "ObjectUpdateMT=0;NpcParallelThink=0"`。每个规模先正常进场暖机（A），再在同一局里只改 ini、等插件热重载，按 B / A / B 各采 12 s（不重进任务、不重新补满敌人、不采栈），`summary.md` 末尾给每个阶段的 A/B 均值。只对运行中会重读的开关有效；只在启动时读的键（如 `FrameRateCap`）仍要分两次启动或 `--ab` 两份 DLL。游戏默认以低于正常优先级运行，桌面不卡；要原始优先级加 `--normal-priority`。
+- 开关对照（性能 A/B）一次启动做完：`python tools/perfrun.py bench:2000 bench:4000 --flip "ObjectUpdateMT=0;NpcParallelThink=0"`。每个规模先正常进场暖机（A），再在同一局里只改 ini、等插件热重载，按 B / B / A 各采 12 s 再采 8 s 栈（ABBA 让同局里场景的逐渐变化平摊到两边；不重进任务、不重新补满敌人），`summary.md` 末尾给每个阶段的 A/B 均值。只对运行中会重读的开关有效；只在启动时读的键（如 `FrameRateCap`）仍要分两次启动或 `--ab` 两份 DLL。游戏默认以低于正常优先级运行，桌面不卡；要原始优先级加 `--normal-priority`。
 
 ## 打分享包（用户要求时才打，合并后不自动打）
 

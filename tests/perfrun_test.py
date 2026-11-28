@@ -1283,7 +1283,7 @@ def legs_run() -> None:
 
 
 def flip_run() -> None:
-    """--flip: one launch, A then B, A, B as stay legs (no `next`, no population wait, no stack window, STAY_SETTLE s
+    """--flip: one launch, A then B, B, A as stay legs (no `next`, no population wait, a short stack window, STAY_SETTLE s
     of warm-up), each stay leg's ini written over the launch's (B with the flip, A the launch's again), the variants in
     run.json; flip_table's means a variant; drive.replace_placed keeps restore_placed putting the original back."""
     import contextlib
@@ -1293,8 +1293,8 @@ def flip_run() -> None:
     _, opts = perfrun.options(['stress:1', '--flip', 'ObjectUpdateMT=0;NpcParallelThink=0', '--dll', 'installed',
                                '--ini', 'Debug=0'])
     check(opts['cpu'] == perfrun.FLIP_CPU and [(x['name'], x['variant'], x['stay']) for x in opts['legs']] ==
-          [('stress_1-A1', 'A', False), ('stress_1-B1', 'B', True), ('stress_1-A2', 'A', True),
-           ('stress_1-B2', 'B', True)], '--flip: A as given, then B / A / B stay legs, its own clean window')
+          [('stress_1-A1', 'A', False), ('stress_1-B1', 'B', True), ('stress_1-B2', 'B', True),
+           ('stress_1-A2', 'A', True)], '--flip: A as given, then B / B / A stay legs (ABBA), its own clean window')
     for bad in (['stress:1,stay'], ['stress:1', '--flip', 'x'], ['stress:1', '--flip', 'A=1', '--cycle', '2']):
         try:
             with contextlib.redirect_stdout(io.StringIO()):
@@ -1353,16 +1353,17 @@ def flip_run() -> None:
             rc = perfrun.multi_run(game, opts['legs'], out, None, opts)
         check(rc == 0, '--flip: the run passes')
         samples = [c for c in calls if c[0] == 'sample']
-        check([c[1] for c in samples] == ['stress_1-A1', 'stress_1-B1', 'stress_1-A2', 'stress_1-B2']
-              and samples[0][4] == 20 and all(c[4] == 0 and c[2] == perfrun.STAY_SETTLE for c in samples[1:])
+        check([c[1] for c in samples] == ['stress_1-A1', 'stress_1-B1', 'stress_1-B2', 'stress_1-A2']
+              and samples[0][4] == 20 and all(c[4] == perfrun.FLIP_STACKS and c[2] == perfrun.STAY_SETTLE
+                                              for c in samples[1:])
               and all(c[3] == perfrun.FLIP_CPU for c in samples), 'stay legs: settle only, the same clean window, '
-              'no stack window')
+              'a short stack window')
         check(('command',) not in calls and ('population',) not in calls, 'stay legs: no `next`')
         inis = [c for c in calls if c[0] == 'ini']
         check(len(inis) == 3 and all(c[1] == perfrun.INI_DEST for c in inis)
               and 'ObjectUpdateMT=0' in inis[0][2] and 'NpcParallelThink=0' in inis[0][2]
-              and 'ObjectUpdateMT=1' in inis[1][2] and 'NpcParallelThink=1' in inis[1][2] and 'PerfProbe=1' in inis[1][2]
-              and inis[0][2] == inis[2][2], 'B: the flip over the launch ini; A: the launch ini again')
+              and 'ObjectUpdateMT=1' in inis[2][2] and 'NpcParallelThink=1' in inis[2][2] and 'PerfProbe=1' in inis[2][2]
+              and inis[0][2] == inis[1][2], 'B: the flip over the launch ini; A: the launch ini again')
         runs = []
         for n in ('stress_1-A1', 'stress_1-B1', 'stress_1-A2', 'stress_1-B2'):
             with open(os.path.join(out, n, 'run.json'), encoding='utf-8') as f:
@@ -1396,7 +1397,7 @@ def flip_run() -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             rc2 = perfrun.multi_run(game, two['legs'], os.path.join(d, 'out-two'), None, two)
         check(rc2 == 0 and [c[1] for c in calls if c[0] == 'sample'] ==
-              [f'stress_{n}-{v}' for n in (1, 2) for v in ('A1', 'B1', 'A2', 'B2')] and
+              [f'stress_{n}-{v}' for n in (1, 2) for v in ('A1', 'B1', 'B2', 'A2')] and
               calls.count(('command',)) == 1, 'a second scenario after stay legs: in by NEXT 1, not NEXT 4')
         check([r['variant'] for r in runs] == ['A', 'B', 'A', 'B'] and [r['stay'] for r in runs] ==
               [False, True, True, True] and all('asked' in r for r in runs[1:]), "run.json: the leg's variant, stay")
