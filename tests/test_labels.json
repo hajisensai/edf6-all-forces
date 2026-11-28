@@ -27,12 +27,6628 @@
   "misc": "anything else tracked"
  },
  "ctest": {
+  "aim_line_want_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "air_chase_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "airbound_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "aircraft_collision": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/aircraft_collision_check.py"
+   ]
+  },
+  "aircraft_locator_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/aircraft_locator_native_audit.py"
+   ]
+  },
+  "aircraft_payload_click": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "airdrop_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "airframe_constructor": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "airframe_constructor_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/airframe_constructor_native_audit.py"
+   ]
+  },
+  "airstrike": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "aiworld_capacity": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "aiworld_capacity_native": {
+   "labels": [
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/aiworld_capacity_audit.py"
+   ]
+  },
+  "allclass": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "allclass_bench_lift": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/allclass_bench_lift_audit.py"
+   ]
+  },
+  "allclass_census": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/allclass_census_check.py"
+   ]
+  },
+  "allclass_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/allclass_guard.py"
+   ]
+  },
+  "allclass_native": {
+   "labels": [
+    "plugin-core",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/allclass_native_audit.py"
+   ]
+  },
+  "andryusha_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "armor_hud_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "armory_logic": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "armory_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/armory_native_audit.py"
+   ]
+  },
+  "armory_skin": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "as_registration": {
+   "labels": [
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/test_as_registration.py"
+   ]
+  },
+  "aura_logic": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "aura_vehicles_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/aura_vehicles_guard.py"
+   ]
+  },
+  "autopilot_driver": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/autopilot/drive.py",
+    "tests/autopilot/test_drive.py"
+   ]
+  },
+  "autoturret_binding": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "autoturret_clock_grid": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "autoturret_payload_aim": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "barga_aim_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "barrage_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "barrage_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "barrel_recoil": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "bc5_normals": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/test_bc5_normals.py"
+   ]
+  },
+  "begaruta_family_profile": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/begaruta_family_native_profile_test.py"
+   ]
+  },
+  "boarding_hit": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "body_mark_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "bullet_pass_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "bvm41_dataflow": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_bvm41_dataflow.py"
+   ]
+  },
+  "cabin_view": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cabin_view_test.py"
+   ]
+  },
+  "camera_frame_native": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "camera_payload_lifecycle": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "car_input_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/car_input_native_audit.py"
+   ]
+  },
+  "carrier_drone_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "carrier_drone_transaction": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "carrier_laser_team": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "carrier_support_dispatch": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "chase_cam": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "coax_fire_motion_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/coax_fire_motion_native_audit.py"
+   ]
+  },
+  "cockpit_build_0": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_1": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_10": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_11": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_12": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_13": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_14": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_15": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_16": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_17": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_18": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_19": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_2": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_3": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_4": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_5": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_6": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_7": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_8": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_build_9": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py"
+   ]
+  },
+  "cockpit_canvas_check": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "cockpit_coverage_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_coverage_guard.py"
+   ]
+  },
+  "cockpit_instruments": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_instruments_test.py"
+   ]
+  },
+  "cockpit_panoramic": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-hud",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_panoramic_test.py"
+   ]
+  },
+  "cockpit_retrofit": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_retrofit_test.py"
+   ]
+  },
+  "cockpit_shell": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_shell_test.py"
+   ]
+  },
+  "cockpit_tub": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_tub_test.py"
+   ]
+  },
+  "code_owner": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "command_identity": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "command_native_dispatch": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "command_protocol": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "commander_logic": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "commander_native": {
+   "labels": [
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/commander_native_audit.py"
+   ]
+  },
+  "common_host_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "config_roundtrip": {
+   "labels": [
+    "installer",
+    "plugin-native",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/config_roundtrip_test.py"
+   ]
+  },
+  "coop_attr": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "coop_attr_guard": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/coop_attr_guard.py"
+   ]
+  },
+  "crash_dump": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "crawl_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "create_jet_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "crew_first_use": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "damage_stats_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "debug_spawn": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "debug_spawn_files": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "debug_spawn_ini": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/debug_spawn_ini_test.py"
+   ]
+  },
+  "debug_spawn_launch_guard": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/debug_spawn_launch_guard.py"
+   ]
+  },
+  "debug_spawn_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "debug_spawn_resources": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/debug_spawn_resource_audit.py"
+   ]
+  },
+  "debug_spawn_vehicle_level_guard": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/debug_spawn_vehicle_level_guard.py"
+   ]
+  },
+  "decal_depth_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "derived_cache": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_derivedcache.py"
+   ]
+  },
+  "dmgnum_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "doll_follow_guard": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/doll_follow_guard.py"
+   ]
+  },
+  "dreadnought_deck": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "dreadnought_fitting": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/dreadnought_fitting_test.py"
+   ]
+  },
+  "dreadnought_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "dreadnought_slot_guard": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/dreadnought_slot_guard.py"
+   ]
+  },
+  "drill_heat": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "drill_hud_binding": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "drill_launch": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "drill_model_rotation": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/drill_model_rotation_test.py"
+   ]
+  },
+  "drill_net": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "drill_sync": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "drive_gear": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "drive_gear_native": {
+   "labels": [
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/drive_gear_native_audit.py"
+   ]
+  },
+  "edf41_before_native": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-ports",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_before_native_audit.py"
+   ]
+  },
+  "edf41_bike_models": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41bike.py"
+   ]
+  },
+  "edf41_caption_contract": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_caption_contract_test.py"
+   ]
+  },
+  "edf41_fortress_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41_heli_models": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41heli.py"
+   ]
+  },
+  "edf41_hitlayer": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41_install_safety": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41_install_safety.py"
+   ]
+  },
+  "edf41_maps_parallel": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41_maps_parallel.py"
+   ]
+  },
+  "edf41_material_install": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41_material_install.py"
+   ]
+  },
+  "edf41_materials": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_material_shader_contract_audit.py",
+    "tests/test_edf41materials.py"
+   ]
+  },
+  "edf41_mech_models": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41mech.py"
+   ]
+  },
+  "edf41_npc_climb": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_npc_climb_test.py",
+    "tests/killcount_native_audit.py",
+    "tests/npc_mobility_native_audit.py",
+    "tests/test_buildcache_module_identity.py",
+    "tests/test_npc_vehicle_ai_sgo.py",
+    "tests/test_shkt_check.py",
+    "tests/testhub_dump_source_test.py",
+    "tools/selftest.py",
+    "tools/test_installer_incremental.py",
+    "tools/test_installer_recovery.py"
+   ]
+  },
+  "edf41_npc_visual_contract": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_npc_visual_contract_test.py",
+    "tests/killcount_native_audit.py",
+    "tests/npc_mobility_native_audit.py",
+    "tests/test_buildcache_module_identity.py",
+    "tests/test_npc_vehicle_ai_sgo.py",
+    "tests/test_shkt_check.py",
+    "tests/testhub_dump_source_test.py",
+    "tools/selftest.py",
+    "tools/test_installer_incremental.py",
+    "tools/test_installer_recovery.py"
+   ]
+  },
+  "edf41_sound_bank": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "edf41_sound_channels": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41_sound_lifecycle": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-ports",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_sound_lifecycle_test.py"
+   ]
+  },
+  "edf41_tank_models": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41tank.py"
+   ]
+  },
+  "edf41_tank_recoil_binding": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41tank_recoil_binding.py"
+   ]
+  },
+  "edf41_vehicle_calls": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41_vehicle_calls.py"
+   ]
+  },
+  "edf41_vehicle_sounds": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41_vehicle_sounds.py"
+   ]
+  },
+  "edf41_vehicle_spawn": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41_vehicle_spawn.py"
+   ]
+  },
+  "edf41_vehicle_spawn_data": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf41_vehicle_spawn_data.py"
+   ]
+  },
+  "edf41bike": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41bike_native": {
+   "labels": [
+    "plugin-ports",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/edf41bike_native_audit.py"
+   ]
+  },
+  "edf41bike_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "edf41dragon_control": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "edf41dragon_wake": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41fortress_runtime": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "edf41hector_control": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "edf41mech_boost": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41mech_boost_native": {
+   "labels": [
+    "plugin-ports",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/edf41mech_boost_native_audit.py"
+   ]
+  },
+  "edf41mother401_control": {
+   "labels": [
+    "edf41",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "edf41mother_control": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "edf41mother_pose": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41net": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41robo_ai": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41robo_body": {
+   "labels": [
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf41tank_pose_native": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/edf41tank_pose_native_audit.py"
+   ]
+  },
+  "edf5_campaign_chained": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "edf5_campaign_foreign_site": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "edf5_campaign_lifecycle_0": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf5_campaign_lifecycle.py"
+   ]
+  },
+  "edf5_campaign_lifecycle_1": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf5_campaign_lifecycle.py"
+   ]
+  },
+  "edf5_campaign_lifecycle_2": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf5_campaign_lifecycle.py"
+   ]
+  },
+  "edf5_campaign_lifecycle_3": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_edf5_campaign_lifecycle.py"
+   ]
+  },
+  "edf5_campaign_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "edf5_campaign_partial_install": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "edf5_online_foreign_build": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf5_online_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf5_online_netid": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf5_online_rollback": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "edf5_online_room": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "emc_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "emplacement": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_emplacement.py"
+   ]
+  },
+  "enemy_control_action_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_action_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_action_native_audit.py"
+   ]
+  },
+  "enemy_control_action_protocol": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_boss_gun_net": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_boss_gun_net_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_boss_gun_net_native_audit.py"
+   ]
+  },
+  "enemy_control_boss_gun_projectile": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_capacity": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_catalog": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_catalog_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/enemy_control_catalog_native_audit.py"
+   ]
+  },
+  "enemy_control_command_actions": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_command_actions_native_audit": {
+   "labels": [
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_command_actions_native_audit.py"
+   ]
+  },
+  "enemy_control_command_boss_carrier_native_audit": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_command_boss_carrier_native_audit.py"
+   ]
+  },
+  "enemy_control_crosshair_guard": {
+   "labels": [
+    "plugin-hud",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_crosshair_guard.py"
+   ]
+  },
+  "enemy_control_deiroi": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "enemy_control_deiroi_entity_aim": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_deiroi_entity_aim_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_deiroi_entity_aim_native_audit.py"
+   ]
+  },
+  "enemy_control_deiroi_native_audit": {
+   "labels": [
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_deiroi_native_audit.py"
+   ]
+  },
+  "enemy_control_deiroi_net": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_deiroi_net_codec": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_deiroi_net_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_deiroi_net_native_audit.py"
+   ]
+  },
+  "enemy_control_export_boss": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_export_deiroi_144": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_export_deiroi_30": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_export_deiroi_60": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_export_merman": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_export_monster": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_export_walking": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_gun_factory": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_gun_factory_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_gun_factory_native_audit.py"
+   ]
+  },
+  "enemy_control_humanoid": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_legacy_robo": {
+   "labels": [
+    "edf41",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_merman_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_merman_net_native_audit": {
+   "labels": [
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_merman_net_native_audit.py"
+   ]
+  },
+  "enemy_control_monster_definition": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_monster_net": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_monster_net_codec": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_monster_net_native_audit": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/enemy_control_monster_net_native_audit.py"
+   ]
+  },
+  "enemy_control_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_native_audit.py"
+   ]
+  },
+  "enemy_control_native_fixture": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_native_look": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_native_look_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_native_look_audit.py"
+   ]
+  },
+  "enemy_control_native_look_extra": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_native_look_extra_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_native_look_extra_audit.py"
+   ]
+  },
+  "enemy_control_native_move": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_native_move_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_native_move_audit.py"
+   ]
+  },
+  "enemy_control_native_net_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_native_net_audit.py"
+   ]
+  },
+  "enemy_control_native_net_fixture": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_native_pose": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_native_pose_audit": {
+   "labels": [
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_native_pose_audit.py"
+   ]
+  },
+  "enemy_control_net_input": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_net_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_ported_spawn_profiles": {
+   "labels": [
+    "edf41",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/test_enemy_control_ported_spawn_profiles.py"
+   ]
+  },
+  "enemy_control_pose_codec": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pose_interp": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pose_protocol": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_projectile_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_projectile_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_projectile_native_audit.py"
+   ]
+  },
+  "enemy_control_protocol": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_provider_trace_rtt250_bg0": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_provider_trace_rtt250_bg32": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_provider_trace_rtt250_bg64": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_provider_trace_rtt600_bg0": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_provider_trace_rtt600_bg32": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_provider_trace_rtt600_bg64": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_berserker": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_berserker_core": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_boss": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_boss_core": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_native_audit": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_pvp_native_audit.py"
+   ]
+  },
+  "enemy_control_pvp_transport": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_transport_core": {
+   "labels": [
+    "edf41",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_pvp_tree": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_radar_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_radar_native_audit.py"
+   ]
+  },
+  "enemy_control_radar_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_source_native": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_source_native_audit.py"
+   ]
+  },
+  "enemy_control_target": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_target_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_target_native_audit.py"
+   ]
+  },
+  "enemy_control_timeship": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_timeship_native_audit": {
+   "labels": [
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_timeship_native_audit.py"
+   ]
+  },
+  "enemy_control_timeship_pods": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_timeship_pods_audit": {
+   "labels": [
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_timeship_pods_audit.py"
+   ]
+  },
+  "enemy_control_timeship_pods_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_timeship_pods_net_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_timeship_pods_net_audit.py"
+   ]
+  },
+  "enemy_control_timeship_script": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_trace_pack": {
+   "labels": [
+    "tools-misc"
+   ],
+   "scripts": []
+  },
+  "enemy_control_unit_guide": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_unit_guide_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_unit_guide_native_audit.py"
+   ]
+  },
+  "enemy_control_walking": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_walking_guns": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "enemy_control_walking_guns_native_audit": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/enemy_control_walking_guns_native_audit.py"
+   ]
+  },
+  "enemy_control_walking_native_audit": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/enemy_control_walking_native_audit.py"
+   ]
+  },
+  "enemy_control_walking_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "enemy_control_walking_net_native_audit": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/enemy_control_projectile_native_audit.py",
+    "tests/enemy_control_walking_net_native_audit.py"
+   ]
+  },
+  "enemy_control_walking_parts": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_control_walking_parts_native_audit": {
+   "labels": [
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/enemy_control_walking_parts_native_audit.py"
+   ]
+  },
+  "enemy_control_weapon_aim": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_control_weapon_aim_native_audit": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/enemy_control_weapon_aim_native_audit.py"
+   ]
+  },
+  "enemy_hud_layout": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "enemy_points_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "enemy_ui_logic": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "exhaust_nozzles_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "exhaust_pose_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "ferry_line": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "fieldshare": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "firecontrol_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "fixed_weapon_sight": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "flight_spread_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "formation_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "fp_aim_check": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "fp_flash_check": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "fp_render_native": {
+   "labels": [
+    "native-codec",
+    "plugin-air",
+    "plugin-hud",
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/fp_render_native_audit.py"
+   ]
+  },
+  "fp_ride_lifecycle": {
+   "labels": [
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "fp_skin": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "fp_view_check": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "frame_pacing_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "frame_pacing_install_guard": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/frame_pacing_install_guard.py"
+   ]
+  },
+  "frame_pacing_sigs": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/frame_pacing_sig_audit.py"
+   ]
+  },
+  "frame_rate_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "frame_rate_net_guard": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/frame_rate_net_guard.py"
+   ]
+  },
+  "frame_rate_objects": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "frame_rate_off_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/frame_rate_off_guard.py"
+   ]
+  },
+  "frame_rate_sigs": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/frame_rate_sig_audit.py"
+   ]
+  },
+  "frame_rate_view": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "frozen_cockpit_package": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_frozen_cockpit_package.py"
+   ]
+  },
+  "fsbudget_native": {
+   "labels": [
+    "plugin-core",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/fsbudget_native_audit.py"
+   ]
+  },
+  "fuze": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "game_dialog": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "game_launch": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/gamelaunch_test.py"
+   ]
+  },
+  "game_lease": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/game_lease_test.py"
+   ]
+  },
+  "gamedir_literal_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "misc",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/gamedir_literal_guard.py"
+   ]
+  },
+  "generator_excludes": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/generator_excludes_test.py"
+   ]
+  },
+  "gltf_glb": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/gltf_glb_test.py"
+   ]
+  },
+  "goldcoat": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-hud",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_goldcoat.py"
+   ]
+  },
+  "gpufx_glow": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "gpufx_gpu": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "gpufx_sim": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "grape_turret_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "gravity_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "gravity_net": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "greyboss_parts": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "greyboss_parts_native": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/greyboss_parts_native_audit.py"
+   ]
+  },
+  "ground_contact_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "ground_navigation": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "ground_navigation_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "gun_camera_sweep_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/gun_camera_sweep_guard.py"
+   ]
+  },
+  "gunner_aim_object_test": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "gunner_recoil": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "gunship_muzzle_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "gunsight_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "hail_glide_0": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
+  },
+  "hail_glide_1": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
+  },
+  "hail_glide_2": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
+  },
+  "hail_glide_3": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py"
+   ]
+  },
+  "hail_glide_shard_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hail_glide_shard.py",
+    "tests/hail_glide_shard_test.py"
+   ]
+  },
+  "hangar_recover": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "hash_index_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "havok_mt": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "havok_mt_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/havok_mt_audit.py"
+   ]
+  },
+  "havok_mt_sim": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/havok_mt_sim.py"
+   ]
+  },
+  "havok_props": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "havok_props_native": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/havok_props_audit.py"
+   ]
+  },
+  "havok_props_sim": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/havok_props_sim.py"
+   ]
+  },
+  "heap_probe": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "hector_ai_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "heli_aim_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "heli_command_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "heli_fire_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "heli_phase": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "heli_physical_sight": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "heli_player_input_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "heli_request_setup": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_heli_setup.py"
+   ]
+  },
+  "heli_yaw_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/heli_yaw_native_audit.py"
+   ]
+  },
+  "highcam_collision_native": {
+   "labels": [
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/highcam_collision_native_audit.py"
+   ]
+  },
+  "highcam_input": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "hit_accept_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "hit_predict_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "hkfile": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_hkfile.py"
+   ]
+  },
+  "hkshape": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_hkshape.py"
+   ]
+  },
+  "hover_lift_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "hq_palette": {
+   "labels": [
+    "native-codec",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/hq_palette_audit.py"
+   ]
+  },
+  "hud_cue_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "hud_layout": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "hudtext_check": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "hudtext_fit": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/hudtext_fit.py"
+   ]
+  },
+  "ifc_model": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "ifc_model_guard": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/ifc_model_guard.py"
+   ]
+  },
+  "ifc_model_native": {
+   "labels": [
+    "plugin-air",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/ifc_model_native_audit.py"
+   ]
+  },
+  "infantry_scope_pip": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "ini_text": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "input_source_guard": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/input_source_guard_test.py"
+   ]
+  },
+  "installer_lock": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/installer_lock_test.py"
+   ]
+  },
+  "item_pickup_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/item_pickup_native_audit.py"
+   ]
+  },
+  "jet_attack_runs": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_command_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_edge_suite": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_entry_suite": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_escort_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "jet_extend_flip": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_ground_settle": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_lever_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "jet_mix_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native",
+    "plugin-sound"
+   ],
+   "scripts": []
+  },
+  "jet_phase": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "jet_player_rotor_suite": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_rain_pass": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_strike_room": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_withdraw_suite": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jet_wobble": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "jetsound_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "katyusha_cab": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/katyusha_cab_check.py"
+   ]
+  },
+  "katyusha_cab_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "katyusha_mount": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/katyusha_mount_check.py"
+   ]
+  },
+  "katyusha_native_rack": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/katyusha_native_rack_audit.py"
+   ]
+  },
+  "katyusha_rack_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "keybind": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "keyconfig_native": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/keyconfig_native_audit.py"
+   ]
+  },
+  "killcount": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "killcount_native": {
+   "labels": [
+    "plugin-hud",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/killcount_native_audit.py"
+   ]
+  },
+  "launcher_owner": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "lazy_rows": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "level_list": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_level_list.py"
+   ]
+  },
+  "loadout_generate": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/loadout_generate_test.py"
+   ]
+  },
+  "loadout_preset": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "loadout_writer": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "lock_cue": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "lock_registry_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/lock_registry_native_audit.py"
+   ]
+  },
+  "lockon": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "log_crash": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "log_once": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "log_test": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "map_buttons_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_cam_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_cmd_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_command_identity_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_command_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_hud_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_marks_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_pvp_input": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "map_signal": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "march_pace": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "mech_parts": {
+   "labels": [
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/mech_parts_test.py"
+   ]
+  },
+  "medic_native_heal": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/medic_native_heal_audit.py"
+   ]
+  },
+  "member_config": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "memo_epoch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "memory_readable": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "menu_graft": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-hud",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/menu_graft_test.py"
+   ]
+  },
+  "menu_preview": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/menu_preview_test.py"
+   ]
+  },
+  "missile_dud_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/missile_dud_native_audit.py"
+   ]
+  },
+  "mission_crew": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "mission_crew_native": {
+   "labels": [
+    "plugin-core",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/mission_crew_native_audit.py"
+   ]
+  },
+  "mission_crew_radar": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "mission_crew_radar_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/mission_crew_radar_native_audit.py"
+   ]
+  },
+  "mission_crew_support": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
   "mission_crew_team_dll": {
    "labels": [
     "plugin-core",
     "plugin-native"
    ],
    "scripts": []
+  },
+  "mission_crew_team_fixture": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "mission_difficulty_native": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "mission_pack_save_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "mission_participant_gate_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "mission_participants_native": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/mission_participants_native_audit.py"
+   ]
+  },
+  "mission_participants_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "mission_script_contract": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_mission_script.py"
+   ]
+  },
+  "mission_watch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "mod_file": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "mod_room_isolation": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "model_lod": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_model_lod.py"
+   ]
+  },
+  "model_pieces": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_model_pieces.py"
+   ]
+  },
+  "model_quality": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_model_quality.py"
+   ]
+  },
+  "model_workers": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_model_workers.py"
+   ]
+  },
+  "modelpack": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/modelpack_test.py"
+   ]
+  },
+  "module_registry": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "module_registry_guard": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/module_registry_guard.py"
+   ]
+  },
+  "native_bc7": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/test_native_bc7.py"
+   ]
+  },
+  "native_body_math": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "native_bone_update": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "native_cmpl": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/test_native_cmpl.py"
+   ]
+  },
+  "native_dxt1": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/test_native_dxt1.py"
+   ]
+  },
+  "native_helpers": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_native_helpers.py"
+   ]
+  },
+  "net_ground_probe_native": {
+   "labels": [
+    "plugin-net",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/net_ground_probe_audit.py"
+   ]
+  },
+  "net_object_ref": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "net_session_lifecycle_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "net_session_native": {
+   "labels": [
+    "plugin-net",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/net_session_native_audit.py"
+   ]
+  },
+  "nix_twist_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "npc_action_look": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_action_look_native": {
+   "labels": [
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_action_look_native.py"
+   ]
+  },
+  "npc_ai_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_arms": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_backpack_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_backpack_guard": {
+   "labels": [
+    "autoturret-tools",
+    "docs-guard",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/npc_backpack_guard.py"
+   ]
+  },
+  "npc_backpack_native": {
+   "labels": [
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/npc_backpack_native_audit.py"
+   ]
+  },
+  "npc_backpack_native_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_board_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_board_native_audit.py"
+   ]
+  },
+  "npc_car_aim_guard": {
+   "labels": [
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_car_aim_guard.py"
+   ]
+  },
+  "npc_climb_native": {
+   "labels": [
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_climb_native_audit.py"
+   ]
+  },
+  "npc_core_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_cover_native": {
+   "labels": [
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_cover_native_audit.py"
+   ]
+  },
+  "npc_driver_payload": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_driver_payload_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_driver_payload_native.py"
+   ]
+  },
+  "npc_grid_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_gunner_aim": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_gunner_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_gunner_native_audit.py"
+   ]
+  },
+  "npc_gunners_online": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_mech_aim_native": {
+   "labels": [
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_mech_aim_native_audit.py"
+   ]
+  },
+  "npc_mobility_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_mobility_native": {
+   "labels": [
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_mobility_native_audit.py"
+   ]
+  },
+  "npc_parallel_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_parallel_guard.py"
+   ]
+  },
+  "npc_post_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "npc_reseat_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_reseat_native_audit.py"
+   ]
+  },
+  "npc_tier": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "npc_vehicle_ai_native_audit": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/npc_vehicle_ai_native_audit.py"
+   ]
+  },
+  "object_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports"
+   ],
+   "scripts": []
+  },
+  "object_update_mt": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "object_update_mt_sigs": {
+   "labels": [
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/object_update_mt_sig_audit.py"
+   ]
+  },
+  "objref": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "online_authority": {
+   "labels": [
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "online_authority_seat": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "online_gate_bridge_guard": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/online_gate_bridge_guard_test.py",
+    "tests/online_gate_guard.py"
+   ]
+  },
+  "online_gate_guard": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/online_gate_guard.py"
+   ]
+  },
+  "optic_install_integration": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/optic_install_integration_test.py"
+   ]
+  },
+  "optics_model_reference": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_optics_model_reference.py"
+   ]
+  },
+  "outfit41": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "outfit41_color": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/outfit41_color_test.py"
+   ]
+  },
+  "outfit41_color_native": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_material_shader_contract_audit.py",
+    "tests/outfit41_color_native_test.py"
+   ]
+  },
+  "outfit41_native": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "plugin-net",
+    "plugin-ports",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/outfit41_native_audit.py"
+   ]
+  },
+  "outfit41_palette_native": {
+   "labels": [
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/outfit41_palette_native_test.py"
+   ]
+  },
+  "own_round_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "pack_switch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "pack_switch_native": {
+   "labels": [
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/pack_switch_native_audit.py"
+   ]
+  },
+  "pause_clock_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "payload_aim_api": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "payload_click": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "payload_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "payload_sight": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "payload_snapshot": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "perf_probe_native": {
+   "labels": [
+    "plugin-core",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/perf_probe_native_audit.py"
+   ]
+  },
+  "perfrun": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/autopilot/drive.py",
+    "tests/perfrun_test.py"
+   ]
+  },
+  "pickup_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "pjet_kinds": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pjet_turn_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "play_area_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "player_aim": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "player_identity_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/player_identity_guard.py"
+   ]
+  },
+  "player_name_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/player_name_native_audit.py"
+   ]
+  },
+  "player_slots": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "player_vehicle": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "player_vehicle_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/player_vehicle_native_audit.py"
+   ]
+  },
+  "playerjet_catch": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_catch_check.py"
+   ]
+  },
+  "playerjet_payload_click": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "playerjet_recovery_0": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "playerjet_recovery_1": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "playerjet_recovery_2": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "playerjet_recovery_3": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/playerjet_recovery_check.py"
+   ]
+  },
+  "plugin_image_size_guard": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/plugin_image_size_guard.py"
+   ]
+  },
+  "plugin_net": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "plugin_pair_load_crew-first": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "plugin_pair_load_turret-first": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "pn": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "ported_missions_unlock_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "preload_set": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "preview_camera": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "primer_ballistics": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "primer_lifecycle": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "profile_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "profile_native_plugin_refusal": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "proteus_assets": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "pylib-model",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/test_proteus_assets.py"
+   ]
+  },
+  "proteus_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "proteus_frame_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "proteus_install": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/proteus_install_test.py"
+   ]
+  },
+  "proteus_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "proteus_net_guard": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/proteus_net_guard.py"
+   ]
+  },
+  "proteus_net_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "proteus_range": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/proteus_range_test.py"
+   ]
+  },
+  "proteus_text": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/proteus_text_test.py"
+   ]
+  },
+  "proteus_visual_profile": {
+   "labels": [
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/proteus_visual_native_profile.py"
+   ]
+  },
+  "proteus_weapon": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "proteus_weapon_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_controlled": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_controlled_npc": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_controlled_npc_native_audit": {
+   "labels": [
+    "plugin-enemy",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/pvp_controlled_npc_native_audit.py"
+   ]
+  },
+  "pvp_controlled_ported_spawn": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "pvp_controlled_spawn_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "pvp_hud_layout": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_inherit_support": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_match": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "pvp_native_contract": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/pvp_native_audit.py"
+   ]
+  },
+  "pvp_native_fixture": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_native_inherit": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_native_live_emitters": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_native_live_emitters_audit": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/pvp_native_live_emitters_audit.py"
+   ]
+  },
+  "pvp_protocol": {
+   "labels": [
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "pvp_support_fixture": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "pvp_units": {
+   "labels": [
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "qmark": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "range_place": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "range_tracked_reuse": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/range_tracked_reuse_test.py"
+   ]
   },
   "real_driver_native_dll": {
    "labels": [
@@ -41,6 +6657,2572 @@
     "plugin-support"
    ],
    "scripts": []
+  },
+  "real_driver_native_fixture": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "real_npc_crew": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "real_turret_crew": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "redirect_owner_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/redirect_owner_guard.py"
+   ]
+  },
+  "redirect_thunk": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "render_record": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "rescue_logic": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "rescue_support_guard": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/rescue_support_guard.py"
+   ]
+  },
+  "reticle_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "ride_along_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "rocket_guide_prediction_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "rocket_impact_readout_test": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "room_coop_capability": {
+   "labels": [
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "room_dialog": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "room_dialog_native": {
+   "labels": [
+    "native-codec",
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/room_dialog_native_audit.py"
+   ]
+  },
+  "room_layout": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/room_layout_test.py"
+   ]
+  },
+  "room_menu": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "room_native_entry_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "room_native_menu_contract": {
+   "labels": [
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/room_native_menu_contract_test.py"
+   ]
+  },
+  "room_preview": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "room_preview_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/room_preview_native_audit.py"
+   ]
+  },
+  "room_pvp": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "room_sync": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "room_ui": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "room_ui_sigs": {
+   "labels": [
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/room_ui_sig_audit.py"
+   ]
+  },
+  "room_ui_wiring": {
+   "labels": [
+    "installer",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/room_ui_wiring_guard.py"
+   ]
+  },
+  "rotor_clear_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "rounds_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "route_guide": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "route_guide_foreign_site": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "route_guide_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "route_guide_partial_install": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "rubble_pass_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "save_backup": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/save_backup_test.py"
+   ]
+  },
+  "save_mode_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sazabi_ask": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "sazabi_assist_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sazabi_flight_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sazabi_funnel_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sazabi_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sazabi_net_guard": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/sazabi_net_guard.py"
+   ]
+  },
+  "sazabi_net_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "sazabi_pose_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sazabi_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "scope_crosshair": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "scope_lens": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "scope_lens_native": {
+   "labels": [
+    "plugin-hud",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/scope_lens_native_audit.py"
+   ]
+  },
+  "scope_pip_check": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "scope_pip_gpu": {
+   "labels": [
+    "native-codec",
+    "plugin-hud",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "scope_spread": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "scope_spread_guard": {
+   "labels": [
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/scope_spread_guard.py"
+   ]
+  },
+  "scope_spread_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-hud",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/scope_spread_native_audit.py"
+   ]
+  },
+  "scopeview_check": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "screen_view": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "seat_aim_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "seat_events_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "seat_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "seat_switch_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "seat_turret": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sedan_build": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/sedan_build_test.py"
+   ]
+  },
+  "shkt_check": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_shkt_check.py"
+   ]
+  },
+  "sidecar_board_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "sight_data_audit": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/sight_data_audit.py"
+   ]
+  },
+  "sightzoom": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "sightzoom_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "sk_terrain_materials": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_sk_terrain_materials.py"
+   ]
+  },
+  "slim_generator": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/slim_generator_test.py"
+   ]
+  },
+  "smoke_trail_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_save": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_save_native": {
+   "labels": [
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_save_native_audit.py"
+   ]
+  },
+  "sortie_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sound_engine_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-sound"
+   ],
+   "scripts": []
+  },
+  "sound_event_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-sound"
+   ],
+   "scripts": []
+  },
+  "sound_pack": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/sound_pack_test.py"
+   ]
+  },
+  "sound_place_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-sound"
+   ],
+   "scripts": []
+  },
+  "split_fuse": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "spot_ray": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "spot_ray_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/spot_ray_native_audit.py"
+   ]
+  },
+  "srcscan": {
+   "labels": [
+    "plugin-native",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/srcscan_test.py"
+   ]
+  },
+  "stab_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "stab_interpolation_test": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "stab_native_readback": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "step_fresh": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "step_objects": {
+   "labels": [
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "step_objects_guard": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/step_objects_guard.py"
+   ]
+  },
+  "stock_store_loadouts": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_stock_store_loadouts.py"
+   ]
+  },
+  "stock_store_recoil": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_stock_store_recoil.py"
+   ]
+  },
+  "stock_store_recoil_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/stock_store_recoil_native_audit.py"
+   ]
+  },
+  "store_burden": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "store_recoil": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "sub_support_dispatch": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "sub_support_net": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "submarine_support": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_config": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_config_ini": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/support_config_ini_test.py"
+   ]
+  },
+  "support_dispatch": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "support_drone_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_entry": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_exit_guard": {
+   "labels": [
+    "plugin-air",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/support_exit_guard.py"
+   ]
+  },
+  "support_firepower": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_infantry_route": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_level": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_loadout": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "support_loadout_ini": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/support_loadout_ini_test.py"
+   ]
+  },
+  "support_net_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_pages": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_points": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_policy": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_protocol": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_resources": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/support_resource_audit.py"
+   ]
+  },
+  "support_soldier": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "support_soldier_create_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "support_soldier_native": {
+   "labels": [
+    "native-codec",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/support_soldier_native_audit.py"
+   ]
+  },
+  "support_source": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_spawn": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "support_variants": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "support_vehicle_route": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "support_warning": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "supportunit_allies_native": {
+   "labels": [
+    "plugin-support",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/supportunit_allies_native_audit.py"
+   ]
+  },
+  "surround_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-sound"
+   ],
+   "scripts": []
+  },
+  "sync_load_logic": {
+   "labels": [
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "sync_load_probe_native": {
+   "labels": [
+    "plugin-net",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/sync_load_probe_native_audit.py"
+   ]
+  },
+  "target_grid": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "team_native": {
+   "labels": [
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "team_native_sigs": {
+   "labels": [
+    "plugin-net",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/team_native_sig_audit.py"
+   ]
+  },
+  "terrain_shader_native": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testrange",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/edf41_material_shader_contract_audit.py",
+    "tests/terrain_shader_native_audit.py"
+   ]
+  },
+  "test_domains": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "misc",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/cockpit_build_test.py",
+    "tests/gamedir_literal_guard.py",
+    "tests/killcount_native_audit.py",
+    "tests/npc_mobility_native_audit.py",
+    "tests/test_buildcache_module_identity.py",
+    "tests/test_domains_test.py",
+    "tests/test_npc_vehicle_ai_sgo.py",
+    "tests/test_shkt_check.py",
+    "tests/testhub_dump_source_test.py",
+    "tools/doc_links_check.py",
+    "tools/selftest.py",
+    "tools/test_domains.py",
+    "tools/test_installer_incremental.py",
+    "tools/test_installer_recovery.py"
+   ]
+  },
+  "testhub_dump_source": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/testhub_dump_source_test.py"
+   ]
+  },
+  "testpool": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/killcount_native_audit.py",
+    "tests/npc_mobility_native_audit.py",
+    "tests/test_buildcache_module_identity.py",
+    "tests/test_npc_vehicle_ai_sgo.py",
+    "tests/test_shkt_check.py",
+    "tests/testhub_dump_source_test.py",
+    "tests/testpool_test.py",
+    "tools/selftest.py",
+    "tools/test_installer_incremental.py",
+    "tools/test_installer_recovery.py"
+   ]
+  },
+  "texshare": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/texshare_test.py"
+   ]
+  },
+  "text_fit": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "texture_acceleration": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_texture_acceleration.py"
+   ]
+  },
+  "thermal_gpu": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "thermal_models": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "thermal_models_native": {
+   "labels": [
+    "plugin-hud",
+    "plugin-ports",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/thermal_model_native_audit.py"
+   ]
+  },
+  "thermal_native": {
+   "labels": [
+    "plugin-hud",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/thermal_native_audit.py"
+   ]
+  },
+  "thermal_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "tracked_collision": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_tracked_collision.py"
+   ]
+  },
+  "tracked_collision_native": {
+   "labels": [
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/tracked_collision_native_audit.py"
+   ]
+  },
+  "tracked_combat": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_tracked_combat.py"
+   ]
+  },
+  "tracked_install": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_tracked_install.py"
+   ]
+  },
+  "tracked_range": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_tracked_range.py"
+   ]
+  },
+  "tracked_range_native_0": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_tracked_range.py"
+   ]
+  },
+  "tracked_range_native_1": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_tracked_range.py"
+   ]
+  },
+  "transport_check": {
+   "labels": [
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "transport_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "turret_cam_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "turret_cam_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "turret_lead_check": {
+   "labels": [
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "tvguide": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "twin_cadence": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "twin_cadence_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": [
+    "tests/twin_cadence_native.py"
+   ]
+  },
+  "ultimate_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "ultimate_net": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "unlock_ported_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "unmanned_launch_guard": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/unmanned_launch_guard.py"
+   ]
+  },
+  "vanilla_launch": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/vanilla_launch_test.py"
+   ]
+  },
+  "vehicle_cas": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/test_cas_pose.py"
+   ]
+  },
+  "vehicle_check": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_vehicle_check.py"
+   ]
+  },
+  "vehicle_look": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "vehicle_optics_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/vehicle_optics_native_audit.py"
+   ]
+  },
+  "vehicle_ram_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehicle_sensor": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehicle_sensor_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "vehicle_shapes": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/test_vehicle_model_shapes.py"
+   ]
+  },
+  "vehicle_weapons": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "vehicle_weapons_covers": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": []
+  },
+  "vehicle_weapons_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "plugin-native",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/vehicle_weapons_native_audit.py"
+   ]
+  },
+  "vehicle_weapons_stock": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": []
+  },
+  "vehsound_gun": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "vehsound_trace_record": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "vehsound_trace_replay": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "view_clip_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "view_depth_lifecycle": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "vsound_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "vulcan_rotor": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vulcan_rotor_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/vulcan_rotor_native_audit.py"
+   ]
+  },
+  "vulcan_rotor_runtime": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "warn_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-sound",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "wasted_fire_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "weapon_equip_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "docs-guard",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/weapon_equip_native_audit.py"
+   ]
+  },
+  "weapon_list_logic": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "weapon_mount_native": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/weapon_mount_native_audit.py"
+   ]
+  },
+  "weapon_page_logic": {
+   "labels": [
+    "plugin-core",
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "weapon_records": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "weapon_records_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/weapon_records_native_audit.py"
+   ]
+  },
+  "weapon_style_data": {
+   "labels": [
+    "native-codec",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/weapon_style_data_check.py"
+   ]
+  },
+  "wing_engine_check": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "wing_turn": {
+   "labels": [
+    "plugin-air",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "worker_pool": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "world_text_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "worldmap": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "worldmap_data": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-hud",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/worldmap_data_test.py"
+   ]
+  },
+  "worldmap_pack": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_worldmap_pack.py"
+   ]
+  },
+  "worldmap_sigs": {
+   "labels": [
+    "plugin-hud",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/worldmap_sig_audit.py"
+   ]
+  },
+  "worldmap_tiles": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_worldmap_pack.py",
+    "tests/worldmap_tiles_test.py"
+   ]
+  },
+  "wt_sound": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/wt_sound_test.py"
+   ]
+  },
+  "wt_tracked_0": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_1": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_2": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_3": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_4": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_5": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_6": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "wt_tracked_7": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_wt_tracked.py"
+   ]
+  },
+  "xm_car_build": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/xm_car_build_test.py"
+   ]
+  },
+  "xm_maps": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_xm_maps.py"
+   ]
+  },
+  "xmorph": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/test_xmorph.py"
+   ]
+  },
+  "xmorph_registry_guard": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-native",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/xmorph_registry_guard.py"
+   ]
   }
  },
  "selftest": {
@@ -68,12 +9250,8 @@
     "installer",
     "plugin-air",
     "plugin-core",
-    "plugin-enemy",
     "plugin-hud",
     "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "tools-misc"
@@ -1061,14 +10239,9 @@
     "docs-guard",
     "installer",
     "native-codec",
-    "plugin-air",
     "plugin-core",
-    "plugin-enemy",
     "plugin-hud",
     "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "testhub",
@@ -1096,14 +10269,9 @@
     "docs-guard",
     "installer",
     "native-codec",
-    "plugin-air",
     "plugin-core",
-    "plugin-enemy",
     "plugin-hud",
     "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "testhub",
@@ -1827,14 +10995,8 @@
     "edf5",
     "installer",
     "native-codec",
-    "plugin-air",
-    "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
     "plugin-native",
-    "plugin-net",
     "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "tools-misc",
@@ -5090,12 +14252,7 @@
     "native-codec",
     "plugin-air",
     "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
     "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "testhub",
@@ -6804,8 +15961,6 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "tools-misc"
@@ -6866,14 +16021,9 @@
     "autoturret-tools",
     "docs-guard",
     "installer",
-    "plugin-air",
     "plugin-core",
-    "plugin-enemy",
     "plugin-hud",
     "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "testhub",
@@ -9849,11 +18999,7 @@
     "installer",
     "plugin-air",
     "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
     "plugin-native",
-    "plugin-net",
-    "plugin-ports",
     "plugin-sound",
     "plugin-support",
     "pylib-model",
@@ -9882,14 +19028,8 @@
   "view_distance_keeps_far_pass_start": {
    "labels": [
     "installer",
-    "plugin-air",
     "plugin-core",
-    "plugin-enemy",
-    "plugin-hud",
     "plugin-native",
-    "plugin-net",
-    "plugin-ports",
-    "plugin-sound",
     "plugin-support",
     "pylib-model",
     "tools-misc"
