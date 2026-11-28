@@ -12,6 +12,7 @@
 #include "runeblade_combo.h"
 #include "runeblade_ether.h"
 #include "runeblade_net.h"
+#include "runeblade_npc_logic.h"
 #include "soldier_factory.h"
 #include "command_identity.h"
 #include "edf_layout.h"
@@ -43,6 +44,7 @@ struct Rb {
     std::uint8_t tag=0,stepSerial=0,stateSerial=0;
     bool gliding=false;               // this frame's (its own machine), or as last heard (a copy)
     bool initialised=false;
+    bool takeoff=false;               // an NPC's takeoff asked (RuneBladeNpcTakeoff), taken by its next frame on the ground
 };
 void Release(void* p) noexcept { delete static_cast<Rb*>(p); }
 
@@ -123,6 +125,12 @@ void OwnFrame(void* self,void* a,void* b,void* c) noexcept {
     const rb::StepOut out=rb::StepFrame(e->motion,ether,in);
     e->gliding=out.glide;
     if(out.jump){Put<float>(h,rb::kJumpSpeed,rb::kStepUp);h[rb::kJumpFlag]=1;}
+    // An NPC's takeoff (runeblade_npc_logic.h): the game's own jump request from the ground, at the stock jump's speed
+    // (0x5669A8 walk+0x30 = 10); 0x575A7A takes it on the ground too (0x11B9450 clears the support +0x711 and detaches),
+    // and tells the peers as any jump of this machine's (0x575AB9). Free, as the player's ground jump.
+    const bool npcTakeoff=e->takeoff && in.ground && in.able && !out.jump;
+    e->takeoff=false;
+    if(npcTakeoff){Put<float>(h,rb::kJumpSpeed,rb::npchop::kTakeoffUp);h[rb::kJumpFlag]=1;if(stepCue)stepCue(self,rb::Cue::takeoff,true);}
     if(out.push){float* carry=reinterpret_cast<float*>(h+rb::kCarry);carry[0]=out.pushX;carry[2]=out.pushZ;}
     Write(self,ether);
     if(out.cue!=rb::Cue::none)TellCue(self,*e,out.cue);
@@ -283,6 +291,14 @@ void ComboTag(void* soldier,std::uint8_t weaponTag) noexcept {
 void SetRemoteStageSink(RemoteStageFn fn) noexcept { remoteStage=fn; }
 void SetStepCueSink(StepCueFn fn) noexcept { stepCue=fn; }
 }  // namespace runeblade
+
+bool RuneBladeNpcTakeoff(void* soldier) noexcept {
+    if(!OwnedHere(soldier) || soldier==PlayerHuman())return false;
+    Rb* const e=Ext(soldier,true);
+    if(!e)return false;
+    e->takeoff=true;
+    return true;
+}
 
 bool RuneBladeHudNow(RuneBladeHudView* out) noexcept {
     if(!out)return false;

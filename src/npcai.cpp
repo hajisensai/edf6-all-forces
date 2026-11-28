@@ -71,6 +71,10 @@
 #include "commander.h"
 #include "ride_along.h"
 #include "loadout_store.h"
+#include "runeblade.h"
+#include "runeblade_ether.h"
+#include "runeblade_npc_logic.h"
+#include "soldier_classes_logic.h"
 #include "vhud.h"
 #include "edf/hash_index.h"
 #include "crash_dump.h"
@@ -242,6 +246,7 @@ struct Soldier {
     bool mobOff;
     ULONGLONG mobAt,mobLogAt,mobWhyAt,mobPosAt;
     ULONGLONG sprintRollAt;  // SPRINT's last roll (SprintRoll), the side it took
+    crew::runeblade::npchop::Hop runeHop;   // a Rune Blade's hop (RuneHop)
     bool sprintRollRight;
     float mobPos[3];
     // The Wing Diver's walk dash watched for how far it carried (npc_mobility.h CarryTick: logged only), and the last
@@ -2288,10 +2293,37 @@ void SprintRoll(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONG
                    p.move,g.left,w.run,rx,rz,way[0],way[2],pos[0],pos[1],pos[2]);
 }
 
+// A Rune Blade's (class 5, soldier_factory.h: an AssultSoldier underneath, so kSoldiers[0]) rune steps along a long walk
+// (runeblade_npc_logic.h Decide): the takeoff asked of runeblade.cpp (the body's own jump press is the roll), the steps the
+// jump press with the stick on the way, which runeblade.cpp's frame turns into a step and pays. Only this machine's NPCs
+// (the caller's), the plugin's own walk; it never rolls (SprintRoll is the Ranger's).
+void RuneHop(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
+    namespace hop=crew::runeblade::npchop;
+    const Config& c=Cfg();
+    const Way w=WayOf(s,pos);
+    hop::In in;
+    in.walking=w.walking;in.free=DashFree(p) && (At<std::uint32_t>(h,kControlMask)&kMaskMove)!=0;
+    in.left=w.walking ? w.goalDist-w.stop : 0.0f;
+    in.ground=h[kSupport]==2;in.airFrames=At<std::int32_t>(h,kAirFrames);
+    in.ether=crew::runeblade::EtherLevel(h);in.depleted=crew::runeblade::EtherDepleted(h);
+    in.pressed=h[kJumpPress]!=0;
+    const hop::Act act=hop::Decide(s.runeHop,in,ms);
+    if(act==hop::Act::none)return;
+    if(act==hop::Act::takeoff) {
+        if(!crew::RuneBladeNpcTakeoff(h)){s.runeHop=hop::Hop{};s.runeHop.at=ms;return;}
+    } else {
+        Move(h,w.runDir,1.0f);   // the step's push along the stick (runeblade_ether_logic.h WorldPush)
+        h[kJumpPress]=1;
+    }
+    if(c.debug)Log("RUNEHOP %p %s left=%.0f ether=%.0f air=%d at=(%.0f,%.0f,%.0f)",h,hop::ActName(act),in.left,in.ether,in.airFrames,
+                   pos[0],pos[1],pos[2]);
+}
+
 // `sprinting`: its squad under SPRINT (mapcmd_logic.h kSprintMs): the dashes rest kSprintRestShare of their gap, the
 // rollers roll their walk (SprintRoll).
 void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms,bool sprinting) noexcept {
     const float restShare=sprinting ? mapcmd::kSprintRestShare : 1.0f;
+    if(soldier::ZwType(h)==zwclass::kRuneBlade){RuneHop(s,h,pos,p,ms);return;}
     if(c.agility==Agility::wingDash)WingDash(s,h,pos,p,ms,restShare);
     else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms,restShare);
     else if(c.agility==Agility::roll)SprintRoll(s,h,pos,p,ms,sprinting);

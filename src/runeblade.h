@@ -24,4 +24,10 @@ struct RuneBladeHudView {
     int steps=0;   // steps since leaving the ground
 };
 bool RuneBladeHudNow(RuneBladeHudView* out) noexcept;
+
+// An NPC Rune Blade of this machine (not the player): its next frame on the ground lifts it with the game's own jump
+// request (runeblade_npc_logic.h: its AssultSoldier body's jump press is the roll). The rune steps in the air are the jump
+// press as for any Rune Blade of this machine (runeblade.cpp's frame). False: not one of this machine's NPC Rune Blades.
+// Game thread (src/npcai.cpp RuneHop).
+bool RuneBladeNpcTakeoff(void* soldier) noexcept;
 }  // namespace crew

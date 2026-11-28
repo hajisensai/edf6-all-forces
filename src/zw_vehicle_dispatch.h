@@ -37,7 +37,20 @@ namespace zwdispatch {
 // Support transaction catalogs (support_net.h: below kMissionCrewCatalog 1023; 1020 the commander, 1021 / 1022 the debug
 // spawn's, 16 the prepared drone).
 inline constexpr std::uint32_t kZwStartCatalog=1018,kZwDeliverCatalog=1019;
+// ZwCrew: a support Vehicler soldier's own vehicle (zw_crew_vehicle_logic.h; 1017 is zw_vehicle_catalog.h's capture's).
+inline constexpr std::uint32_t kZwCrewCatalog=1016;
 }  // namespace zwdispatch
+
+// ---- a support Vehicler's own vehicle (NPC, catalog kZwCrewCatalog) ----
+// The host (offline this machine) only, on making a support soldier the ZwVehicler factory made (support_dispatch.cpp
+// SpawnDeployment): it is noted; once it stands on its feet (out of any transport) the host asks its own session for
+// one hull of zwcrew::kCrewKind beside it (BuildStart's placement, as a player's start vehicle), every machine makes
+// the same hull, and the host sends the soldier aboard (NpcBoardCrew; the guests follow the native ride): it drives and
+// fights from it with the NPC driver AI (npcai.cpp) and on foot uses its body's own weapon (ZW_Gyrojet01,
+// tools/make_zw_classes.py). Its owner is the soldier, on the host (ZwVehicleOwner: only it may take the driver seat,
+// vstart::DriverSeatBarred); the guests know the hull as a crew vehicle without an owner (nobody is let past a
+// driver it already has). Not replaced when wrecked. Not underground (no support hull goes there).
+void NoteZwCrewVehicler(const ObjRef& soldier) noexcept;
 
 // ---- M3: the start vehicle ----
 // Ask for `human`'s start vehicle of `kind` (ZwMissionVehicle). `human` is this machine's player (offline also the split
@@ -107,7 +120,7 @@ constexpr std::uint64_t ZwDeliverLoadout(int kind,std::uint32_t unlocked) noexce
 }
 // True for a catalog of this module's.
 constexpr bool IsZwCatalog(std::uint32_t catalog) noexcept {
-    return catalog==zwdispatch::kZwStartCatalog || catalog==zwdispatch::kZwDeliverCatalog;
+    return catalog==zwdispatch::kZwStartCatalog || catalog==zwdispatch::kZwDeliverCatalog || catalog==zwdispatch::kZwCrewCatalog;
 }
 // Host (or offline): the plan of `peer`'s request (its authenticated player; `loadout` the kind it asked for, a resupply's
 // with the requester's unlocked kinds above it: ZwDeliverLoadout).

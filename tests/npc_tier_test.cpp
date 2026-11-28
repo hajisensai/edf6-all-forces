@@ -40,14 +40,16 @@ void Table() {
         Check(p!=nullptr,"a previous model is a row of the same kind");
         Check(p && p->series==r.series && p->level<=r.level,"the previous model: the same series, not a higher level");
     }
-    for(int k=0;k<kSupportWeaponCount;++k) {
+    for(int k=0;k<kSupportArmedKindCount;++k) {
         const auto kind=static_cast<SupportWeapon>(k);
-        Check(KindArmed(kind),"every kind armed, the X-Morph infantry too (2026-11-10)");
+        Check(KindArmed(kind),"every kind armed, the X-Morph infantry too (2026-11-10)");  // the new classes carry their own
         // Each series has exactly one first model.
         std::set<int> firsts,series;
         for(const auto& r:kTierRows)if(r.kind==k){series.insert(r.series);if(r.prev<0)firsts.insert(r.series);}
         Check(firsts==series,"each series one first model");
     }
+    for(int k=kSupportArmedKindCount;k<kSupportWeaponCount;++k)
+        Check(!KindArmed(static_cast<SupportWeapon>(k)),"the new classes are not armed from the player's weapons (their body's own)");
 }
 
 void Tier() {

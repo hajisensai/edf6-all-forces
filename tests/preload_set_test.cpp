@@ -53,7 +53,8 @@ void Sets() {
     Expect(all.Count()==kBodyItems+kCatchItems+10+crew::kZwVehicleCount+kSoldierItems,
            "everything: every body, catch file, item, Vehicler's vehicle and soldier");
     for(int k=0;k<crew::kZwVehicleCount;++k)
-        Expect(all.Has(ZwVehicle(k)) && !always.Has(ZwVehicle(k)),"a Vehicler's vehicle: in everything, not in every mission");
+        Expect(all.Has(ZwVehicle(k)) && always.Has(ZwVehicle(k))==(k==crew::zwcrew::kCrewKind),
+               "a Vehicler's vehicle: in everything; in every mission only the support Vehicler's");
     Expect(!all.Has(Item::end) && !Set{}.Has(Item::end),"nothing past the end");
     Set s;s.Add(Item::end);
     Expect(s.Empty(),"an out-of-range item is not added");

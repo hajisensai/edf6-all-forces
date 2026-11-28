@@ -93,9 +93,9 @@ int main() {
           SupportSoldierClass(SupportWeapon::xmInfantry)==0 && !SupportKindHasLooks(SupportWeapon::xmInfantry) &&
           SupportKindHasLooks(SupportWeapon::rifle),"xminfantry parses: a Ranger's class, no looks");
     p=Preset(L"xminfantry@1E3A8A",12,&ok,why);
-    Check(!ok && p.count==0 && std::wcsstr(why,L"X-Morph 步兵没有涂装与背包"),"a colour on the X-Morph infantry refused, the reason named");
+    Check(!ok && p.count==0 && std::wcsstr(why,L"该兵种没有涂装与背包"),"a colour on the X-Morph infantry refused, the reason named");
     p=Preset(L"xminfantry+aHandGrenade01",12,&ok,why);
-    Check(!ok && p.count==0 && std::wcsstr(why,L"X-Morph 步兵没有涂装与背包"),"a backpack on the X-Morph infantry refused, the reason named");
+    Check(!ok && p.count==0 && std::wcsstr(why,L"该兵种没有涂装与背包"),"a backpack on the X-Morph infantry refused, the reason named");
     p=Preset(L"rifle,xminfantry@X",12,&ok);Check(!ok && p.count==0,"even an explicit stock colour is refused: no looks at all");
     {
         wchar_t file[96];SupportLook look;look.primary=0x1E3A8A;
@@ -107,8 +107,8 @@ int main() {
         Check(files==0,"no variant to preload for the X-Morph infantry");
         Check(SupportLookFile(SupportWeapon::rifle,false,look,file,96)>0,"a kind with looks still names its file");
     }
-    Check(PackSupportLoadout(PresetLoadout(p))!=0 && kSupportWeaponCount==15 &&
-          SupportSoldierResource(SupportWeapon::xmInfantry,true)==((14u<<8)|2u),"it rides the 4-bit packing as kind 14");
+    Check(PackSupportLoadout(PresetLoadout(p))!=0 && kSupportWeaponCount==17 &&
+          SupportSoldierResource(SupportWeapon::xmInfantry,true)==((14u<<8)|2u),"it rides the 5-bit packing as kind 14");
 
     // Vehicle pylons. A tank: its main gun, then rounds beside it (the user: 一半ap一半he = one tank carrying both).
     VehicleLoadout l=Load(L"HE,AP:25",VehicleBody::tank,&ok);

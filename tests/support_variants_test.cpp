@@ -18,8 +18,9 @@ void Expect(bool ok,const char* what) {
     if(!ok){++failures;std::printf("FAIL %s\n",what);}
 }
 
-// The kinds that can wear a colour: all but the last, the X-Morph infantry (support_call.h SupportKindHasLooks).
-constexpr int kKindsWithLooks=kSupportWeaponCount-1;
+// The kinds that can wear a colour: all but the last three, the X-Morph infantry and the new classes (support_call.h
+// SupportKindHasLooks).
+constexpr int kKindsWithLooks=kSupportWeaponCount-3;
 std::wstring Soldier(int kind,bool leader,std::int32_t primary) {
     SupportLook look;look.primary=primary;
     wchar_t f[96];SupportLookFile(static_cast<SupportWeapon>(kind),leader,look,f,96);

@@ -19,6 +19,7 @@
 // 2 nothing of the plugin's (A/B of the plugin's cost; the calls then do not come). Online the host's set decides, so
 // a member's PreloadMode only changes what it contributes as the host.
 #pragma once
+#include "zw_crew_vehicle_logic.h"
 #include "zw_vehicle_catalog.h"
 #include <cstddef>
 #include <cstdint>
@@ -41,11 +42,11 @@ enum class Item : std::uint8_t {
     ultimate=55,             // the ultimate strike's magic circles (ultimate.cpp)
     dnRounds=56,             // the Dreadnought's turret rounds (jet_bay.cpp kDnRounds) and, with them, the gunship's shells
     vehicleRounds=57,        // the impact charges, the drill charge, the EMC / Sazabi / Proteus / Andryusha rounds
-    soldier0=64,             // .. soldier0+14: support_call.h SupportWeapon k's two bodies (support_soldier.cpp)
-    zwVehicle0=80,           // .. zwVehicle0+9: zw_vehicle_catalog.h kZwVehicles[k], the Vehicler's vehicle (support_spawn.cpp)
+    soldier0=64,             // .. soldier0+16: support_call.h SupportWeapon k's two bodies (support_soldier.cpp)
+    zwVehicle0=96,           // .. zwVehicle0+9: zw_vehicle_catalog.h kZwVehicles[k], the Vehicler's vehicle (support_spawn.cpp)
     end=128,
 };
-inline constexpr int kBodyItems=39,kCatchItems=7,kSoldierItems=15;
+inline constexpr int kBodyItems=39,kCatchItems=7,kSoldierItems=17;
 // jet_internal.h Body's indexes this file names (static_assert against Body in preload_set.cpp).
 namespace body {
 enum : int { strike=0, fighter=1, bomber401=2, bomber501_2=3, interceptor=4, multirole=5, carrier=6, drone=7, blast=8,
@@ -124,12 +125,14 @@ inline void AddCallItems(std::wstring_view row,Set& out) noexcept {
 // What every mission takes whatever the room can call: the rounds a vehicle of the player's may fire any time (a Proteus
 // may be called any time, ProteusRework switched on mid-mission), the parachute's canopy (an ejection out of any jet the
 // player flies), and every support soldier kind (the soldiers also crew the mission's own vehicles and the composition
-// panel picks any installed kind mid-mission: support_soldier.cpp keeps one flag for them all, so they are not narrowed).
+// panel picks any installed kind mid-mission: support_soldier.cpp keeps one flag for them all, so they are not narrowed),
+// with the vehicle a support Vehicler soldier gets (zw_crew_vehicle_logic.h kCrewKind: such a soldier may come any time).
 constexpr Set Always() noexcept {
     Set s;
     s.Add(Item::vehicleRounds);
     s.Add(Item::chute);
     for(int k=0;k<kSoldierItems;++k)s.Add(Soldier(k));
+    s.Add(ZwVehicle(zwcrew::kCrewKind));
     return s;
 }
 

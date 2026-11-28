@@ -1440,6 +1440,11 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
         }
     }
     if(!BoardAirborne(*deployed,networked)){Destroy(id);return false;}
+    // A support Vehicler (the ZwVehicler factory's body) gets a vehicle of its own once it stands on its feet: the host's
+    // (offline this machine's) to ask (zw_vehicle_dispatch.h NoteZwCrewVehicler; it checks the class and the authority).
+    if(!remote)
+        for(unsigned i=0;i<plan.count;++i)
+            if(plan.units[i].resourceId<kAircraft)NoteZwCrewVehicler(deployed->objects[i]);
     Log("SUPPORT spawn %llu: catalog %u, %u units created (%s)",static_cast<unsigned long long>(id),plan.catalogId,plan.count,
         networked ? "networked" : InSession() ? "host of a one-player world" : "offline");
     // Its route on every machine's view and map (support_warning.h): a map support, not a carrier's drone or the rescue.

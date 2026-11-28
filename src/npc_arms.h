@@ -32,8 +32,9 @@ inline void GiveLocalArms(support_net::Plan* plan) noexcept {
         const bool soldier=IsSupportSoldierResource(unit.resourceId);
         if(soldier && unit.arms && unit.offhand)continue;
         const int k=static_cast<int>(SupportSoldierWeapon(unit.resourceId));
-        unit.arms=soldier ? arms.kind[k] : 0;
-        unit.offhand=soldier ? arms.offhand[k] : 0;
+        const bool armed=soldier && k<static_cast<int>(support_net::kArmsKinds);  // the new classes carry their body's own weapon
+        unit.arms=armed ? arms.kind[k] : 0;
+        unit.offhand=armed ? arms.offhand[k] : 0;
     }
 }
 // A preset's two Fencer hands (support_loadout.h FencerHands: weapon ids) as the words of a unit (npc_tier.h PresetHand:

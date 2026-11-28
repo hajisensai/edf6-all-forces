@@ -9426,6 +9426,7 @@
     "installer",
     "native-codec",
     "plugin-core",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
