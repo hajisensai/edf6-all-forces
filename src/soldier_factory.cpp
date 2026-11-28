@@ -176,6 +176,8 @@ bool InstallSoldierFactory() noexcept {
         return false;
     }
     for(Clone* c:{&vehiclerClass,&runeBladeClass})Inherit(*c);
+    soldier::zwVtables[0]=&vehiclerClass.block[1];
+    soldier::zwVtables[1]=&runeBladeClass.block[1];
     ready.store(true,std::memory_order_release);
     const bool v=edf41c::AddFactory(L"ZwVehicler",&CreateVehicler);
     const bool r=edf41c::AddFactory(L"ZwRuneBlade",&CreateRuneBlade);
@@ -190,7 +192,6 @@ int ZwType(const void* object) noexcept {
     if(!object || !Readable(object,sizeof(void*)))return -1;
     return TypeOfVtable(*static_cast<const void* const*>(object));
 }
-bool IsZwVtable(const void* vptr) noexcept { return TypeOfVtable(vptr)>=0; }
 bool SetExtension(void* object,void* data,ReleaseFn release) noexcept {
     if(ZwType(object)<0)return false;
     State* s=StateOf(object);

@@ -19,9 +19,12 @@ namespace soldier {
 bool FactoriesReady() noexcept;
 // 4 / 5 for an object a new-class factory made (alive: its vptr is the clone's), -1 for anything else (or null).
 int ZwType(const void* object) noexcept;
+// The clones' main vtables (where their objects' vptr points), set once by InstallSoldierFactory when the clones are built
+// (before any object); null: no new class. Inline, so the checks below link into every test that compiles their callers.
+inline const void* zwVtables[2]={nullptr,nullptr};
 // Whether `vptr` is a new-class clone's main vtable: the plugin's soldier checks that compare an object's vptr with the four stock
 // soldier vtables (0x17CDF28 ...) must accept these too (an object's vptr is *(void**)object).
-bool IsZwVtable(const void* vptr) noexcept;
+inline bool IsZwVtable(const void* vptr) noexcept { return vptr && (vptr==zwVtables[0] || vptr==zwVtables[1]); }
 // The plugin's own state of a new-class object: one pointer the class's behaviour owns, released by `release` when the object is
 // destroyed (or replaced by another SetExtension). False when `object` is no new-class object.
 using ReleaseFn=void(*)(void*) noexcept;
