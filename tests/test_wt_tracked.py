@@ -60,7 +60,7 @@ class PrepRuleTests(unittest.TestCase):
         for name in ('ex_lantern_b_02', 'ex_lantern_b_03', 'ex_lantern_l_02', 'ex_lantern_r_02'):
             self.assertEqual(prep.bone_of(b, name), 'body', name)
         self.assertEqual(prep.bone_of(z, 'ex_decor_14'), 'cannon_main')
-        # docs/newclass-re/vehicler.md §1.2: the Vehicler's cars. The HSTV-L's cradle (gun_mask) and the MG on it elevate
+        # docs/newclass-re/vehicler-plan.md §1.2: the Vehicler's cars. The HSTV-L's cradle (gun_mask) and the MG on it elevate
         # with the gun, its sprocket is the back station; the M247's twin guns each on its slide over one cradle; the
         # MBT-70's hull node is `root`
         h, y, t = prep.HSTVL, prep.M247, prep.MBT70
@@ -187,7 +187,7 @@ class WtRigTests(unittest.TestCase):
         self.assertEqual([f[0] for f in found], ['body.lamp'])
 
     def test_the_vehicler_folders_keep_their_fittings_on_the_turret(self) -> None:
-        # docs/newclass-re/vehicler.md §1.2: shipped (RELEASE_MODELS) before make_tracked_combat builds them (their kinds
+        # docs/newclass-re/vehicler-plan.md §1.2: shipped (RELEASE_MODELS) before make_tracked_combat builds them (their kinds
         # not in FOLDERS yet): read straight from the repository's models/
         for kind, name in (('hstvl', 'wt_hstvl'), ('m247', 'wt_m247'), ('mbt70', 'wt_mbt70')):
             with self.subTest(kind=kind):

@@ -219,6 +219,8 @@ class IncrementalTests(unittest.TestCase):
             stack.enter_context(patch.object(make_edf5_campaign.modfiles, 'refuse_while_running', lambda *a, **k: None))
             import make_zw_classes   # no Root.cpk here: its files stand in; its install (skip unchanged) runs for real
             stack.enter_context(patch.object(make_zw_classes, 'build', return_value={rel: b'zw class' for rel in make_zw_classes.ASSETS}))
+            import make_zw_vehicles   # the same for the Vehicler's vehicles
+            stack.enter_context(patch.object(make_zw_vehicles, 'build', return_value={'OBJECT/EDF6VC_ZW_HSTVL.SGO': b'zw vehicle'}))
             builders = {}
             for group in buildcache.GROUPS:
                 module = buildcache.tool(group)   # make_<group>, an X-Morph unit's builder

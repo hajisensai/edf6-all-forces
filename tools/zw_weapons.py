@@ -71,24 +71,24 @@ NONE_TEMPLATE = 'aSupportNone'
 WEAPONS: tuple[Weapon, ...] = (
     Weapon('ZW_VehicleNone', 400, NONE_TEMPLATE, 'none', {}),
     Weapon('ZW_Gyrojet01', 401, 'aWeapon109', 'gyrojet', {
-        'SC': ('陀螺喷射手枪（试作型）', '载具手的随身手枪。发射小型火箭弹，弹头离膛时很慢，随后一路加速。\n'
+        'SC': ('陀螺喷射手枪', '载具手的随身手枪。发射小型火箭弹，弹头离膛时很慢，随后一路加速。\n'
                                   '装弹 6 发，逐发射击，命中时小范围爆炸。贴脸威力很低，飞得越远威力越高（最高 5 倍）。'
-                                  '\n\n试作型，模型暂用火箭弹发射器代替。'),
-        'CN': ('陀螺噴射手槍（試作型）', '載具手的隨身手槍。發射小型火箭彈，彈頭離膛時很慢，隨後一路加速。\n'
+                                  '\n\n模型暂用火箭弹发射器代替。'),
+        'CN': ('陀螺噴射手槍', '載具手的隨身手槍。發射小型火箭彈，彈頭離膛時很慢，隨後一路加速。\n'
                                   '裝彈 6 發，逐發射擊，命中時小範圍爆炸。貼臉威力很低，飛得越遠威力越高（最高 5 倍）。'
-                                  '\n\n試作型，模型暫用火箭彈發射器代替。'),
-        'JA': ('ジャイロジェット・ピストル（試作型）', 'ヴィークラーの携行拳銃。小型ロケット弾を撃ち出す。弾頭は銃口を'
+                                  '\n\n模型暫用火箭彈發射器代替。'),
+        'JA': ('ジャイロジェット・ピストル', 'ヴィークラーの携行拳銃。小型ロケット弾を撃ち出す。弾頭は銃口を'
                                           'ゆっくり離れ、そこから加速していく。\n装弾数 6 発の単発射撃で、着弾時に小さく爆発する。'
                                           '至近距離では威力が低く、遠くまで飛ぶほど威力が上がる（最大 5 倍）。'
-                                          '\n\n試作型。モデルは仮にロケットランチャーを使用。'),
-        'EN': ('Gyrojet Pistol (Prototype)', "The Vehicler's sidearm. It fires small rockets that leave the muzzle "
+                                          '\n\nモデルは仮にロケットランチャーを使用。'),
+        'EN': ('Gyrojet Pistol', "The Vehicler's sidearm. It fires small rockets that leave the muzzle "
                                              'slowly and speed up from there.\nSix rounds, single shots; each round '
                                              'explodes on impact in a small radius. Weak point-blank, it hits '
-                                             'harder the farther it has flown (up to five times).\n\nPrototype: a rocket '
+                                             'harder the farther it has flown (up to five times).\n\nA rocket '
                                              "launcher's model stands in for its own."),
-        'KR': ('자이로젯 권총(시제형)', '비클러의 휴대 권총. 소형 로켓탄을 발사하며, 탄두는 총구를 천천히 떠난 뒤 점점 '
+        'KR': ('자이로젯 권총', '비클러의 휴대 권총. 소형 로켓탄을 발사하며, 탄두는 총구를 천천히 떠난 뒤 점점 '
                                  '가속한다.\n장탄수 6발, 단발 사격. 착탄 시 좁은 범위에 폭발한다. '
-                                 '근거리에서는 위력이 낮고, 멀리 날아갈수록 위력이 오른다(최대 5배).\n\n시제형: 모델은 임시로 '
+                                 '근거리에서는 위력이 낮고, 멀리 날아갈수록 위력이 오른다(최대 5배).\n\n모델은 임시로 '
                                  '로켓 런처를 사용한다.'),
     }),
     Weapon('ZW_MeleeNone', 500, NONE_TEMPLATE, 'none', {}),
@@ -201,7 +201,7 @@ def class_of(category: int) -> int:
 
 # ---------------------------------------------------------------- the SGOs
 
-# Gyrojet01 (frames at 60/s; scalars: a prototype has no star growth; plan §1.3, docs/newclass-re/vehicler-plan.md M5). Speed
+# Gyrojet01 (frames at 60/s; scalars: no star growth until stage 4; plan §1.3, docs/newclass-re/vehicler-plan.md M5). Speed
 # 0.2 m/frame (12 m/s) at the muzzle, +0.02 a frame (72 m/s²): 15 m after 0.5 s, 255 m when it expires (150 frames).
 GYROJET = {
     'AmmoCount': 6.0, 'FireInterval': 20.0, 'ReloadTime': 120.0, 'FireAccuracy': 0.01, 'FireRecoil': 0.15,
