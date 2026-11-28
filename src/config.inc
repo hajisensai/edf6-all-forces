@@ -5,6 +5,7 @@
     bool enabled=true;
     bool debug=true;
     int perfProbe=0;                // with debug: 1 frame and graph probes, 2 also samples collision tasks
+    bool perfHud=false;             // the performance panel in a mission: frame rate, the step's phases, the population, CPU, memory (perf_hud.h); read live
     int preloadMode=0;              // a measurement's switch: 0 the mission's set, 1 everything installed, 2 nothing (preload_set_logic.h)
     bool syncLoadProbe=true;        // with debug: SYNC LOAD / SYNC WAIT lines, the game thread's file reads (sync_load_probe.h; read at load)
     bool autoCrew=true;             // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
@@ -601,6 +602,7 @@
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
     n.perfProbe=ReadInt(L"PerfProbe",static_cast<DWORD>(n.perfProbe));
+    n.perfHud=ReadBool(L"PerfHud",n.perfHud);
     n.preloadMode=ReadInt(L"PreloadMode",static_cast<DWORD>(n.preloadMode));
     n.syncLoadProbe=ReadBool(L"SyncLoadProbe",n.syncLoadProbe);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);

@@ -814,12 +814,16 @@ def _session(game: str, mission: str, difficulty: int, seconds: int, keep: str |
         command(game, '\n'.join([f'mission {mission} {difficulty}' + (' hq' if hq else ''), *extra,
                                  *([cycle_command(*cycle)] if cycle else [])]))
         try:
-            launch(game)
+            started = launch(game)
         except gamelaunch.LaunchFailed as e:
             print('the game did not start:', e)
             return 1
         if not wait_for(game, 'SCRIPT HQMain stays' if hq else 'PlayMission_Offline', 240):
             print('the HQ menu never came (see the log)' if hq else 'the mission never started (see the log)')
+            # The game this run started (a message box up, e.g. 7_0 "a file is missing", or stuck loading): closed
+            # again, so what was placed is put back below instead of staying behind a game nobody plays.
+            if isinstance(started, gamelaunch.Game):
+                gamelaunch.abandon(game, started.pid, None)
             return 1
         print('the HQ menu shown' if hq else 'mission started', '; staying', seconds, 's')
         start = time.time()

@@ -34,6 +34,7 @@ using AabbFn=void(__fastcall*)(const void*,const void*,float*);
 using HitsFn=const unsigned char*(__fastcall*)(void*);
 
 bool counting=false,shadowing=false,installed=false;
+bool flatCopies=true;   // the cut walks off the groups' flat copies (the test turns it off to time the list walk)
 // Casts are cut only once the settle is chained (InstallBulletExpandCullSettle): before, a settle would not end the
 // boxes' generation.
 std::atomic<bool> armed{false};
@@ -88,8 +89,10 @@ struct Thread {
     unsigned tick=0,settleTick=0,nextSample=0;
     bool afterSettle=false;   // a settle with entries since this thread's last bullet cast
     Sample samples[kSamples];
+    FlatGroup* flats=nullptr;   // kFlatSlots copies, direct-mapped by the group; null: none (walk the list)
     explicit Thread(BoxEntry* storage) noexcept : cache(storage) {}
 };
+constexpr unsigned kFlatBits=13,kFlatSlots=1u<<kFlatBits;
 thread_local Thread* self=nullptr;
 
 Thread* Self() noexcept {
@@ -98,6 +101,7 @@ Thread* Self() noexcept {
     if(!storage)return nullptr;
     Thread* const t=new(std::nothrow) Thread(static_cast<BoxEntry*>(storage));
     if(!t){VirtualFree(storage,0,MEM_RELEASE);return nullptr;}
+    t->flats=new(std::nothrow) FlatGroup[kFlatSlots];
     return self=t;
 }
 
@@ -105,10 +109,11 @@ struct Totals {
     std::atomic<unsigned long long> casts{0},culling{0},blast{0},off{0},walks{0},parts{0},kept{0},culled{0},keptOne{0},
         lookups{0},misses{0},unbounded{0},walkTicks{0},boxTicks{0},outside{0},filtered{0},sampled{0},shadowed{0},mismatches{0},
         unreadDiffs{0},unarmed{0},rechecked{0},stale{0},settleSampled{0},settleShadowed{0},settleMismatches{0},spanShadowed{0},
-        spanMismatches{0},rayShadowed{0},rayMismatches{0},unmatched{0},settleCalls{0},settles{0};
+        spanMismatches{0},rayShadowed{0},rayMismatches{0},unmatched{0},settleCalls{0},settles{0},flatHits{0},flatBuilds{0},
+        flatChanged{0},flatChecked{0},flatMismatches{0};
     std::atomic<unsigned> unreadMask{0};
 } totals;
-std::atomic<unsigned> loggedMismatches{0},loggedUnread{0},loggedStale{0};
+std::atomic<unsigned> loggedMismatches{0},loggedUnread{0},loggedStale{0},loggedFlat{0};
 
 void Flush(Stats& s) noexcept {
     const auto add=[](std::atomic<unsigned long long>& to,unsigned long long v) noexcept { if(v)to.fetch_add(v,std::memory_order_relaxed); };
@@ -122,6 +127,8 @@ void Flush(Stats& s) noexcept {
     add(totals.settleSampled,s.settleSampled);add(totals.settleShadowed,s.settleShadowed);add(totals.settleMismatches,s.settleMismatches);
     add(totals.spanShadowed,s.spanShadowed);add(totals.spanMismatches,s.spanMismatches);
     add(totals.rayShadowed,s.rayShadowed);add(totals.rayMismatches,s.rayMismatches);add(totals.unmatched,s.unmatched);
+    add(totals.flatHits,s.flatHits);add(totals.flatBuilds,s.flatBuilds);add(totals.flatChanged,s.flatChanged);
+    add(totals.flatChecked,s.flatChecked);add(totals.flatMismatches,s.flatMismatches);
     if(s.unreadMask)totals.unreadMask.fetch_or(s.unreadMask,std::memory_order_relaxed);
     s=Stats{};
 }
@@ -223,6 +230,47 @@ template<class Out> void Walk(const unsigned char* group,Out&& out) {
         if(node[kNodeOn])out(Rd<unsigned>(Rd<const unsigned char*>(node,kNodeBody),kBodyId));
 }
 
+// The group's flat copy this generation on this thread: the slot's when it is the group's, this generation's, and the
+// live list is still its (Same); else made from the live list now (its active parts' boxes the cache's, counted as
+// lookups). Null (walk the list) without the table or when the copy could not be allocated.
+const FlatGroup* FlatOf(Thread& t,const Bodies& b,const unsigned char* group,unsigned gen) {
+    if(!t.flats || !flatCopies)return nullptr;
+    Stats& s=t.stats;
+    const std::uintptr_t key=reinterpret_cast<std::uintptr_t>(group);
+    FlatGroup& f=t.flats[static_cast<std::size_t>((static_cast<unsigned long long>(key>>4)*0x9E3779B97F4A7C15ull)>>(64-kFlatBits))];
+    const auto* const head=Rd<const unsigned char*>(group,kGroupList);
+    if(f.group==group && f.gen==gen) {
+        if(f.Same(head)){++s.flatHits;return &f;}
+        ++s.flatChanged;
+        if(loggedFlat.fetch_add(1,std::memory_order_relaxed)<8)
+            Log("EXPANDCULL FLAT group %p: its list changed in the generation (%u active parts in the copy); copied again",
+                static_cast<const void*>(group),f.active);
+    }
+    ++s.flatBuilds;
+    f.group=nullptr;
+    try {
+        f.nodes.clear();f.bodies.clear();f.on.clear();f.ids.clear();
+        thread_local std::vector<float> boxes;
+        boxes.clear();
+        for(const auto* node=Rd<const unsigned char*>(head,0);node!=head;node=Rd<const unsigned char*>(node,0)) {
+            const auto* const body=Rd<const unsigned char*>(node,kNodeBody);
+            const unsigned char on=node[kNodeOn];
+            f.nodes.push_back(node);f.bodies.push_back(body);f.on.push_back(on);
+            if(!on)continue;
+            const unsigned id=Rd<unsigned>(body,kBodyId);
+            const BoxEntry& e=BoxOf(t,b,id,gen);
+            f.ids.push_back(id);
+            boxes.insert(boxes.end(),{e.lo[0],e.lo[1],e.lo[2],e.hi[0],e.hi[1],e.hi[2]});
+        }
+        f.Pack(boxes);
+    } catch(const std::bad_alloc&) {
+        return nullptr;
+    }
+    s.lookups+=f.ids.size();
+    f.group=group;f.head=head;f.gen=gen;
+    return &f;
+}
+
 // A shadow sample's walk: the whole group appended (as stock), the cut's decision for each position recorded, the
 // keep-one as the cut list would take it (its count: the whole one's less the positions dropped).
 void RecordWalk(Thread& t,Cast& c,unsigned char* collector,const unsigned char* group) {
@@ -244,6 +292,23 @@ void RecordWalk(Thread& t,Cast& c,unsigned char* collector,const unsigned char* 
     });
     out.Done();
     t.stats.lookups+=parts;
+    // The flat copy's cut against the walk's decisions: the same parts kept, in order.
+    if(const FlatGroup* const f=FlatOf(t,c.bodies,group,gen)) {
+        ++t.stats.flatChecked;
+        std::size_t at=first,i=0;
+        bool same=f->active==parts;
+        const unsigned cut=f->Cut(c.sweep,[&](unsigned v) {
+            while(same && at<m.keep.size() && !m.keep[at]){++at;++i;}
+            same=same && at<m.keep.size() && v==f->ids[i];
+            ++at;++i;
+        });
+        if(!same || cut!=kept) {
+            ++t.stats.flatMismatches;
+            if(loggedFlat.fetch_add(1,std::memory_order_relaxed)<8)
+                Log("EXPANDCULL FLAT MISMATCH group %p: the copy's cut kept %u of %u, the walk %u of %u",
+                    static_cast<const void*>(group),cut,f->active,kept,parts);
+        }
+    }
     if(parts && !kept && before-static_cast<int>(c.dropped)==0){m.keep[first]=1;kept=1;}
     c.dropped+=parts-kept;
 }
@@ -279,13 +344,20 @@ void __fastcall Expand(unsigned char* collector,const unsigned char* group,unsig
     const unsigned gen=boxGen.load(std::memory_order_relaxed);
     Gather out{collector};
     unsigned first=0,parts=0,kept=0;
-    Walk(group,[&](unsigned v) {
-        if(!parts++)first=v;
-        const BoxEntry& b=BoxOf(*t,c->bodies,v,gen);
-        if(c->sweep.Touches(b.lo,b.hi)){out(v);++kept;}
-    });
+    if(const FlatGroup* const f=FlatOf(*t,c->bodies,group,gen)) {
+        parts=f->active;
+        if(parts)first=f->ids[0];
+        kept=f->Cut(c->sweep,out);
+    } else {
+        Walk(group,[&](unsigned v) {
+            if(!parts++)first=v;
+            const BoxEntry& b=BoxOf(*t,c->bodies,v,gen);
+            if(c->sweep.Touches(b.lo,b.hi)){out(v);++kept;}
+        });
+        s.lookups+=parts;
+    }
     out.Done();
-    ++s.walks;s.parts+=parts;s.kept+=kept;s.culled+=parts-kept;s.lookups+=parts;
+    ++s.walks;s.parts+=parts;s.kept+=kept;s.culled+=parts-kept;
     // Stock would have put parts in the list; an empty list takes the step another way (no cast, b80 = to).
     if(parts && !kept && Rd<int>(collector,kCollectorCount)==0){AppendIds(collector,&first,1);++s.keptOne;}
     if(counting)s.walkTicks+=__rdtsc()-t0;
@@ -720,7 +792,8 @@ void ReportBulletExpandCull(unsigned frames) noexcept {
         settleShadowed=take(totals.settleShadowed),settleMismatches=take(totals.settleMismatches),
         spanShadowed=take(totals.spanShadowed),spanMismatches=take(totals.spanMismatches),rayShadowed=take(totals.rayShadowed),
         rayMismatches=take(totals.rayMismatches),unmatched=take(totals.unmatched),settleCalls=take(totals.settleCalls),
-        settles=take(totals.settles);
+        settles=take(totals.settles),flatHits=take(totals.flatHits),flatBuilds=take(totals.flatBuilds),
+        flatChanged=take(totals.flatChanged),flatChecked=take(totals.flatChecked),flatMismatches=take(totals.flatMismatches);
     const unsigned mask=totals.unreadMask.exchange(0,std::memory_order_relaxed);
     if(!counting || !Cfg().perfProbe || !(casts+outside+filtered))return;
     // TSC ticks to ms: the counter's rate since the install.
@@ -737,11 +810,14 @@ void ReportBulletExpandCull(unsigned frames) noexcept {
         "entries (a new generation); boxes filled again after a settle %llu, changed %llu; walks as stock %llu outside casts, "
         "%llu filtered; shadow step 3 %llu checked (%llu with a settle since the cast: %llu mismatched), ray %llu checked "
         "(%llu mismatched), after a settle %llu checked (%llu mismatched), %llu mismatched in all, %llu lists not the record's, "
-        "%llu with unread dwords differing (mask %08X)",
+        "%llu with unread dwords differing (mask %08X); flat copies %.1f%% hits (%llu hits, %llu made, %llu of them the list "
+        "changed in the generation), %llu checked against the walk (%llu mismatched)",
         frames,casts,culling,blast,off,unarmed,sampled,settleSampled,walks,parts,kept,culled,
         parts ? 100.0*static_cast<double>(culled)/static_cast<double>(parts) : 0.0,keptOne,walkMs,walkMs/n,
         parts ? walkMs*1e6/static_cast<double>(parts) : 0.0,boxMs,lookups-(std::min)(lookups,misses),misses,unbounded,
         settleCalls,settles,rechecked,stale,outside,filtered,shadowed,spanShadowed,spanMismatches,rayShadowed,rayMismatches,
-        settleShadowed,settleMismatches,mismatches,unmatched,unreadDiffs,mask);
+        settleShadowed,settleMismatches,mismatches,unmatched,unreadDiffs,mask,
+        flatHits+flatBuilds ? 100.0*static_cast<double>(flatHits)/static_cast<double>(flatHits+flatBuilds) : 0.0,flatHits,
+        flatBuilds,flatChanged,flatChecked,flatMismatches);
 }
 }  // namespace crew

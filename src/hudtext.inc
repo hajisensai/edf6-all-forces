@@ -1333,3 +1333,10 @@ HUDTEXT(zwLogPoor,L"Not enough logistics points",L"后勤点不够",L"後勤點�
 HUDTEXT(rbEtherTitle,L"ETHER %.0f / %.0f",L"以太 %.0f / %.0f",L"以太 %.0f / %.0f",L"エーテル %.0f / %.0f")
 HUDTEXT(rbEtherDepleted,L"ETHER SPENT: LAND TO REFILL",L"以太耗尽：落地回充",L"以太耗盡：落地回充",L"エーテル枯渇：着地で回復")
 HUDTEXT(rbEtherGlide,L"GLIDE  STEPS %d",L"滑翔  踏阵 %d",L"滑翔  踏陣 %d",L"滑空  ステップ %d")
+
+// --- The performance panel (hud.cpp PerfPanel; ini PerfHud) ---
+HUDTEXT(perfHudTitle,L"PERFORMANCE",L"性能",L"效能",L"パフォーマンス")
+HUDTEXT(perfHudFrame,L"%.0f fps  frame %.1f ms (worst %.1f)  %.2f steps a frame",L"%.0f 帧/秒  每帧 %.1f ms（最差 %.1f）  每帧 %.2f 步",L"%.0f 幀/秒  每幀 %.1f ms（最差 %.1f）  每幀 %.2f 步",L"%.0f fps  フレーム %.1f ms（最悪 %.1f）  1 フレーム %.2f ステップ")
+HUDTEXT(perfHudStep,L"step %.1f ms: AI %.1f  pre %.1f  Havok %.1f  objects %.1f  camera %.1f",L"每步 %.1f ms：AI %.1f  前置 %.1f  Havok %.1f  对象 %.1f  镜头 %.1f",L"每步 %.1f ms：AI %.1f  前置 %.1f  Havok %.1f  物件 %.1f  鏡頭 %.1f",L"ステップ %.1f ms：AI %.1f  前処理 %.1f  Havok %.1f  オブジェクト %.1f  カメラ %.1f")
+HUDTEXT(perfHudDraw,L"a frame: safe update %.1f  render commands %.1f  rest %.1f ms",L"每帧：安全更新 %.1f  渲染命令 %.1f  其余 %.1f ms",L"每幀：安全更新 %.1f  渲染命令 %.1f  其餘 %.1f ms",L"1 フレーム：セーフ更新 %.1f  描画コマンド %.1f  その他 %.1f ms")
+HUDTEXT(perfHudPopulation,L"enemies %d  friends %d  CPU %.1f cores  memory %.1f GB",L"敌人 %d  友军 %d  CPU %.1f 核  内存 %.1f GB",L"敵人 %d  友軍 %d  CPU %.1f 核  記憶體 %.1f GB",L"敵 %d  味方 %d  CPU %.1f コア  メモリ %.1f GB")

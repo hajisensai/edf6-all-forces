@@ -33,6 +33,7 @@
 #include "subcarrier.h"
 #include "vehicler_logistics.h"
 #include "runeblade.h"
+#include "perf_hud.h"
 
 namespace crew {
 namespace hudi {
@@ -493,6 +494,33 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
     HideLinesUnder(lines,firstLine,x-12.0f*s,y0,right,y1);   // a Q mark's name tag, a squad's label: not over the menu
     Rect(drawer,ctx,x-12.0f*s,y0,right,y1,kPanel);
 }
+// The performance panel (perf_hud.h; ini PerfHud, read live): left, under the armor gauge (top right is the radar and
+// its boxes, the vehicles' panels; the 2026-11-28 shot had it over them). The frame line in green at 55 fps and over,
+// yellow at 30, red under; nothing without a fresh readout (no frames: a menu, a load).
+void PerfPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    (void)width;
+    perfhud::Readout r{};
+    if(!Cfg().perfHud || !perfhud::Latest(&r))return;
+    if(!LineSink{lines,at}.Room(5,__func__))return;
+    using perfhud::Scope;
+    const float x=40.0f*s,top=height*0.24f,row=24.0f*s,scale=kLineScale*0.8f;
+    const int firstLine=*at;
+    const float* const tint=r.fps>=55.0 ? kGreen : r.fps>=30.0 ? kYellow : kRed;
+    Label(text,lines,at,x,top,0,kLineScale*0.9f,kTitle,L"%ls",Tr(Tx::perfHudTitle));
+    Label(text,lines,at,x,top+row,0,scale,tint,Tr(Tx::perfHudFrame),r.fps,r.frameMs,r.worstMs,r.stepsPerFrame);
+    Label(text,lines,at,x,top+row*2,0,scale,kWhite,Tr(Tx::perfHudStep),r.stepMs,r.scopeMs[Scope::kAi],
+          r.scopeMs[Scope::kPre],r.scopeMs[Scope::kHavok],r.scopeMs[Scope::kObject],r.scopeMs[Scope::kCamera]);
+    Label(text,lines,at,x,top+row*3,0,scale,kWhite,Tr(Tx::perfHudDraw),r.scopeMs[Scope::kSafe],
+          r.scopeMs[Scope::kRender],r.restMs);
+    Label(text,lines,at,x,top+row*4,0,scale,kTeal,Tr(Tx::perfHudPopulation),r.enemies,r.friends,r.cpuCores,
+          r.commitMb/1024.0);
+    // the panel behind them, as wide as the widest line
+    float right=x+300.0f*s;
+    for(int i=firstLine;i<*at;++i)if(lines[i].x+lines[i].w+12.0f*s>right)right=lines[i].x+lines[i].w+12.0f*s;
+    const float y0=top-row*0.7f,y1=top+row*4.7f;
+    HideLinesUnder(lines,firstLine,x-12.0f*s,y0,right,y1);
+    Rect(drawer,ctx,x-12.0f*s,y0,right,y1,kPanel);
+}
 }  // namespace hudi
 
 #include "cockpit_screens.inc"
@@ -808,6 +836,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         VehiclerHud(drawer,ctx,t,width,height,s,lines,&at);
         RuneBladeHud(drawer,ctx,t,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
+        PerfPanel(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(fresh)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

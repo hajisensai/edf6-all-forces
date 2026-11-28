@@ -406,6 +406,8 @@ bool VehiclerHudNow(VehiclerHudView* o) noexcept { if(sceneVehiclerOn)*o=sceneVe
 bool RuneBladeHudNow(RuneBladeHudView*) noexcept { return false; }
 namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
+// The performance panel (perf_hud.cpp Latest): live numbers only, not drawn in any scene.
+namespace perfhud { bool Latest(Readout*) noexcept { return false; } }
 // The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.
 bool AuraViewNow(AuraView*) noexcept { return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.

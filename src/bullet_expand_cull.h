@@ -11,6 +11,10 @@
 // in an empty list keeps its first active part (the list's emptiness decides the step's path). Left as stock: a blast
 // bullet (core+0xAF4 bit 0x1000: its point query reads the 0x8D8 list), walks with a filter functor or outside the
 // bullet casts, ExpandCull=0 (read every cast).
+// A group's first cut walk in a generation on a thread flattens its list (the nodes, their next links, bodies and on
+// bytes; the active parts' ids and boxes, struct of arrays); later walks in the generation check the live list against
+// the copy node for node (every field stock's walk reads, no load waiting on another) and cut off the copy, 4 boxes at
+// a time; a list that differs is copied again (counted, EXPANDCULL FLAT).
 // Step 1 settles damage between bullets (0x23426F -> 0x543920): a death there may remove / move / reshape bodies, so
 // a settle with entries ends the boxes' generation too (the casts after it fill their boxes again). That call is
 // chained at the load's end (InstallBulletExpandCullSettle, over damagestats' redirect); until it is in, every cast
