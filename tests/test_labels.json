@@ -250,6 +250,19 @@
    ],
    "scripts": []
   },
+  "armory_look_logic": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "armory_look_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": []
+  },
   "armory_native": {
    "labels": [
     "plugin-air",
