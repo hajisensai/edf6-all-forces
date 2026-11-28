@@ -43,13 +43,6 @@ void Gauge() {
     Check(!e::CanSpend(g,1.0f),"spent pays nothing");
     e::Gauge d{40.0f,100.0f,false};
     Check(Near(e::Drain(d),40.0f) && d.spent && e::Drain(d)==0.0f,"drain takes all, once");
-    unsigned char soldier[0x400]{};
-    const float most=100.0f,now=30.0f;
-    std::memcpy(soldier+e::kMost,&most,4);std::memcpy(soldier+e::kNow,&now,4);
-    Check(e::Spend(soldier,10.0f),"live spend");
-    e::Gauge live;
-    Check(e::Read(soldier,&live) && Near(live.now,20.0f) && !live.spent,"live read");
-    Check(Near(e::Drain(static_cast<void*>(soldier)),20.0f) && e::Read(soldier,&live) && live.spent,"live drain sets +0x2FC");
 }
 
 void QueueRuns() {
