@@ -2,11 +2,14 @@
 // tests/bullet_expand_cull_test.cpp runs the hooks on a private EDF.dll mapping against the stock addBody;
 // docs/bullet-expand-cull-re.md). Addresses: EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
+#include <emmintrin.h>
+#include <intrin.h>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 namespace crew::expand_cull {
 // ---- stock EDF.dll ----
@@ -191,5 +194,74 @@ struct Stats {
     unsigned long long settleSampled=0,settleShadowed=0,settleMismatches=0;   // samples: the first cast after a settle
     unsigned long long spanShadowed=0,spanMismatches=0;   // samples with a settle between the cast and the step-3 build
     unsigned long long rayShadowed=0,rayMismatches=0,unmatched=0;   // the ray list's check; a list not the record's
+    // The flat copies: cut walks off a copy made earlier this generation; copies made (a group's first walk this
+    // generation, or its slot another's); copies made again because the live list was not the copy's (a node, its
+    // body or its on byte changed in the generation); debug: sampled walks checked against the copy's cut, differing.
+    unsigned long long flatHits=0,flatBuilds=0,flatChanged=0,flatChecked=0,flatMismatches=0;
+};
+
+// A group's list flattened for one generation on one thread: its nodes in list order with the fields stock's walk
+// reads (the next link, the body, the on byte), and the active ones' ids and boxes (the cache's, this generation) in
+// rows of `stride` floats (lo x, lo y, lo z, hi x, hi y, hi z; the active count rounded up to 4, the pad lanes lo +inf,
+// hi -inf: no sweep touches them). A walk uses it only while the live list is the copy's node for node (Same).
+struct FlatGroup {
+    const unsigned char* group=nullptr;
+    const unsigned char* head=nullptr;
+    unsigned gen=0,active=0,stride=0;
+    std::vector<const unsigned char*> nodes,bodies;
+    std::vector<unsigned char> on;
+    std::vector<unsigned> ids;
+    std::vector<float> box;
+    // Whether the live list from `liveHead` is the copy's: the head, and each node's next link, body and on byte, and each
+    // active node's body's id (the fields stock's walk reads, all of them). A node is read only after the link before it
+    // named it (the live list reaches it), a body only after its node named it and its on byte is set (as stock reads
+    // it); the loads do not wait on each other (the addresses are the copy's), unlike the walk's chase.
+    bool Same(const unsigned char* liveHead) const noexcept {
+        if(liveHead!=head)return false;
+        const std::size_t n=nodes.size();
+        if(Rd<const unsigned char*>(head,0)!=(n ? nodes[0] : head))return false;
+        unsigned j=0;
+        for(std::size_t i=0;i<n;++i) {
+            const unsigned char* const node=nodes[i];
+            if(Rd<const unsigned char*>(node,0)!=(i+1<n ? nodes[i+1] : head))return false;
+            if((Rd<const unsigned char*>(node,kNodeBody)!=bodies[i]) | (node[kNodeOn]!=on[i]))return false;
+            if(on[i] && Rd<unsigned>(bodies[i],kBodyId)!=ids[j++])return false;
+        }
+        return true;
+    }
+    // The box rows from `boxes` (the active parts' lo xyz, hi xyz in order, as `ids`).
+    void Pack(const std::vector<float>& boxes) {
+        active=static_cast<unsigned>(ids.size());
+        stride=(active+3u)&~3u;
+        const float inf=std::numeric_limits<float>::infinity();
+        box.resize(static_cast<std::size_t>(stride)*6);
+        for(unsigned r=0;r<6;++r) {
+            float* const row=box.data()+static_cast<std::size_t>(r)*stride;
+            for(unsigned i=0;i<active;++i)row[i]=boxes[static_cast<std::size_t>(i)*6+r];
+            for(unsigned i=active;i<stride;++i)row[i]=r<3 ? inf : -inf;
+        }
+    }
+    // The active parts the sweep touches, in order, each to `out(id)`; the count kept. Touches' first test (the float
+    // overlap, the same comparisons) 4 boxes at a time, then Touches itself on each box that passes it: the same parts.
+    template<class Out> unsigned Cut(const Sweep& sw,Out&& out) const {
+        const float* const b=box.data();
+        const std::size_t st=stride;
+        const __m128 flo0=_mm_set1_ps(sw.flo[0]),flo1=_mm_set1_ps(sw.flo[1]),flo2=_mm_set1_ps(sw.flo[2]);
+        const __m128 fhi0=_mm_set1_ps(sw.fhi[0]),fhi1=_mm_set1_ps(sw.fhi[1]),fhi2=_mm_set1_ps(sw.fhi[2]);
+        unsigned kept=0;
+        for(unsigned at=0;at<stride;at+=4) {
+            __m128 m=_mm_and_ps(_mm_cmple_ps(_mm_loadu_ps(b+at),fhi0),_mm_cmple_ps(flo0,_mm_loadu_ps(b+3*st+at)));
+            m=_mm_and_ps(m,_mm_and_ps(_mm_cmple_ps(_mm_loadu_ps(b+st+at),fhi1),_mm_cmple_ps(flo1,_mm_loadu_ps(b+4*st+at))));
+            m=_mm_and_ps(m,_mm_and_ps(_mm_cmple_ps(_mm_loadu_ps(b+2*st+at),fhi2),_mm_cmple_ps(flo2,_mm_loadu_ps(b+5*st+at))));
+            for(unsigned long bits=static_cast<unsigned long>(_mm_movemask_ps(m));bits;bits&=bits-1) {
+                unsigned long k=0;
+                _BitScanForward(&k,bits);
+                const unsigned i=at+static_cast<unsigned>(k);
+                const float lo[3]{b[i],b[st+i],b[2*st+i]},hi[3]{b[3*st+i],b[4*st+i],b[5*st+i]};
+                if(sw.Touches(lo,hi)){out(ids[i]);++kept;}
+            }
+        }
+        return kept;
+    }
 };
 }  // namespace crew::expand_cull
