@@ -788,6 +788,17 @@ SALVO_MARK = 7070.0
 SALVO_JET = 'edf6tr_jet_salvo_interceptor_mission'
 SALVO_MODEL = 'EDF6VC_SALVO_INTERCEPTOR.MRAB'
 SALVO_OBJECT = 'EDF6VC_JET_SALVO_INTERCEPTOR.SGO'
+# The Arsenal Bird's two modes (pylib/salvo_model.py, the model pack's arsenal_bird folder): the missile mode is the salvo
+# (SALVO_JET, in SALVO_MODEL); the drone mode the carrier ARSENAL_CARRIER_JET in the same model (src/jet_internal.h
+# Body::arsenalCarrier: the carrier kind's arms, durability and AI under a mark of its own), launching M101s (M101_JET,
+# Body::m101Drone: the gun drone's arms, durability and AI in the M101's model). Both only with the model folder.
+ARSENAL_CARRIER_MARK = 7071.0
+ARSENAL_CARRIER_JET = 'edf6tr_jet_arsenal_carrier_mission'
+ARSENAL_CARRIER_OBJECT = 'EDF6VC_JET_ARSENAL_CARRIER.SGO'
+M101_MARK = 7072.0
+M101_JET = 'edf6tr_jet_m101'
+M101_MODEL = 'EDF6VC_M101.MRAB'
+M101_OBJECT = 'EDF6VC_JET_M101.SGO'
 # The salvo's launch, after Ace Combat's multi-missile volleys (the user, 2026-11-26: 「参照别的游戏做导弹发射效果…类似王牌空战」):
 # the rounds leave the four rails in volleys (SALVO_VOLLEY every SALVO_VOLLEY_GAP frames), drop clear of the launcher for a beat, light, fan out, then
 # turn onto their locks off the nose; each splits into four bright children. The carrier is MissileBullet02
@@ -1043,9 +1054,12 @@ JET_MASSES = {
 # ...the support aircraft weigh what their kinds do (SUPPORT_JETS: the same arms, the same payload; src/support_loadout.h
 # kVehicleBodies payloadKg)
 JET_MASSES.update({mark: JET_MASSES[kind_mark] for _n, mark, _m, _k, kind_mark in SUPPORT_JETS.values()})
-# ...the salvo interceptor in the TU-1600 (40.0 x 9.7 x 61.8 m, salvo_model): the Tu-160 its size (55.7 / 35.6 x 13.1 x
-# 54.1 m), 110,000 + 130,000 (a B-1B, 42 / 24 x 10 x 45 m, would be 87,090 + 120,326 per the USAF sheet: 207 t)
-JET_MASSES[SALVO_MARK] = 240000.0
+# ...the Arsenal Bird, both modes (106.6 x 14.9 x 22.8 m, salvo_model): the Stratolaunch its size (117 m across, 73 m
+# long, 15 m high). Wikipedia gives no fuel figure: its 589,670 kg maximum takeoff weight less its 250,000 kg external
+# payload, 339,670 kg, is the empty aircraft (226,796 kg) with the fuel it takes off with
+JET_MASSES[SALVO_MARK] = JET_MASSES[ARSENAL_CARRIER_MARK] = 339700.0
+# ...and its M101 drone (3.2 x 1.5 x 5.7 m, scaled to the gun drone's length: tools/prep_arsenal_bird.py): the drones'
+JET_MASSES[M101_MARK] = JET_MASSES[7006.0]
 # ...and the support's C-130s (C130_JETS): the AC-130 the gunship's (C130_GUNSHIP_MARK), the paratroop plane the same
 # airframe's (C130_TRANSPORT_MARK): the C-130J's
 C130_GUNSHIP_MARK = 7065.0
@@ -1460,6 +1474,13 @@ JETS: dict[str, Jet] = {
                                           'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
     SALVO_JET: Jet(SALVO_MARK, 1250.0, _SALVO, (f'app:/object/{SALVO_MODEL.lower()}', 'edf6vc_salvo_interceptor.mdb'),
                    SALVO_MODEL, 'body', 'body'),
+    # the Arsenal Bird's drone mode: the carrier kind's durability and arms (its drones do the fighting) in the same model
+    ARSENAL_CARRIER_JET: Jet(ARSENAL_CARRIER_MARK, 8000.0, _ARMS,
+                             (f'app:/object/{SALVO_MODEL.lower()}', 'edf6vc_salvo_interceptor.mdb'), SALVO_MODEL, 'body',
+                             'body'),
+    # ...and the M101 it launches: the gun drone's durability and arms (edf6tr_jet_drone) in the M101's model
+    M101_JET: Jet(M101_MARK, 300.0, _DRONE, (f'app:/object/{M101_MODEL.lower()}', 'edf6vc_m101.mdb'), M101_MODEL, 'body',
+                  'body'),
     # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
@@ -1722,7 +1743,7 @@ class DoorError(Exception):
 # their holder bone, then stood 0.24-0.67 m in the ground under a parked jet. Every other weapon (the blast drones'
 # charges, the Primers' guns) and the fuel tank stay on the anchor.
 HARDPOINT_FILES = frozenset({JET_ELEVON_FILE, 'EDF6VC_INTERCEPTOR.MRAB', 'EDF6VC_MULTIROLE.MRAB', 'EDF6VC_DRONE.MRAB',
-                             'EDF6VC_CARRIER.MRAB', GUNSHIP_MODEL_FILE, SALVO_MODEL})
+                             'EDF6VC_CARRIER.MRAB', GUNSHIP_MODEL_FILE, SALVO_MODEL, M101_MODEL})
 
 
 def model_file(model) -> str:  # noqa: ANN001 - [archive path, member]

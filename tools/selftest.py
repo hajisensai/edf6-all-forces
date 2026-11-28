@@ -456,7 +456,8 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     import jet_models
     import rootcpk
     assert vc.HARDPOINT_FILES == {vc.JET_ELEVON_FILE, *(f for f, r in jet_models.MODELS.items() if r.grounded),
-                                  vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL}, sorted(vc.HARDPOINT_FILES)
+                                  vc.GUNSHIP_MODEL_FILE, vc.SALVO_MODEL, vc.M101_MODEL}, sorted(vc.HARDPOINT_FILES)
+    assert set(jet_models.SALVO_MODEL_NAMES) == {vc.SALVO_MODEL, vc.M101_MODEL}
     assert jet_models.ELEVON_FILE == vc.JET_ELEVON_FILE
     seen = 0
     for name, jet in vc.JETS.items():
@@ -487,10 +488,10 @@ def jet_weapons_hang_on_their_hardpoints() -> None:
     muzzles = vc.hardpoint_muzzles(game)
     assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
     from mdb import mdb_read, rab_read
-    import salvo_model   # the salvo's TU-1600: made from the model pack's folder (pylib/salvo_model.py), where it is there
+    import salvo_model   # the Arsenal Bird and its M101: made from the model pack's folder (pylib/salvo_model.py), where it is
     models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
               for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE
-              and (f != vc.SALVO_MODEL or salvo_model.model_dir() is not None)}
+              and (f not in jet_models.SALVO_MODEL_NAMES or salvo_model.model_dir() is not None)}
     raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
     models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
     for f, md in models.items():
