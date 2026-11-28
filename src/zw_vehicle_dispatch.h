@@ -18,8 +18,13 @@
 //    old vehicle is still alive and nobody is aboard it, the courier boards the old one, drives it back to the map's
 //    edge and it is deleted there. One vehicle of its own per Vehicler on the field, always; a wrecked old one is left
 //    to the game. Online the host does it all (plan, the courier's orders, the deletion) and every peer follows the
-//    transaction (the same hulls by NetId, the deletion by the support session's rollback / withdraw path).
-// Not in this build: see RequestZwDeliver.
+//    transaction (the same hulls and courier by NetId); the courier's hand-over and the old vehicle's deletion reach the
+//    guests as M4's ZWLG messages handed / retired (vehicler_logistics_net.h: a native deletion is no message of the game's).
+// The plan: the parking spot beside the requester as it stands at the host (zwplace::Place, clear of its current vehicle,
+// the planned starts and the other resupplies on their way), a ground entry with a verified corridor to it (support_entry.h
+// GroundEntryCandidates, as support_dispatch.cpp plans a ground call), the hull there facing the spot and its courier
+// beside it (role 1). A vehicle being delivered has no owner until the courier gets off (ZwVehicleOwner nullptr): no
+// filter of the Vehicler's own vehicle stands in the courier's way.
 //
 // Game thread only, every function.
 #pragma once
@@ -74,18 +79,35 @@ struct ZwDeliverLedger {
 };
 void SetZwDeliverLedger(const ZwDeliverLedger& ledger) noexcept;
 // Ask the host for a resupply of `kind` (any kind in ZwUnlockedKinds) for `human`, driven to a parking spot near `around`
-// (the owner's position). One at a time a player (ZwDeliverPending). Not in this build (the courier's route, arrival and
-// the old vehicle's drive-off are not written): false and a log line, nothing held.
+// (the owner's position). One at a time a player (ZwDeliverPending; the host refuses a second while one is planned, on its
+// way or its courier still driving the old one off). Online only this machine's player asks (PlayerHuman). True: asked
+// (offline: planning here); the outcome is the log's and ZwDeliverPending's.
 bool RequestZwDeliver(unsigned char* human,int kind,const float* around) noexcept;
-// Whether `human` has a resupply on its way (asked, not yet delivered / refused); M4 shows it and refuses a second.
+// Whether `human` has a resupply on its way (asked, not yet handed over / refused); M4 shows it and refuses a second.
 bool ZwDeliverPending(const unsigned char* human) noexcept;
+// The vehicle on its way to `human` (made, its courier not yet off it), nullptr when none: M4's HUD shows its distance.
+unsigned char* ZwDeliverVehicle(const unsigned char* human) noexcept;
+// The reference the resupply and the points know a player by (net_object_ref.h): online its mission slot's
+// (command_identity.h PlayerRequesterOf), offline the local player's (0 PlayerHuman, 1 the split screen's second).
+bool ZwRequesterRef(const unsigned char* human,unsigned char out[32]) noexcept;
+// Host (offline this machine): whether player `requester` has a resupply being planned, on its way or driving the old one
+// off (M4 sends it in its state: a guest's HUD shows it).
+bool ZwDeliverInTransit(const unsigned char requester[32]) noexcept;
+// A guest: the host's word of a delivery (M4's ZWLG handed / retired): `hull` the delivered vehicle's NetId (handed) or the
+// replaced one's (retired), `courier` its courier's, `follows` the courier now follows the owner.
+void ZwDeliverHeard(bool retired,const unsigned char hull[32],const unsigned char courier[32],bool follows) noexcept;
 
 // ---- support_dispatch.cpp's hooks for kZwStartCatalog / kZwDeliverCatalog (as commander.h's) ----
+// A resupply request's loadout word: the kind, and the requester's ZwUnlockedKinds (the host checks the kind is in it).
+constexpr std::uint64_t ZwDeliverLoadout(int kind,std::uint32_t unlocked) noexcept {
+    return static_cast<std::uint64_t>(static_cast<std::uint8_t>(kind))|(static_cast<std::uint64_t>(unlocked)<<8);
+}
 // True for a catalog of this module's.
 constexpr bool IsZwCatalog(std::uint32_t catalog) noexcept {
     return catalog==zwdispatch::kZwStartCatalog || catalog==zwdispatch::kZwDeliverCatalog;
 }
-// Host (or offline): the plan of `peer`'s request (its authenticated player; `loadout` the kind it asked for).
+// Host (or offline): the plan of `peer`'s request (its authenticated player; `loadout` the kind it asked for, a resupply's
+// with the requester's unlocked kinds above it: ZwDeliverLoadout).
 support_net::PlanResult PlanZwVehicle(std::uint32_t peer,std::uint32_t catalog,const float* target,std::uint64_t loadout,
                                       SupportPlan* out) noexcept;
 // Every peer, before anything is made: one hull of a known kind, ready here, at its target, not underground.
@@ -95,8 +117,10 @@ bool ApplyZwVehiclePlan(std::uint64_t transaction,const SupportPlan& plan,bool r
 void DestroyZwVehiclePlan(std::uint64_t transaction) noexcept;
 // The request notices: true for this machine's ZwStart request (consumed here).
 bool ZwVehicleRequestNotice(std::uint32_t request,support_net::RequestStatus status) noexcept;
-// support_dispatch.cpp's tick (every frame, the game thread): activation of made hulls, the offline requests.
+// support_dispatch.cpp's tick (every frame, the game thread): activation of made hulls, the offline requests, the couriers
+// (host / offline), M4's logistics tick (vehicler_logistics.h).
 void ZwVehicleTick() noexcept;
-// A new mission (support_dispatch.cpp's reset): the last mission's records dropped (its objects are the teardown's).
+// A new mission (support_dispatch.cpp's reset): the last mission's records dropped (its objects are the teardown's), M4's
+// points started again.
 void ResetZwVehicles() noexcept;
 }  // namespace crew
