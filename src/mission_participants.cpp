@@ -7,6 +7,7 @@
 #include "memory.h"
 #include "team_walk.h"
 #include "edf/host.h"
+#include "soldier_identity.h"
 
 namespace crew {
 namespace mission_participants {
@@ -31,7 +32,7 @@ void __fastcall Ignore(void*) noexcept {}
 void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
     if(v->failed || !object)return;
     __try {
-        if(!IsSoldierClass(object))return;
+        if(!IsPlayerClassSoldier(object))return;   // any player class: All Forces' 4 / 5 too (soldier_identity.h)
         if(!Readable(object,0x1EE0)){v->failed=true;return;}
         if(At<unsigned char>(object,0x18)&4)return; // deleted from scene, not the +2E8 death/revival state
         const auto user=At<const unsigned char*>(object,0x1ED0);

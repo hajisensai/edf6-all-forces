@@ -2161,6 +2161,14 @@ add_test(NAME weapon_mount_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 set_tests_properties(weapon_mount_native PROPERTIES SKIP_RETURN_CODE 77)
 # Authenticated map command RPC shares the support extension consumer.
 target_sources(EDF6VehicleCrew PRIVATE src/command_net.cpp src/command_protocol.cpp src/command_identity.cpp src/net_object_resolve.cpp)
+# A soldier of any player class, All Forces' 4 / 5 (AssultSoldier clones) by their RTTI pointer (src/soldier_identity_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/soldier_identity.cpp)
+add_executable(soldier_identity_test tests/soldier_identity_test.cpp)
+target_include_directories(soldier_identity_test PRIVATE src)
+target_compile_options(soldier_identity_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME soldier_identity COMMAND soldier_identity_test)
+add_test(NAME soldier_identity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_identity_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(soldier_identity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_executable(command_protocol_test tests/command_protocol_test.cpp src/command_protocol.cpp)
 target_compile_options(command_protocol_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME command_protocol COMMAND command_protocol_test)

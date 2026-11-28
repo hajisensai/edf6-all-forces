@@ -6,6 +6,7 @@
 #include "support_soldier.h"
 #include <cstring>
 #include "scene.h"
+#include "soldier_identity.h"
 
 // The one native all-team walk every resolver of object references makes (net_object_resolve.h). Static RE
 // (docs/mission-participants-native.md): 5E0C80 visits every team's GameObjects with no HP or dead-state filter, a player
@@ -37,11 +38,11 @@ bool Alive(const NetLife life,const unsigned char* object,ObjRef* ref) noexcept 
 }
 // A player's soldier (any machine's): named by its slot alone, never by its NetId (another on every machine).
 bool PlayerSoldier(const unsigned char* object) noexcept {
-    return Readable(object,0x1EE0) && IsSoldierClass(object) && IsAnyPlayer(object);
+    return Readable(object,0x1EE0) && IsPlayerClassSoldier(object) && IsAnyPlayer(object);
 }
 // A mission player's soldier: its slot (User+48, inside the mission's `expected` players) and its native PUID (User+18).
 bool Player(const unsigned char* object,unsigned expected,void** puid,int* slot) noexcept {
-    if(!Readable(object,0x1EE0) || !IsAnyPlayer(object) || !IsSoldierClass(object))return false;
+    if(!Readable(object,0x1EE0) || !IsAnyPlayer(object) || !IsPlayerClassSoldier(object))return false;
     const auto user=At<const unsigned char*>(object,0x1ED0);
     const auto ctrl=At<const unsigned char*>(object,0x1ED8);
     if(!Readable(user,0x4C) || !Readable(ctrl,16) || At<LONG>(ctrl,8)<=0)return false;

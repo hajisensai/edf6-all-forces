@@ -7413,6 +7413,19 @@
    ],
    "scripts": []
   },
+  "soldier_identity": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_identity_native": {
+   "labels": [
+    "test-data"
+   ],
+   "scripts": []
+  },
   "sortie_check": {
    "labels": [
     "plugin-air",
