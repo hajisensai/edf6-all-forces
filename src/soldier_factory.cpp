@@ -1,5 +1,13 @@
 // The new classes' player objects (src/soldier_factory.h): factories ZwVehicler / ZwRuneBlade on AssultSoldier's constructor with
 // cloned vtables. The sites are src/soldier_sites.inc (tests/soldier_native_audit.py checks them against EDF.dll).
+//
+// The clones follow AssultSoldier's live tables. Other code patches slots of the live 0x17CDF28 / 0x17CE220 / 0x17CE2D8 for
+// every AssultSoldier: EDF6Coop's player sync (slots 52 / 53 / 55 / 92 of the main table, its netplayer_game.cpp), this
+// plugin's own hooks, at whatever time each installs (another plugin may load after this one). A clone of the file's stock
+// functions would skip all of them for classes 4 / 5 (online: their players not synced). So right before each object is made,
+// every slot of the three clones this module does not replace (Owned: main 1 and 83, slot 0 of both secondary tables) is
+// copied from the live table; a hook that patches the live table is then inherited by the new classes with no list of
+// hooks here. The EDF4.1 ports' clones (edf41classes) keep their own rule (the file's functions, counted).
 #include "soldier_factory.h"
 #include "soldier_type_logic.h"
 #include "edf_layout.h"
@@ -33,6 +41,9 @@ Clone runeBladeClass{"ZwRuneBlade",st::kVtable,st::kMainSlots,st::kMainVtable,{}
 // (main table) destructor, the rest the stock functions as the file has them.
 void* table120[1+st::kSlots120];
 void* table1940[1+st::kSlots1940];
+// The slots this module replaces (the rest follow the live tables: Inherit).
+constexpr bool OwnedMain(int slot) noexcept { return slot==edf41c::kSlotDtor || slot==st::kSlotType; }
+constexpr bool OwnedSecondary(int slot) noexcept { return slot==0; }
 std::atomic<bool> ready{false};
 std::atomic<bool> factories{false};   // both AddFactory calls succeeded
 std::atomic<std::uint32_t> made[2],destroyed[2];
@@ -81,7 +92,21 @@ std::uint64_t __fastcall Dtor1940(char* self,unsigned flags) noexcept {
 int __fastcall VehiclerType(void*) noexcept { return st::kVehicler; }
 int __fastcall RuneBladeType(void*) noexcept { return st::kRuneBlade; }
 
+// Every slot not owned, from the live table (readable: checked by the install). Aligned pointer stores: an object of the
+// class already alive reads either the old or the new function, both the live table's at some time.
+void InheritTable(void** slots,std::size_t vtable,int count,bool (*owned)(int) noexcept) noexcept {
+    const void* const* live=reinterpret_cast<const void* const*>(image+vtable);
+    for(int i=0;i<count;++i)
+        if(!owned(i))slots[i]=const_cast<void*>(live[i]);
+}
+void Inherit(Clone& c) noexcept {
+    InheritTable(&c.block[1],st::kVtable,st::kMainSlots,&OwnedMain);
+    InheritTable(&table120[1],st::kTable120,st::kSlots120,&OwnedSecondary);
+    InheritTable(&table1940[1],st::kTable1940,st::kSlots1940,&OwnedSecondary);
+}
+
 void Create(Clone& c,int type,void* info) noexcept {
+    Inherit(c);
     void* obj=edf41c::CloneObject(c,st::kCtor,kObjectSize,info);
     if(!obj)return;   // logged; left an AssultSoldier (its own destructor frees the whole block)
     char* o=static_cast<char*>(obj);
@@ -122,8 +147,8 @@ bool BuildTable(void** block,std::size_t vtable,const std::uint32_t* rvas,int sl
     block[0]=const_cast<void*>(vt[-1]);
     block[1]=slot0;
     for(int i=1;i<slots;++i) {
-        if(vt[i]!=image+rvas[i])Log("ZWSOLDIER table 0x%zX slot %d is patched (%p): the clone keeps the stock EDF.dll+0x%X",vtable,i,vt[i],rvas[i]);
-        block[1+i]=image+rvas[i];
+        if(vt[i]!=image+rvas[i])Log("ZWSOLDIER table 0x%zX slot %d is patched already (%p, stock EDF.dll+0x%X): the clones follow it",vtable,i,vt[i],rvas[i]);
+        block[1+i]=const_cast<void*>(vt[i]);   // refreshed from the live table before each object (Inherit)
     }
     return true;
 }
@@ -145,6 +170,12 @@ bool InstallSoldierFactory() noexcept {
     }
     edf41c::SetSlot(vehiclerClass,st::kSlotType,reinterpret_cast<void*>(&VehiclerType));
     edf41c::SetSlot(runeBladeClass,st::kSlotType,reinterpret_cast<void*>(&RuneBladeType));
+    static_assert(OwnedMain(edf41c::kSlotDtor) && OwnedMain(st::kSlotType) && OwnedSecondary(0),"the slots set here are the owned ones");
+    if(!Readable(image+st::kVtable,sizeof(void*)*st::kMainSlots)) {
+        Log("ZWSOLDIER AssultSoldier's main table is not readable: the new classes' player objects are off");
+        return false;
+    }
+    for(Clone* c:{&vehiclerClass,&runeBladeClass})Inherit(*c);
     ready.store(true,std::memory_order_release);
     const bool v=edf41c::AddFactory(L"ZwVehicler",&CreateVehicler);
     const bool r=edf41c::AddFactory(L"ZwRuneBlade",&CreateRuneBlade);

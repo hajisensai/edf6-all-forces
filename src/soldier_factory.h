@@ -3,8 +3,9 @@
 // is built by AssultSoldier's constructor 0x54FF10 (0x2090 bytes, then the plugin's own part) and given cloned vtables: the main
 // one (94 slots, its RTTI kept, so the dynamic_cast to SoldierBase at 0x5A4065 still holds), +0x120 (22) and +0x1940 (2). Slot 83
 // (+0x298) returns the new type; the deleting destructor (slot 1, and slot 0 of both secondary tables, which reach it through the
-// main table) frees the plugin's part before the stock destructor and the delete. Everything else is AssultSoldier's until the
-// classes' own behaviour is written (later stages of the plan).
+// main table) frees the plugin's part before the stock destructor and the delete. Every other slot is copied from AssultSoldier's
+// live tables right before each object is made, so the hooks patched into them (EDF6Coop's player sync, this plugin's) hold
+// for the new classes too (soldier_factory.cpp; docs/newclass-re/spawn.md §6.4).
 #pragma once
 #include <cstdint>
 

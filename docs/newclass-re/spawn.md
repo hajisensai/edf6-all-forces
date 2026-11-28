@@ -159,6 +159,13 @@ AssultSoldier 与 SoldierBase 差异最小，是最干净的底。
 
 0x5A3F90 本地 / 远端共用，远端也按 PlayerSpec.class 查 SoldierInit，所以两端都要装同一份 CONFIG.SGO 与插件工厂；按项目规则拒绝未装插件的成员进房。[确认 共用路径；推断 其余]
 
+### 6.4 克隆表继承活表（实现：`src/soldier_factory.cpp` Inherit）
+
+- AssultSoldier 的活表（主表 0x17CDF28、次表 0x17CE220 / 0x17CE2D8）会被别的代码就地改槽：EDF6Coop 的玩家联机同步改主表 52 / 53 / 55 / 92（`edf6_directnet` 的 `multislot/src/netplayer_game.cpp`，站点 0x17CE0C8 / 0x17CE0D0 / 0x17CE0E0 / 0x17CE208），本插件的模块也可能改；各自安装时间不定（别的插件可能晚于本插件加载）。[确认 Coop 站点]
+- 克隆若照文件里的原版函数填槽，这些补丁对兵种 4 / 5 全部失效（联机时新兵种玩家不同步）。所以每次造新兵种对象前，把三张克隆表里本模块**没有替换**的槽（主表除 1 析构、83 GetSoldierType 以外，两张次表除 slot 0 以外）从活表重抄一遍：改活表的 hook 自动被新兵种继承，不需要在这里列 hook 清单。
+- 只对玩家克隆这样做；edf41classes 的 4.1 移植类（EventAnimationObject / UfoCarrier508 底）仍是文件里的原版函数 + 计数桩，行为不变。
+- 推论：只挂在活 AssultSoldier 表上的 SetSlot 式 hook 不必再单独挂克隆表（挂了就会对新兵种执行两次）；hook 里按 vptr 认兵种的判断要认出克隆（`soldier_identity.h` / `soldier_factory.h IsZwVtable`）。
+
 ## 7. 阻塞
 
 - GS per-class 数组（+0x6E98 起 4×0x18）与存档布局按 4 个兵种定长，兵种号 4/5 会写出界（其它主题）。[确认 布局；推断 后果]
