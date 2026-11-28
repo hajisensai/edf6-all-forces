@@ -1332,7 +1332,8 @@ def supports_on_map_pt() -> None:
     on_map = [c for c in calls.CALLS if c.on_map]
     assert {c.brings for c in on_map} == {'jets', 'helis', 'sub', 'barrage', 'ultimate'}
     # FLOWN: the flown calls, each sortie beside its airframe (calls._catalog); the retired sorties' rows kept, not flown.
-    assert len(on_map) == 42 and sorted(c.id for c in on_map if c.flown) == sorted(c.id for c in calls.FLOWN), len(on_map)
+    # 44: the Arsenal Bird's drone mode (guard / follow) appended 2026-11-28.
+    assert len(on_map) == 44 and sorted(c.id for c in on_map if c.flown) == sorted(c.id for c in calls.FLOWN), len(on_map)
     on_map = [c for c in on_map if not c.retired]
     assert list(calls.STRIKES) == [c for c in on_map if c.brings == 'barrage'] + [c for c in on_map if c.brings == 'ultimate']
     inc = src('src/calls.inc')
