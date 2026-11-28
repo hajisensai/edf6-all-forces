@@ -1045,6 +1045,11 @@ add_executable(zw_crew_vehicle_test tests/zw_crew_vehicle_test.cpp)
 target_include_directories(zw_crew_vehicle_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(zw_crew_vehicle_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME zw_crew_vehicle COMMAND zw_crew_vehicle_test)
+# A Rune Blade NPC's hop (src/runeblade_npc_logic.h): takeoff, steps, rest, the gauge kept.
+add_executable(runeblade_npc_test tests/runeblade_npc_test.cpp)
+target_include_directories(runeblade_npc_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(runeblade_npc_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME runeblade_npc COMMAND runeblade_npc_test)
 # The Vehicler's V4..V9 (src/zw_unlock_logic.h, src/zw_heat_logic.h): unlock stages, capture, the beam's heat, the zone.
 add_executable(zw_v4v9_test tests/zw_v4v9_test.cpp)
 target_include_directories(zw_v4v9_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

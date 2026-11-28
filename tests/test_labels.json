@@ -7056,6 +7056,56 @@
    ],
    "scripts": []
   },
+  "runeblade": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "runeblade_melee": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "runeblade_npc": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "runeblade_weapons": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "runeblade_weapons_sgo": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/runeblade_weapons_test.py"
+   ]
+  },
   "save_backup": {
    "labels": [
     "autoturret-tools",
@@ -9383,6 +9433,7 @@
     "installer",
     "native-codec",
     "plugin-core",
+    "plugin-support",
     "pylib-model",
     "test-data",
     "testhub",
@@ -9394,7 +9445,23 @@
     "tests/zw_classes_test.py"
    ]
   },
+  "zw_crew_vehicle": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
   "zw_dispatch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "zw_v4v9": {
    "labels": [
     "plugin-core",
     "plugin-native",
