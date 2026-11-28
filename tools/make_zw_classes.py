@@ -8,8 +8,9 @@ Every model is the Ranger's for now: ASSETS marks each file 'placeholder' (plan 
 player's own Root.cpk (only read), written atomically and recorded in the ledger as this tool's (pylib/ledger.py
 'zwclass'); --remove releases them. No shared table is touched here: the weapon rows are tools/zw_weapons.py's
 (call_weapons stacks them), the texts (TEXTS: class, weapon category and slot names, the keys SoldierInit and
-SoldierWeaponCategory name) go into the game's text tables with the mission packs' (make_edf5_campaign.text_table ->
-add_texts), the one writer of those tables.
+SoldierWeaponCategory name) go into the game's text tables through their one writer, make_edf5_campaign (text_table ->
+add_texts): with the mission packs' when those are built, else alone (install_texts), so they are there whatever packs
+are installed.
   python tools/make_zw_classes.py [game dir]            write / refresh
   python tools/make_zw_classes.py [game dir] --remove   release them
 """

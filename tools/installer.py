@@ -976,6 +976,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(make_edf5_campaign.summary(campaign))
         for group, path, why in campaign[2]['skipped']:
             print(tr('  跳过', '  Skipped'), group, path, why)
+    else:   # no pack this time (said why above): the texts no pack owns (the new classes' names, ...) all the same
+        try:
+            for path in make_edf5_campaign.install_texts(game):
+                print(tr('写入', 'Writing'), path)
+        except make_edf5_campaign.Refused as e:
+            print(tr('！ 文本表没有写入：', '! The text tables were not written:'), e)
     if bigmap is not None:
         for path in make_bigmap.install(game, built=bigmap):
             print(tr('写入', 'Writing'), path)
