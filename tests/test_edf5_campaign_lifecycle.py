@@ -69,6 +69,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         import make_optics
         import make_stock_holds
         import make_stock_stores
+        import make_zw_classes
         import rootcpk
         plugins = {name: (b'new plugin', f'[{section}]\nStockVehicleStores=0\nEDF5CampaignContent=0\nTestRangeContent=0\n'.encode())
                    for name, section in installer.PLUGINS}
@@ -81,7 +82,8 @@ class CampaignLifecycleTests(unittest.TestCase):
                                         (call_weapons, 'install', []), (gen, 'install', []),
                                         (gen, 'target_range', None), (make_stock_stores, 'wanted', False),
                                         (make_stock_stores, 'remove', ([], [])), (make_bigmap, 'set_big_world', None),
-                                        (make_optics, 'build_stock_redirects', {}), (make_stock_holds, 'build', ({}, []))):
+                                        (make_optics, 'build_stock_redirects', {}), (make_stock_holds, 'build', ({}, [])),
+                                        (make_zw_classes, 'build', {})):   # no Root.cpk here: no Ranger SGOs to derive from
                 stack.enter_context(patch.object(module, name, return_value=value))
             stack.enter_context(patch.object(buildcache, 'Cache'))
             build = stack.enter_context(self.stub_build())
