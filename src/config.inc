@@ -593,7 +593,7 @@
     float auraRepairShare=0.02f;    // ...the repair truck: the share of max HP healed a second
     float auraAmmoShare=0.1f;       // ...the ammo truck: the share of a magazine (or a reload) given a second
     float auraParkSpeed=1.0f;       // ...an empty truck's aura stands at most this fast (m/s): parked
-    int vehiclerLogisticsKey=0x4B;  // vehicler_logistics.cpp: the Vehicler's resupply key ('K'; N is the thermal sight's): a short press picks the next
+    int vehiclerLogisticsKey=0x4F;  // vehicler_logistics.cpp: the Vehicler's resupply key ('K'; N is the thermal sight's): a short press picks the next
                                     // unlocked vehicle, held half a second it calls the picked one when the logistics points cover its price
     int vehiclerLogisticsButton=0;
 #elif defined(EDF6_CONFIG_LOAD)

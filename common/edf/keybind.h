@@ -172,7 +172,7 @@ inline constexpr Slot kSlots[]={
     {0x7F,14,10,Owner::crew,L"VehicleCruiseDownKey",0x70},
     {0x80,13,5,Owner::crew,L"HeliHoverKey",0x48},
     // page 11 again: the Vehicler's resupply (src/vehicler_logistics.cpp: tap the next vehicle, hold to call it)
-    {0x81,11,9,Owner::crew,L"VehiclerLogisticsKey",0x4B},
+    {0x81,11,9,Owner::crew,L"VehiclerLogisticsKey",0x4F},
 };
 inline constexpr int kSlotCount=static_cast<int>(sizeof(kSlots)/sizeof(kSlots[0]));
 inline constexpr int kFirstAction=0x4F;
