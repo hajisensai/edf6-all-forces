@@ -1,4 +1,4 @@
-"""Writes the Vehicler's vehicles (pylib/zw_vehicles.py, docs/newclass-re/vehicler.md §1.2) into <game>/Mods:
+"""Writes the Vehicler's vehicles (pylib/zw_vehicles.py, docs/newclass-re/vehicler-plan.md §1.2) into <game>/Mods:
   Mods/OBJECT/EDF6VC_ZW_<V>.SGO     each vehicle: its stock hull's SGO with its durability, speed, drive force and guns,
                                     and mission_setup the same as vehicle_setup (the plugin spawns it by
                                     ApplyMissionSetup, which reads mission_setup: a vehicle_setup-only hull comes unarmed)

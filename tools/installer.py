@@ -858,7 +858,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
              'Writing the call weapons (only this plugin\'s rows of the weapon table change; all written or none)...'))
     call_weapons.install(game, weapons)
     # The new player classes' battle / menu SGOs and colour sets (plan-2026-11-28-new-classes: the SoldierInit the
-    # plugin adds names them; their weapon rows came with the call weapons, their texts come with the mission packs)
+    # plugin adds names them; their weapon rows came with the call weapons, their texts go on last: install_zw_texts)
     print(tr('写入新兵种（载具手、刻印剑士）的战斗与菜单 SGO、配色（模型暂用游骑兵的占位）……',
              'Writing the new classes\' (Vehicler, Rune Blade) battle and menu SGOs and colour sets (the Ranger\'s models '
              'stand in for now)...'))
@@ -983,12 +983,6 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(make_edf5_campaign.summary(campaign))
         for group, path, why in campaign[2]['skipped']:
             print(tr('  跳过', '  Skipped'), group, path, why)
-    else:   # no pack this time (said why above): the texts no pack owns (the new classes' names, ...) all the same
-        try:
-            for path in make_edf5_campaign.install_texts(game):
-                print(tr('写入', 'Writing'), path)
-        except make_edf5_campaign.Refused as e:
-            print(tr('！ 文本表没有写入：', '! The text tables were not written:'), e)
     if bigmap is not None:
         for path in make_bigmap.install(game, built=bigmap):
             print(tr('写入', 'Writing'), path)
@@ -1013,6 +1007,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(tr('！ 测试场任务包这次没有注册（原因见上），测试场保持原样；补齐上面缺的资源后再运行安装器。',
                  '! The test range\'s pack was not registered this time (see why above) and the range stays as it was; '
                  'run the installer again once the missing resources above are there.'))
+    install_zw_texts(game)   # after every writer of the text tables above (the packs, the range's registration)
     print(tr('\n安装完成。启动游戏即可。', '\nInstall complete. Start the game.'))
     print(tr('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。',
              'For online play also update the matching EDF Coop: All Forces rooms are open only to players with compatible mods.'))
@@ -1170,6 +1165,9 @@ def uninstall(game: str) -> None:
                 print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
     if choice == '2':   # the stock vehicles' stores need the plugin to fire: they go with it (with 1 they went above)
         uninstall_stock_stores(game)
+        # the new classes are the plugin's: their names off the text tables (with 1 make_zw_classes.remove did it),
+        # before the packs' tables beneath them are put back
+        remove_zw_texts(game)
     if gen.uninstall(game, unregister=False):   # its pack goes with the others just below
         print(tr('删除测试场关卡', 'Deleting the test range missions'))
     # with 2 too: without the plugin the packs would stay listed as content the player does not own
@@ -1366,6 +1364,27 @@ def send_logs() -> int:
     return 0
 
 
+def install_zw_texts(game: str) -> None:
+    """The new classes' names (make_zw_classes.install_texts): their own layer on top of the text tables, so run after
+    every other writer of those (the mission packs: installed, not installed, refused or turned off)."""
+    import make_zw_classes
+    written, notes = make_zw_classes.install_texts(game)
+    for path in written:
+        print(tr('写入', 'Writing'), path)
+    for note in notes:
+        print(tr('！ 新兵种名字：', '! The new classes\' names: '), note)
+
+
+def remove_zw_texts(game: str) -> None:
+    """The new classes' names off the text tables (make_zw_classes.remove_texts): each table back to what was beneath."""
+    import make_zw_classes
+    done, kept = make_zw_classes.remove_texts(game)
+    for path in done:
+        print(tr('还原', 'Restoring'), path)
+    for path in kept:
+        print(tr('保留（之后被别的工具改过）', 'Kept (changed by another tool since)'), path)
+
+
 def manage_campaign(game: str) -> int:
     """Menu 6: explicit experimental campaign opt-in or removal, without uninstalling the plugins."""
     import make_edf5_campaign
@@ -1388,6 +1407,7 @@ def manage_campaign(game: str) -> int:
                 print(tr('写入或还原', 'Writing or restoring'), path)
         except make_edf5_campaign.Refused as e:
             print(tr('未能停用：', 'Could not turn it off:'), e)
+        install_zw_texts(game)   # the tables were rebuilt or put back beneath the classes' names
         if make_edf5_campaign.enabled(game):
             print(tr('未能停用：模式表或旧版任务列表被其他工具改过，已保留它依赖的任务文件和插件。',
                      'Could not turn it off: the mode table or an older mission list was changed by another tool; the '

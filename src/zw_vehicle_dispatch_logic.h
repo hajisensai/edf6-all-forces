@@ -1,4 +1,4 @@
-// Where a Vehicler's start vehicle stands (docs/newclass-re/vehicler.md §2.2 step 2), pure: tests/zw_dispatch_test.cpp.
+// Where a Vehicler's start vehicle stands (docs/newclass-re/vehicler-plan.md §2.2 step 2), pure: tests/zw_dispatch_test.cpp.
 // The host plans every start (offline this machine), one request after another, and keeps the footprints it planned this
 // mission: a vehicle goes beside its player along the player's side axis (right = (fz, -fx), the stock matrix's row 0),
 // first right then left, a step further out each time, kMaxShift steps a side. A spot is taken when its footprint (the

@@ -217,6 +217,8 @@ class IncrementalTests(unittest.TestCase):
                 {rel: b'stub' for rel in make_edf5_campaign.FILES}, make_edf5_campaign.Contents(3, 6),
                 {'rows': [], 'skipped': []})))
             stack.enter_context(patch.object(make_edf5_campaign.modfiles, 'refuse_while_running', lambda *a, **k: None))
+            import make_zw_classes   # no Root.cpk here: its files stand in; its install (skip unchanged) runs for real
+            stack.enter_context(patch.object(make_zw_classes, 'build', return_value={rel: b'zw class' for rel in make_zw_classes.ASSETS}))
             builders = {}
             for group in buildcache.GROUPS:
                 module = buildcache.tool(group)   # make_<group>, an X-Morph unit's builder
