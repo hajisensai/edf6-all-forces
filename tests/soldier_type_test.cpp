@@ -64,7 +64,8 @@ void DamageStub() {
     const std::uint64_t table=0x1122334455667788ull,back=0x0102030405060708ull;
     Check(st::BuildDamageStub(code,st::kDamageStubSize-1,stock,table,back)==0,"a short buffer builds nothing");
     const std::size_t n=st::BuildDamageStub(code,sizeof(code),stock,table,back);
-    Check(n==st::kDamageStubSize,"the stub is kDamageStubSize bytes");
+    Check(n==st::kDamageStubSize && n==82,"the stub is kDamageStubSize (8 + 38 + 22 + 14) bytes");
+    Check(code[7]==0x26,"ja skips the 38-byte plugin path");
     // The test: lea ecx,[rax-4] / cmp ecx,1 / ja stock, the jump landing on the stock bytes.
     const unsigned char head[]={0x8D,0x48,0xFC,0x83,0xF9,0x01,0x77};
     Check(std::memcmp(code,head,sizeof(head))==0,"the stub tests type-4 <= 1 unsigned");

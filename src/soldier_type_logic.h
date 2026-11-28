@@ -53,7 +53,11 @@ constexpr std::size_t kDamageSite=0x81F844,kDamageSiteSize=22,kDamageBack=0x81F8
 //     lea edx,[rcx+rcx*2] / add rdx,rbx / shl rdx,4 / mov rax,table / movups xmm0,[rax+rdx] / jmp [rip] back
 //   stock: the 22 bytes as they were / jmp [rip] back
 // Position independent (absolute jumps), so it runs wherever AllocateNearCode puts it. Returns its size, 0 when `cap` is short.
-constexpr std::size_t kDamageStubSize=74;
+constexpr std::size_t kDamageAbsJump=14;                          // jmp [rip] + the 8-byte address
+constexpr std::size_t kDamagePluginPath=3+3+4+10+4+kDamageAbsJump; // lea, add, shl, mov rax imm64, movups, jmp back
+constexpr std::size_t kDamageStockAt=3+3+2+kDamagePluginPath;      // the ja's target
+static_assert(kDamagePluginPath<0x80,"the ja is a rel8");
+constexpr std::size_t kDamageStubSize=kDamageStockAt+kDamageSiteSize+kDamageAbsJump;
 inline std::size_t BuildDamageStub(unsigned char* out,std::size_t cap,const unsigned char* stock,std::uint64_t table,
                                    std::uint64_t back) noexcept {
     if(cap<kDamageStubSize)return 0;
@@ -62,7 +66,7 @@ inline std::size_t BuildDamageStub(unsigned char* out,std::size_t cap,const unsi
     auto put64=[&](std::uint64_t v) { std::memcpy(out+n,&v,8); n+=8; };
     put({0x8D,0x48,0xFC});          // lea ecx,[rax-4]
     put({0x83,0xF9,0x01});          // cmp ecx,1
-    put({0x77,0x26});               // ja stock (+38)
+    put({0x77,static_cast<unsigned char>(kDamagePluginPath)});   // ja stock
     put({0x8D,0x14,0x49});          // lea edx,[rcx+rcx*2]
     put({0x48,0x01,0xDA});          // add rdx,rbx
     put({0x48,0xC1,0xE2,0x04});     // shl rdx,4
