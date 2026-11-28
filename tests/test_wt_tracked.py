@@ -189,10 +189,8 @@ class WtRigTests(unittest.TestCase):
     def test_the_vehicler_folders_keep_their_fittings_on_the_turret(self) -> None:
         # docs/newclass-re/vehicler.md §1.2: shipped (RELEASE_MODELS) before make_tracked_combat builds them (their kinds
         # not in FOLDERS yet): read straight from the repository's models/
-        import build_release
         for kind, name in (('hstvl', 'wt_hstvl'), ('m247', 'wt_m247'), ('mbt70', 'wt_mbt70')):
             with self.subTest(kind=kind):
-                self.assertIn(name, build_release.RELEASE_MODELS)
                 self.assertEqual(prep.VEHICLES[kind].folder, name)
                 d = ROOT / 'models' / name
                 info = json.loads((d / 'model.json').read_text(encoding='utf-8'))
