@@ -233,7 +233,7 @@ bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept
         return false;
     }
     const void* const* vt=reinterpret_cast<const void* const*>(image+c.vtable);
-    if(c.slots>64 || !Readable(vt-1,sizeof(void*)*static_cast<std::size_t>(c.slots+1))) { Log("EDF41CLASS the %s vtable is not readable",c.tag); return false; }
+    if(c.slots>kMostSlots || !Readable(vt-1,sizeof(void*)*static_cast<std::size_t>(c.slots+1))) { Log("EDF41CLASS the %s vtable is not readable",c.tag); return false; }
     c.block[0]=const_cast<void*>(vt[-1]);
     for(int i=0;i<c.slots;++i) {
         void* const stock=image+c.rvas[i];
@@ -242,7 +242,7 @@ bool BuildClone(Clone& c,DtorFn dtor,UpdateFn update,MessageFn message) noexcept
         c.orig[i]=stock;
     }
     constexpr std::size_t kStub=32;
-    unsigned char code[64*kStub];
+    unsigned char code[kMostSlots*kStub];
     std::memset(code,0xCC,sizeof(code));
     for(int i=0;i<c.slots;++i) {
         unsigned char* s=code+static_cast<std::size_t>(i)*kStub;

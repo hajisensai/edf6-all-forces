@@ -58,6 +58,7 @@ enum class StateStream : std::uint32_t {
     ultimateKeep=4,    // ultimate strike: a playing show's keep (object: its show slot, < ultimate::kMaxShows)
     jetLever=5,        // a registered jet's engine lever (object: its slot on the machine that runs it, jet_lever_net.cpp)
     auraVehicles=6,    // the aura trucks' standing auras, the host's (object 0, aura.cpp)
+    runeBlade=7,       // a Rune Blade's ether gauge, its own machine's (object: its player slot, runeblade.cpp)
 };
 constexpr std::uint32_t kStateObjects=1024,kStateStreams=64;
 // 0: no key (an object out of range, a stream not one).

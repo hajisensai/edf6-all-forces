@@ -9,6 +9,7 @@
 #include "support_net.h"
 #include "support_soldier.h"
 #include "memory.h"
+#include "soldier_identity.h"
 #include <cstring>
 #include "netprobe.h"
 
@@ -73,7 +74,7 @@ bool PvpMakeInheritedSupportPlan(const ObjRef& parent,support_net::Plan* plan) n
             plan->team=static_cast<std::uint32_t>(team);return true;
         }
         ObjRef ownerPlayer=parent;
-        if(!((IsSoldierClass(parent.obj) && IsAnyPlayer(static_cast<const unsigned char*>(parent.obj))) ||
+        if(!((IsPlayerClassSoldier(parent.obj) && IsAnyPlayer(static_cast<const unsigned char*>(parent.obj))) ||
              PvpNativeSupportDriver(parent,&ownerPlayer))) {
             if(InSession() || PvpSupportTeam(nullptr)!=0)return false;
             plan->team=0;return true;
@@ -94,7 +95,7 @@ bool PvpInheritSupport(const ObjRef& parent,const ObjRef* children,unsigned coun
     if(!owned) {
         __try {
             ObjRef ownerPlayer=parent;
-            if(LiveParent(parent) && ((IsSoldierClass(parent.obj) && IsAnyPlayer(static_cast<const unsigned char*>(parent.obj))) ||
+            if(LiveParent(parent) && ((IsPlayerClassSoldier(parent.obj) && IsAnyPlayer(static_cast<const unsigned char*>(parent.obj))) ||
                PvpNativeSupportDriver(parent,&ownerPlayer))) {
                 unsigned char requester[32]{};EDF6CoopPeer owner{};
                 if(PlayerRequesterOf(ownerPlayer,requester) && ResolveOwner(requester,&ownerPlayer,&owner)) {

@@ -455,15 +455,20 @@ void Stage6() {
     const auto c2=MapChip(2,3);
     Expect(TitleChipAt(3,Pixel{(c2.x0+c2.x1)/2,(c2.y0+c2.y1)/2})==2 && TitleChipAt(0,Pixel{(c2.x0+c2.x1)/2,(c2.y0+c2.y1)/2})==-1,
            "a chip under the pointer (none without presets)");
-    const auto last=MapChip(7,8),tab3=MapTab(kMapTab);
-    Expect(last.x1<=kMapTitle.x1 && MapChip(0,8).x0>tab3.x1,"eight chips clear of the four tabs");
+    const auto last=MapChip(7,8),lastTab=MapTab(kMapTab);
+    Expect(last.x1<=kMapTitle.x1 && MapChip(0,8).x0>lastTab.x1,"eight chips clear of the tabs");
+    // The strip is 整备's own tab table (armory_tabs.h): 外观 shown, the map on 任务, the last.
+    namespace at=crew::armory::tabs;
+    Expect(kTabCount==at::kCount && kTabCount==5 && kMapTab==at::kMission && kMapTab==kTabCount-1 &&
+           at::kName[at::kLook]==hudtext::Tx::armoryTabLook && at::kName[kMapTab]==hudtext::Tx::armoryTabMission,
+           "the map's tab strip is 整备's, 外观 included, the map on 任务");
     Expect(OverTitle(Pixel{1000.f,150.f}) && !OverTitle(Pixel{1000.f,50.f}) && !OverTitle(Pixel{1000.f,200.f}),
            "the native title and mission region do not receive the armory tab hits");
     Expect(kProgressBar.y0>=kMapTitle.y1 && kProgressBar.y1<=kOpenArea.y0 && kProgressBar.x1<=kOpenArea.x1,
            "the progress bar between the title bar and the open area");
-    // Q / E on the map step the 整备 tabs as in 整备: Q from the map (the last) to 载具, E stays; no wrap at either end.
-    Expect(StepMapTab(kMapTab,-1)==2 && StepMapTab(kMapTab,1)==kMapTab && StepMapTab(0,-1)==0 && StepMapTab(1,1)==2 &&
-           StepMapTab(2,0)==2,"the map's tab keys stop at both ends");
+    // Q / E on the map step the 整备 tabs as in 整备: Q from the map (the last) to 外观, E stays; no wrap at either end.
+    Expect(StepMapTab(kMapTab,-1)==at::kLook && StepMapTab(kMapTab,1)==kMapTab && StepMapTab(0,-1)==0 &&
+           StepMapTab(1,1)==2 && StepMapTab(2,0)==2,"the map's tab keys stop at both ends");
     // The panel's three key lines: under the last mission line (and its more-below arrow), inside the panel.
     Expect(kPanelKeysTop>=PanelLineTop(kPanelLines) && PanelKeyTop(kPanelKeyLines)<=kPanel.y1 &&
            PanelKeyTop(1)-PanelKeyTop(0)>=24.f,"the key lines under the missions, apart, inside the panel");

@@ -102,6 +102,15 @@ bool ValidateCommanderPlan(const SupportPlan&) noexcept {return false;}
 bool ApplyCommanderPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
 void DestroyCommanderPlan(std::uint64_t) noexcept {}
 bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
+// zw_vehicle_dispatch.h: the Vehicler's vehicles' catalogs (none in these tests).
+support_net::PlanResult PlanZwVehicle(std::uint32_t,std::uint32_t,const float*,std::uint64_t,SupportPlan*) noexcept {return support_net::PlanResult::refused;}
+bool ValidateZwVehiclePlan(const SupportPlan&) noexcept {return false;}
+bool ApplyZwVehiclePlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
+void NoteZwCrewVehicler(const ObjRef&) noexcept {}   // zw_vehicle_dispatch.cpp: a Vehicler NPC's own vehicle, not under test here
+void DestroyZwVehiclePlan(std::uint64_t) noexcept {}
+bool ZwVehicleRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
+void ZwVehicleTick() noexcept {}
+void ResetZwVehicles() noexcept {}
 bool PresetHandArms(int,int,std::uint64_t* a,std::uint64_t* b) noexcept{*a=0;*b=0;return false;}
 support_net::PlanResult NpcArmsLoaded(const support_net::Plan&) noexcept{return support_net::PlanResult::ready;}
 bool SupportPeersAcceptAirborne() noexcept{return true;}

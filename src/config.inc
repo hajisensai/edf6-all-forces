@@ -594,6 +594,9 @@
     float auraRepairShare=0.02f;    // ...the repair truck: the share of max HP healed a second
     float auraAmmoShare=0.1f;       // ...the ammo truck: the share of a magazine (or a reload) given a second
     float auraParkSpeed=1.0f;       // ...an empty truck's aura stands at most this fast (m/s): parked
+    int vehiclerLogisticsKey=0x4F;  // vehicler_logistics.cpp: the Vehicler's resupply key ('K'; N is the thermal sight's): a short press picks the next
+                                    // unlocked vehicle, held half a second it calls the picked one when the logistics points cover its price
+    int vehiclerLogisticsButton=0;
 #elif defined(EDF6_CONFIG_LOAD)
 #undef EDF6_CONFIG_LOAD
     n.enabled=ReadBool(L"Enabled",n.enabled);
@@ -1105,6 +1108,8 @@
     n.auraRepairShare=ReadFloat(L"AuraRepairShare",n.auraRepairShare);
     n.auraAmmoShare=ReadFloat(L"AuraAmmoShare",n.auraAmmoShare);
     n.auraParkSpeed=ReadFloat(L"AuraParkSpeed",n.auraParkSpeed);
+    n.vehiclerLogisticsKey=ReadInt(L"VehiclerLogisticsKey",static_cast<DWORD>(n.vehiclerLogisticsKey));
+    n.vehiclerLogisticsButton=ReadInt(L"VehiclerLogisticsButton",static_cast<DWORD>(n.vehiclerLogisticsButton));
 #elif defined(EDF6_CONFIG_VALIDATE)
 #undef EDF6_CONFIG_VALIDATE
     n.perfProbe=static_cast<int>(FixInt("PerfProbe",n.perfProbe,0,2));
@@ -1438,6 +1443,8 @@
     Fix("AuraRepairShare",n.auraRepairShare,0.0f,1.0f);
     Fix("AuraAmmoShare",n.auraAmmoShare,0.0f,5.0f);
     Fix("AuraParkSpeed",n.auraParkSpeed,0.0f,20.0f);
+    n.vehiclerLogisticsKey=static_cast<int>(FixInt("VehiclerLogisticsKey",n.vehiclerLogisticsKey,0,254));
+    n.vehiclerLogisticsButton=static_cast<int>(FixInt("VehiclerLogisticsButton",n.vehiclerLogisticsButton,0,0xFFFF));
     // Engaged while following, it takes on enemies within HeliCombatRange of the player plus its gun's reach,
     // capped at HeliRange: a combat range past HeliRange says something HeliRange overrules anyway.
     Fix("HeliCombatRange",n.heliCombatRange,0.0f,n.heliRange);

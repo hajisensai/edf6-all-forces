@@ -72,6 +72,7 @@ import cpk  # noqa: E402
 import dsgo  # noqa: E402
 from i18n import is_zh, tr  # noqa: E402
 import edf41kills  # noqa: E402
+import make_zw_classes  # noqa: E402
 import mdb  # noqa: E402
 import modfiles  # noqa: E402
 import rootcpk  # noqa: E402
@@ -384,6 +385,13 @@ def load_manifest(root: str) -> dict:
     return modfiles.load_json(os.path.join(root, 'Mods', MANIFEST), {})
 
 
+def on_disk(root: str, rel: str) -> bytes | None:
+    """The file `rel` under Mods as this tool wrote it: a text table with the new classes' names on top
+    (make_zw_classes.install_texts, run after this tool) read without them (make_zw_classes.beneath), so that layer is
+    neither taken for another mod's change nor kept as what this tool replaced."""
+    return make_zw_classes.beneath(root, rel, modfiles.read(rel_path(root, rel)))
+
+
 def ours(entry: dict | None, data: bytes | None) -> bool:
     """`data` is a file this tool wrote: the manifest's sha, or while an install is writing (the manifest saved before
     the files) also the one it is replacing (`also`), so a run cut short leaves every file recognised either way."""
@@ -399,13 +407,13 @@ def base_bytes(root: str, game: rootcpk.Game, rel: str, manifest: dict) -> bytes
     """What the list file is without this tool: the file it replaced (kept in the manifest) while ours is still in
     place, else the one in Mods (another mod's), else the game's."""
     entry = manifest.get('files', {}).get(rel)
-    on_disk = modfiles.read(rel_path(root, rel))
-    if ours(entry, on_disk):
+    data = on_disk(root, rel)
+    if ours(entry, data):
         if entry['original'] is None:
             return game.read(*rel.split('/'))
         return base64.b64decode(entry['original'])
-    if on_disk is not None:
-        return on_disk
+    if data is not None:
+        return data
     return game.read(*rel.split('/'))
 
 
@@ -799,7 +807,8 @@ def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, di
 
 def text_table(data: bytes, lang: str, packs: tuple[Pack, ...] = PACKS) -> bytes:
     """The game's text table with the packs' mode names and descriptions and the EDF4.1 kill counters' battle record
-    labels (other keys untouched)."""
+    labels (other keys untouched). The new player classes' names are not written here: they are make_zw_classes' own
+    layer on top of these tables (on_disk)."""
     ver, members = sgo.read(data)
     for pack in packs:
         for kind in pack.kinds:
@@ -1081,7 +1090,7 @@ def removal_blocked(root: str) -> bool:
     manifest = load_manifest(root)
     for rel in ANCHORS:
         entry = manifest.get('files', {}).get(rel)
-        data = modfiles.read(rel_path(root, rel))
+        data = on_disk(root, rel)
         if entry is not None and data is not None and not ours(entry, data) and not restored(entry, data):
             return True
     return False
@@ -1091,7 +1100,7 @@ def _put_back(root: str, rel: str, entry: dict) -> str | None:
     """Puts back what `rel` was before this tool (deleted if nothing): its path, None when already so, or raises
     KeyError when someone changed it since (left alone)."""
     path = rel_path(root, rel)
-    data = modfiles.read(path)
+    data = on_disk(root, rel)
     if data is None or restored(entry, data):
         return None
     if not ours(entry, data):
@@ -1121,15 +1130,18 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
     manifest = load_manifest(root)
     kept = manifest.get('files', {})
     entries: dict[str, dict] = {}
+    layered = set()   # under the classes' text layer already exactly as written now: left as it is
     for rel in files:
         old = kept.get(rel)
-        on_disk = modfiles.read(rel_path(root, rel))
+        data = on_disk(root, rel)
         entry = {'sha': modfiles.sha256(files[rel])}
-        if ours(old, on_disk):   # ours from before: what it replaced stays what to put back
+        if ours(old, data):   # ours from before: what it replaced stays what to put back
             entry['original'] = old['original']
-            entry['also'] = [modfiles.sha256(on_disk)]
+            entry['also'] = [modfiles.sha256(data)]
         else:
-            entry['original'] = None if on_disk is None else base64.b64encode(on_disk).decode('ascii')
+            entry['original'] = None if data is None else base64.b64encode(data).decode('ascii')
+        if data == files[rel] and data != modfiles.read(rel_path(root, rel)):
+            layered.add(rel)
         entries[rel] = entry
     retired = {rel: e for rel, e in kept.items() if rel not in files}   # the older version's, put back below
     # Commit enable intent before the first resource mutation. If writing fails, ordinary updates must repair
@@ -1142,6 +1154,8 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
     modfiles.save_json(mpath, manifest_record(content, {**retired, **entries}, legacy))
     paths = []
     for rel, data in files.items():
+        if rel in layered:
+            continue
         path = rel_path(root, rel)
         modfiles.atomic_write(path, data)
         paths.append(path)
@@ -1288,12 +1302,16 @@ def check(root: str) -> bool:
                *(f for f in files if manifest.get('edf41') and managed(f) and f not in FILES)}
 
     def foreign(rel: str, entry: dict) -> bool:   # a retired file someone changed since: kept, its record with it
-        data = modfiles.read(rel_path(root, rel))
+        data = on_disk(root, rel)
         return rel not in current and data is not None and not ours(entry, data) and not restored(entry, data)
+
+    def sha_on_disk(rel: str) -> str | None:
+        data = on_disk(root, rel)
+        return None if data is None else modfiles.sha256(data)
 
     kept = [rel for rel, e in files.items() if 'also' not in e and managed(rel) and foreign(rel, e)]
     bad = [rel for rel, e in files.items() if rel not in kept and (
-        'also' in e or not managed(rel) or rel not in current or modfiles.sha256_file(rel_path(root, rel)) != e['sha'])]
+        'also' in e or not managed(rel) or rel not in current or sha_on_disk(rel) != e['sha'])]
     for rel in kept:
         print(tr('  保留（别的工具改过，卸载时不动）', '  Kept (changed by another tool; uninstall leaves it)'), rel)
     wanted_ids = ((INI_KEY, manifest.get('content', 0)), (RANGE_INI_KEY, manifest.get('range', 0)),

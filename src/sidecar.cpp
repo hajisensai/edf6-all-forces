@@ -42,6 +42,7 @@
 // replaced by a rate that brings the roll back to level (SidecarLevel): no lean in a turn, no falling over.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "objref.h"
+#include "soldier_factory.h"
 #include "step_fresh.h"
 #include "edf_layout.h"
 #include "config.h"
@@ -286,7 +287,7 @@ void StepOff(Sidecar& s,unsigned char* v,unsigned char* human,const char* why) n
 bool IsSoldier(const unsigned char* o) noexcept {
     const auto vt=At<const unsigned char*>(o,0);
     for(unsigned x:kSoldierVts)if(vt==image+x)return true;
-    return false;
+    return soldier::IsZwVtable(vt);   // classes 4 / 5 (their own vtables, src/soldier_factory.h)
 }
 
 // The team walk's functor (0x5E11D0 calls slot 1 with each object): the nearest holdable NPC soldier to `at`.

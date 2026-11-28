@@ -13,6 +13,8 @@
 #include "scene.h"
 #include "core.h"
 #include "memory.h"
+#include "player_slots.h"
+#include "weapon_equip.h"
 #include "weapon_records.h"
 #include <cwchar>
 #include <iterator>
@@ -29,7 +31,9 @@ constexpr unsigned kCreateCalls[]={0xA153A,0xA1879,0x1DC539,0x22AE3D,0x5A51C5};
 // per weapon id a record of a flags word and 8 star bytes (weapon_records.h WeaponRecord: relocated past 0x800).
 constexpr std::size_t kSlotStride=0x3E60,kClass=0x6E90,kWeapons=0x6E98,kClassStride=0x18;
 constexpr std::size_t kStars=4,kStarCount=8;   // in a weapon record
-constexpr int kSlotsPerClass[4]={4,4,5,6};
+// Classes 0..5 (the plugin's 4 / 5 only while the game has them: SoldierInit is indexed by the class unchecked), their
+// slots from the generated rules (playerslots::SlotsOf).
+constexpr int kClassesMost=playerslots::kClasses;
 
 wchar_t loadoutPath[MAX_PATH]{};
 Fn createOrig=nullptr;
@@ -51,8 +55,12 @@ struct Undo {
 bool ReadLoadout(Loadout& l) noexcept {
     if(!GetPrivateProfileIntW(L"Loadout",L"Enabled",0,loadoutPath))return false;
     l.cls=static_cast<int>(GetPrivateProfileIntW(L"Loadout",L"Class",static_cast<UINT>(-1),loadoutPath));
-    if(l.cls<0 || l.cls>3)return false;
-    for(int i=0;i<kSlotsPerClass[l.cls];++i) {
+    const int classes=wequip::ClassCount();
+    if(l.cls<0 || l.cls>=kClassesMost || l.cls>=(classes>0 ? classes : 4)){
+        if(l.cls>=0)Log("LOADOUT class %d is not in the game (%d classes): not forced",l.cls,classes);
+        return false;
+    }
+    for(int i=0;i<playerslots::SlotsOf(l.cls);++i) {
         wchar_t key[8];swprintf_s(key,L"Slot%d",i);
         const int id=static_cast<int>(GetPrivateProfileIntW(L"Loadout",key,static_cast<UINT>(-1),loadoutPath));
         l.weapon[i]=id>=0 && static_cast<std::uint32_t>(id)<WeaponRecordCapacity() ? id : -1;   // -1: leave the slot as the save has it
@@ -67,7 +75,7 @@ bool Apply(std::uintptr_t slotArg,Undo& u,const char* where) noexcept {
     Loadout l;
     if(!ReadLoadout(l))return false;
     auto gs=At<unsigned char*>(image,kGameStatus);
-    if(!gs || !Readable(gs,kWeapons+4*kClassStride,true))return false;
+    if(!gs || !Readable(gs,kWeapons+kClassesMost*kClassStride,true))return false;
     auto p=gs;   // slot 0
     u.player=p;u.gs=gs;u.target=l.cls;
     u.cls=At<std::int32_t>(p,kClass);

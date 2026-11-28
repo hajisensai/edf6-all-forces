@@ -25,6 +25,8 @@
 #include "player_vehicle.h"
 #include "jet_lever_net.h"
 #include "aura.h"
+#include "vehicler_logistics.h"
+#include "runeblade_melee.h"
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "npc_arms.h"
@@ -36,6 +38,7 @@
 #include "qmark.h"
 #include "qmark_protocol.h"
 #include "enemy_control_protocol.h"
+#include "runeblade.h"
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -216,6 +219,9 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(SupportPointsNetChannel());
     plugin_net::RegisterChannel(JetLeverNetChannel());
     plugin_net::RegisterChannel(AuraNetChannel());
+    plugin_net::RegisterChannel(VehiclerLogisticsNetChannel());
+    plugin_net::RegisterChannel(RuneBladeNetChannel());
+    plugin_net::RegisterChannel(RuneBladeMeleeNetChannel());
 }
 // A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
 // said once a magic (a few magics), never once a message.
@@ -526,6 +532,7 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
     }
 }
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
+bool SupportRequestsOpen() noexcept { return !blockedUntilMission && running && session.Ready(); }
 bool SupportPeersHaveDetails(std::uint32_t details) noexcept { return !InSession() || (running && session.PeersHaveDetails(details)); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }

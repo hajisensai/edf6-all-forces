@@ -29,6 +29,7 @@
 #include "memory.h"
 #include "lazy_rows.h"
 #include "stores.h"
+#include "vehicler_logistics.h"
 #include <cwchar>
 
 namespace crew {
@@ -158,7 +159,7 @@ dmgstat::Group GroupOf(unsigned char* o,std::int32_t team,wchar_t* name,std::siz
 
 // --- The rounds' tags (the game thread's; under tagLock all the same, should a fire run elsewhere) ---
 struct Tag { const unsigned char* round; const void* vtable; const void* owner; std::uint64_t seq; dmgstat::Side side;
-             wchar_t name[dmgstat::kNameLen]; };
+             wchar_t name[dmgstat::kNameLen]; const unsigned char* weapon; };
 constexpr int kTags=4096;   // two ways per hash: a round lives a few seconds at most, a few hundred in flight
 LazyRows<Tag,kTags> tags;   // heap from the first tagged round (plugin_image_size_guard: no image table)
 std::uint64_t tagSeq=0;   // the fires so far: a pair's older tag is the one replaced
@@ -178,7 +179,7 @@ const unsigned char* WeaponOfParam(const unsigned char* param) noexcept {
 void TagRound(unsigned char* round,const unsigned char* param) noexcept {
     const unsigned char* w=WeaponOfParam(param);
     if(!w || !Readable(round,kRoundOwnerCtrl+8))return;
-    Tag t{round,At<const void*>(round,0),At<const void*>(round,kRoundOwner),0,dmgstat::Side::ally,{}};
+    Tag t{round,At<const void*>(round,0),At<const void*>(round,kRoundOwner),0,dmgstat::Side::ally,{},w};
     const auto owner=At<unsigned char*>(round,kRoundOwner);
     if(owner && Readable(owner,kTeam+4))t.side=EnemyTeam(At<std::int32_t>(owner,kTeam)) ? dmgstat::Side::enemy : SideOf(owner,w);
     WeaponName(w,t.name,dmgstat::kNameLen);
@@ -307,6 +308,25 @@ void Record(unsigned char* obj,const unsigned char* gdi,float hpBefore,bool dead
 
 bool On() noexcept { return Cfg().enabled && Cfg().damageStats; }
 
+// A kill this machine settled (the hit took a live target to dead: only the victim's authority writes its HP, so one
+// machine a kill), for the Vehicler's logistics points (vehicler_logistics.h VehiclerKill): the shooter the round's tag
+// names (its owner, the weapon that fired it), else the hit's attacker. Nothing booked here: the points are its.
+void NoteKill(unsigned char* obj,const unsigned char* gdi) noexcept {
+    __try {
+        if(!Readable(obj,kTeam+4) || !obj[kDead] || !Readable(gdi,kGdiTeam+4))return;
+        const auto ctrl=At<const unsigned char*>(gdi,kGdiAttackerCtrl);
+        unsigned char* attacker=ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,0x8)>0 ? At<unsigned char*>(gdi,kGdiAttacker) : nullptr;
+        unsigned char* shooter=attacker;
+        const unsigned char* weapon=nullptr;
+        Tag tag;
+        if(const unsigned char* settling=Source(); settling && TagOf(settling,attacker,&tag)) {
+            weapon=tag.weapon;
+            if(!shooter)shooter=const_cast<unsigned char*>(static_cast<const unsigned char*>(tag.owner));
+        }
+        VehiclerKill(obj,shooter,weapon,EnemyTeam(At<std::int32_t>(obj,kTeam)),WeakPartObject(obj));
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 // --- The hooks ---
 using DamageFn=std::uintptr_t(__fastcall*)(unsigned char*,unsigned char*,std::uintptr_t,std::uintptr_t);
 using SpawnFn=unsigned char*(__fastcall*)(void*,void*,void*,unsigned char*);
@@ -341,12 +361,13 @@ std::uintptr_t __fastcall DamageHook(unsigned char* obj,unsigned char* gdi,std::
     const Before b=Read(obj);
     const std::uintptr_t r=damageNext(obj,gdi,r8,r9);
     if(on && b.ok)Record(obj,gdi,b.hp,b.dead);
+    if(b.ok && !b.dead && VehiclerLogisticsWanted())NoteKill(obj,gdi);
     NoteWasted(obj,gdi,b);
     return r;
 }
 unsigned char* __fastcall SpawnHook(void* mgr,void* matrix,void* factory,unsigned char* param) noexcept {
     unsigned char* const round=spawnNext(mgr,matrix,factory,param);
-    if(round && param && On()) {
+    if(round && param && (On() || VehiclerLogisticsWanted())) {
         __try { TagRound(round,param); } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
     return round;

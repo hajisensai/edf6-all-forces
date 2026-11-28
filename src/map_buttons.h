@@ -423,7 +423,7 @@ inline int ComposeKinds(int cls,int* out,int most) noexcept {
 // Pixel sizes at 1080 lines (times the HUD scale `s`).
 constexpr float kComposePad=6.0f,kComposeTitleH=22.0f,kComposeSquadH=22.0f,kComposeGap=3.0f,
                 kComposeLabelW=66.0f,kComposeKindW=56.0f,kComposeKindH=22.0f,kComposeHintH=18.0f;
-constexpr int kComposeClasses=3;
+constexpr int kComposeClasses=4;   // Ranger, Wing Diver, Fencer, the new classes (support_call.h SupportSoldierClass)
 // The most kinds any one class has (a row of the panel): the width fits it.
 constexpr int ComposeKindsMost() noexcept {
     int most=0;

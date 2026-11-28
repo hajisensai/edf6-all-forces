@@ -22,6 +22,7 @@
 // one with no identity), as the stock AI writes only theirs; the block goes to the other machines the way the stock AI's
 // does (§2.1).
 #include "host_settings.h"
+#include "soldier_factory.h"
 #include "edf/input_source.h"
 #include "step_fresh.h"
 #include "edf_layout.h"
@@ -60,6 +61,9 @@
 #include "turretaim.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
+#include "ride_native.h"
+#include "zw_vehicle_dispatch.h"
+#include "vehicler_start_logic.h"
 #include "seat_turret.h"
 #include "seat_events.h"
 #include "support_soldier.h"
@@ -67,6 +71,10 @@
 #include "commander.h"
 #include "ride_along.h"
 #include "loadout_store.h"
+#include "runeblade.h"
+#include "runeblade_ether.h"
+#include "runeblade_npc_logic.h"
+#include "soldier_classes_logic.h"
 #include "vhud.h"
 #include "edf/hash_index.h"
 #include "crash_dump.h"
@@ -238,6 +246,7 @@ struct Soldier {
     bool mobOff;
     ULONGLONG mobAt,mobLogAt,mobWhyAt,mobPosAt;
     ULONGLONG sprintRollAt;  // SPRINT's last roll (SprintRoll), the side it took
+    crew::runeblade::npchop::Hop runeHop;   // a Rune Blade's hop (RuneHop)
     bool sprintRollRight;
     float mobPos[3];
     // The Wing Diver's walk dash watched for how far it carried (npc_mobility.h CarryTick: logged only), and the last
@@ -1571,7 +1580,7 @@ Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
 // takes one first. It checks neither team, nor class mask, nor reach: the plugin does (a free seat whose masks take the
 // soldier's class, the seat's riding point within reach). Driver input is preserved by the narrow native
 // seat-clear hook; real soldiers occupy driver seats as well as gunner and passenger seats.
-constexpr unsigned kRideVehicle=0x5765E0;
+using ride_native::kRideVehicle;using ride_native::kRideRelease;using ride_native::kRideSig;using ride_native::kRideReleaseSig;
 constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSeat=0x1540,kHumanRiding=0x1548;
 // A board order that has not brought the soldier kBoardProgress m nearer its seat in this long is dropped (the user's
 // report #12, 2026-10-11: no NPC ever got into the Proteus's driver seat or the Barga). Not a deadline for the whole walk:
@@ -1579,8 +1588,6 @@ constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSe
 // Proteus's driver seat in 48 s), so a fixed 20 s dropped every far order half way and the squad walked them back.
 constexpr ULONGLONG kBoardMs=20000;
 constexpr float kBoardProgress=1.0f;
-const unsigned char kRideSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x48};
-const unsigned char kRideReleaseSig[]={0x49,0x8B,0x5E,0x08,0x48,0x85,0xDB,0x74,0x27,0x8B,0xC7,0xF0,0x0F,0xC1,0x43,0x08};   // 0x57690D
 bool rideOk=false;
 // The vehicle's seat events (seat_events.h): the boarding-sound site 0x632AC6 (mov ecx,[rsi+0x620]; shl al,cl;
 // test [rsi+0x628],al) and the seat scan's 0x62F1AA (mov [rsi+0x628],dx; mov ecx,[rsi+0x620]; shl ax,cl). Not as read:
@@ -1589,15 +1596,13 @@ const unsigned char kSeatSoundSig[]={0x8B,0x8E,0x20,0x06,0x00,0x00,0xD2,0xE0,0x8
 const unsigned char kSeatScanSig[]={0x66,0x89,0x96,0x28,0x06,0x00,0x00,0x8B,0x8E,0x20,0x06,0x00,0x00,0x66,0xD3,0xE0};
 static_assert(seatevt::kMask==0x628 && seatevt::kShift==0x620,"the offsets the signatures read");
 bool seatEventsOk=false;
-struct SharedRef { void* obj; void* ctrl; };
-using RideFn=void(__fastcall*)(void*,SharedRef*,int);
+using ride_native::SharedRef;using ride_native::RideFn;
 // Silent boardings (npcai.h SetNpcMissionCrew; 测试站 #41): the stock SeatRide 0x633C10 marks a new rider's seat taken
 // and changed itself (0x633D90 -> 0x633FE0: or [+0x628], bit; or [+0x628], bit << [+0x620]), so the vehicle's next
 // update (0x674B60 -> 0x632A60) plays the boarding preset unless the change bit is gone first: Quiet right after the ride.
 NpcMissionCrewFn missionCrewJudge=nullptr;
 // A peer's ride message (HUMAN_EVENT_VEHICLE_RIDE, HumanBase slot 15 0x5774C0): `lea rcx,[rsi-0x120]; call 0x5765E0`.
-constexpr unsigned kRemoteRideCall=0x577661;
-const unsigned char kRemoteRideSig[]={0x48,0x8D,0x8E,0xE0,0xFE,0xFF,0xFF,0xE8};   // 0x57765A
+using ride_native::kRemoteRideCall;using ride_native::kRemoteRideSig;
 bool remoteRideHooked=false;
 // The vehicle takes `human`'s seat as held from the start: no boarding sound for it (seat_events.h Quiet).
 void QuietRide(unsigned char* v,const unsigned char* human) noexcept {
@@ -1728,6 +1733,9 @@ bool OwnsNpcSeatInput(unsigned char* seat) noexcept { return NpcSeatInputOwner(s
 bool SeatTakes(const unsigned char* v,unsigned i,const unsigned char* h) noexcept {
     const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),i);
     if(SeatRider(seat)!=Rider::none || (i==0 && !RealDriverNativeReady()))return false;
+    // A Vehicler's own vehicle (zw_vehicle_dispatch.h): its driver seat is its owner's alone (vehicler-plan.md §2.3); the
+    // gunner and passenger seats are offered as any vehicle's.
+    if(vstart::DriverSeatBarred(i,ZwVehicleOwner(v),h))return false;
     return (At<std::uint32_t>(h,kHumanMask)&At<std::uint32_t>(seat,kSeatClass)&At<std::uint32_t>(seat,kSeatEnable))!=0;
 }
 
@@ -2285,10 +2293,37 @@ void SprintRoll(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONG
                    p.move,g.left,w.run,rx,rz,way[0],way[2],pos[0],pos[1],pos[2]);
 }
 
+// A Rune Blade's (class 5, soldier_factory.h: an AssultSoldier underneath, so kSoldiers[0]) rune steps along a long walk
+// (runeblade_npc_logic.h Decide): the takeoff asked of runeblade.cpp (the body's own jump press is the roll), the steps the
+// jump press with the stick on the way, which runeblade.cpp's frame turns into a step and pays. Only this machine's NPCs
+// (the caller's), the plugin's own walk; it never rolls (SprintRoll is the Ranger's).
+void RuneHop(Soldier& s,unsigned char* h,const float* pos,const Plan& p,ULONGLONG ms) noexcept {
+    namespace hop=crew::runeblade::npchop;
+    const Config& c=Cfg();
+    const Way w=WayOf(s,pos);
+    hop::In in;
+    in.walking=w.walking;in.free=DashFree(p) && (At<std::uint32_t>(h,kControlMask)&kMaskMove)!=0;
+    in.left=w.walking ? w.goalDist-w.stop : 0.0f;
+    in.ground=h[kSupport]==2;in.airFrames=At<std::int32_t>(h,kAirFrames);
+    in.ether=crew::runeblade::EtherLevel(h);in.depleted=crew::runeblade::EtherDepleted(h);
+    in.pressed=h[kJumpPress]!=0;
+    const hop::Act act=hop::Decide(s.runeHop,in,ms);
+    if(act==hop::Act::none)return;
+    if(act==hop::Act::takeoff) {
+        if(!crew::RuneBladeNpcTakeoff(h)){s.runeHop=hop::Hop{};s.runeHop.at=ms;return;}
+    } else {
+        Move(h,w.runDir,1.0f);   // the step's push along the stick (runeblade_ether_logic.h WorldPush)
+        h[kJumpPress]=1;
+    }
+    if(c.debug)Log("RUNEHOP %p %s left=%.0f ether=%.0f air=%d at=(%.0f,%.0f,%.0f)",h,hop::ActName(act),in.left,in.ether,in.airFrames,
+                   pos[0],pos[1],pos[2]);
+}
+
 // `sprinting`: its squad under SPRINT (mapcmd_logic.h kSprintMs): the dashes rest kSprintRestShare of their gap, the
 // rollers roll their walk (SprintRoll).
 void Mobility(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,const Plan& p,ULONGLONG ms,bool sprinting) noexcept {
     const float restShare=sprinting ? mapcmd::kSprintRestShare : 1.0f;
+    if(soldier::ZwType(h)==zwclass::kRuneBlade){RuneHop(s,h,pos,p,ms);return;}
     if(c.agility==Agility::wingDash)WingDash(s,h,pos,p,ms,restShare);
     else if(c.agility==Agility::fencer)FencerMove(s,h,pos,p,ms,restShare);
     else if(c.agility==Agility::roll)SprintRoll(s,h,pos,p,ms,sprinting);
@@ -3465,10 +3500,12 @@ bool NpcOwnsNativeThink(const void* nativeTable,const void* function) noexcept {
     return false;
 }
 
+// A soldier of the stock four (kSoldiers) or of classes 4 / 5 (src/soldier_factory.h: their own vtables, AssultSoldier
+// underneath; their Think is AssultSoldier's live slot 7, inherited, so ThinkHook<0>). SoldierClassIndex stays the stock four's.
 bool IsSoldierClassLive(const void* human) noexcept {
     const auto vt=At<const unsigned char*>(human,0);
     for(const auto& c:kSoldiers)if(vt==image+c.vtable)return true;
-    return false;
+    return soldier::IsZwVtable(vt);
 }
 bool IsSoldierClass(const void* human) noexcept { return stepobj::Reads(human,8) && IsSoldierClassLive(human); }
 namespace {
@@ -3486,7 +3523,7 @@ bool InstallNpcAi() noexcept {
         for(const auto& s:kSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("NPCAI profile mismatch at %#zx: the soldiers' AI stays stock",s.rva);return false;}
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     __try { followOk=Matches(kSetFollow,kSetFollowSig,sizeof(kSetFollowSig)); } __except(EXCEPTION_EXECUTE_HANDLER){followOk=false;}
-    __try { rideOk=Matches(kRideVehicle,kRideSig,sizeof(kRideSig)) && Matches(0x57690D,kRideReleaseSig,sizeof(kRideReleaseSig)); }
+    __try { rideOk=Matches(kRideVehicle,kRideSig,sizeof(kRideSig)) && Matches(kRideRelease,kRideReleaseSig,sizeof(kRideReleaseSig)); }
     __except(EXCEPTION_EXECUTE_HANDLER){rideOk=false;}
     if(!rideOk)Log("NPCAI RideVehicle not as read: squads do not board vehicles");
     __try { hullOk=Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) && Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2)); }

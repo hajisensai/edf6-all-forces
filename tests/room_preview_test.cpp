@@ -26,9 +26,9 @@ void Models() {
     wchar_t f[96],q[96];
     for(int i=0;i<kSupportWeaponCount;++i) {
         const int c=SupportSoldierClass(Kind(i));
-        Expect(MenuClassOf(Kind(i))==(c==0 ? 0 : c==1 ? 1 : 3),"class: Ranger 0, Wing Diver 1, Fencer 3");
+        Expect(MenuClassOf(Kind(i))==(c==0 || c==3 ? 0 : c==1 ? 1 : 3),"class: Ranger 0 (a new class previewed as one), Wing Diver 1, Fencer 3");
         const wchar_t* t=kSoldierTemplates[i];
-        Expect(!std::wcsncmp(t,c==0 ? L"N601_" : c==1 ? L"N606_" : L"N607_",5),"the template is the class's (N601 / N606 / N607)");
+        Expect(!std::wcsncmp(t,c==0 || c==3 ? L"N601_" : c==1 ? L"N606_" : L"N607_",5),"the template is the class's (N601 / N606 / N607; a new class the rifle Ranger's)");
         for(int l=0;l<2;++l) {
             const bool leader=l==1;
             const std::size_t nf=SoldierFileOf(Kind(i),leader,false,f,96),nq=SoldierFileOf(Kind(i),leader,true,q,96);

@@ -399,6 +399,11 @@ bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return
 // The sea rescue's banner (heli.cpp PlayerRescueCue): on in the rescue_banner scene.
 bool sceneRescueOn=false;RescueCue sceneRescue{};
 bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;return sceneRescueOn; }
+// The Vehicler's logistics block (vehicler_logistics.cpp VehiclerHudNow): on in the vehicler_logistics scenes.
+bool sceneVehiclerOn=false;VehiclerHudView sceneVehicler{};
+bool VehiclerHudNow(VehiclerHudView* o) noexcept { if(sceneVehiclerOn)*o=sceneVehicler;return sceneVehiclerOn; }
+// The Rune Blade's ether gauge (runeblade.cpp RuneBladeHudNow): off in every scene here.
+bool RuneBladeHudNow(RuneBladeHudView*) noexcept { return false; }
 namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The performance panel (perf_hud.cpp Latest): live numbers only, not drawn in any scene.
@@ -2860,6 +2865,36 @@ int Scenes(const std::wstring& dir) {
         sceneRescueOn=false;
     }
     sceneSweepOn=false;
+    // The Vehicler's logistics block (vehicler_logistics.h): the call hint with both keys, on its way, waiting for the host,
+    // a notice; each on the screen and no two texts on each other, its title drawn.
+    for(int pass=0;pass<4;++pass) {
+        sceneVehicler=VehiclerHudView{};
+        sceneVehicler.points=pass==1 ? 40u : 180u;sceneVehicler.gauge=200;sceneVehicler.price=150;sceneVehicler.choices=5;
+        wcscpy_s(sceneVehicler.name,L"Bullet Girls Tank");sceneVehicler.key=0x4B;sceneVehicler.button=0x1000|0x0100;
+        sceneVehicler.transit=pass==1 || pass==2;sceneVehicler.distance=pass==1 ? 412.0f : -1.0f;
+        sceneVehicler.heard=pass!=3;
+        sceneVehicler.notice=pass==0 ? VehiclerNotice::poor : pass==2 ? VehiclerNotice::refused : VehiclerNotice::arrived;
+        sceneVehiclerOn=true;
+        static const wchar_t* const kNames[4]={L"vehicler_call",L"vehicler_transit",L"vehicler_dispatched",L"vehicler_waiting"};
+        Scene(dir,kNames[pass],ground);
+        wchar_t title[64];
+        if(pass==3)_snwprintf_s(title,_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::zwLogWaiting));
+        else _snwprintf_s(title,_TRUNCATE,hudtext::Tr(hudtext::Tx::zwLogTitle),sceneVehicler.points,sceneVehicler.gauge);
+        bool line=false,inside=true,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text==title)line=true;
+            if(!p.text.empty() && (p.x0<0.0f || p.x1>1920.0f || p.y0<0.0f || p.y1>1080.0f))inside=false;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(line && inside && apart);
+        std::printf("%s  %ls: the title %d, on the screen %d, no text overlapping %d\n",line && inside && apart ? "ok  " : "FAIL",
+                    kNames[pass],line,inside,apart);
+        sceneVehiclerOn=false;
+    }
     // The debug spawn tool's menu (DebugSpawn=1): the longest category (vehicles, its window scrolled to the middle) and
     // the enemies with a spawn's result; on the screen and no two texts on each other, the picked row's name drawn.
     for(int pass=0;pass<2;++pass) {
@@ -3025,6 +3060,7 @@ int wmain(int argc,wchar_t** argv) {
     if(argc==2 && !wcscmp(argv[1],L"--check-feed"))return PhysicalInstrumentFeedChecks();
     // the scenes are a full install's (the X-Morph model pack's infantry among the kinds: support_call.h SupportKindInstalled)
     SetSupportKindInstalled(SupportWeapon::xmInfantry,true);
+    SetSupportKindInstalled(SupportWeapon::zwVehicler,true);SetSupportKindInstalled(SupportWeapon::zwRuneBlade,true);   // the new classes' bodies installed too
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH,temp);
     std::wstring dir=std::wstring(temp)+L"edf6_hud_view";

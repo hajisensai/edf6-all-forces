@@ -250,6 +250,25 @@
    ],
    "scripts": []
   },
+  "armory_look_logic": {
+   "labels": [
+    "plugin-hud",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "armory_look_native": {
+   "labels": [
+    "plugin-hud",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/armory_look_native_audit.py"
+   ]
+  },
   "armory_native": {
    "labels": [
     "plugin-air",
@@ -1181,7 +1200,8 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports"
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -6253,7 +6273,8 @@
   "preload_set": {
    "labels": [
     "plugin-core",
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -7042,6 +7063,56 @@
    ],
    "scripts": []
   },
+  "runeblade": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "runeblade_melee": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "runeblade_npc": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "runeblade_weapons": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "runeblade_weapons_sgo": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/runeblade_weapons_test.py"
+   ]
+  },
   "save_backup": {
    "labels": [
     "autoturret-tools",
@@ -7422,6 +7493,89 @@
    ]
   },
   "smoke_trail_check": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_classes": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "test-data"
+   ],
+   "scripts": []
+  },
+  "soldier_classes_native": {
+   "labels": [
+    "native-codec",
+    "plugin-core",
+    "plugin-native",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_classes_native_audit.py"
+   ]
+  },
+  "soldier_identity": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_identity_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/soldier_identity_native_audit.py"
+   ]
+  },
+  "soldier_native": {
+   "labels": [
+    "plugin-core",
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_native_audit.py"
+   ]
+  },
+  "soldier_save": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "soldier_save_native": {
+   "labels": [
+    "plugin-net",
+    "pylib-model",
+    "test-data",
+    "tools-misc"
+   ],
+   "scripts": [
+    "tests/soldier_save_native_audit.py"
+   ]
+  },
+  "soldier_type": {
    "labels": [
     "plugin-core",
     "plugin-native"
@@ -8640,6 +8794,62 @@
    ],
    "scripts": []
   },
+  "vehicler_foot": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehicler_foot_native": {
+   "labels": [
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/vehicler_foot_native_audit.py"
+   ]
+  },
+  "vehicler_logistics": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-net"
+   ],
+   "scripts": []
+  },
+  "vehicler_start": {
+   "labels": [
+    "plugin-core",
+    "plugin-native"
+   ],
+   "scripts": []
+  },
+  "vehicler_start_native": {
+   "labels": [
+    "plugin-air",
+    "plugin-core",
+    "plugin-enemy",
+    "plugin-hud",
+    "plugin-net",
+    "plugin-ports",
+    "plugin-sound",
+    "plugin-support",
+    "pylib-model",
+    "test-data"
+   ],
+   "scripts": [
+    "tests/vehicler_start_native_audit.py"
+   ]
+  },
   "vehsound_gun": {
    "labels": [
     "plugin-air",
@@ -9219,6 +9429,91 @@
    ],
    "scripts": [
     "tests/xmorph_registry_guard.py"
+   ]
+  },
+  "zw_classes": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "plugin-support",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/zw_classes_test.py"
+   ]
+  },
+  "zw_crew_vehicle": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "zw_dispatch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "zw_v4v9": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
+  },
+  "zw_vehicler_sgo": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/zw_vehicler_sgo_test.py"
+   ]
+  },
+  "zw_vehicles": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "plugin-core",
+    "pylib-model",
+    "test-data",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tests/zw_vehicles_test.py"
    ]
   }
  },
@@ -19193,6 +19488,33 @@
     "sys",
     "tempfile",
     "xmorph_undeployed_without_its_folder"
+   ]
+  },
+  "zw_class_texts_without_packs": {
+   "labels": [
+    "autoturret-tools",
+    "cockpit",
+    "edf41",
+    "edf5",
+    "installer",
+    "native-codec",
+    "pylib-model",
+    "testhub",
+    "testrange",
+    "tools-misc",
+    "worldmap"
+   ],
+   "scripts": [
+    "tools/selftest.py"
+   ],
+   "uses": [
+    "e5c",
+    "modfiles",
+    "os",
+    "patched",
+    "tempfile",
+    "vc",
+    "zw_class_texts_without_packs"
    ]
   }
  }

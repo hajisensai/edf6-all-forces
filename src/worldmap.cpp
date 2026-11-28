@@ -1088,9 +1088,7 @@ void Describe(Shot& out,unsigned char* self,const Screen& s) noexcept {
     out.targetCount=rows.targetCount;
     for(int i=0;i<rows.targetCount;++i){out.targets[i]=rows.targets[i];out.targetState[i]=rows.targetState[i];}
     out.lang=hudtext::InUse();
-    static constexpr hudtext::Tx kTabs[kTabCount]={hudtext::Tx::armoryTabPlayer,hudtext::Tx::armoryTabSquad,
-                                                   hudtext::Tx::armoryTabVehicle,hudtext::Tx::armoryTabMission};
-    for(int i=0;i<kTabCount;++i)wcsncpy_s(out.tab[i],hudtext::Tr(kTabs[i]),_TRUNCATE);
+    for(int i=0;i<kTabCount;++i)wcsncpy_s(out.tab[i],crew::armory::tabs::Name(i),_TRUNCATE);   // 整备's own tab table
     out.presetCount=ui.ps.count;out.presetCurrent=ui.ps.current;
     const int remembered=RememberedOf(cursor);
     out.launch=LaunchPreset(remembered,ui.ps.current,ui.ps.count);

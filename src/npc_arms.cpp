@@ -165,7 +165,7 @@ void LocalRequesterArms(support_net::RequesterArms* out) noexcept {
     Records records;
     npctier::Inventory inv;
     if(!ReadInventory(records,inv,true))return;
-    for(int k=0;k<kSupportWeaponCount;++k) {
+    for(int k=0;k<static_cast<int>(support_net::kArmsKinds);++k) {
         const auto kind=static_cast<SupportWeapon>(k);
         if(!npctier::KindArmed(kind))continue;
         const npctier::Hands hands=npctier::PickHands(kind,inv);
@@ -173,7 +173,7 @@ void LocalRequesterArms(support_net::RequesterArms* out) noexcept {
         out->offhand[k]=npctier::PackArms(hands.off);
     }
     if(Cfg().debug) {
-        for(int k=0;k<kSupportWeaponCount;++k)if(out->kind[k])
+        for(int k=0;k<static_cast<int>(support_net::kArmsKinds);++k)if(out->kind[k])
             Log("SUPPORT arms: kind %d gets weapon %u stars %08llX, second hand %u stars %08llX",k,static_cast<unsigned>(out->kind[k]&0xFFFFu),
                 static_cast<unsigned long long>((out->kind[k]>>16)&0xFFFFFFFFull),
                 out->offhand[k] ? static_cast<unsigned>(out->offhand[k]&0xFFFFu) : 0xFFFFu,

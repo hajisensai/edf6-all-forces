@@ -155,6 +155,7 @@ constexpr hudtext::Tx kSlotText[]={
     hudtext::Tx::kbSzMelee,hudtext::Tx::kbSzGuard,
     hudtext::Tx::kbFire3,hudtext::Tx::kbFire4,hudtext::Tx::kbFire5,hudtext::Tx::kbFire6,hudtext::Tx::kbAutoTurret,
     hudtext::Tx::kbCruiseUp,hudtext::Tx::kbCruiseDown,hudtext::Tx::kbHeliHover,
+    hudtext::Tx::kbVehiclerLogistics,
 };
 static_assert(sizeof(kSlotText)/sizeof(kSlotText[0])==static_cast<std::size_t>(kb::kSlotCount),"a label for every slot");
 constexpr hudtext::Tx kPageText[kb::kPages]={hudtext::Tx::kbPageFoot,hudtext::Tx::kbPageVehicle,hudtext::Tx::kbPageAir,
@@ -191,6 +192,7 @@ constexpr KeyField kFields[]={
     {L"VehicleAutoTurretKey",&Config::vehicleAutoTurretKey},
     {L"VehicleCruiseUpKey",&Config::vehicleCruiseUpKey},{L"VehicleCruiseDownKey",&Config::vehicleCruiseDownKey},
     {L"HeliHoverKey",&Config::heliHoverKey},
+    {L"VehiclerLogisticsKey",&Config::vehiclerLogisticsKey},
 };
 constexpr int kFieldCount=static_cast<int>(sizeof(kFields)/sizeof(kFields[0]));
 constexpr bool SameName(const wchar_t* a,const wchar_t* b) noexcept {

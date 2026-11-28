@@ -38,6 +38,8 @@
 #include "sazabi.h"
 #include "shield.h"
 #include "sidecar.h"
+#include "soldier_factory.h"
+#include "soldier_type_patches.h"
 #include "sightzoom_api.h"
 #include "sound.h"
 #include "stab_api.h"
@@ -55,6 +57,7 @@
 #include "qmark.h"
 #include "infantryscope.h"
 #include "crew_frame.h"
+#include "soldier_identity.h"
 #include "crash_dump.h"
 #include "frame_pacing.h"
 #include "perf_probe.h"
@@ -79,6 +82,13 @@
 #include "mod_room.h"
 #include "outfit41.h"
 #include "weapon_records.h"
+#include "soldier_save.h"
+#include "soldier_classes.h"
+#include "vehicler_foot.h"
+#include "runeblade.h"
+#include "runeblade_melee.h"
+#include "vehicler_start.h"
+#include "zw_vehicle_gear.h"
 #include "weapon_equip.h"
 #include "loadout_store.h"
 #include "room_ui.h"
@@ -130,6 +140,8 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
 #define EDF6_MODULES(M) \
     M(kCrashDump,"crash dump",kLoadOnly) \
     M(kWeaponRecords,"weapon records",kLoadOnly) \
+    M(kSoldierSave,"soldier save",kLoadOnly) \
+    M(kSoldierClasses,"soldier classes",kLoadOnly) \
     M(kFramePacing,"frame pacing",kLoadOnly) \
     M(kRenderFence,"render fence",kLoadOnly) \
     M(kFrameLatency,"frame latency",kLoadOnly) \
@@ -227,6 +239,8 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kRoomPvp,"room pvp",kLoadOnly) \
     M(kLockon,"lockon",kLoadOnly) \
     M(kSeatSwitch,"seat switch",nullptr) \
+    M(kVehiclerStart,"vehicler start",nullptr) \
+    M(kZwVehicleGear,"vehicler gear",nullptr) \
     M(kAllClassesRide,"all classes ride",kLoadOnly) \
     M(kBigWorld,"big world",nullptr) \
     M(kLegacyMap,"legacy map",kLoadOnly) \
@@ -243,6 +257,11 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kEdf41Robo,"edf41 robo",kLoadOnly) \
     M(kEdf41Deiroi,"edf41 deiroi",kLoadOnly) \
     M(kEdf41Mother401,"edf41 mother401",kLoadOnly) \
+    M(kSoldierFactory,"soldier factory",kLoadOnly) \
+    M(kVehiclerFoot,"vehicler foot",kLoadOnly) \
+    M(kRuneBlade,"runeblade",kLoadOnly) \
+    M(kRuneBladeMelee,"runeblade melee",kLoadOnly) \
+    M(kSoldierTypePatches,"soldier type patches",kLoadOnly) \
     M(kEnemyControlRadar,"enemy control radar",kLoadOnly) \
     M(kControlledPvpSpawn,"controlled pvp spawn",kLoadOnly) \
     M(kEnemyControlNativePvp,"enemy control native pvp",nullptr) \
@@ -250,6 +269,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kTerrainShare,"terrain share",nullptr) \
     M(kMission,"mission","the mission's start hook itself: what a mission keeps is the modules' (ResetAll)") \
     M(kLoadout,"loadout",kLoadOnly) \
+    M(kSoldierIdentity,"soldier identity",kLoadOnly) \
     M(kAirstrikes,"airstrikes",nullptr) \
     M(kCrew,"crew",nullptr) \
     M(kPerfProbe,"perf probe",kLoadOnly) \
@@ -332,6 +352,23 @@ constexpr InstallEntry kInstalls[]={
     // the weapon records past 0x800 (weapon_records.cpp): before anything could make the game status, whose
     // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord
     {IP::kBeforeGameStatus,Id::kWeaponRecords,&Install<&InstallWeaponRecords>},
+    // the new classes' save (soldier_save.cpp): after the weapon records, whose load completion it listens to
+    {IP::kBeforeGameStatus,Id::kSoldierSave,&Install<&InstallSoldierSave>},
+    // the new classes' player objects ZwVehicler / ZwRuneBlade (soldier_factory.cpp): in the game's factory table
+    // (edf41classes AddFactory: only its own fingerprints and the scene system not yet made, so the game's start-up
+    // registration 0x701859 still to come); and the per-type tables made to hold types 4 / 5 (soldier_type_patches.cpp).
+    // Both before the classes: the SoldierInit read adds 4 / 5 only when they and the save's stand-in are in.
+    {IP::kBeforeGameStatus,Id::kSoldierFactory,&Install<&InstallSoldierFactory>},
+    {IP::kBeforeGameStatus,Id::kSoldierTypePatches,&Install<&InstallSoldierTypePatches>},
+    // the Vehicler on foot (vehicler_foot.cpp): its dash held back over AssultSoldier's live frame slot (the clones copy it),
+    // and the bullet falloff gate widened to AmmoDamageReduce a > 1 (the Gyrojet's damage growing with its flight)
+    {IP::kBeforeGameStatus,Id::kVehiclerFoot,&Install<&InstallVehiclerFoot>},
+    {IP::kBeforeGameStatus,Id::kRuneBlade,&Install<&InstallRuneBlade>},
+    // the RuneBlade's melee and special arms (runeblade_melee.cpp): AssultSoldier's live frame slot chained after the one above
+    {IP::kBeforeGameStatus,Id::kRuneBladeMelee,&Install<&InstallRuneBladeMelee>},
+    // six player classes (soldier_classes.cpp): before the game status, whose constructor reads the mode data's
+    // SoldierInit (SetMode 0xDC460 from 0xD6722)
+    {IP::kBeforeGameStatus,Id::kSoldierClasses,&Install<&InstallSoldierClasses>},
     {IP::kBeforeAppInit,Id::kFramePacing,&Install<&InstallFramePacing>},   // the window thread's spin and the frame step's Sleep(1) made real waits (frame_pacing.cpp)
     {IP::kBeforeAppInit,Id::kRenderFence,&Install<&InstallRenderFence>},   // the game thread's spin on the render fence made a wait (frame_pacing.cpp)
     {IP::kBeforeAppInit,Id::kFrameLatency,&Install<&InstallFrameLatency>}, // before the application's init makes the device: DXGI's queue to ini MaxFrameLatency
@@ -438,6 +475,8 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kRoomPvp,&Install<&InstallRoomPvp>},        // the room's start held until every member acknowledged the PvP lock (room_pvp.cpp)
     {IP::kFeatures,Id::kLockon,&Install<&InstallLockon>},          // every lock-on weapon's search order: the player's nearest the view first
     {IP::kFeatures,Id::kSeatSwitch,&Install<&InstallSeatSwitch>},  // the player moving between seats (the stock board button's steps, checked)
+    {IP::kFeatures,Id::kZwVehicleGear,&Install<&InstallZwVehicleGear>},   // the Vehicler's V4..V9 (zw_vehicle_gear.cpp)
+    {IP::kFeatures,Id::kVehiclerStart,&Install<&InstallVehiclerStart>},   // the Vehicler's start seat: the stock ride's natives checked (vehicler_start.cpp)
     {IP::kFeatures,Id::kAllClassesRide,&Install<&InstallAllClassesRide>},   // every class in every seat: before any mission makes a vehicle (the seat build is in its constructor)
     {IP::kFeatures,Id::kBigWorld,&Install<&InstallBigWorld>},
     {IP::kFeatures,Id::kLegacyMap,[](const LoadContext&) noexcept {Log("LEGACYMAP collision migration hooked=%d",InstallLegacyMap());}},   // EDF4.1 maps (plan P6)
@@ -459,6 +498,8 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kEnemyControlNativePvp,[](const LoadContext&) noexcept {Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());}},
     {IP::kFeatures,Id::kEnemyControlWeaponAim,[](const LoadContext&) noexcept {Log("ENEMY CONTROL weapon aiming=%d",InstallEnemyControlWeaponAim());}},
     {IP::kFeatures,Id::kTerrainShare,&Install<&InstallTerrainShare>},   // before any map loads: the pieces of one terrain decoded once
+    // before any mission: the online code that names players knows All Forces' classes 4 / 5 (soldier_identity.h)
+    {IP::kFeatures,Id::kSoldierIdentity,&Install<&InstallSoldierIdentity>},
     {IP::kMission,Id::kMission,&Install<&InstallMission>},         // the mission's start (ResetAll, the preloads) and a trigger of the per-frame hooks
     {IP::kMission,Id::kLoadout,[](const LoadContext& c) noexcept {InstallLoadout(c.iniPath);}},
     {IP::kMission,Id::kAirstrikes,[](const LoadContext&) noexcept {Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());}},
@@ -533,6 +574,8 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kRoomUi,&Call<&ResetRoomUi>},   // the room / HQ screen is gone: its menu and room sync go on the next screen frame
     {RP::kMissionState,Id::kPayload,&Call<&ResetPayload>},
     {RP::kMissionState,Id::kSeatSwitch,&Call<&ResetSeatSwitch>},
+    {RP::kMissionState,Id::kVehiclerStart,&Call<&ResetVehiclerStart>},
+    {RP::kMissionState,Id::kZwVehicleGear,&Call<&ResetZwVehicleGear>},
     {RP::kMissionState,Id::kGear,&Call<&ResetGear>},
     {RP::kMissionState,Id::kJetSound,&Call<&ResetJetSound>},
     {RP::kMissionState,Id::kVehicleSound,&Call<&ResetVehicleSound>},
@@ -580,6 +623,8 @@ constexpr TickEntry kTicks[]={
     {TP::kAfterHudPublish,Id::kBigWorld,&Call<&BigWorldProbe>},
     {TP::kAfterHudPublish,Id::kPlayArea,&Call<&PlayAreaTick>},   // the walls where the map's ground ends (playarea.cpp)
     {TP::kAfterHudPublish,Id::kSupportDispatch,&Call<&SupportDispatchTick>},
+    {TP::kAfterHudPublish,Id::kZwVehicleGear,&Call<&ZwVehicleGearTick>},   // after the dispatch's: its hulls activated
+    {TP::kAfterHudPublish,Id::kVehiclerStart,&Call<&VehiclerStartTick>},   // after the dispatch's: its made hulls activated first
     {TP::kAfterHudPublish,Id::kPlayerJet,&Call<&PlayerEjectTick>},
     {TP::kAfterHudPublish,Id::kView,&Call<&ViewDiagTick>},   // the grey-map diagnosis (viewdiag.cpp)
     {TP::kAfterHudPublish,Id::kBoarding,&Call<&BoardingTick>},

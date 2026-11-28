@@ -342,6 +342,16 @@ bool ValidateCommanderPlan(const SupportPlan&) noexcept {return false;}
 bool ApplyCommanderPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
 void DestroyCommanderPlan(std::uint64_t) noexcept {}
 bool CommanderRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
+// zw_vehicle_dispatch.h: the Vehicler's vehicles' catalogs (none in these tests; tests/zw_dispatch_test.cpp has their placement).
+int zwResets=0,zwTicks=0;
+support_net::PlanResult PlanZwVehicle(std::uint32_t,std::uint32_t,const float*,std::uint64_t,SupportPlan*) noexcept {return support_net::PlanResult::refused;}
+bool ValidateZwVehiclePlan(const SupportPlan&) noexcept {return false;}
+bool ApplyZwVehiclePlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
+void NoteZwCrewVehicler(const ObjRef&) noexcept {}   // zw_vehicle_dispatch.cpp: a Vehicler NPC's own vehicle, not under test here
+void DestroyZwVehiclePlan(std::uint64_t) noexcept {}
+bool ZwVehicleRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept {return false;}
+void ZwVehicleTick() noexcept {++zwTicks;}
+void ResetZwVehicles() noexcept {++zwResets;}
 // npc_arms.h PresetHandArms: a preset's two Fencer hands, star 0 = 1 (this machine's player's, a star less), or none.
 bool presetHandsOk=true;int presetHandsAsked=0;
 bool PresetHandArms(int right,int left,std::uint64_t* arms,std::uint64_t* offhand) noexcept {
@@ -563,7 +573,9 @@ int main() {
     SupportDispatchTick();
     check(creationSeen && netConfigured==1,"first frame does not reset creation observations already collected during mission start");
     check(quietTicks==quietBefore+1,"every dispatch frame keeps the mission AI vehicles' crews quiet");
-    SupportDispatchTick();check(quietTicks==quietBefore+1,"the mission crews' quiet runs once per game frame");
+    check(zwResets>=1 && zwTicks>=1,"the Vehicler's vehicles reset with the mission and tick with the dispatch");
+    const int zwTicksBefore=zwTicks;
+    SupportDispatchTick();check(quietTicks==quietBefore+1 && zwTicks==zwTicksBefore,"the mission crews' quiet runs once per game frame");
     // 2026-10-09: air support flies in from the edge. Created in the air, its real crew made inside it and seated at
     // once, the flight on at spawn: no runway, no walk aboard, no takeoff.
     check(made==2 && boardRequests==0 && seatNow==1 && activated==1 && lastAirborne,
@@ -1242,7 +1254,7 @@ int main() {
         check(UnpackSupportLoadout(PackSupportLoadout(l),&back) && back.count==8 && back.soldier[0]==SupportWeapon::wingLance &&
               back.soldier[7]==SupportWeapon::fencerCannon,"a load packs into a request's 64 bits and back");
         check(PackSupportLoadout(SupportLoadout{})==0 && !UnpackSupportLoadout(0,&back) && back.count==0,"no load: 0, the call's own");
-        check(!UnpackSupportLoadout(0xDu,&back) && !UnpackSupportLoadout(0x1u|(0xFull<<4),&back) &&
+        check(!UnpackSupportLoadout(0xDu,&back) && !UnpackSupportLoadout(0x1u|(0x1Full<<4),&back) &&
               !UnpackSupportLoadout(PackSupportLoadout(l)|(1ull<<60),&back),
               "malformed: thirteen soldiers, a kind past the table, bits past the count");
         check(SupportLoadoutResource(l,0)==SupportSoldierResource(SupportWeapon::wingLance,true) &&

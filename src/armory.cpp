@@ -7,14 +7,17 @@
 //    paints the published copy after the screen's own draw, when the screen object drawing is the one it was opened on.
 #include "armory.h"
 #include "armory_draw.h"
+#include "armory_look.h"
 #include "armory_logic.h"
 #include "armory_presets.h"
+#include "armory_tabs.h"
 #include "host_settings.h"
 #include "hud.h"
 #include "ini_text.h"
 #include "loadout_file.h"
 #include "loadout_store.h"
 #include "online_authority.h"
+#include "outfit41.h"
 #include "player_slots.h"
 #include "room_dialog_logic.h"
 #include "room_preview.h"
@@ -261,6 +264,7 @@ public:
     bool built=false;   // the catalog built from the table loaded now (Open)
     bool Ready() const noexcept override { return built && wequip::Ready() && wequip::RowCount()>=0; }
     int CurrentClass() const noexcept override { return wequip::CurrentClass(0); }
+    int Classes() const noexcept override { return wequip::ClassCount(); }
     bool Read(int cls,wlist::Loadout* out) noexcept override {
         try { return wequip::ReadLoadout(0,cls,out); } catch(...) { return false; }
     }
@@ -270,6 +274,17 @@ public:
         return r.verdict;
     }
     void Preview(int cls,int slot,int row) noexcept override { roompreview::ShowPlayerWeapon(cls,slot,row); }
+    // The stock class select entry is gone (room_ui.cpp HideStockEntries): the player's class is chosen here.
+    bool UseClass(int cls) noexcept override {
+        const int was=wequip::CurrentClass(0);
+        const bool ok=wequip::SetClass(0,cls);
+        Log("ARMORY the player's class %d -> %d from the weapons page: %s",was,cls,ok ? "written" : "not written");
+        if(ok) {   // the 4.1 outfit follows the class (outfit41 recolours / publishes); the HQ model is rebuilt
+            Outfit41Changed(0);
+            roompreview::RefreshPlayer();
+        }
+        return ok;
+    }
     void SaveFavourites(const std::set<std::wstring>& ids) noexcept override {
         try {
             if(!SaveIniFlag("WeaponFavourites",wlist::SerializeFavourites(ids).c_str()))
@@ -281,11 +296,52 @@ public:
     }
 };
 
+// The look: the player's outfit and its two colours, written where the stock outfit popup / colour screen write them
+// (armory_look.cpp); the 4.1 outfit through outfit41. The room learns them as the stock screens' changes are learnt
+// (MissionSync); the HQ model is rebuilt from GameStatus.
+class LookGame final : public ar::look::Game {
+public:
+    bool Ready() const noexcept override { return armorylook::Ready() && wequip::Ready(); }
+    int CurrentClass() const noexcept override { return wequip::CurrentClass(0); }
+    int Classes() const noexcept override { return wequip::ClassCount(); }
+    int Outfit() const noexcept override { return armorylook::Outfit(0); }
+    int WornOutfit() const noexcept override { return armorylook::WornOutfit(0); }
+    bool Unlocked() const noexcept override { return armorylook::Unlocked()==1; }
+    bool Edf41Offered(int cls) const noexcept override { return Outfit41Offered(0,cls); }
+    bool Edf41Chosen() const noexcept override { return Outfit41Chosen(0); }
+    bool PickOutfit(const ar::look::Option& o) noexcept override {
+        bool ok=false;
+        if(o.edf41)ok=Outfit41Choose(0);
+        else {
+            Outfit41Leave(0);
+            ok=armorylook::WriteOutfit(0,o.outfit);
+            if(ok)Outfit41Changed(0);
+        }
+        if(ok)roompreview::RefreshPlayer();
+        Log("ARMORY the player's outfit -> %s%d from the look page: %s",o.edf41 ? "EDF4.1 / " : "",o.outfit,
+            ok ? "written" : "not written");
+        return ok;
+    }
+    bool ReadColours(int cls,int outfit,ar::look::Palette* out) noexcept override {
+        return armorylook::ReadColours(0,cls,outfit,out);
+    }
+    bool PickColour(int cls,int outfit,int ch,int idx) noexcept override {
+        const bool ok=armorylook::WriteColour(0,cls,outfit,ch,idx);
+        if(ok) {
+            Outfit41Changed(0);
+            roompreview::RefreshPlayer();
+        }
+        Log("ARMORY the player's colour (class %d outfit %d ch %d) -> %d from the look page: %s",cls,outfit,ch,idx,
+            ok ? "written" : "not written");
+        return ok;
+    }
+};
+
 // The mission: where missions are picked, and in the room the 对战 pages.
 class MissionPage final : public ar::Page {
 public:
     void Bind(bool inRoom) noexcept { room=inRoom; }
-    const wchar_t* Name() const noexcept override { return hudtext::Tr(Tx::armoryTabMission); }
+    const wchar_t* Name() const noexcept override { return ar::tabs::Name(ar::tabs::kMission); }
     int Rows(int) const noexcept override { return room ? 2 : 1; }
     void RowLine(int,int row,ar::Line* out) const noexcept override {
         if(row==0){ar::CopyText(out->label,ar::kTextMost,hudtext::Tr(Tx::armoryWorldMap));return;}
@@ -321,9 +377,14 @@ wlist::Catalog weaponCatalog;
 ar::wpage::Texts weaponTexts;
 ar::wpage::WeaponsPage weaponsPage;
 MissionPage missionPage;
-ar::Page* const kPages[]={&weaponsPage,&squadPage,&vehiclePage,&missionPage};
-constexpr int kWeaponsTab=0,kSquadTab=1,kVehicleTab=2;
+LookGame lookGame;
+ar::look::Texts lookTexts;
+ar::look::LookPage lookPage;
+// In the order of armory_tabs.h, the one tab table the world map's strip shows too (its kMapTab is tabs::kMission).
+ar::Page* const kPages[ar::tabs::kCount]={&weaponsPage,&squadPage,&vehiclePage,&lookPage,&missionPage};
+constexpr int kWeaponsTab=ar::tabs::kPlayer,kSquadTab=ar::tabs::kSquad,kVehicleTab=ar::tabs::kVehicle,kLookTab=ar::tabs::kLook;
 constexpr int kPageCount=static_cast<int>(std::size(kPages));
+static_assert(kPageCount<=ar::kPageMost && kPageCount<=ar::skin::layout::kTabMost,"every tab has room in the title bar");
 
 ar::State state;
 ar::Presets presets;
@@ -444,9 +505,20 @@ void BindSupport() noexcept {
 
 void FillWeaponTexts() noexcept {
     ar::wpage::Texts& t=weaponTexts;
-    t.name=hudtext::Tr(Tx::armoryTabPlayer);
+    t.name=ar::tabs::Name(ar::tabs::kPlayer);
     static constexpr Tx kClassNames[]={Tx::classRanger,Tx::classWingDiver,Tx::armoryClassAirRaider,Tx::classFencer};
-    for(int c=0;c<ar::wpage::kClasses;++c)t.cls[c]=hudtext::Tr(kClassNames[c]);
+    static_assert(std::size(kClassNames)==ar::wpage::kStockClasses && ar::wpage::kClasses==playerslots::kClasses);
+    for(int c=0;c<ar::wpage::kStockClasses;++c)t.cls[c]=hudtext::Tr(kClassNames[c]);
+    // The plugin's classes: the game's own text of their name keys (SoldierInit[c][1], SoldierType_ZwVehicler /
+    // SoldierType_ZwRuneBlade), copied (the text table may be reloaded). Not in the game (soldier_classes off): no page.
+    static wchar_t newNames[ar::wpage::kClasses-ar::wpage::kStockClasses][64];
+    for(int c=ar::wpage::kStockClasses;c<ar::wpage::kClasses;++c){
+        wchar_t* to=newNames[c-ar::wpage::kStockClasses];
+        const wchar_t* name=wequip::ClassName(c);
+        to[0]=0;
+        if(name)wcsncpy_s(to,std::size(newNames[0]),name,_TRUNCATE);
+        t.cls[c]=to;
+    }
     t.slotFormat=hudtext::Tr(Tx::armorySlot);
     t.empty=hudtext::Tr(Tx::armoryEmpty);
     t.notReady=hudtext::Tr(Tx::armoryNoPlayer);
@@ -467,6 +539,8 @@ void FillWeaponTexts() noexcept {
     t.badgeNew=hudtext::Tr(Tx::armoryWpNew);
     t.badgeUp=hudtext::Tr(Tx::armoryWpUp);
     t.previewOther=hudtext::Tr(Tx::armoryWpPreviewOther);
+    t.useClass=hudtext::Tr(Tx::armoryWpUseClass);
+    t.useClassFailed=hudtext::Tr(Tx::armoryWpUseClassFailed);
     t.verdict[static_cast<int>(wlist::Verdict::notOwned)]=hudtext::Tr(Tx::armoryWpNotOwned);
     t.verdict[static_cast<int>(wlist::Verdict::capped)]=hudtext::Tr(Tx::armoryWpCapped);
     t.verdict[static_cast<int>(wlist::Verdict::wrongSlot)]=hudtext::Tr(Tx::armoryWpWrongSlot);
@@ -477,6 +551,27 @@ void FillWeaponTexts() noexcept {
     t.hints[2]=hudtext::Tr(Tx::armoryWpHintDetails);
     t.typingHint=hudtext::Tr(Tx::armoryWpHintTyping);
     t.lang=static_cast<int>(hudtext::InUse());
+}
+
+void FillLookTexts() noexcept {
+    ar::look::Texts& t=lookTexts;
+    static_assert(ar::look::kClasses==ar::wpage::kClasses);
+    t.name=ar::tabs::Name(ar::tabs::kLook);
+    for(int c=0;c<ar::look::kClasses;++c)t.cls[c]=weaponTexts.cls[c];   // FillWeaponTexts: the same class names
+    t.outfit=hudtext::Tr(Tx::armoryLookOutfit);
+    t.primary=hudtext::Tr(Tx::armoryLookPrimary);
+    t.secondary=hudtext::Tr(Tx::armoryLookSecondary);
+    t.mission=hudtext::Tr(Tx::armoryLookMission);
+    t.numbered=hudtext::Tr(Tx::armoryLookNumbered);
+    t.colour=hudtext::Tr(Tx::armoryLookColour);
+    t.edf41=hudtext::Tr(Tx::outfit41Item);
+    t.locked=hudtext::Tr(Tx::armoryLookLocked);
+    t.failed=hudtext::Tr(Tx::armoryLookFailed);
+    t.notReady=hudtext::Tr(Tx::armoryLookNotReady);
+    t.previewOther=hudtext::Tr(Tx::armoryWpPreviewOther);
+    t.hints[0]=hudtext::Tr(Tx::armoryLookHintList);
+    t.hints[1]=hudtext::Tr(Tx::armoryLookHintCentre);
+    t.hints[2]=nullptr;
 }
 
 // The favourites ([VehicleCrew] WeaponFavourites, ids comma-separated) as the ini has them now.
@@ -523,6 +618,7 @@ void FillWords() noexcept {
     words.nsuggest=static_cast<int>(std::size(kSuggest));
     for(int i=0;i<words.nsuggest;++i)words.suggest[i]=hudtext::Tr(kSuggest[i]);
     FillWeaponTexts();
+    FillLookTexts();
     words.unsaved=hudtext::Tr(Tx::spUnsaved);
     words.unsavedTitle=hudtext::Tr(Tx::spUnsavedTitle);
     words.unsavedActions[ar::kUnsavedSave]=hudtext::Tr(Tx::spUnsavedSave);
@@ -679,6 +775,7 @@ bool Install() noexcept {
     const bool hq=Chain(kHqDrawSlot,reinterpret_cast<void*>(&HqDrawHook),nextHqDraw,"HQ");
     const bool room=Chain(kRoomDrawSlot,reinterpret_cast<void*>(&RoomDrawHook),nextRoomDraw,"room");
     installed=hq && room;
+    armorylook::Install();   // its own signatures: refused, the look page says it cannot read (the others stay)
     Log("HOOK armory Draw chained: HQ=%d room=%d (vtables 0x1804DD8 / 0x180AC40 slot 2)",hq,room);
     return installed;
 }
@@ -702,6 +799,7 @@ void Open(unsigned char* self,bool room,const roommenu::Menu* units,roommenu::In
     if(!weaponsGame.built)Log("ARMORY the weapons page: the weapon table is not loaded (or weapon_equip is off)");
     weaponsPage.Attach(&weaponsGame,&weaponCatalog,&weaponTexts);
     weaponsPage.SetFavourites(ReadWeaponFavourites());
+    lookPage.Attach(&lookGame,&lookTexts);
     missionPage.Bind(room);
     missionPage.asked=false;
     missionPage.mapAsked=false;
@@ -794,6 +892,7 @@ bool Frame(unsigned char* self,bool hasInput,bool toggleDown) noexcept {
         } else if(fx.op==ar::Op::switchTo) {
             roomsync::RoomSyncNudge();   // the room's start gate reads the switched-in set's files at once
             weaponsPage.Refresh();
+            lookPage.Refresh();
             if(iniRead)sp::Reload(support,iniRead,iniContext);   // the preset rewrote the support keys: shown as written
             BindSupport();
         }
@@ -817,10 +916,12 @@ bool PreviewWanted(roompreview::PreviewSpec* spec,roompreview::ViewRect* rect,ro
     if(squad)squad->count=0;
     // held for the world map: the model stays in the drawn view's hole too
     if((!state.open && handoff.phase==ar::Handoff::none) || !support.env.previewOn)return false;   // as the page's Hole: the popups are drawn over the model
-    if(state.tab==kWeaponsTab) {
-        // the player's own model holding the weapon under the cursor, in the details column's hole (front camera)
+    if(state.tab==kWeaponsTab || state.tab==kLookTab) {
+        // the player's own model (holding the weapon under the cursor / in the outfit and colours written), in the
+        // details column's hole (front camera)
         ar::skin::Rect hole{};
-        if(state.popup!=ar::Popup::none || !weaponsPage.Hole(state.pos,&hole))return false;
+        const ar::Page& page=state.tab==kWeaponsTab ? static_cast<const ar::Page&>(weaponsPage) : lookPage;
+        if(state.popup!=ar::Popup::none || !page.Hole(state.pos,&hole))return false;
         if(rect)*rect=roompreview::ViewRect{hole.x0,hole.y0,hole.x1-hole.x0,hole.y1-hole.y0};
         if(camera)*camera=roompreview::PresetOf(roompreview::CameraPreset::front);
         if(own)*own=true;

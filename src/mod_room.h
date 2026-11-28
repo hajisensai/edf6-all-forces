@@ -92,8 +92,17 @@ namespace crew {
 //      so every entry after them moved by two, and a gun drone is its carrier's (jet_spawn.cpp DroneBody: the Arsenal
 //      Bird's resolve to the M101, mark 7072). An older build would read another catalog id and make the gun drone a
 //      carrier launches in the stock drone body.
+//  28 (2026-11-28): the two new soldier classes (docs/plan-2026-11-28-new-classes-impl.md: 4 Vehicler, 5 Rune Blade)
+//      travel as themselves in every member's MissionSync record (0x78E9A0 packs GameStatus+0x6E90 as an int, 0x78D0E0
+//      forwards and 0x790600 unpacks it unchecked; docs/newclass-re/online.md). Every machine builds them from its own
+//      SoldierInit 4 / 5, its factories and its name-tag table: an older build has none of them and would read the
+//      record's class past the game's four. And every member needs EDF6Coop 2.10.0 (coop_attr.h kRoomCoop*), whose
+//      loadout guard and armor copy know six classes.
+//  29 (2026-11-28): the new classes as support soldiers (support_call.h SupportWeapon::zwVehicler / zwRuneBlade, 17
+//      kinds): the room loadout packs 5 bits a soldier (it was 4) and the preload set's words moved (preload_set_logic.h
+//      soldier0+16, zwVehicle0=96). An older build would read every packed loadout and preload word wrong.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=27;  // the Arsenal Bird: two catalog entries, M101 gun drones
+constexpr std::int64_t kAllForcesRoomProtocol=29;  // 17 support soldier kinds, 5-bit loadout packing
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

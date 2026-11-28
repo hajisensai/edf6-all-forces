@@ -61,6 +61,13 @@ bool LivingSoldierInSeat(const unsigned char* image,const unsigned char* seat) n
         constexpr unsigned soldiers[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};
         bool soldier=false;
         for(const auto rva:soldiers)if(vt==image+rva)soldier=true;
+        // A clone of AssultSoldier's vtable (EDF6VehicleCrew's classes 4 / 5, src/soldier_factory.h) keeps its
+        // CompleteObjectLocator at vt-8 (src/soldier_identity.h checks the same pointer): still an AssultSoldier.
+        // The stock locator must be there: two empty slots are not the same class.
+        if(!soldier && vt && stepobj::Reads(vt-8,8)) {
+            const void* const locator=At<const void*>(image+0x17CDF28-8,0);
+            soldier=locator && At<const void*>(vt-8,0)==locator;
+        }
         const float hp=At<float>(rider,0x2F8);
         return soldier && std::isfinite(hp) && hp>0.0f;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }

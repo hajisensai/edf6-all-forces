@@ -155,18 +155,39 @@ target_sources(EDF6VehicleCrew PRIVATE src/npc_arms.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp src/vehicle_target.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp src/support_firepower.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/zw_vehicle_catalog.cpp src/zw_vehicle_dispatch.cpp)
+# The Vehicler's V4..V9: unlocks by progress and capture, 1K17's heat, TV-8's fallout (src/zw_vehicle_gear.h).
+target_sources(EDF6VehicleCrew PRIVATE src/zw_vehicle_gear.cpp)
 # The generated variant files (coloured soldiers, loaded vehicles) a mission preloads (src/support_variants.h).
 target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 # The debug spawn tool (ini DebugSpawn, off by default; src/debug_spawn.h, docs/debug-spawn.md).
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 # The world map mission select (src/worldmap.h: the stock select's list as a satellite map; docs/worldmap-select-re.md).
-target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/ui_gpu.cpp src/ui_text.cpp src/armory.cpp src/armory_draw.cpp src/armory_presets.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/worldmap.cpp src/ui_gpu.cpp src/ui_text.cpp src/armory.cpp src/armory_draw.cpp src/armory_presets.cpp src/armory_look.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/worldmap_tiles.cpp src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp src/pack_switch.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/keyconfig.cpp)
 # The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
+# Six player classes: SoldierInit / SoldierWeaponCategory copies with ZwVehicler / ZwRuneBlade (src/soldier_classes_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/soldier_classes.cpp)
+# The new classes' player objects and the per-type tables made to hold types 4 / 5 (src/soldier_type_logic.h,
+# docs/plan-2026-11-28-new-classes-impl.md §2 B).
+target_sources(EDF6VehicleCrew PRIVATE src/soldier_factory.cpp src/soldier_type_patches.cpp)
+# The new classes' save: a stock stand-in in MAIN.GST, the real class back after a load (src/soldier_save_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/soldier_save.cpp)
+# The Vehicler on foot: no dash, the Gyrojet's damage growing with its flight (src/vehicler_foot_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/vehicler_foot.cpp)
+# The Vehicler's start seat: its start vehicle asked for, the owner seated in the driver seat (src/vehicler_start_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/vehicler_start.cpp)
+# The Vehicler's logistics points, its HUD gauge and the resupply call (src/vehicler_logistics_logic.h, docs/newclass-re/vehicler-plan.md §3).
+target_sources(EDF6VehicleCrew PRIVATE src/vehicler_logistics.cpp)
+# The Rune Blade: its ether gauge, rune steps, the combo state, the ZWRB channel (docs/newclass-re/runeblade-plan.md).
+target_sources(EDF6VehicleCrew PRIVATE src/runeblade.cpp)
+
+# The RuneBlade's melee and special arms: the combo extras, the lance, the ring, the smash, the iaido, R2 / R3 (src/runeblade_melee_logic.h, docs/newclass-re/runeblade-melee-plan.md).
+target_sources(EDF6VehicleCrew PRIVATE src/runeblade_melee.cpp)
 # 整备界面武器页的游戏侧（src/weapon_equip.h，docs/weapon-select-re.md）：读表 / 持有 / 上限，写一个槽。
 target_sources(EDF6VehicleCrew PRIVATE src/weapon_equip.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/frame_pacing.cpp)
@@ -890,6 +911,55 @@ add_executable(weapon_records_test tests/weapon_records_test.cpp)
 target_include_directories(weapon_records_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(weapon_records_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME weapon_records COMMAND weapon_records_test)
+# The new classes' pure part (src/sgo_build_logic.h, src/soldier_classes_logic.h): SGO blocks read back with the
+# game's accessor arithmetic, the classes 4 / 5 against the plan, the refusals, the play count stub.
+add_executable(soldier_classes_test tests/soldier_classes_test.cpp)
+target_include_directories(soldier_classes_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(soldier_classes_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME soldier_classes COMMAND soldier_classes_test)
+# The new classes' pure part (src/soldier_type_logic.h): the script mapping, the nameplate and damage colours, the damage
+# colour stub's bytes, the site list (src/soldier_sites.inc) decoding.
+add_executable(soldier_type_test tests/soldier_type_test.cpp)
+target_include_directories(soldier_type_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(soldier_type_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME soldier_type COMMAND soldier_type_test)
+# The new classes' save (src/soldier_save_logic.h): the stand-in, the restore, a class changed in a stock game, two players.
+add_executable(soldier_save_test tests/soldier_save_test.cpp)
+target_include_directories(soldier_save_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(soldier_save_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME soldier_save COMMAND soldier_save_test)
+# The Vehicler on foot (src/vehicler_foot_logic.h): the sites decode, the gate rule, the falloff mirror, the gate's code run.
+add_executable(vehicler_foot_test tests/vehicler_foot_test.cpp)
+target_include_directories(vehicler_foot_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicler_foot_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicler_foot COMMAND vehicler_foot_test)
+# The Rune Blade's weapons (src/runeblade_weapons_logic.h): the rounds' marks, Matins Bell's 2-enemy pierce limit.
+add_executable(runeblade_weapons_test tests/runeblade_weapons_test.cpp)
+target_include_directories(runeblade_weapons_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(runeblade_weapons_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME runeblade_weapons COMMAND runeblade_weapons_test)
+# The Vehicler's start seat (src/vehicler_start_logic.h): the request's gate, what follows it, the NPCs' driver-seat bar.
+add_executable(vehicler_start_test tests/vehicler_start_test.cpp)
+target_include_directories(vehicler_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicler_start_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicler_start COMMAND vehicler_start_test)
+# The Vehicler's logistics (src/vehicler_logistics_logic.h / _net.h): kill worth and attribution, the host's book, the ZWLG codec.
+add_executable(vehicler_logistics_test tests/vehicler_logistics_test.cpp)
+target_include_directories(vehicler_logistics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(vehicler_logistics_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME vehicler_logistics COMMAND vehicler_logistics_test)
+# The Rune Blade (src/runeblade_ether_logic.h, _combo_logic.h, _net.h): the ether gauge, rune steps, the glide, the combo
+# machine, the ZWRB codec (docs/newclass-re/runeblade-plan.md).
+add_executable(runeblade_test tests/runeblade_test.cpp)
+target_include_directories(runeblade_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(runeblade_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME runeblade COMMAND runeblade_test)
+
+# The RuneBlade's arms (src/runeblade_melee_logic.h / _net.h, src/runeblade_ether.h): each arm's frames, the strike queue, the ring, the ZWRB codec.
+add_executable(runeblade_melee_test tests/runeblade_melee_test.cpp)
+target_include_directories(runeblade_melee_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(runeblade_melee_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME runeblade_melee COMMAND runeblade_melee_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 # The menu as the game's own dialogs: pages, buttons, paging, cancel, the edits and saves they make
@@ -965,6 +1035,26 @@ add_executable(preload_set_test tests/preload_set_test.cpp)
 target_include_directories(preload_set_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(preload_set_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME preload_set COMMAND preload_set_test)
+# The Vehicler's start vehicles' placement (src/zw_vehicle_dispatch_logic.h) and the table's lookups (src/zw_vehicle_catalog.h).
+add_executable(zw_dispatch_test tests/zw_dispatch_test.cpp)
+target_include_directories(zw_dispatch_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(zw_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME zw_dispatch COMMAND zw_dispatch_test)
+# A support Vehicler soldier's own vehicle (src/zw_crew_vehicle_logic.h): asking, retrying, the ticket.
+add_executable(zw_crew_vehicle_test tests/zw_crew_vehicle_test.cpp)
+target_include_directories(zw_crew_vehicle_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(zw_crew_vehicle_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME zw_crew_vehicle COMMAND zw_crew_vehicle_test)
+# A Rune Blade NPC's hop (src/runeblade_npc_logic.h): takeoff, steps, rest, the gauge kept.
+add_executable(runeblade_npc_test tests/runeblade_npc_test.cpp)
+target_include_directories(runeblade_npc_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(runeblade_npc_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME runeblade_npc COMMAND runeblade_npc_test)
+# The Vehicler's V4..V9 (src/zw_unlock_logic.h, src/zw_heat_logic.h): unlock stages, capture, the beam's heat, the zone.
+add_executable(zw_v4v9_test tests/zw_v4v9_test.cpp)
+target_include_directories(zw_v4v9_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(zw_v4v9_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME zw_v4v9 COMMAND zw_v4v9_test)
 # The vehicles' weapon SGOs queued with them (src/vehicle_weapons_logic.h): the scan, the stock rows of the hitch2 SYNC
 # LOAD list; the stock table covers every stock vehicle the plugin preloads; against the game's SGOs (skip 77 without it).
 add_executable(vehicle_weapons_test tests/vehicle_weapons_test.cpp)
@@ -1012,6 +1102,11 @@ add_test(NAME weapon_list_logic COMMAND weapon_list_logic_test)
 add_executable(weapon_page_logic_test tests/weapon_page_logic_test.cpp)
 target_compile_options(weapon_page_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME weapon_page_logic COMMAND weapon_page_logic_test)
+# 整备界面的外观页（src/armory_look_logic.h）：GameStatus 偏移、色块换算、选项表、确认键写外观 / 配色、3D 预览洞，
+# 框架里用键盘驱动、假游戏侧。
+add_executable(armory_look_logic_test tests/armory_look_logic_test.cpp)
+target_compile_options(armory_look_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME armory_look_logic COMMAND armory_look_logic_test)
 # It waits for its stand-in children however long a busy machine takes (they run at normal priority; only the
 # plugin's own generator is below normal, VariantGenerator): the hang guard is here.
 set_tests_properties(loadout_writer PROPERTIES TIMEOUT 900)
@@ -1156,6 +1251,18 @@ add_test(NAME cockpit_retrofit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_D
 add_test(NAME cockpit_shell COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_shell_test.py")
 add_test(NAME cockpit_tub COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_tub_test.py")
 add_test(NAME cockpit_panoramic COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_panoramic_test.py")
+# The new player classes' weapon rows and resources (tools/zw_weapons.py, tools/make_zw_classes.py); the Root.cpk part skips without the game.
+add_test(NAME zw_classes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_classes_test.py")
+# The Vehicler's vehicles (pylib/zw_vehicles.py, tools/make_zw_vehicles.py) and src/zw_vehicles.inc being current.
+add_test(NAME zw_vehicles COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_vehicles_test.py")
+# The Vehicler's Gyrojet SGO (tools/zw_weapons.py): six single shots, slow then fast, damage growing with flight, a thin trail;
+# the Root.cpk part skips without the game.
+add_test(NAME zw_vehicler_sgo COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_vehicler_sgo_test.py")
+set_tests_properties(zw_vehicler_sgo PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
+# The Rune Blade's weapon rows and SGOs (tools/zw_weapons.py tuned rows, src/runeblade_weapons_logic.h marks); the Root.cpk
+# part skips without the game.
+add_test(NAME runeblade_weapons_sgo COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/runeblade_weapons_test.py")
+set_tests_properties(runeblade_weapons_sgo PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
@@ -1209,6 +1316,21 @@ set_tests_properties(outfit41_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf
 # instruction there, no other instruction addresses the records, every wrapped call calls what the plugin expects.
 add_test(NAME weapon_records_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_records_native_audit.py")
 set_tests_properties(weapon_records_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME soldier_classes_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_classes_native_audit.py" $<TARGET_FILE:soldier_classes_test>)
+set_tests_properties(soldier_classes_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The new classes' sites, the AssultSoldier vtables the clone copies and the slot 83 calls against the game's EDF.dll
+# (read only; the EDF.dll part skipped without the game).
+add_test(NAME soldier_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_native_audit.py")
+set_tests_properties(soldier_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The new classes' save hooks against the game's EDF.dll (read only; skipped without the game).
+add_test(NAME soldier_save_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_save_native_audit.py")
+set_tests_properties(soldier_save_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The Vehicler on foot's sites and the falloff 0x231080 run natively with a growing AmmoDamageReduce (read only; skipped without the game).
+add_test(NAME vehicler_foot_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicler_foot_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(vehicler_foot_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
+# The start ride's natives (src/ride_native.h) against the game's EDF.dll (read only; skipped without it).
+add_test(NAME vehicler_start_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vehicler_start_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(vehicler_start_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1255,6 +1377,9 @@ add_test(NAME pack_switch_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 set_tests_properties(pack_switch_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME weapon_equip_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_equip_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(weapon_equip_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The 整备 look page: its signatures and GameStatus offsets against EDF.dll read as a file (skipped without the game).
+add_test(NAME armory_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/armory_look_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(armory_look_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8 SKIP_RETURN_CODE 77)
 # The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
 add_test(NAME player_vehicle_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_vehicle_native_audit.py")
 set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1523,8 +1648,8 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks lazy_rows_test preload_set_test)
-add_dependencies(offline_checks worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test support_pages_test weapon_list_logic_test weapon_page_logic_test room_coop_capability_test room_sync_test member_config_test)
+add_dependencies(offline_checks lazy_rows_test preload_set_test zw_dispatch_test zw_v4v9_test)
+add_dependencies(offline_checks soldier_type_test soldier_classes_test soldier_save_test worldmap_tiles_test support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test preview_camera_test worldmap_test outfit41_test weapon_records_test room_ui_test room_dialog_test pvp_units_test team_native_test aiworld_capacity_test havok_mt_test havok_props_test pvp_match_test room_pvp_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test loadout_preset_test armory_skin_test player_slots_test armory_logic_test support_pages_test weapon_list_logic_test weapon_page_logic_test armory_look_logic_test room_coop_capability_test room_sync_test member_config_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -2162,6 +2287,14 @@ add_test(NAME weapon_mount_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 set_tests_properties(weapon_mount_native PROPERTIES SKIP_RETURN_CODE 77)
 # Authenticated map command RPC shares the support extension consumer.
 target_sources(EDF6VehicleCrew PRIVATE src/command_net.cpp src/command_protocol.cpp src/command_identity.cpp src/net_object_resolve.cpp)
+# A soldier of any player class, All Forces' 4 / 5 (AssultSoldier clones) by their RTTI pointer (src/soldier_identity_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/soldier_identity.cpp)
+add_executable(soldier_identity_test tests/soldier_identity_test.cpp)
+target_include_directories(soldier_identity_test PRIVATE src)
+target_compile_options(soldier_identity_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME soldier_identity COMMAND soldier_identity_test)
+add_test(NAME soldier_identity_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/soldier_identity_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(soldier_identity_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_executable(command_protocol_test tests/command_protocol_test.cpp src/command_protocol.cpp)
 target_compile_options(command_protocol_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME command_protocol COMMAND command_protocol_test)

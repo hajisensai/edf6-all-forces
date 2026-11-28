@@ -11,6 +11,7 @@
 #include "scene.h"
 #include "seats.h"
 #include "npcai.h"
+#include "soldier_identity.h"
 #include "support_call.h"
 #include "transport.h"
 #include "edf41classes.h"
@@ -288,7 +289,7 @@ int RadarFriendTeam(const void* hud,int requested) noexcept {
     __try {
         const auto* object=At<const unsigned char*>(hud,0x778);
         const ObjRef identity{object,control};
-        if(Live(identity) && IsSoldierClass(object) && IsAnyPlayer(object)) {
+        if(Live(identity) && IsPlayerClassSoldier(object) && IsAnyPlayer(object)) {
             const int team=At<int>(object,kTeam);
             if(pvp_match::PvpTeam(team))selected=team;
         }
@@ -751,7 +752,7 @@ bool PvpNativeSupportDriver(const ObjRef& parent,ObjRef* driver) noexcept {
         if(!Readable(seat,kSeatRiderCtrl+8))return false;
         const ObjRef rider{At<const void*>(seat,kSeatRider),At<const void*>(seat,kSeatRiderCtrl)};
         if(!Live(rider) || static_cast<const unsigned char*>(rider.obj)[kDead] ||
-           !IsSoldierClass(rider.obj) || !IsAnyPlayer(static_cast<const unsigned char*>(rider.obj)))return false;
+           !IsPlayerClassSoldier(rider.obj) || !IsAnyPlayer(static_cast<const unsigned char*>(rider.obj)))return false;
         *driver=rider;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){*driver={};return false;}
 }

@@ -1366,7 +1366,8 @@ def supports_on_map_rows_are_placeholders() -> None:
     wrote under that name stays; every live row (vehicle requests, thrown drones, guns, the gravity gun) is its own,
     unchanged; no SGO is built for a support. The placeholders and the live rows stay where they are on a reinstall."""
     import ported_weapons as pw
-    templates = sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK))
+    import zw_weapons as zw
+    templates = sorted({*cw.templates(), *(p.template for p in pw.PORTS), *(w.template for w in zw.WEAPONS)} - set(STOCK))
     base_ids = STOCK + templates
 
     def table(key: str, rows: list[str]) -> bytes:
@@ -1397,7 +1398,9 @@ def supports_on_map_rows_are_placeholders() -> None:
                     request_curve=lambda game_root, family=cw.EROS_REQUESTS: [(0.0, 1.0, 1.0)],
                     vehicle_durability=lambda game_root, c: 1000.0, model_missing=lambda c: False,
                     record_room=lambda game_root: (cw.SAVE_WEAPONS, None)), \
-            patched(pw, build=lambda game_root, stock: ({}, {p.id: 'Unavailable: test' for p in pw.PORTS})):
+            patched(pw, build=lambda game_root, stock: ({}, {p.id: 'Unavailable: test' for p in pw.PORTS})), \
+            patched(zw, build_sgo=lambda w, template: f'sgo {w.id}'.encode(),
+                    text_row=lambda template, w, lang: dsgo.Node([w.id, 'zw', dsgo.Node([])])):
         def check_rows(ids: list[str], at: dict[str, int]) -> None:
             for c in calls.CALLS:
                 want = calls.retired_id(c.id) if cw.placeholder(c) else c.id
@@ -1441,7 +1444,7 @@ def supports_on_map_rows_are_placeholders() -> None:
                     modfiles.atomic_write(_mods(game, cw.vehicle_file(c)), b'jet')
             cw.install(game)
             ids = _placeholder_game_rows(game)
-            assert len(ids) == len(old_release), 'the table grew or shrank'
+            assert len(ids) == len(old_release) + len(zw.IDS), 'the table grew (other than by the zw rows) or shrank'
             check_rows(ids, old_at)
             assert [x for x in ids if cw.slot_of(x) is None] == base_ids + OTHER, 'another row moved'
             for c in on_map:
@@ -1684,7 +1687,8 @@ def install_keeps_rows() -> None:
                 if calls.slot_of(x):
                     assert plan.at[x] == i, f'{name}: {x} moved'
             import ported_weapons as pw   # every EDF5 weapon's row follows the calls' (edf5_weapons_rows)
-            assert plan.appended == [c for c in calls.IDS if c not in table] + list(pw.IDS), name
+            import zw_weapons as zw   # then the new classes' (call_weapons.plan_rows)
+            assert plan.appended == [c for c in calls.IDS if c not in table] + list(pw.IDS) + list(zw.IDS), name
             assert sorted(plan.at[c] for c in plan.appended) == list(range(len(table), len(table) + len(plan.appended)))
     fresh = cw.plan_rows(STOCK)
     assert [fresh.at[c] for c in calls.IDS] == list(range(len(STOCK), len(STOCK) + len(calls.IDS)))
@@ -5298,6 +5302,8 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
     files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS if not cw.placeholder(c)})   # a placeholder has none
+    import zw_weapons as zw   # the new classes' weapons (their rows when the table holds them)
+    files.update({rel: w.id.encode() for w in zw.WEAPONS if w.id in table_ids for rel in zw.files(w)})
     for c in calls.CALLS:
         if c.jet in cw.MODEL_VEHICLES:   # their install reads the request's own setup (call_weapons.vehicle_needs)
             files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
@@ -5408,7 +5414,8 @@ def sazabi_fallback_install_upgrade() -> None:
             patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
             patched(sazabi_model, model_dir=lambda: None), patched(vc, Game=lambda root: Game()):
         import ported_weapons as pw   # every install has a row per EDF5 weapon: here they wait for EDF5
-        files = _call_files(game, STOCK + _call_ids() + [pw.retired_id(x) for x in pw.IDS])
+        import zw_weapons as zw
+        files = _call_files(game, STOCK + _call_ids() + [pw.retired_id(x) for x in pw.IDS] + list(zw.IDS))
         arms = {f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.SAZABI_WEAPONS}
         for rel in arms:
             os.remove(_mods(game, rel))  # clean CI package: no Sazabi weapons have ever been installed
@@ -5665,6 +5672,12 @@ def pack_install_upgrade_uninstall() -> None:
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
                           check=lambda game: True))
+            # the new classes' SGOs (tools/make_zw_classes.py): its Root.cpk reader stubbed, its install / remove real
+            enter(patched(importlib.import_module('make_zw_classes'),
+                          build=lambda game: {'OBJECT/ZW_VEHICLER_01.SGO': b'zw battle'}))
+            # the Vehicler's vehicles (tools/make_zw_vehicles.py): the same, its Root.cpk reader stubbed
+            enter(patched(importlib.import_module('make_zw_vehicles'),
+                          build=lambda game: {'OBJECT/EDF6VC_ZW_HSTVL.SGO': b'zw vehicle'}))
             enter(patched(buildcache, recipes=lambda: {g: 'recipe' for g in buildcache.GROUPS}))
             enter(patched(installer.model_workers, group_workers=lambda: 1))   # the stand-in builders are this process's
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
@@ -7068,11 +7081,12 @@ def map_wired() -> None:
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp',
-                                      'drivegear.cpp', 'andryusha.cpp', 'worldmap.cpp', 'armory.cpp', 'pack_switch.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'drivegear.cpp', 'andryusha.cpp', 'worldmap.cpp', 'armory.cpp', 'pack_switch.cpp', 'vehicler_logistics.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/worldmap.cpp'), "the world map select's keys give way to the map"
     assert 'if(!InFront() || MapHoldsKeys()){in.ntyped=0;return in;}' in src('src/armory.cpp'), "整备's keys give way to the map"
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     assert 'Keys k;\n    if(MapHoldsKeys())return k;' in src('src/pack_switch.cpp'), "the HQ's pack switch keys give way to the map"
+    assert 'if(MapHoldsKeys())return false;' in src('src/vehicler_logistics.cpp'), "the Vehicler's resupply key gives way to the map"
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]
     assert 'if(MapHoldsHumanKeys(human))return false;' in key_input
@@ -9196,13 +9210,14 @@ def edf5_weapons_rows() -> None:
     are the same on every machine) after the calls, in the registry's order; a reinstall keeps each row or placeholder
     where it is; tail_start counts them as ours; retired_id picks each kind's."""
     import ported_weapons as pw
+    import zw_weapons as zw   # the new classes' rows after them (call_weapons.plan_rows)
     fresh = cw.plan_rows(STOCK)
-    assert fresh.appended == list(calls.IDS) + list(pw.IDS)
+    assert fresh.appended == list(calls.IDS) + list(pw.IDS) + list(zw.IDS)
     assert [fresh.at[x] for x in fresh.appended] == list(range(len(STOCK), len(STOCK) + len(fresh.appended)))
-    installed = STOCK + list(calls.IDS) + list(pw.IDS) + OTHER
+    installed = STOCK + list(calls.IDS) + list(pw.IDS) + list(zw.IDS) + OTHER
     again = cw.plan_rows(installed)
     assert all(again.at[x] == installed.index(x) for x in pw.IDS) and again.appended == []
-    pending = STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS] + OTHER
+    pending = STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS] + list(zw.IDS) + OTHER
     assert all(cw.plan_rows(pending).at[x] == pending.index(pw.retired_id(x)) for x in pw.IDS)
     ports = list(pw.IDS[:3])
     assert cw.tail_start(STOCK + ports) == len(STOCK) and cw.tail_start(STOCK + ports + OTHER) == len(STOCK) + 3 + 2
@@ -16058,6 +16073,97 @@ def edf41_kill_counters_save_slots() -> None:
         assert all(k not in base for k in kills.text_keys()), (rel, 'EDF6 already has a 4.1 counter text')
         for c in kills.COUNTERS:
             assert text[kills.TEXT_PREFIX + c.key] == kills.label(c, lang), (rel, c.key)
+
+
+@test
+def zw_class_texts_without_packs() -> None:
+    """The new classes' text keys (make_zw_classes.TEXTS) are make_zw_classes' own layer on top of the text tables
+    (2026-11-28), whatever the mission packs do: not installed (or refused: the packs write nothing), installed beneath
+    it, turned off (the packs' tables put back), installed again. The packs' install reads its tables through the layer
+    (make_edf5_campaign.on_disk): it neither keeps the classes' keys as what it replaced nor rewrites a table that is
+    unchanged beneath them, and the layer is not rewritten either; removing the classes puts back exactly what was
+    beneath, the packs' removal then the other mod's tables. No game needed (the tables are in Mods), no Root.cpk read."""
+    import base64
+    import make_zw_classes as zw
+    import rootcpk
+    import sgo
+    assert set(zw.TEXT_TABLES.values()) == set(e5c.TEXTS.values()), 'the two writers name other tables'
+
+    def no_game(root: str) -> None:
+        raise AssertionError('Root.cpk read')
+
+    with tempfile.TemporaryDirectory(prefix='edf6vc-zwtext-') as root, \
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), patched(rootcpk, Game=no_game), patched(vc, Game=no_game):
+        other = {}
+        for lang, rel in e5c.TEXTS.items():
+            other[rel] = sgo.write_depth_first(258, {'OtherModKey': f'other {lang}'})
+            modfiles.atomic_write(e5c.rel_path(root, rel), other[rel])
+
+        def tables() -> dict[str, dict]:
+            return {rel: sgo.read(modfiles.read(e5c.rel_path(root, rel)))[1] for rel in e5c.TEXTS.values()}
+
+        def stamps() -> dict[str, int]:
+            return {rel: os.stat(e5c.rel_path(root, rel)).st_mtime_ns for rel in e5c.TEXTS.values()}
+
+        def has_classes(packs: bool) -> None:
+            for lang, rel in e5c.TEXTS.items():
+                text = tables()[rel]
+                assert text['OtherModKey'] == f'other {lang}', (rel, 'another mod\'s key changed')
+                for key, by_lang in zw.TEXTS.items():
+                    assert text[key] == by_lang[lang], (rel, key, 'packs' if packs else 'no packs')
+                assert (e5c.PACKS[0].keys(e5c.OFFLINE)[0] in text) == packs, (rel, 'the packs\' keys')
+
+        assert zw.install_texts(root) == ([], []), 'written while the classes are not installed'
+        zw.install(root, {'OBJECT/ZW_VEHICLER_01.SGO': b'zw battle'})
+        # no packs (or refused: they wrote nothing)
+        written, notes = zw.install_texts(root)
+        assert len(written) == len(e5c.TEXTS) and not notes, (written, notes)
+        has_classes(False)
+        before = stamps()
+        assert zw.install_texts(root) == ([], []), 'written again'
+        assert stamps() == before, 'rewritten'
+
+        # the packs installed beneath the layer: what they replaced is the other mod's table, not the classes' keys
+        def built() -> tuple:
+            manifest = e5c.load_manifest(root)
+            files = {e5c.CONFIG: b'stub config'}
+            for lang, rel in e5c.TEXTS.items():
+                files[rel] = e5c.text_table(e5c.base_bytes(root, None, rel, manifest), lang, e5c.PACKS)
+            return files, e5c.Contents(65, 0), {'rows': [], 'skipped': []}
+        e5c.install(root, built())
+        for rel, entry in e5c.load_manifest(root)['files'].items():
+            if rel in other:
+                assert base64.b64decode(entry['original']) == other[rel], (rel, 'the layer kept as what was replaced')
+        zw.install_texts(root)
+        has_classes(True)
+        for rel, entry in e5c.load_manifest(root)['files'].items():
+            assert modfiles.sha256(e5c.on_disk(root, rel)) == entry['sha'], (rel, 'the packs\' table not seen beneath')
+        before = stamps()
+        e5c.install(root, built())   # an update with the same packs: neither writer rewrites a table
+        assert zw.install_texts(root) == ([], [])
+        assert stamps() == before, 'an unchanged update rewrote a table'
+        has_classes(True)
+
+        # turned off (no pack left: the packs' tables put back, beneath nothing), then the layer again
+        e5c.disable(root)
+        assert not e5c.installed(root) and not e5c.enabled(root)
+        assert all(modfiles.read(e5c.rel_path(root, rel)) == data for rel, data in other.items()), 'not put back'
+        zw.install_texts(root)
+        has_classes(False)
+
+        # installed again, then the classes removed (uninstall: before the packs), then the packs
+        e5c.install(root, built())
+        zw.install_texts(root)
+        has_classes(True)
+        done, kept = zw.remove(root)
+        assert not kept and len([p for p in done if p.upper().endswith('TXT_SGO')]) == len(e5c.TEXTS), (done, kept)
+        for lang, rel in e5c.TEXTS.items():
+            assert not any(key in tables()[rel] for key in zw.TEXTS), (rel, 'the classes\' keys left')
+        assert not os.path.exists(os.path.join(root, 'Mods', zw.TEXT_RECORD))
+        done, kept = e5c.remove(root)
+        assert not kept
+        for rel, data in other.items():
+            assert modfiles.read(e5c.rel_path(root, rel)) == data, (rel, 'not put back')
 
 
 def _rows_copy(rows: list) -> list:

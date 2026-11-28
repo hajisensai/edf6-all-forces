@@ -258,6 +258,8 @@ void Compose() {
     Check(ComposeSquads(odd)==2 && ComposeApply(odd,12,ComposeSquadCode(1)) && odd.count==4,"a partial second squad taken out whole");
     int ranger[16],wing[16],fencer[16];
     // Without the X-Morph model pack (support_call.h SupportKindInstalled false): not in the Rangers' row, its click refused.
+    // The new classes' bodies installed (support_soldier.cpp NoteSupportKindsInstalled): their row is the panel's fourth.
+    crew::SetSupportKindInstalled(SupportWeapon::zwVehicler,true);crew::SetSupportKindInstalled(SupportWeapon::zwRuneBlade,true);
     crew::SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
     {
         SupportLoadout none{};

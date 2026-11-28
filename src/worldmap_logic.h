@@ -18,6 +18,7 @@
 #include <cwchar>
 #include <utility>
 #include "armory_skin.h"
+#include "armory_tabs.h"
 
 namespace worldmap {
 
@@ -714,8 +715,10 @@ inline bool RouteClear(Pixel a,Pixel b,float radius,float* cut) noexcept {
 
 // --- Stage 6: the 整备 tab bar, the preset chips, 本关出动, the campaign's progress (src/worldmap.cpp) ---
 // The title bar is the 整备 screen's (armory_skin.h layout: kTitle, Tab(i), Chip(i, count)), the map being its last
-// tab (armory.cpp kPages: 武器, 支援编成, 载具, 任务). The chips are the presets only (no ＋: presets are made in 整备).
-inline constexpr int kTabCount=4,kMapTab=3;
+// tab: armory_tabs.h, the one table 整备 (armory.cpp kPages) draws too (武器, 小队, 载具, 外观, 任务). The chips are
+// the presets only (no ＋: presets are made in 整备).
+inline constexpr int kTabCount=crew::armory::tabs::kCount,kMapTab=crew::armory::tabs::kMission;
+static_assert(kTabCount<=crew::armory::skin::layout::kTabMost,"every 整备 tab has room in the map's title bar");
 // Mission select draws its own frame above the map. Fit the shared armory tabs and their hit regions below
 // its native title and between the side decorations.
 inline constexpr crew::armory::skin::Rect kMapTitle{170.f,120.f,1750.f,178.f};

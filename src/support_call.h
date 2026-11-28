@@ -18,18 +18,27 @@ namespace crew {
 enum class SupportWeapon : std::uint8_t { rifle, flame, rocket, shotgun, sniper,
                                           wingLance, wingLaser, wingMonster, wingIzuna, wingThunderBow,
                                           fencerCannon, fencerMiddleCannon, fencerPileBanker, fencerShotgun,
-                                          xmInfantry, count };
+                                          xmInfantry, zwVehicler, zwRuneBlade, count };
 inline constexpr int kSupportWeaponCount=static_cast<int>(SupportWeapon::count);
 inline constexpr int kSupportRangerWeaponCount=5;
 // The last kind: the X-Morph: Defense powered-suit infantry (EDF6VC_XM_SMALL_INFANTRY[_LEADER].SGO, written by the
 // installer): an AssultSoldier, so a Ranger's class, on the plugin's own model.
-// A soldier kind's class: 0 Ranger, 1 Wing Diver, 2 Fencer (the bar's composition panel rows).
+// After it the two new classes' NPCs (docs/plan-2026-11-28-zero-worldline-gear.md stage 6): the Vehicler (ZwVehicler) and
+// the Rune Blade (ZwRuneBlade), each on its own body EDF6VC_ZW_<CLASS>[_LEADER].SGO (tools/make_zw_classes.py): the stock
+// N601 Ranger template with the class's factory and the class's weapon, so the soldier is that class's clone object
+// (soldier_factory.h ZwType 4 / 5) and the plugin's per-class frame runs on it. Neither carries player weapons
+// (support_net.h kArmsKinds stops before them): the body's own weapon is the class's (the Gyrojet pistol, the rune carbine).
+constexpr bool SupportKindIsZw(SupportWeapon w) noexcept { return w==SupportWeapon::zwVehicler || w==SupportWeapon::zwRuneBlade; }
+inline constexpr int kSupportArmedKindCount=static_cast<int>(SupportWeapon::zwVehicler);
+// A soldier kind's class: 0 Ranger, 1 Wing Diver, 2 Fencer, 3 the new classes (the bar's composition panel rows).
 constexpr int SupportSoldierClass(SupportWeapon w) noexcept {
-    return w==SupportWeapon::xmInfantry ? 0 : static_cast<int>(w)<kSupportRangerWeaponCount ? 0 : w<SupportWeapon::fencerCannon ? 1 : 2;
+    return SupportKindIsZw(w) ? 3 : w==SupportWeapon::xmInfantry ? 0 : static_cast<int>(w)<kSupportRangerWeaponCount ? 0 :
+           w<SupportWeapon::fencerCannon ? 1 : 2;
 }
 // Whether a kind can wear a colour or a backpack: those are generated from the kind's stock template in Root.cpk. The
 // X-Morph infantry has no such template and its model no change-colour material, so it is always the plain body.
-constexpr bool SupportKindHasLooks(SupportWeapon k) noexcept { return k!=SupportWeapon::xmInfantry; }
+// The new classes' bodies are the installer's too (no generated variants): the plain body as well.
+constexpr bool SupportKindHasLooks(SupportWeapon k) noexcept { return k!=SupportWeapon::xmInfantry && !SupportKindIsZw(k); }
 // Whether a kind's bodies (member and leader) are installed here, so that it is offered at all: the room menu, its
 // dialogs, the map's composition panel, a SupportPreset_ value and the host's plan / every peer's Validate all ask this
 // one answer (CLAUDE.md: a missing resource is a broken install, the feature does not deploy; no stand-in). The stock
@@ -39,7 +48,8 @@ constexpr bool SupportKindHasLooks(SupportWeapon k) noexcept { return k!=Support
 namespace support_kind_detail {
 constexpr std::uint32_t StockKinds() noexcept {
     std::uint32_t m=0;
-    for(int k=0;k<kSupportWeaponCount;++k)if(static_cast<SupportWeapon>(k)!=SupportWeapon::xmInfantry)m|=1u<<k;
+    for(int k=0;k<kSupportWeaponCount;++k)
+        if(static_cast<SupportWeapon>(k)!=SupportWeapon::xmInfantry && !SupportKindIsZw(static_cast<SupportWeapon>(k)))m|=1u<<k;
     return m;
 }
 inline std::atomic<std::uint32_t> installed{StockKinds()};
@@ -87,24 +97,29 @@ static_assert(SupportSoldierResource(SupportWeapon::sniper,true)<kSupportAircraf
 // --- A composed load (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，直到座位满") ---
 // The soldiers a player puts aboard a call, in seat order: soldier i is the leader of its squad when i % 4 == 0 (the
 // same rule as every infantry plan). On the wire (a request's `challenge`, support_protocol.cpp: unused by a request and
-// ignored there by an older host) as 4 bits of count then 4 bits a soldier; 0 = no composition (the call's own load).
+// ignored there by an older host) as 4 bits of count then 5 bits a soldier (5 since the new classes' kinds made 17; the
+// room protocol's bump keeps older builds out, mod_room.h); 0 = no composition (the call's own load).
 inline constexpr int kSupportLoadoutMost=12;
+inline constexpr int kSupportLoadoutBits=5;
 struct SupportLoadout { int count=0; SupportWeapon soldier[kSupportLoadoutMost]{}; };
-static_assert(kSupportWeaponCount<=16 && kSupportLoadoutMost<=15,"a soldier fits 4 bits, the count 4 bits");
+static_assert(kSupportWeaponCount<=(1<<kSupportLoadoutBits) && kSupportLoadoutMost<=15 &&
+              4+kSupportLoadoutBits*kSupportLoadoutMost<=64,"a soldier fits 5 bits, the count 4 bits, the load one word");
 constexpr std::uint64_t PackSupportLoadout(const SupportLoadout& l) noexcept {
     if(l.count<=0 || l.count>kSupportLoadoutMost)return 0;
     std::uint64_t bits=static_cast<std::uint64_t>(l.count);
-    for(int i=0;i<l.count;++i)bits|=static_cast<std::uint64_t>(static_cast<std::uint8_t>(l.soldier[i])&0xFu)<<(4+4*i);
+    for(int i=0;i<l.count;++i)
+        bits|=static_cast<std::uint64_t>(static_cast<std::uint8_t>(l.soldier[i])&0x1Fu)<<(4+kSupportLoadoutBits*i);
     return bits;
 }
 // False (and *out empty) for 0 or anything malformed: a count past the most, a kind past the table, bits past the count.
 constexpr bool UnpackSupportLoadout(std::uint64_t bits,SupportLoadout* out) noexcept {
     SupportLoadout l{};
     const int count=static_cast<int>(bits&0xFu);
-    if(count<=0 || count>kSupportLoadoutMost || (bits>>(4+4*count))!=0){if(out)*out=l;return false;}
+    const int used=4+kSupportLoadoutBits*count;
+    if(count<=0 || count>kSupportLoadoutMost || (used<64 && (bits>>used)!=0)){if(out)*out=l;return false;}
     l.count=count;
     for(int i=0;i<count;++i) {
-        const auto kind=static_cast<int>((bits>>(4+4*i))&0xFu);
+        const auto kind=static_cast<int>((bits>>(4+kSupportLoadoutBits*i))&0x1Fu);
         if(kind>=kSupportWeaponCount){if(out)*out=SupportLoadout{};return false;}
         l.soldier[i]=static_cast<SupportWeapon>(kind);
     }

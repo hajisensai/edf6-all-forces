@@ -110,6 +110,7 @@ void ExhaustiveRoundTrip() {
     int bad=0;
     for(int k=0;k<kSupportWeaponCount;++k)
         for(std::int32_t p:colours)for(std::int32_t s:colours) {
+            if(!SupportKindInstalled(static_cast<SupportWeapon>(k)))continue;   // not offered (NewClassSoldiers: installed)
             if(!SupportKindHasLooks(static_cast<SupportWeapon>(k)) && (p!=kStockColour || s!=kStockColour))continue;   // no colours to write
             SupportPreset a{};a.count=2;a.kind[0]=a.kind[1]=static_cast<SupportWeapon>(k);a.look[1].primary=p;a.look[1].secondary=s;
             wchar_t out[kValueMost],why[8];SupportPreset back;
@@ -251,6 +252,34 @@ void Backpacks() {
     Expect(Tap(m,&Keys::confirm)==Act::save,"save");
     SaveSet s;
     Expect(CollectSave(m,&s) && SaysValue(s,L"SupportPreset_SQUAD",L"monster+pHandGrenade01"),"the pack written as the plugin reads it");
+}
+
+// The new classes' support soldiers (support_call.h zwVehicler / zwRuneBlade, their bodies from make_zw_classes): offered
+// once installed, last in the kind field, the kind field alone; a preset of them round-trips, a colour or a pack on them
+// is refused; uninstalled, they are stepped over and a preset naming one is refused.
+void NewClassSoldiers() {
+    SetSupportKindInstalled(SupportWeapon::zwVehicler,true);SetSupportKindInstalled(SupportWeapon::zwRuneBlade,true);
+    {Ini ini;Menu m;
+     Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
+     Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);   // into SQUAD, a stock rifle added, its fields
+     Tap(m,&Keys::left);
+     Expect(m.unit[0].squad.kind[0]==SupportWeapon::zwRuneBlade,"installed: left past the first kind wraps to the Rune Blade");
+     Tap(m,&Keys::left);
+     Expect(m.unit[0].squad.kind[0]==SupportWeapon::zwVehicler && FieldCount(m.unit[0],0)==1 && !CarriesPack(SupportWeapon::zwVehicler),
+            "then the Vehicler: the kind field alone, no backpack");}
+    SupportPreset p;wchar_t why[160];
+    Expect(ParseSupportPreset(L"zwvehicler*2,zwruneblade*2",12,&p,why,160) && p.count==4 && p.kind[0]==SupportWeapon::zwVehicler &&
+           p.kind[3]==SupportWeapon::zwRuneBlade,"a preset of the new classes parses");
+    PresetRoundTrip(L"zwvehicler,zwvehicler,zwruneblade",12,L"zwvehicler*2,zwruneblade");
+    Expect(!ParseSupportPreset(L"zwvehicler@1E3A8A",12,&p,why,160) && !ParseSupportPreset(L"zwruneblade+aHandGrenade01",12,&p,why,160) &&
+           std::wcsstr(why,L"该兵种没有涂装与背包"),"no colour, no backpack on them");
+    SetSupportKindInstalled(SupportWeapon::zwVehicler,false);SetSupportKindInstalled(SupportWeapon::zwRuneBlade,false);
+    Expect(!ParseSupportPreset(L"zwvehicler",12,&p,why,160) && std::wcsstr(why,L"该兵种未安装"),"uninstalled: a preset naming one refused");
+    {Ini ini;Menu m;
+     Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
+     Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);
+     Tap(m,&Keys::left);
+     Expect(m.unit[0].squad.kind[0]==SupportWeapon::xmInfantry,"uninstalled: stepped over");}
 }
 
 // The X-Morph infantry has the kind field alone: switching to it clears the colours and the pack, and the value written
@@ -784,6 +813,7 @@ int main() {
     Navigation();
     Backpacks();
     XmInfantryHasNoLooks();
+    NewClassSoldiers();
     SquadLimits();
     VehicleLimits();
     VehicleWeight();

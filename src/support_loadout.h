@@ -6,7 +6,7 @@
 //
 // EDF6VehicleCrew.ini [VehicleCrew], the one source of truth (the plugin rereads it on every save):
 //   SupportPreset_<KEY>=rifle@1E3A8A*2,rocket,sniper   a seated entry's soldiers in seat order (a leader every four):
-//       kind      one of kSupportKindNames (the 15 kinds: 5 Ranger, 5 Wing Diver, 4 Fencer weapons, the X-Morph infantry)
+//       kind      one of kSupportKindNames (the 17 kinds: 5 Ranger, 5 Wing Diver, 4 Fencer weapons, the X-Morph infantry, the Vehicler, the Rune Blade)
 //       @RRGGBB   its primary colour (soldier_color change_color0); @RRGGBB:RRGGBB primary and secondary (change_color1);
 //                 X a colour left stock (@X:FFFFFF). No @: the stock look.
 //       #R:L      a Fencer's two hands (2026-11-21, docs/feature-npc-weapon-tier.md 2.5): weapon table row ids of any
@@ -54,6 +54,7 @@ inline constexpr SupportKindName kSupportKindNames[]={
     {SupportWeapon::fencerCannon,L"cannon",L"重装·重炮"},{SupportWeapon::fencerMiddleCannon,L"midcannon",L"重装·中炮"},
     {SupportWeapon::fencerPileBanker,L"pilebanker",L"重装·打桩"},{SupportWeapon::fencerShotgun,L"fshotgun",L"重装·霰弹"},
     {SupportWeapon::xmInfantry,L"xminfantry",L"X-Morph 步兵"},
+    {SupportWeapon::zwVehicler,L"zwvehicler",L"载具手"},{SupportWeapon::zwRuneBlade,L"zwruneblade",L"刻印剑士"},
 };
 static_assert(sizeof(kSupportKindNames)/sizeof(kSupportKindNames[0])==static_cast<std::size_t>(kSupportWeaponCount),
               "one name per soldier kind");
@@ -176,10 +177,10 @@ inline bool ParseSupportPreset(const wchar_t* text,int seatCount,SupportPreset* 
         if(!ParseSupportKind(a,at,&kind)){Say(why,whyCapacity,L"未知兵种：",a,at);return false;}
         // A kind whose bodies this install lacks (support_call.h SupportKindInstalled: the X-Morph model pack) is never
         // composed: the value is refused whole, the reason named, like any other fault.
-        if(!SupportKindInstalled(kind)){Say(why,whyCapacity,L"该兵种未安装（缺少 X-Morph 模型包）：",a,at);return false;}
+        if(!SupportKindInstalled(kind)){Say(why,whyCapacity,L"该兵种未安装（缺少它的模型文件）：",a,at);return false;}
         SupportLook look;
         if(!SupportKindHasLooks(kind) && (at<hash || plus<star)) {
-            Say(why,whyCapacity,L"X-Morph 步兵没有涂装与背包：",a,star);return false;
+            Say(why,whyCapacity,L"该兵种没有涂装与背包：",a,star);return false;
         }
         if(at<hash) {
             const wchar_t* colon=Find(at+1,hash,L':');

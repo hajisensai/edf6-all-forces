@@ -265,8 +265,8 @@ void NamesAndTokens() {
         if(ok)++round;
         else std::printf("  soldier round trip failed: kind %d leader %d %06X %06X\n",k,leader,p,s);
     }
-    Expect(round==(kSupportWeaponCount-1)*2*24 && looklessRefused==2*24,
-           "every soldier kind with looks x leader x colour form round-trips name and token; the X-Morph infantry names no file");
+    Expect(round==(kSupportWeaponCount-3)*2*24 && looklessRefused==3*2*24,
+           "every soldier kind with looks x leader x colour form round-trips name and token; the X-Morph infantry and the new classes name no file");
     Expect(!ParseVariantFile(L"EDF6VC_NPC_XMINFANTRY_1E3A8A_X.SGO",nullptr) && !ParseVariantFile(L"EDF6VC_NPC_XMINFANTRY_L_X_X_AHANDGRENADE01.SGO",nullptr) &&
            !ParseToken("o1E3A8AX",8,nullptr),"a colour or backpack of the X-Morph infantry is refused by name and token");
     // The examples the docs give, exactly.
@@ -361,7 +361,7 @@ void NamesAndTokens() {
 VariantSet BigSet(int soldiers) {
     VariantSet set;
     for(int i=0;i<soldiers;++i)
-        set.Add(Soldier(static_cast<SupportWeapon>(i%(kSupportWeaponCount-1)),(i/(kSupportWeaponCount-1))%2!=0,0x010101*(i+1),i%3 ? 0xABCDEF : kStockColour));
+        set.Add(Soldier(static_cast<SupportWeapon>(i%(kSupportWeaponCount-3)),(i/(kSupportWeaponCount-3))%2!=0,0x010101*(i+1),i%3 ? 0xABCDEF : kStockColour));
     set.Add(Vehicle(VehicleBody::tank,L"HE,AP:25"));set.Add(Vehicle(VehicleBody::fighter,L"AAM_M:4,AAM_S:2"));
     return set;
 }

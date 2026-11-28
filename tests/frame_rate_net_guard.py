@@ -148,7 +148,11 @@ for n in PER_FRAME_FILES:
         check(not hit, f'src/{n} (runs on every presented frame) neither sends nor pumps: {hit.group(0) if hit else ""}')
 check(sum(n in src for n in PER_FRAME_FILES) >= 15, 'the per-frame files are where this guard looks')
 
-PLUGIN_SENDERS = {'barrage.cpp', 'floatgun.cpp', 'gravity_net.cpp', 'player_vehicle.cpp', 'support_points.cpp', 'ultimate.cpp'}
+# runeblade.cpp / runeblade_melee.cpp: from AssultSoldier's frame slot 5 (chained, an object stage: per tick only);
+# vehicler_logistics.cpp: from VehiclerLogisticsTick (the module tick, a logic frame), state paced by kStateGapMs / kStateKeepMs,
+# and from the plugin_net pump (Receive, Joined) and zw_vehicle_dispatch's transaction (the support tick)
+PLUGIN_SENDERS = {'barrage.cpp', 'floatgun.cpp', 'gravity_net.cpp', 'player_vehicle.cpp', 'support_points.cpp', 'ultimate.cpp',
+                  'runeblade.cpp', 'runeblade_melee.cpp', 'vehicler_logistics.cpp'}
 senders = {n for n, t in src.items() if re.search(r'plugin_net::(Send|Broadcast|SendHost)\(', t)} - {'plugin_net.cpp'}
 check(senders == PLUGIN_SENDERS, f'plugin_net senders are the reviewed ones (new: check its driver; gone: drop it): '
       f'new {sorted(senders - PLUGIN_SENDERS)}, gone {sorted(PLUGIN_SENDERS - senders)}')

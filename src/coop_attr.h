@@ -39,7 +39,10 @@ inline const Table* Usable(const Table* t) noexcept {
 // 2.9.0 (net-5, 2026-11-24): extension ABI 2 (coop_extension_api.h): the channels' state messages (sendState: an enemy
 // lease's pose, a gravity hold and flight, an ultimate show's keep) and the 20-byte delivered message; 2.8.x serves ABI 1
 // alone, so support_net.cpp would find no extension at all.
-inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=9,kRoomCoopPatch=0;
+// 2.10.0 (room protocol 28, 2026-11-28): six soldier classes (edf-coop-stable feat/soldier-class-6: weaponguard.h
+// kWeaponClasses, armor.h kSoldierTypeCount). 2.9.x guards no loadout record of class 4 / 5 (an unknown weapon id in
+// one is left for the game to read past its table) and copies no armor for them.
+inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=10,kRoomCoopPatch=0;
 enum class CoopVersion : std::uint8_t { ok, old, unreadable };
 // EDF6Coop's exported EDF6CoopVersion marker (nullptr: not exported, older than 2.5.0) against kRoomCoop*; the version
 // read back when there is one.

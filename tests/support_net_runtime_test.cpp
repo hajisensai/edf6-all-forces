@@ -159,6 +159,24 @@ plugin_net::Channel AuraNetChannel() noexcept {
     plugin_net::Channel c;c.name="aura vehicles";c.magic=0x55414641u;c.version=1;
     c.minSize=c.maxSize=409;c.receive=&ReceiveAura;c.takesState=&AuraState;return c;
 }
+// The Vehicler's logistics (vehicler_logistics.cpp): ZWLG messages, not under test here.
+bool ReceiveVehiclerLogistics(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel VehiclerLogisticsNetChannel() noexcept {
+    plugin_net::Channel c;c.name="vehicler logistics";c.magic=0x474C575Au;c.version=1;
+    c.minSize=80;c.maxSize=152;c.receive=&ReceiveVehiclerLogistics;return c;
+}
+// The RuneBlade's arms (runeblade_melee.cpp): ZWRM messages, not under test here.
+bool ReceiveRuneBladeMelee(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel RuneBladeMeleeNetChannel() noexcept {
+    plugin_net::Channel c;c.name="runeblade melee";c.magic=0x4D52575Au;c.version=1;
+    c.minSize=c.maxSize=96;c.receive=&ReceiveRuneBladeMelee;return c;
+}
+// The Rune Blade's ether and step state (runeblade.cpp): ZWRB messages, not under test here.
+bool ReceiveRuneBlade(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel RuneBladeNetChannel() noexcept {
+    plugin_net::Channel c;c.name="runeblade";c.magic=0x4252575Au;c.version=1;
+    c.minSize=c.maxSize=48;c.receive=&ReceiveRuneBlade;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}

@@ -16,6 +16,8 @@ bool BoardingUnderway() noexcept { return false; }
 bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
+void VehiclerStartTick() noexcept {}   // the Vehicler's start seat (vehicler_start.cpp, not linked here)
+void ZwVehicleGearTick() noexcept {}   // the Vehicler's V4..V9 gear (zw_vehicle_gear.cpp, not linked here)
 void FlushLog() noexcept {}
 namespace modules {   // the reset pass is modules_load.cpp's (not linked here): a module taken off has nothing to reset
 ResetRun ResetModule(Id) noexcept { return {}; }

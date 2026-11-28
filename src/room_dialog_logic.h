@@ -62,7 +62,8 @@ template<class... A> void AddF(Dialog& d,Choice c,const wchar_t* format,A... arg
 inline constexpr Tx kKindTexts[kSupportWeaponCount]={
     Tx::roomKindRifle,Tx::roomKindFlame,Tx::roomKindRocket,Tx::roomKindShotgun,Tx::roomKindSniper,
     Tx::roomKindLance,Tx::roomKindLaser,Tx::roomKindMonster,Tx::roomKindIzuna,Tx::roomKindThunderBow,
-    Tx::roomKindCannon,Tx::roomKindMidCannon,Tx::roomKindPileBanker,Tx::roomKindShotgunFencer,Tx::roomKindXmInfantry};
+    Tx::roomKindCannon,Tx::roomKindMidCannon,Tx::roomKindPileBanker,Tx::roomKindShotgunFencer,Tx::roomKindXmInfantry,
+    Tx::roomKindZwVehicler,Tx::roomKindZwRuneBlade};
 inline constexpr Tx kStoreTexts[kLoadStoreCount]={
     Tx::roomStoreAamS,Tx::roomStoreAamM,Tx::roomStoreAamL,Tx::roomStoreAgm,Tx::roomStoreAgmL,Tx::roomStoreMk82,
     Tx::roomStoreRkt,Tx::roomStoreAp,Tx::roomStoreHe,Tx::roomStoreGlm};

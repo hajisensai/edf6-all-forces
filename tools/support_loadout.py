@@ -73,6 +73,8 @@ KINDS: tuple[tuple[str, str, str], ...] = (
     ('pilebanker', '重装·打桩', 'N607_AIHEAVYARMOR_SP'), ('fshotgun', '重装·霰弹', 'N607_AIHEAVYARMOR_SSG'),
     # The X-Morph infantry: the installer's own bodies (EDF6VC_XM_SMALL_INFANTRY[_LEADER].SGO), not a Root.cpk template.
     ('xminfantry', 'X-Morph 步兵', 'EDF6VC_XM_SMALL_INFANTRY'),
+    # The new classes' support soldiers: make_zw_classes.py's own bodies (EDF6VC_ZW_*[_LEADER].SGO), no looks.
+    ('zwvehicler', '载具手', 'EDF6VC_ZW_VEHICLER'), ('zwruneblade', '刻印剑士', 'EDF6VC_ZW_RUNEBLADE'),
 )
 KIND_NAMES = tuple(k[0] for k in KINDS)
 # The kinds' labels in English (an English installer, pylib/i18n.py; shown only).
@@ -80,17 +82,20 @@ KIND_LABELS_EN = {'rifle': 'Ranger: rifle', 'flame': 'Ranger: flamethrower', 'ro
                   'shotgun': 'Ranger: shotgun', 'sniper': 'Ranger: sniper', 'lance': 'Wing Diver: lance',
                   'laser': 'Wing Diver: laser', 'monster': 'Wing Diver: sniper', 'izuna': 'Wing Diver: chain lightning',
                   'thunderbow': 'Wing Diver: thunder bow', 'cannon': 'Fencer: heavy cannon', 'midcannon': 'Fencer: mid cannon',
-                  'pilebanker': 'Fencer: pile banker', 'fshotgun': 'Fencer: shotgun', 'xminfantry': 'X-Morph infantry'}
+                  'pilebanker': 'Fencer: pile banker', 'fshotgun': 'Fencer: shotgun', 'xminfantry': 'X-Morph infantry',
+                  'zwvehicler': 'Vehicler', 'zwruneblade': 'Rune Blade'}
 
 
 def kind_label(name: str) -> str:
     return next(label for n, label, _ in KINDS if n == name) if is_zh() else KIND_LABELS_EN[name]
 # support_call.h SupportSoldierClass: 0 Ranger, 1 Wing Diver, 2 Fencer (KINDS order: 5 Rangers, 5 Wing Divers, 4 Fencers; the
-# X-Morph infantry, last, is a Ranger's class).
-KIND_CLASS = {n: 0 if i < 5 or n == 'xminfantry' else 1 if i < 10 else 2 for i, n in enumerate(KIND_NAMES)}
+# X-Morph infantry is a Ranger's class; the two new classes, last, are class 3, the composition panel's 新兵种 row).
+KIND_CLASS = {n: 3 if n.startswith('zw') else 0 if i < 5 or n == 'xminfantry' else 1 if i < 10 else 2
+              for i, n in enumerate(KIND_NAMES)}
 # support_call.h SupportKindHasLooks: colours and a backpack are generated from a kind's stock template in Root.cpk; the
-# X-Morph infantry has none (its model has no change-colour material), so it is always the plain body.
-LOOKLESS = ('xminfantry',)
+# X-Morph infantry has none (its model has no change-colour material), nor do the new classes' own bodies, so they are
+# always the plain body.
+LOOKLESS = ('xminfantry', 'zwvehicler', 'zwruneblade')
 
 
 def has_looks(k: str) -> bool:
@@ -404,7 +409,7 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
         name, at, colours = head.partition('@')
         k = kind(name)
         if not has_looks(k) and (at or plus):
-            raise Invalid(tr('X-Morph 步兵没有涂装与背包：', 'X-Morph infantry has no colours and no backpack: ')
+            raise Invalid(tr('该兵种没有涂装与背包：', 'this kind has no colours and no backpack: ')
                           + token.partition('*')[0].strip())
         look: Look = (STOCK, STOCK)
         if at:

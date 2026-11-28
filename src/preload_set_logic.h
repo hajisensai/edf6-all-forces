@@ -19,6 +19,8 @@
 // 2 nothing of the plugin's (A/B of the plugin's cost; the calls then do not come). Online the host's set decides, so
 // a member's PreloadMode only changes what it contributes as the host.
 #pragma once
+#include "zw_crew_vehicle_logic.h"
+#include "zw_vehicle_catalog.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -42,10 +44,11 @@ enum class Item : std::uint8_t {
     vehicleRounds=57,        // the impact charges, the drill charge, the EMC / Sazabi / Proteus / Andryusha rounds
     bodyMore=58,             // .. bodyMore+5: kBodies[kLowBodies+k] (the bodies past body0's room: every bit below keeps
                              // what it says, the host-settings word's p= / n= unchanged for the items already there)
-    soldier0=64,             // .. soldier0+14: support_call.h SupportWeapon k's two bodies (support_soldier.cpp)
+    soldier0=64,             // .. soldier0+16: support_call.h SupportWeapon k's two bodies (support_soldier.cpp)
+    zwVehicle0=96,           // .. zwVehicle0+9: zw_vehicle_catalog.h kZwVehicles[k], the Vehicler's vehicle (support_spawn.cpp)
     end=128,
 };
-inline constexpr int kBodyItems=41,kCatchItems=7,kSoldierItems=15,kLowBodies=40;
+inline constexpr int kBodyItems=41,kCatchItems=7,kSoldierItems=17,kLowBodies=40;
 // jet_internal.h Body's indexes this file names (static_assert against Body in preload_set.cpp).
 namespace body {
 enum : int { strike=0, fighter=1, bomber401=2, bomber501_2=3, interceptor=4, multirole=5, carrier=6, drone=7, blast=8,
@@ -58,11 +61,13 @@ constexpr Item Body(int k) noexcept {
 }
 constexpr Item Catch(int i) noexcept { return static_cast<Item>(static_cast<int>(Item::catch0)+i); }
 constexpr Item Soldier(int k) noexcept { return static_cast<Item>(static_cast<int>(Item::soldier0)+k); }
+constexpr Item ZwVehicle(int k) noexcept { return static_cast<Item>(static_cast<int>(Item::zwVehicle0)+k); }
+static_assert(static_cast<int>(Item::zwVehicle0)+kZwVehicleMost<=static_cast<int>(Item::end),"the Vehicler's vehicles fit");
 static_assert(static_cast<int>(Item::body0)+kLowBodies<=static_cast<int>(Item::catch0),"bodies before the catch files");
 static_assert(static_cast<int>(Item::bodyMore)+kBodyItems-kLowBodies<=static_cast<int>(Item::soldier0),
               "the further bodies before the soldiers");
 static_assert(static_cast<int>(Item::catch0)+kCatchItems<=static_cast<int>(Item::chute),"catch files before the chute");
-static_assert(static_cast<int>(Item::soldier0)+kSoldierItems<=static_cast<int>(Item::end),"soldiers fit");
+static_assert(static_cast<int>(Item::soldier0)+kSoldierItems<=static_cast<int>(Item::zwVehicle0),"soldiers before the Vehicler's vehicles");
 
 struct Set {
     std::uint64_t w[2]{};
@@ -91,7 +96,10 @@ struct Set {
 // launches its four fighters and its turrets fire their rounds. Every other row (the ground vehicles, the guns, the
 // player jets PJET_*: their own SGO) reaches nothing of the plugin's preload.
 inline constexpr std::wstring_view kCallPrefix=L"EDF6VC_CALL_";
+// The Vehicler's vehicle rows (zw_vehicle_catalog.h, its slot 0) bring their vehicle: the plugin makes it at the start
+// (zw_vehicle_dispatch.cpp), the game preloads nothing of it (the row is an inert accessory).
 inline void AddCallItems(std::wstring_view row,Set& out) noexcept {
+    if(const int kind=ZwVehicleKindOfRow(row);kind>=0){out.Add(ZwVehicle(kind));return;}
     if(row.substr(0,kCallPrefix.size())!=kCallPrefix)return;
     row.remove_prefix(kCallPrefix.size());
     struct Reach { std::wstring_view key; int bodies[4]; bool dnRounds; };
@@ -123,12 +131,14 @@ inline void AddCallItems(std::wstring_view row,Set& out) noexcept {
 // What every mission takes whatever the room can call: the rounds a vehicle of the player's may fire any time (a Proteus
 // may be called any time, ProteusRework switched on mid-mission), the parachute's canopy (an ejection out of any jet the
 // player flies), and every support soldier kind (the soldiers also crew the mission's own vehicles and the composition
-// panel picks any installed kind mid-mission: support_soldier.cpp keeps one flag for them all, so they are not narrowed).
+// panel picks any installed kind mid-mission: support_soldier.cpp keeps one flag for them all, so they are not narrowed),
+// with the vehicle a support Vehicler soldier gets (zw_crew_vehicle_logic.h kCrewKind: such a soldier may come any time).
 constexpr Set Always() noexcept {
     Set s;
     s.Add(Item::vehicleRounds);
     s.Add(Item::chute);
     for(int k=0;k<kSoldierItems;++k)s.Add(Soldier(k));
+    s.Add(ZwVehicle(zwcrew::kCrewKind));
     return s;
 }
 
@@ -138,6 +148,7 @@ constexpr Set All() noexcept {
     for(int k=0;k<kBodyItems;++k)s.Add(Body(k));
     for(int i=0;i<kCatchItems;++i)s.Add(Catch(i));
     for(int b=static_cast<int>(Item::chute);b<=static_cast<int>(Item::vehicleRounds);++b)s.Add(static_cast<Item>(b));
+    for(int k=0;k<kZwVehicleCount;++k)s.Add(ZwVehicle(k));
     for(int k=0;k<kSoldierItems;++k)s.Add(Soldier(k));
     return s;
 }
