@@ -60,6 +60,45 @@ class PrepRuleTests(unittest.TestCase):
         for name in ('ex_lantern_b_02', 'ex_lantern_b_03', 'ex_lantern_l_02', 'ex_lantern_r_02'):
             self.assertEqual(prep.bone_of(b, name), 'body', name)
         self.assertEqual(prep.bone_of(z, 'ex_decor_14'), 'cannon_main')
+        # docs/newclass-re/vehicler.md §1.2: the Vehicler's cars. The HSTV-L's cradle (gun_mask) and the MG on it elevate
+        # with the gun, its sprocket is the back station; the M247's twin guns each on its slide over one cradle; the
+        # MBT-70's hull node is `root`
+        h, y, t = prep.HSTVL, prep.M247, prep.MBT70
+        self.assertEqual(prep.bone_of(h, 'wheel_l_front'), 'tire_moveA_l')
+        self.assertEqual(prep.bone_of(h, 'wheel_r_05'), 'tire_moveF_r')
+        self.assertEqual(prep.bone_of(h, 'wheel_l_drive'), 'tire_moveG_l')
+        self.assertEqual(h.split_idler, 'tire_moveG')
+        for name in ('gun_mask', 'gun_mask_cable', 'hatch_04', 'bone_mg_twin_01'):
+            self.assertEqual(prep.bone_of(h, name), 'cannon_l', name)
+        for name in ('bone_turret_02', 'ex_decor_l_05', 'bone_mg_aa_v_01', 'ammo'):
+            self.assertEqual(prep.bone_of(h, name), 'cannon_main', name)
+        for name in ('hatch_01', 'ex_decor_l_01', 'suspension_l_01'):
+            self.assertEqual(prep.bone_of(h, name), 'body', name)
+        self.assertEqual(prep.bone_of(y, 'gun_barrel_02'), 'cannon_slide_l')
+        self.assertEqual(prep.bone_of(y, 'gun_barrel_01'), 'cannon_slide_r')
+        self.assertEqual(prep.bone_of(y, 'bone_gun'), 'cannon_l')
+        self.assertEqual(prep.bone_of(y, 'antenna_target_location'), 'doppler_radar')
+        self.assertEqual(prep.bone_of(y, 'antenna_target_location_mount'), 'cannon_main')
+        self.assertEqual(prep.bone_of(y, 'wheel_r_drive'), 'tire_moveH_r')
+        self.assertEqual(t.hull, 'root')
+        self.assertEqual(prep.bone_of(t, 'root'), 'body')
+        self.assertEqual(prep.bone_of(t, 'gun_barrel_01'), 'cannon_main')      # the remote 20 mm traverses only
+        self.assertEqual(prep.bone_of(t, 'bone_mg_gun_twin'), 'cannon_l')
+        self.assertEqual(t.stores['mg'][0], 'cannon_main')
+
+    def test_drop_materials_leaves_out_their_triangles(self) -> None:
+        src = prep.Source(path='x.obj', positions=np.zeros((3, 3)), uvs=np.zeros((1, 2)),
+                          tri_v=np.asarray([(0, 1, 2)] * 3), tri_t=np.zeros((3, 3), dtype=np.int64),
+                          tri_obj=np.asarray([0, 0, 1]), tri_mat=np.asarray([0, 1, 0]),
+                          objects=['vehicle#hull_1', 'vehicle#optic_2'], materials=['paint', 'glass'], mtl={})
+        v = prep.Vehicle(kind='k', folder='f', title='t', source_url='u', rules=[], turret=(0, 0, 0), trunnion={},
+                         barrels={}, drop_materials=('glass',))
+        prep.drop(v, src)
+        self.assertEqual(src.tri_mat.tolist(), [0, 0])
+        self.assertEqual(src.tri_obj.tolist(), [0, 1])
+        with self.assertRaises(ValueError):
+            prep.drop(prep.Vehicle(kind='k', folder='f', title='t', source_url='u', rules=[], turret=(0, 0, 0),
+                                   trunnion={}, barrels={}, drop_materials=('chrome',)), src)
 
     def test_collision_hulls_are_outward_convex_pieces(self) -> None:
         cube = np.asarray([(x, y, z) for x in (0, 1) for y in (0, 1) for z in (0, 1)], dtype=float)
@@ -146,6 +185,20 @@ class WtRigTests(unittest.TestCase):
         arrays[f'p{k}_pos'] = np.asarray([(0.6, 2.6, -2.05), (0.7, 2.6, -2.05), (0.6, 2.7, -2.05)], dtype=np.float32)
         found = hull_parts_in_turret(wt.Spec(spec.folder, info, arrays))
         self.assertEqual([f[0] for f in found], ['body.lamp'])
+
+    def test_the_vehicler_folders_keep_their_fittings_on_the_turret(self) -> None:
+        # docs/newclass-re/vehicler.md §1.2: shipped (RELEASE_MODELS) before make_tracked_combat builds them (their kinds
+        # not in FOLDERS yet): read straight from the repository's models/
+        for kind, name in (('hstvl', 'wt_hstvl'), ('m247', 'wt_m247'), ('mbt70', 'wt_mbt70')):
+            with self.subTest(kind=kind):
+                self.assertEqual(prep.VEHICLES[kind].folder, name)
+                d = ROOT / 'models' / name
+                info = json.loads((d / 'model.json').read_text(encoding='utf-8'))
+                self.assertEqual((info['format'], info['kind']), (wt.FORMAT, kind))
+                with np.load(d / 'model.npz', allow_pickle=False) as z:
+                    arrays = {k: z[k] for k in z.files}
+                self.assertEqual(hull_parts_in_turret(wt.Spec(str(d), info, arrays)), [])
+                self.assertTrue((d / 'LICENSE.txt').read_text(encoding='utf-8').count('CC-BY-4.0'))
 
 
 @unittest.skipUnless(_ready(), 'EDF6 Root.cpk or the War Thunder model folders are unavailable')

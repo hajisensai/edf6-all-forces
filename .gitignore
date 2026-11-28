@@ -29,6 +29,10 @@ models/*
 !models/wt_apocalypse/
 !models/wt_tos1/
 !models/emp_*/
+# 2026-11-28: the Vehicler's cars (the same tool, the same uploader: HSTV-L, M247, MBT-70)
+!models/wt_hstvl/
+!models/wt_m247/
+!models/wt_mbt70/
 
 # Development-only data (tools/make_edf41_objects.py --mother-dev): never committed, never in a release
 edf41port_dev/
