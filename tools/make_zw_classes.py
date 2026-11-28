@@ -50,6 +50,9 @@ class SoldierClass:
     factory: str     # xgs_scene_object_class, the name src/soldier_factory* registers
     stem: str        # zw_vehicler -> OBJECT/zw_vehicler_0N.sgo, MENUOBJECT/zw_vehicler_0N.SGO
     npc_weapon: str  # the support soldier's weapon (tools/zw_weapons.py row id: WEAPON/<ID>.SGO)
+    # Its second weapon in the same hand slot (the Ranger template's one slot already lists loads [0, 1]): the AI
+    # (src/npcai.cpp ChooseArm) takes whichever reaches the target; '' none.
+    npc_second: str = ''
 
     @property
     def name_key(self) -> str:
@@ -85,9 +88,14 @@ class SoldierClass:
     def npc_weapon_path(self) -> str:
         return f'app:/weapon/{self.npc_weapon}.sgo'
 
+    @property
+    def npc_weapon_paths(self) -> list[str]:
+        return [self.npc_weapon_path] + ([f'app:/weapon/{self.npc_second}.sgo'] if self.npc_second else [])
+
 
 CLASSES: tuple[SoldierClass, ...] = (SoldierClass(4, 'ZwVehicler', 'zw_vehicler', 'ZW_Gyrojet01'),
-                                     SoldierClass(5, 'ZwRuneBlade', 'zw_runeblade', 'ZW_RuneCarbine01'))
+                                     SoldierClass(5, 'ZwRuneBlade', 'zw_runeblade', 'ZW_RuneCarbine01',
+                                                  'ZW_RuneSaber01'))
 # The support soldiers' template (support_loadout.KINDS' rifle): an AI soldier, one weapon (AiSoldierRifle01) in one set.
 NPC_TEMPLATE = 'N601_COMMON_RANGER_AF'
 
@@ -301,8 +309,13 @@ def npc_sgo(template: bytes, c: SoldierClass) -> bytes:
     loads = doc.root.get('soldier_load_weapon')
     if not isinstance(loads, dsgo.Node) or len(loads.items) != 1 or not isinstance(loads.items[0], str):
         raise ValueError(f'{NPC_TEMPLATE} does not load exactly one weapon')
+    if c.npc_second:
+        slots = doc.root.get('soldier_weapon_slot')
+        if (not isinstance(slots, dsgo.Node) or len(slots.items) != 1 or not isinstance(slots.items[0], dsgo.Node)
+                or not isinstance(slots.items[0].items[0], dsgo.Node) or slots.items[0].items[0].items != [0.0, 1.0]):
+            raise ValueError(f'{NPC_TEMPLATE} has not one weapon slot of loads [0, 1]: no room for a second weapon')
     doc.root.set('xgs_scene_object_class', c.factory)
-    loads.items[0] = c.npc_weapon_path
+    loads.items[:] = c.npc_weapon_paths
     return dsgo.compact(doc)
 
 

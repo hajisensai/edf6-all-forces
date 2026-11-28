@@ -97,6 +97,10 @@ check([(f'OBJECT/{a.upper()}.SGO', f'OBJECT/{b.upper()}.SGO') for a, b in bodies
       [(c.npc(False), c.npc(True)) for c in zc.CLASSES], 'the support soldiers\' bodies are support_soldier.cpp\'s')
 check([c.npc_weapon for c in zc.CLASSES] == ['ZW_Gyrojet01', 'ZW_RuneCarbine01'] and
       all(c.npc_weapon in zw.IDS for c in zc.CLASSES), 'each support soldier carries its class\'s own weapon row')
+check([c.npc_second for c in zc.CLASSES] == ['', 'ZW_RuneSaber01'] and zc.CLASSES[1].npc_second in zw.IDS and
+      zc.CLASSES[1].npc_weapon_paths == ['app:/weapon/ZW_RuneCarbine01.sgo', 'app:/weapon/ZW_RuneSaber01.sgo'] and
+      zc.CLASSES[0].npc_weapon_paths == ['app:/weapon/ZW_Gyrojet01.sgo'],
+      'the Rune Blade support soldier: the carbine and the saber in its one slot; the Vehicler its pistol only')
 
 # ledger lifecycle in a scratch game dir: write, refresh, release
 with tempfile.TemporaryDirectory(prefix='edf6vc-zw-') as game:
@@ -127,7 +131,7 @@ else:
         for leader in (False, True):
             npc = dsgo.parse(built[c.npc(leader)]).root
             check(npc.get('xgs_scene_object_class') == c.factory and
-                  npc.get('soldier_load_weapon').items == [c.npc_weapon_path], f'{c.factory} support soldier: factory, weapon')
+                  npc.get('soldier_load_weapon').items == c.npc_weapon_paths, f'{c.factory} support soldier: factory, weapons')
     sgos = zw.build(lambda rel: cw.stock(game_root, rel))
     check(set(sgos) == {rel for w in zw.WEAPONS for rel in zw.files(w)}, 'every zw weapon SGO built')
     check(all(data[:4] == b'DSGO' or data[:3] == b'SGO' for data in sgos.values()), 'zw weapon SGOs are SGOs')
