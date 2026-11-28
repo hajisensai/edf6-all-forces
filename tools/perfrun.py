@@ -242,6 +242,38 @@ def presentmon_args(exe: str, pid: int, secs: int, csv: str) -> list[str]:
             '--v1_metrics', '--no_console_stats']
 
 
+def machine_times() -> tuple[int, int] | None:
+    """The machine's (busy, all) CPU time so far in 100 ns units, every core (GetSystemTimes: kernel includes idle);
+    None off Windows."""
+    if os.name != 'nt':
+        return None
+    import ctypes
+    idle, kernel, user = (ctypes.c_ulonglong(), ctypes.c_ulonglong(), ctypes.c_ulonglong())
+    if not ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+        return None
+    return kernel.value + user.value - idle.value, kernel.value + user.value
+
+
+# A leg whose clean window had the machine this busy (a share of all cores) with other processes using more than
+# CONTENDED_OTHERS cores is flagged: the game (below normal) may not have had the cores it wanted (2026-11-28 r2: a
+# check.py's ctest beside a bench, the game at 5% of a core and 921 ms frames, its numbers worthless)
+CONTENDED_BUSY = 0.9
+CONTENDED_OTHERS = 1.0
+
+
+def contention(run: dict, game_cpu_pct: float | None) -> str | None:
+    """Why `run`'s clean window was contended (the machine busy, others using cores), None when it was not or is
+    not known."""
+    m = run.get('machine')
+    if not m or not m.get('cores'):
+        return None
+    busy = m['busy_cores']
+    others = busy - (game_cpu_pct or 0) / 100
+    if busy < CONTENDED_BUSY * m['cores'] or others <= CONTENDED_OTHERS:
+        return None
+    return f'contended: the machine {busy:.1f} of {m["cores"]} cores busy, {others:.1f} by other processes'
+
+
 def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, marks: dict,
             presentmon: str | None = None) -> None:
     import drive
@@ -259,11 +291,16 @@ def _sample(out: str, warm: float, cpu_s: int, stacks_s: int, interval: int, mar
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     pm = (subprocess.Popen(presentmon_args(presentmon, pid, cpu_s, os.path.join(out, 'presentmon.csv')),
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if presentmon else None)
+    before = machine_times()
     r = subprocess.run([SAMPLER, str(pid), str(cpu_s), '0', os.path.join(out, 'cpu.txt')], capture_output=True, text=True)
     end = time.time()
+    after = machine_times()
     if r.returncode:
         marks['error'] = f'rip_sampler (CPU window) exit {r.returncode}: {r.stderr.strip()[-200:]}'
         return
+    if before and after and after[1] > before[1]:   # the sampler's attach (SymInitialize) in it too: a little long
+        cores = os.cpu_count() or 1
+        marks['machine'] = {'cores': cores, 'busy_cores': round((after[0] - before[0]) / (after[1] - before[1]) * cores, 2)}
     # rip_sampler times its own `seconds` after attaching (SymInitialize first) and exits right after: the window is
     # the last cpu_s seconds before it returned, not from its start
     marks['windows'] = {'cpu': [end - cpu_s, end]}
@@ -911,6 +948,9 @@ def legs_table(dirs: list[str]) -> str:
         except OSError:
             pass
         c = f'{cpu.get("total", sum(cpu.values())) / 10 / secs:.0f}' if cpu else ''
+        busy = contention(run, cpu.get('total', sum(cpu.values())) / 10 / secs if cpu else None)
+        if busy:
+            err = (err + '; ' if err else '**ERROR** ') + busy
         if not fs:
             out.append(f'| {name} | {scenario} | {warm} | no PERF rows | | | | {own} | '
                        f'{perf_report.objects_text(objs)} | {c} | {err} |')

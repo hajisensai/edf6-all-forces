@@ -19,7 +19,7 @@
   One check per worktree: a second one while the first is queued or running exits 3 at once.
 
 Why (the maintainer, 2026-11-10: 「太慢了 ... 特别吃性能，电脑很卡」):
-- Below-normal priority (Windows): this process and everything it starts (the compiler, ctest, every test, selftest's
+- Idle priority (Windows; below the perfrun game's below normal): this process and everything it starts (the compiler, ctest, every test, selftest's
   workers inherit it), so the desktop, the game and the editor keep the cores whenever they want them.
 - No more tests at once on the machine than it has cores (pylib/checklock.py core slots, one a test, shared test by
   test by every check and selftest.py): every worktree's session ran its own ctest -j 8 + selftest -j 8 at once, 16
@@ -372,7 +372,7 @@ def _main(argv: list[str], jobs: int) -> int:
     label = f'tools/check.py ({os.path.basename(ROOT)})'
     # the parts' output goes to their logs: a line every few minutes for whoever watches this run (pylib/heartbeat.py)
     with heartbeat.beating('check.py', lambda: heartbeat.parts_progress(results, logs)):
-        print(f'check.py: {ROOT}, {jobs} processes, below-normal priority; logs build/check-*.log', flush=True)
+        print(f'check.py: {ROOT}, {jobs} processes, idle priority; logs build/check-*.log', flush=True)
         defines, game = game_defines()
         print(f'check.py: native audits {"read " + game if game else "skip (no game found)"}', flush=True)
         if '--no-build' not in argv:

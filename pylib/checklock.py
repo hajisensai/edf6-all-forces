@@ -80,11 +80,13 @@ def children_die_with_me() -> None:
 
 
 def below_normal() -> None:
-    """This process below normal priority; on Windows every process it starts inherits the class."""
+    """This process at idle priority (the name kept: what it asks is "below everything the user runs"); on Windows
+    every process it starts inherits the class. Idle, not below normal: a perfrun's game runs below normal, and a
+    check's ctest beside it at the same class took its cores (2026-11-28: the game at 5% of a core, 921 ms frames)."""
     if os.name == 'nt':
         import ctypes
         k = ctypes.windll.kernel32
-        k.SetPriorityClass(k.GetCurrentProcess(), 0x4000)   # BELOW_NORMAL_PRIORITY_CLASS
+        k.SetPriorityClass(k.GetCurrentProcess(), 0x40)   # IDLE_PRIORITY_CLASS: below the game's BELOW_NORMAL
     else:
         with contextlib.suppress(OSError):
             os.nice(10)
