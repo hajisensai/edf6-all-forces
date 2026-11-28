@@ -36,11 +36,11 @@ def audit_source() -> None:
         text = f.read()
     rvas = {rva for rva, _, _ in sigs.SIGNATURES}
     for name in ('kRowCount', 'kGetRow', 'kFindRow', 'kLevelCap', 'kNodeChild', 'kNodeDouble', 'kNodeCount',
-                 'kNodeString', 'kNodeIsArray', 'kSpecEval', 'kTextLoad'):
+                 'kNodeString', 'kNodeIsArray', 'kSpecEval', 'kTextLoad', 'kClassCount', 'kClassSlots', 'kClassName'):
         m = re.search(rf'{name}=0x([0-9A-F]+)', text)
         check(bool(m) and int(m.group(1), 16) in rvas, f'weapon_equip.cpp {name} is a signed function')
     for const in ('kGsCapOn=0x14FC8', 'kGsEquipped=0x6E98', 'kGsPlayerStride=0x3E60', 'kGsClassStride=0x18',
-                  'kGsClass=0x6E90', 'kRowLevel=0x20', 'kGsText=0xD0'):
+                  'kGsClass=0x6E90', 'kRowLevel=0x20', 'kGsText=0xD0', 'kCfgClasses=0x20'):
         check(const in text, f'weapon_equip.cpp {const}')
 
 
@@ -57,6 +57,14 @@ def audit_code(img: bytes) -> None:
           'msg 4 sender: 0x119D1B0(system, 4, payload)')
     check(rel(0x8BB972, 7) == 0x20B2960, 'msg 4 sender: the UI system pointer at EDF+0x20B2960')
     check(rel(0x8BDA4D, 5) == 0x8BB920, 'confirm calls the msg 4 sender')
+    # The class table (docs/newclass-re/equip.md): the count is [[cfg+0x20]+4]; the name is 0xE3580's key through the
+    # text lookup 0x7A3500 on GS+0x130.
+    check(img[0xE34D0:0xE34D8] == bytes.fromhex('488B41208B4004C3'), 'class count: mov rax,[rcx+0x20]; mov eax,[rax+4]; ret')
+    check(img[0xE3680:0xE3684] == bytes.fromhex('4C8B4920') and img[0xE369C:0xE36A1] == bytes.fromhex('8B441034C3'),
+          'slot count: [cfg+0x20], the class element +0x34')
+    check(rel(0x959176, 7) == 0x20B2890 and img[0x95917D:0x959184] == bytes.fromhex('4881C130010000') and
+          rel(0x959184, 5) == 0xE3580 and rel(0x959197, 5) == 0x7A3500,
+          'class name: 0xE3580(GS+0x130, class), jmp 0x7A3500')
     check(rel(0x8BC86A, 5) == 0xD8850 and rel(0x8BC85A, 7) == 0x20B2890, 'cap predicate: 0xD8850(GS)')
     check(struct.unpack_from('<f', img, 0x1765A14)[0] == 0.25 and struct.unpack_from('<f', img, 0x1765A68)[0] == 100.0,
           'GetRow level constants 0.25f, 100.0f')
@@ -102,7 +110,7 @@ def audit_data(game) -> None:
     import sgo
     config = sgo.load(data=game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))
     have = tuple(tuple((s[0], tuple(s[2]), bool(s[3])) for s in c[4]) for c in config['SoldierInit'])
-    check(have == gen.SLOTS, 'gen_weapon_series SLOTS is CONFIG.SGO SoldierInit')
+    check(have == gen.STOCK_SLOTS, 'gen_weapon_series STOCK_SLOTS is CONFIG.SGO SoldierInit')
     table = dsgo.parse(game.read('WEAPON', 'WEAPONTABLE.SGO')).root.get('table').items
     stock = gen.stock_rows()
     check(len(table) == len(stock) == gen.STOCK_ROWS, 'stock row count')

@@ -72,6 +72,7 @@ import cpk  # noqa: E402
 import dsgo  # noqa: E402
 from i18n import is_zh, tr  # noqa: E402
 import edf41kills  # noqa: E402
+import make_zw_classes  # noqa: E402
 import mdb  # noqa: E402
 import modfiles  # noqa: E402
 import rootcpk  # noqa: E402
@@ -798,8 +799,8 @@ def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, di
 
 
 def text_table(data: bytes, lang: str, packs: tuple[Pack, ...] = PACKS) -> bytes:
-    """The game's text table with the packs' mode names and descriptions and the EDF4.1 kill counters' battle record
-    labels (other keys untouched)."""
+    """The game's text table with the packs' mode names and descriptions, the EDF4.1 kill counters' battle record
+    labels and the new player classes' names (make_zw_classes.TEXTS; other keys untouched)."""
     ver, members = sgo.read(data)
     for pack in packs:
         for kind in pack.kinds:
@@ -807,6 +808,7 @@ def text_table(data: bytes, lang: str, packs: tuple[Pack, ...] = PACKS) -> bytes
             members[name_key] = pack.name[lang]
             members[desc_key] = pack.desc[lang]
     edf41kills.add_texts(members, lang)
+    make_zw_classes.add_texts(members, lang)
     return sgo.write_depth_first(ver, members)
 
 
@@ -1163,6 +1165,51 @@ def install(root: str, built: tuple[dict[str, bytes], Contents, dict] | None = N
     return paths
 
 
+def install_texts(root: str) -> list[str]:
+    """The text tables' keys no pack owns (the EDF4.1 kill counters' labels, the new player classes' names:
+    edf41kills / make_zw_classes TEXTS) written while no pack build is (refused, or every pack opted out): the plugin's
+    classes read them whatever packs are installed. A table of ours keeps the packs' keys it has and what it replaced;
+    any other is the base (another mod's, else the game's) with the keys added and itself kept to put back. The packs'
+    install writes the same keys (text_table); remove() puts these back with the rest. The paths written."""
+    modfiles.refuse_while_running()
+    mpath = os.path.join(root, 'Mods', MANIFEST)
+    manifest = load_manifest(root)
+    kept = manifest.get('files', {})
+    game: rootcpk.Game | None = None   # opened only for a table that is nowhere in Mods
+    files: dict[str, bytes] = {}
+    entries: dict[str, dict] = {}
+    for lang, rel in TEXTS.items():
+        old = kept.get(rel)
+        on_disk = modfiles.read(rel_path(root, rel))
+        if ours(old, on_disk):
+            data = parsed(rel, lambda on_disk=on_disk, lang=lang: text_table(on_disk, lang, ()))
+            if data == on_disk:
+                continue
+            entries[rel] = {'sha': modfiles.sha256(data), 'original': old['original'], 'also': [modfiles.sha256(on_disk)]}
+        else:
+            if on_disk is None and game is None:
+                game = rootcpk.Game(root)
+            data = parsed(rel, lambda rel=rel, lang=lang, game=game: text_table(base_bytes(root, game, rel, manifest), lang, ()))
+            entries[rel] = {'sha': modfiles.sha256(data),
+                            'original': None if on_disk is None else base64.b64encode(on_disk).decode('ascii')}
+        files[rel] = data
+    if not files:
+        return []
+    content = Contents(manifest.get('content', 0), manifest.get('range', 0), manifest.get('edf41', 0))
+    legacy = manifest.get('legacy')
+    # As install(): the manifest first (old bytes and new both recognised), then the files, then only the new.
+    modfiles.save_json(mpath, manifest_record(content, {**kept, **entries}, legacy))
+    paths = []
+    for rel, data in files.items():
+        path = rel_path(root, rel)
+        modfiles.atomic_write(path, data)
+        paths.append(path)
+    for entry in entries.values():
+        entry.pop('also', None)
+    modfiles.save_json(mpath, manifest_record(content, {**kept, **entries}, legacy))
+    return paths
+
+
 def remove(root: str, *, remember_disabled: bool = False) -> tuple[list[str], list[str]]:
     """Puts back what each file was before (deleted if there was none): (restored or deleted, kept changed).
     A changed anchor preserves the whole dependency group and its recovery records. Other changed files stay
@@ -1226,7 +1273,10 @@ def disable(root: str) -> list[str]:
     if built is None and removal_blocked(root):
         raise Refused('模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能还原：保留任务包文件。')
     modfiles.atomic_write(os.path.join(root, 'Mods', DISABLED), b'Disabled by the user.\n')
-    return install(root, built) if built is not None else set_packs(root, False, False)
+    if built is not None:
+        return install(root, built)
+    done = set_packs(root, False, False)
+    return done + install_texts(root)   # no pack left: the keys no pack owns stay (install_texts)
 
 
 def enabled(root: str) -> bool:

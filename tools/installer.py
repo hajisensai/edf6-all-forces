@@ -696,6 +696,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_jets
     import edf41_objects
     import edf41_outfits
+    import make_zw_classes
+    import make_zw_vehicles
     import edf41_maps
     import make_xm_maps
     import worldmap_pack
@@ -855,6 +857,19 @@ def install(game: str, campaign_requested: bool = False) -> None:
     print(tr('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……',
              'Writing the call weapons (only this plugin\'s rows of the weapon table change; all written or none)...'))
     call_weapons.install(game, weapons)
+    # The new player classes' battle / menu SGOs and colour sets (plan-2026-11-28-new-classes: the SoldierInit the
+    # plugin adds names them; their weapon rows came with the call weapons, their texts come with the mission packs)
+    print(tr('写入新兵种（载具手、刻印剑士）的战斗与菜单 SGO、配色（模型暂用游骑兵的占位）……',
+             'Writing the new classes\' (Vehicler, Rune Blade) battle and menu SGOs and colour sets (the Ranger\'s models '
+             'stand in for now)...'))
+    for path in make_zw_classes.install(game, make_zw_classes.build(game)):
+        print(tr('写入', 'Writing'), path)
+    # The Vehicler's vehicles and their guns (pylib/zw_vehicles.py: the vehicle rows above name them, the plugin spawns
+    # them by src/zw_vehicles.inc); stock hulls' models stand in for now
+    print(tr('写入载具手的载具（HSTV-L、M247、MBT-70；模型暂用原版车体占位）……',
+             "Writing the Vehicler's vehicles (HSTV-L, M247, MBT-70; stock hulls' models stand in for now)..."))
+    for path in make_zw_vehicles.install(game, make_zw_vehicles.build(game)):
+        print(tr('写入', 'Writing'), path)
     # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
     # weapons' install has recorded it in the ledger; built before, a first upgrade from a version whose weapons
     # recorded it in their own manifest only would leave the 4.1 tank out (2026-10-12, real install).
@@ -968,6 +983,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print(make_edf5_campaign.summary(campaign))
         for group, path, why in campaign[2]['skipped']:
             print(tr('  跳过', '  Skipped'), group, path, why)
+    else:   # no pack this time (said why above): the texts no pack owns (the new classes' names, ...) all the same
+        try:
+            for path in make_edf5_campaign.install_texts(game):
+                print(tr('写入', 'Writing'), path)
+        except make_edf5_campaign.Refused as e:
+            print(tr('！ 文本表没有写入：', '! The text tables were not written:'), e)
     if bigmap is not None:
         for path in make_bigmap.install(game, built=bigmap):
             print(tr('写入', 'Writing'), path)
@@ -1075,6 +1096,8 @@ def uninstall(game: str) -> None:
     import make_jets
     import edf41_objects
     import edf41_outfits
+    import make_zw_classes
+    import make_zw_vehicles
     import edf41_maps
     import make_xm_maps
     import worldmap_pack
@@ -1138,7 +1161,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_stock_holds.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_c130.remove, make_helicarrier.remove, make_sedan.remove, make_aura_vehicles.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, worldmap_pack.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_stock_holds.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_c130.remove, make_helicarrier.remove, make_sedan.remove, make_aura_vehicles.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(functools.partial(make_tracked_combat.remove, kind=u.key) for u in (*xm_units.ported('heli'), *xm_units.ported('jet'))), *(functools.partial(make_xmorph.remove, kind=kind) for kind in make_xmorph.CARS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, make_zw_classes.remove, make_zw_vehicles.remove, edf41_maps.remove, make_xm_maps.remove, worldmap_pack.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

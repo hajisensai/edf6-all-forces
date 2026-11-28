@@ -65,6 +65,7 @@
 //    ini and the motion speak of is mirrored into it here (x, yaw and roll negated).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "frame_rate_view.h"
+#include "soldier_factory.h"
 #include "render_record.h"
 #include "edf/input_source.h"
 #include "edf_layout.h"
@@ -604,7 +605,7 @@ bool KeyInputAllowed(const unsigned char* human) noexcept {
 bool IsSoldier(const unsigned char* h) noexcept {
     const auto vt=At<const unsigned char*>(h,0);
     for(unsigned v:kSoldierVts)if(vt==image+v)return true;
-    return false;
+    return soldier::IsZwVtable(vt);   // classes 4 / 5 (their own vtables, src/soldier_factory.h)
 }
 
 M4 MatrixAt(const unsigned char* p) noexcept { M4 m;std::memcpy(m.m,p,sizeof(m.m));return m; }

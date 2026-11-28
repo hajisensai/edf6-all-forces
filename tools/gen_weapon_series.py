@@ -55,6 +55,7 @@ sys.path.insert(0, HERE)
 import call_weapons as cw  # noqa: E402
 import calls  # noqa: E402
 import ported_weapons as pw  # noqa: E402
+import zw_weapons as zw  # noqa: E402
 
 CSV = os.path.join(ROOT, 'docs', 'weapons.csv')
 ZH = os.path.join(ROOT, 'docs', 'weapon-names-zh.csv')
@@ -69,7 +70,7 @@ MODEL_WORDS = frozenset({'model', 'mk', 'mark', 'ver', 'type'})
 STOCK_ROWS = 1564
 
 # CONFIG.SGO SoldierInit[class][4]: (slot name, the categories it takes, one row may be in two slots of the class).
-SLOTS: tuple[tuple[tuple[str, tuple[int, ...], bool], ...], ...] = (
+STOCK_SLOTS: tuple[tuple[tuple[str, tuple[int, ...], bool], ...], ...] = (
     (('Weapon_Slot1', (0, 1, 2, 3, 4, 5, 6), False), ('Weapon_Slot2', (0, 1, 2, 3, 4, 5, 6), False),
      ('Weapon_SlotSupport2', (20, 23, 21, 22), False), ('Weapon_SlotSupport1', (7, 8, 9, 10), False)),
     (('Weapon_Slot1', (100, 101, 102, 103, 104, 105, 106), False),
@@ -86,6 +87,9 @@ SLOTS: tuple[tuple[tuple[str, tuple[int, ...], bool], ...], ...] = (
      ('Weapon_SlotFencerSupport', (206, 207, 208, 209), False),
      ('Weapon_SlotFencerSupport', (206, 207, 208, 209), False)),
 )
+# then the new classes 4 and 5 the plugin adds to SoldierInit (tools/zw_weapons.py SLOTS; plan-2026-11-28-new-classes)
+SLOTS = STOCK_SLOTS + zw.SLOTS
+assert len(STOCK_SLOTS) == zw.FIRST_CLASS
 FLAG_CALL, FLAG_INITIAL, FLAG_DLC = 1, 2, 4
 
 
@@ -204,11 +208,20 @@ def port_rows() -> list[dict]:
              'names': tuple(p.text[lang][0] for lang in LANGS)} for p in pw.PORTS]
 
 
+def zw_rows(stock: list[dict]) -> list[dict]:
+    """The new classes' rows (tools/zw_weapons.py): a none row named as its stock template, the rest by their texts."""
+    by_id = {r['id'].upper(): r for r in stock}
+    return [{'id': w.id, 'source': 0, 'category': w.category, 'raw': zw.LEVEL, 'flags': FLAG_INITIAL,
+             'names': tuple(w.text[lang][0] for lang in LANGS) if w.text else by_id[w.template.upper()]['names']}
+            for w in zw.WEAPONS]
+
+
 def rows() -> list[dict]:
-    """Every row in installed-table order (EDF6's, then call_weapons.plan_rows' appended order: calls, then ports)."""
+    """Every row in installed-table order (EDF6's, then call_weapons.plan_rows' appended order: calls, ports, then the
+    new classes' weapons)."""
     stock = stock_rows()
-    out = stock + call_rows(stock) + port_rows()
-    if [r['id'] for r in out[STOCK_ROWS:]] != list(calls.IDS + pw.IDS):
+    out = stock + call_rows(stock) + port_rows() + zw_rows(stock)
+    if [r['id'] for r in out[STOCK_ROWS:]] != list(calls.IDS + pw.IDS + zw.IDS):
         raise ValueError('the appended rows are not in call_weapons.plan_rows order')
     for i, r in enumerate(out):
         r['index'] = i
@@ -289,8 +302,8 @@ def write_names() -> int:
         raise SystemExit(f'the stock table has {len(table)} rows: want {STOCK_ROWS}')
     config = sgo.load(data=game.read('DEFAULTPACKAGE', 'CONFIG.SGO'))
     have = tuple(tuple((s[0], tuple(s[2]), bool(s[3])) for s in c[4]) for c in config['SoldierInit'])
-    if have != SLOTS:
-        raise SystemExit(f'SLOTS is not CONFIG.SGO SoldierInit: {have}')
+    if have != STOCK_SLOTS:
+        raise SystemExit(f'STOCK_SLOTS is not CONFIG.SGO SoldierInit: {have}')
     with open(ZH, 'w', encoding='utf-8-sig', newline='') as f:
         w = csv.writer(f, lineterminator='\n')
         w.writerow(['id', 'sgo_name', 'name_sc', 'name_cn'])

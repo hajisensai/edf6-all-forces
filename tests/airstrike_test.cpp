@@ -10,6 +10,7 @@
 
 namespace crew {
 unsigned char* image=nullptr;
+namespace wequip { int ClassCount() noexcept { return 4; } }   // weapon_equip.cpp (not linked): the stock classes
 Config config{};
 PlayerFix player{};
 bool supportSky=true,supportGround=true,supportMeasured=true;
@@ -56,6 +57,8 @@ ULONGLONG GameMs() noexcept { return gameMs; }
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept { return EXCEPTION_EXECUTE_HANDLER; }
 void SetMissionPackSaveHook(bool) noexcept {}             // edf5campaign.cpp: the packs' save rows (not this test's)
 void MigrateMissionPackSave(unsigned char*) noexcept {}
+int GrantSoldierClassWeapons(unsigned char*) noexcept { return -1; }   // soldier_classes.cpp (not this test's)
+void SetSoldierClassWeaponsHooked(bool) noexcept {}
 // weapon_records.cpp (not linked here): the native layout, 0x800 records at GS+0xEB50.
 std::uint32_t WeaponRecordCapacity() noexcept { return 0x800; }
 unsigned char* WeaponRecord(unsigned char* gs,std::uint32_t id) noexcept { return gs && id<0x800 ? gs+0xEB50+std::size_t{id}*12 : nullptr; }

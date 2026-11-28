@@ -45,6 +45,7 @@
 #include "support_warning.h"
 #include "commander.h"
 #include "commander_logic.h"
+#include "zw_vehicle_dispatch.h"
 #include <cwchar>
 #include <cstring>
 #include <new>
@@ -161,6 +162,7 @@ void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexc
     using support_net::RequestStatus;
     // A commander's NPC request (commander.cpp): its own, never the map's line nor a paid call's.
     if(CommanderRequestNotice(request,state))return;
+    if(ZwVehicleRequestNotice(request,state))return;   // a Vehicler's vehicle (zw_vehicle_dispatch.cpp)
     // The rescue's own request: told to the rescue only (its id taken from the accepted notice of its submission).
     if(rescueSubmitting && state==RequestStatus::accepted && request){rescueRequest=request;rescueEnded=false;return;}
     if(request && request==rescueRequest) {
@@ -913,6 +915,7 @@ const SupportConfig* LoadoutOfPeer(std::uint32_t peer,std::uint32_t catalog,cons
 support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalog,const float* target,
                                          std::uint64_t loadout,SupportPlan* out) noexcept {
     if(catalog==commander::kCatalog)return PlanCommander(peer,target,loadout,out);   // a commander's NPC (commander.cpp)
+    if(IsZwCatalog(catalog))return PlanZwVehicle(peer,catalog,target,loadout,out);  // a Vehicler's vehicle (zw_vehicle_dispatch.cpp)
     struct Scope {
         explicit Scope(const SupportConfig* c) noexcept { planConfig=c; }
         ~Scope() { planConfig=nullptr; }
@@ -932,6 +935,7 @@ bool Validate(const SupportPlan& plan) noexcept {
        (sortie::HasHeading(plan.run) && !SupportCatalogFlown(static_cast<int>(plan.catalogId))))return false;
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ValidateMissionCrewPlan(plan);
     if(plan.catalogId==commander::kCatalog)return ValidateCommanderPlan(plan);
+    if(IsZwCatalog(plan.catalogId))return ValidateZwVehiclePlan(plan);
     const bool dynamicDrone=plan.count==1 &&
         (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
     if(int strike=0;!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) ||
@@ -1316,6 +1320,7 @@ void Destroy(std::uint64_t id) noexcept {
     }
     DestroyMissionCrewPlan(id);
     DestroyCommanderPlan(id);
+    DestroyZwVehiclePlan(id);
 }
 // Aircraft `unit`'s place in its plan's formation (flight_spread.h Place): the plan makes its aircraft in slot order
 // (PlanSupport: AirFormationSlot 0, 1, ..., each one's crew after it), so its slot is the aircraft before it and its
@@ -1464,6 +1469,7 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
 bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ApplyMissionCrewPlan(id,plan,remote);
     if(plan.catalogId==commander::kCatalog)return ApplyCommanderPlan(id,plan,remote);
+    if(IsZwCatalog(plan.catalogId))return ApplyZwVehiclePlan(id,plan,remote);
     return SpawnDeployment(id,plan,remote,InSession());
 }
 bool Assign(Deployment& deployed) noexcept {
@@ -2066,6 +2072,7 @@ void SupportDispatchTick() noexcept {
     if(dispatchFrame==GameFrame())return;
     dispatchFrame=GameFrame();
     Configure();SupportNetTick();
+    ZwVehicleTick();          // the Vehicler's vehicles: made hulls activated with their transactions
     MissionCrewQuietTick();   // the mission AI vehicles' crews: quiet while aboard (every machine, its own copies)
     AirdropTestCall();
     if(offlinePending && !LocalAuthority()) {
@@ -2324,6 +2331,7 @@ void ResetSupportDispatch() noexcept {
     localRequest={};
     dispatchFrame=~ULONGLONG{0};
     ResetMissionCrewSupport();
+    ResetZwVehicles();
     ResetSupportNet();
     // MissionStart runs during preload, before native players are created. Installing lazily on the
     // first player frame would miss the creation callback and discard its admission observation.

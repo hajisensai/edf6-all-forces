@@ -9,6 +9,7 @@
 #include "weapon_equip.h"
 #include <Windows.h>
 #include <cstdint>
+#include <algorithm>
 #include <array>
 #include <cwchar>
 #include <iterator>
@@ -90,6 +91,11 @@ playerslots::RowInfo Lookup(const std::string& name) {
 bool WritePlayer(const preset::Player& p) {
     if(p.cls<0)return true;   // the preset does not hold the player's loadout
     if(wequip::RowCount()<0)return false;   // not ready or no weapon table yet
+    const int classes=(std::min)(wequip::ClassCount(),playerslots::kClasses);   // 4: the plugin's classes not in the game
+    if(p.cls>=classes) {
+        Log("ARMORY the preset's class %d is not in the game (%d classes: soldier_classes off?): not switched",p.cls,classes);
+        return false;
+    }
     const playerslots::Plan plan=playerslots::PlanWrites(p,[](const std::string& n){ return Lookup(n); });
     std::array<std::array<int,wlist::kSlotsMost>,playerslots::kClasses> want{};
     for(auto& c:want)c.fill(-1);
@@ -98,7 +104,7 @@ bool WritePlayer(const preset::Player& p) {
     int written=0,refused=0;
     std::array<int,wlist::kSlotsMost> shown{};
     shown.fill(-1);
-    for(int c=0;c<playerslots::kClasses;++c){
+    for(int c=0;c<classes;++c){   // a class the game lacks keeps its cells (the preset's names stay in the book)
         const wlist::ClassPlan r=wequip::SetClassSlots(0,c,want[static_cast<std::size_t>(c)]);
         written+=r.changed;
         for(std::size_t s=0;s<r.verdict.size();++s)
@@ -107,7 +113,7 @@ bool WritePlayer(const preset::Player& p) {
         if(c==plan.cls)shown=r.slots;
     }
     if(plan.cls>=0 && !wequip::SetClass(0,plan.cls))return false;
-    for(int s=0;s<4;++s)
+    for(int s=0;s<(std::min)(4,playerslots::SlotsOf(plan.cls));++s)
         if(shown[static_cast<std::size_t>(s)]>=0)roompreview::ShowPlayerWeapon(plan.cls,s,shown[static_cast<std::size_t>(s)]);
     Log("ARMORY the player's loadout switched: class %d, %d slots written (%d not in the weapon table, %d not owned, "
         "%d of a category the slot does not take, %d refused by the select rules (level cap / duplicate): left as they were)",
@@ -196,7 +202,9 @@ bool ReadPlayer(preset::Player* out) noexcept {
         const int cls=wequip::CurrentClass(0);
         if(cls<0)return false;
         out->cls=cls;
-        for(int c=0;c<playerslots::kClasses;++c) {
+        // the classes the game has now; the others (the plugin's 4 / 5 when soldier_classes is off) stored empty
+        const int classes=(std::min)(wequip::ClassCount(),playerslots::kClasses);
+        for(int c=0;c<classes;++c) {
             std::array<int,wlist::kSlotsMost> rows{};
             if(!wequip::ReadEquipped(0,c,&rows))return false;
             for(int s=0;s<playerslots::SlotsOf(c);++s) {

@@ -53,7 +53,10 @@
 #include "online_authority.h"
 #include "preload_set.h"
 #include "unlock_ported.h"
+#include "player_slots.h"
+#include "weapon_equip.h"
 #include "weapon_records.h"
+#include "soldier_classes.h"
 #include <cmath>
 #include <cstdarg>
 #include <cwchar>
@@ -436,6 +439,8 @@ void Grant(unsigned char* gs) noexcept {
     __try {
         const bool ported=Cfg().portedWeaponsUnlocked;
         const Granted granted=GrantCalls(gs,ported);
+        const int classWeapons=GrantSoldierClassWeapons(gs);   // classes 4 / 5's defaults (soldier_classes.h)
+        if(classWeapons>0)Log("CALLS %d weapons of classes 4 / 5 owned now",classWeapons);
         if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
         if(granted.moved>0)Log("CALLS %d support call weapons are on the map's bar now: no longer owned (one equipped goes back "
                                "to the default weapon)",granted.moved);
@@ -498,15 +503,17 @@ int SupportAirCallCount() noexcept { return kCallCount; }
 void AddEquippedCallItems(preload::Set& out) noexcept {
     constexpr unsigned kGameStatus=0x20B2890;
     constexpr std::size_t kWeapons=0x6E98,kClassStride=0x18;
-    constexpr int kSlots[4]={4,4,5,6};   // Ranger, Wing Diver, Air Raider, Fencer
+    // The classes the game has (the stock 4, with soldier_classes the plugin's 4 / 5), their slots from the rules.
+    const int counted=wequip::ClassCount();
+    const int classes=counted>0 ? (counted<playerslots::kClasses ? counted : playerslots::kClasses) : 4;
     __try {
         unsigned char* const gs=At<unsigned char*>(image,kGameStatus);
-        if(!gs || !Readable(gs+kWeapons,4*kClassStride) || !Readable(gs+kCfg+kTableRef,8))return;
+        if(!gs || !Readable(gs+kWeapons,static_cast<std::size_t>(playerslots::kClasses)*kClassStride) || !Readable(gs+kCfg+kTableRef,8))return;
         void* const table=gs+kCfg;
         if(!At<void*>(table,kTableRef))return;
         const std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
         alignas(8) unsigned char row[0x100];
-        for(int cls=0;cls<4;++cls)for(int i=0;i<kSlots[cls];++i) {
+        for(int cls=0;cls<classes;++cls)for(int i=0;i<playerslots::SlotsOf(cls);++i) {
             const auto id=At<std::int32_t>(gs,kWeapons+cls*kClassStride+i*4);
             if(id<0 || static_cast<std::uint32_t>(id)>=n)continue;
             reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,static_cast<std::uint32_t>(id));
@@ -654,6 +661,7 @@ bool InstallAirstrikes() noexcept {
     __try {
         bool script=false;
         const bool owned=InstallOwnership(script);
+        SetSoldierClassWeaponsHooked(owned);   // both 0xDC550 entries: the new classes' defaults owned before every pass
         SetMissionPackSaveHook(script);   // a mission pack is owned only while its saves are marked (edf5campaign.cpp Ours)
         // The stock radio calls (bombers, Vesta, Phobos, the satellites) are left wholly native: no support of the plugin's
         // is a weapon any more (they are the map's bar's).

@@ -2,6 +2,7 @@
 // never invents an entry, teleports towards the destination, or substitutes another vehicle.
 #pragma once
 #include "support_level.h"
+#include "zw_vehicle_catalog.h"
 #include <cstdint>
 
 namespace crew {
@@ -61,6 +62,16 @@ bool SupportDrillTransportReady() noexcept;
 // An empty drill transport at the verified entry, as SpawnSupportVehicle makes a stock hull (the same class and seats
 // required of what the game made); rolled back by DeleteSupportVehicle.
 unsigned char* SpawnSupportDrillTransport(const float* entry,const float* heading,const void* owner) noexcept;
+// The Vehicler's vehicles (zw_vehicle_catalog.h; docs/newclass-re/vehicler.md §2.2): the installer's files (Mods/OBJECT,
+// tools/make_zw_vehicles.py), preloaded when this mission's set has their item (preload_set_logic.h Item::zwVehicle0 + kind),
+// made as the stock hulls are (MakeHull: the class and seats of the generated table required of what the game made, the
+// guns' firepower marked on the vehicle's curve, its mission setup, friend team, level 1). Not wasteland-capable, armed.
+constexpr SupportVehicleSpec ZwHullSpec(const ZwVehicleSpec& v) noexcept {
+    return SupportVehicleSpec{v.row,v.sgo,v.seats,v.halfWidth,v.halfLength,v.height,v.vtable,false,true,v.curve};
+}
+// An empty hull of kind `kind` at the verified entry (zw_vehicle_dispatch.cpp plans it); rolled back by DeleteSupportVehicle.
+// nullptr: not ready (ZwVehicleReady), a bad entry / heading, or the game's object not the table's.
+unsigned char* SpawnZwVehicle(int kind,const float* entry,const float* heading,const void* owner) noexcept;
 bool SupportVehicleReady(SupportVehicleKind kind,SupportCrewMode mode) noexcept;
 // Creates and initializes an EMPTY hull at the already verified entry, sets friend team and records
 // its copy owner (owner is the parent; otherwise inherits SetSpawnOwner, as jet::Launch). Caller then
