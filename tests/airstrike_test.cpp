@@ -48,6 +48,8 @@ bool UltimateStart(const unsigned char* caller,const float*,float damage,std::ui
 }
 unsigned char* playerHuman=nullptr;
 unsigned char* PlayerHuman() noexcept { return playerHuman; }
+// zw_vehicle_gear.h: the Vehicler's progress unlocks (none in these tests).
+int GrantZwProgress(unsigned char*) noexcept { return 0; }
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
 bool InSession() noexcept { return testOnline; }

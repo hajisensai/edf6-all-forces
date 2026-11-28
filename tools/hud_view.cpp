@@ -402,6 +402,8 @@ bool PlayerRescueCue(RescueCue* o) noexcept { if(sceneRescueOn)*o=sceneRescue;re
 // The Vehicler's logistics block (vehicler_logistics.cpp VehiclerHudNow): on in the vehicler_logistics scenes.
 bool sceneVehiclerOn=false;VehiclerHudView sceneVehicler{};
 bool VehiclerHudNow(VehiclerHudView* o) noexcept { if(sceneVehiclerOn)*o=sceneVehicler;return sceneVehiclerOn; }
+// The Rune Blade's ether gauge (runeblade.cpp RuneBladeHudNow): off in every scene here.
+bool RuneBladeHudNow(RuneBladeHudView*) noexcept { return false; }
 namespace modules { bool ModuleNotice(wchar_t*,std::size_t) noexcept { return false; } }   // modules.cpp: a module taken off
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The aura trucks' rings and line (aura.cpp AuraViewNow): not drawn in any scene.
