@@ -294,10 +294,11 @@ int Extend(const char* in,const char* outPath) {
 }  // namespace
 
 void TestPrerequisites() {
-    Check(zwclass::MissingPrerequisite(true,true,true)==nullptr,"all three installed: classes 4 / 5 added");
-    Check(zwclass::MissingPrerequisite(false,true,true)!=nullptr,"no save stand-in: the stock four");
-    Check(zwclass::MissingPrerequisite(true,false,true)!=nullptr,"no factories: the stock four");
-    Check(zwclass::MissingPrerequisite(true,true,false)!=nullptr,"no per-type tables: the stock four");
+    Check(zwclass::MissingPrerequisite(true,true,true,true)==nullptr,"all four installed: classes 4 / 5 added");
+    Check(zwclass::MissingPrerequisite(false,true,true,true)!=nullptr,"no save stand-in: the stock four");
+    Check(zwclass::MissingPrerequisite(true,false,true,true)!=nullptr,"no factories: the stock four");
+    Check(zwclass::MissingPrerequisite(true,true,false,true)!=nullptr,"no per-type tables: the stock four");
+    Check(zwclass::MissingPrerequisite(true,true,true,false)!=nullptr,"no ownership pass: the stock four");
 }
 
 int main(int argc,char** argv) {

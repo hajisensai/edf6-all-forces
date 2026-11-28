@@ -18,11 +18,16 @@
 // The redirected read adds classes 4 / 5 only when the save's stand-in, the factories and the per-type tables are all in
 // (zwclass::MissingPrerequisite; those modules install before this one in kBeforeGameStatus): otherwise it returns the
 // stock nodes, logs why, and SoldierClassesActive() is false.
+//
+// The classes' default weapons are owned at every 0xDC550 pass (GrantSoldierClassWeapons, from airstrike.cpp's two
+// entries; the save load's ownership pass is a prerequisite of the read).
 #include "soldier_classes.h"
 #include "soldier_classes_logic.h"
 #include "soldier_factory.h"
 #include "soldier_save.h"
 #include "soldier_type_patches.h"
+#include "weapon_records.h"
+#include "unlock_ported.h"
 #include "sgo_build_logic.h"
 #include "edf_layout.h"
 #include "plugin_log.h"
@@ -67,6 +72,16 @@ constexpr unsigned kPlayCountBack=0x70FC36;  // je (the switch on the class)
 constexpr unsigned char kPlayCountBackSig[]={0x74,0x36};
 constexpr unsigned kPlayCountSkip=0x70FD82;  // inc ebx: the loop's next row
 constexpr unsigned char kPlayCountSkipSig[]={0xFF,0xC3};
+
+// 0xE1BA0 (GS+0x130, const wchar_t* name) -> the weapon table row, -1: mov [rsp+8],rbx; mov [rsp+0x10],rbp;
+// mov [rsp+0x18],rsi; push rdi; sub rsp,0x40; movups xmm0,[rcx+0x188] (the table, set once loaded)
+constexpr unsigned kFindRow=0xE1BA0;
+constexpr unsigned char kFindRowSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,
+                                       0x48,0x83,0xEC,0x40,0x0F,0x10,0x81,0x88,0x01,0x00,0x00};
+constexpr std::size_t kGsTable=0x130,kTableRef=0x188,kRecordSize=12;
+using FindRowFn=int(__fastcall*)(void*,const wchar_t*);
+std::atomic<bool> weaponsHooked{false};
+std::atomic<int> missingRowLogs{0};
 
 using SgoNodeFn=const unsigned char* (*)(void* doc,const wchar_t* key);
 using CountFn=int (*)(void* config);
@@ -145,7 +160,8 @@ const unsigned char* SoldierInitHook(void* doc,const wchar_t* key) noexcept {
     pendingFrom=pendingTo=nullptr;
     // The modules classes 4 / 5 need were installed (or refused) at load, before this one; this runs from the game status's
     // constructor on, so their state is final here.
-    if(const char* why=zwclass::MissingPrerequisite(SoldierSaveActive(),soldier::FactoriesReady(),SoldierTypePatchesActive())) {
+    if(const char* why=zwclass::MissingPrerequisite(SoldierSaveActive(),soldier::FactoriesReady(),SoldierTypePatchesActive(),
+                                                            weaponsHooked.load(std::memory_order_acquire))) {
         Refuse(why);
         return init;
     }
@@ -201,6 +217,36 @@ const wchar_t* SoldierClassNameKey(int type) noexcept {
 
 bool SoldierClassesActive() noexcept { return installed.load() && !refused.load(); }
 
+void SetSoldierClassWeaponsHooked(bool hooked) noexcept { weaponsHooked.store(hooked,std::memory_order_release); }
+
+int GrantSoldierClassWeapons(unsigned char* gs) noexcept {
+    if(!SoldierClassesActive() || !gs)return -1;
+    __try {
+        if(!Readable(gs+kGsTable+kTableRef,8) || !At<void*>(gs+kGsTable,kTableRef))return -1;   // no weapon table yet
+        const std::uint32_t most=WeaponRecordCapacity();
+        int owned=0;
+        for(const zwclass::ClassDef& c:zwclass::kClasses)
+            for(int s=0;s<c.slotCount;++s) {
+                const wchar_t* const name=c.slots[s].defaultWeapon;
+                const int row=reinterpret_cast<FindRowFn>(image+kFindRow)(gs+kGsTable,name);
+                unsigned char* const record=row>=0 && static_cast<std::uint32_t>(row)<most ? WeaponRecord(gs,static_cast<std::uint32_t>(row)) : nullptr;
+                if(!record || !Readable(record,kRecordSize,true)) {
+                    if(missingRowLogs.fetch_add(1)<8)
+                        Log("NEWCLASS weapon %ls: %s, not owned",name,row<0 ? "not in the weapon table" : "its record is out of reach");
+                    continue;
+                }
+                if(ported::Own(record)) {
+                    ++owned;
+                    Log("NEWCLASS weapon %ls (row %d) owned now",name,row);
+                }
+            }
+        return owned;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        Log("NEWCLASS owning the classes' weapons failed");
+        return -1;
+    }
+}
+
 bool InstallSoldierClasses() noexcept {
     if(Gs()) {
         Log("NEWCLASS REFUSED: the game status exists already (the mode data was read with the four stock classes)");
@@ -216,6 +262,11 @@ bool InstallSoldierClasses() noexcept {
             Log("NEWCLASS REFUSED: the class count read at EDF+0x%X is not the expected code",s.rva);
             return false;
         }
+    }
+    if(!Matches(kFindRow,kFindRowSig,sizeof(kFindRowSig))) {
+        Log("NEWCLASS REFUSED: the weapon table's find by name at EDF+0x%X is not the expected code (the classes' weapons "
+            "could not be owned)",kFindRow);
+        return false;
     }
     if(!Matches(kPlayCount,kPlayCountSig,sizeof(kPlayCountSig)) || !Matches(kPlayCountBack,kPlayCountBackSig,sizeof(kPlayCountBackSig)) ||
        !Matches(kPlayCountSkip,kPlayCountSkipSig,sizeof(kPlayCountSkipSig))) {
