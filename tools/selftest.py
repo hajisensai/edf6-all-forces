@@ -1364,7 +1364,8 @@ def supports_on_map_rows_are_placeholders() -> None:
     wrote under that name stays; every live row (vehicle requests, thrown drones, guns, the gravity gun) is its own,
     unchanged; no SGO is built for a support. The placeholders and the live rows stay where they are on a reinstall."""
     import ported_weapons as pw
-    templates = sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK))
+    import zw_weapons as zw
+    templates = sorted({*cw.templates(), *(p.template for p in pw.PORTS), *(w.template for w in zw.WEAPONS)} - set(STOCK))
     base_ids = STOCK + templates
 
     def table(key: str, rows: list[str]) -> bytes:
@@ -1395,7 +1396,9 @@ def supports_on_map_rows_are_placeholders() -> None:
                     request_curve=lambda game_root, family=cw.EROS_REQUESTS: [(0.0, 1.0, 1.0)],
                     vehicle_durability=lambda game_root, c: 1000.0, model_missing=lambda c: False,
                     record_room=lambda game_root: (cw.SAVE_WEAPONS, None)), \
-            patched(pw, build=lambda game_root, stock: ({}, {p.id: 'Unavailable: test' for p in pw.PORTS})):
+            patched(pw, build=lambda game_root, stock: ({}, {p.id: 'Unavailable: test' for p in pw.PORTS})), \
+            patched(zw, build_sgo=lambda w, template: f'sgo {w.id}'.encode(),
+                    text_row=lambda template, w, lang: dsgo.Node([w.id, 'zw', dsgo.Node([])])):
         def check_rows(ids: list[str], at: dict[str, int]) -> None:
             for c in calls.CALLS:
                 want = calls.retired_id(c.id) if cw.placeholder(c) else c.id
@@ -1439,7 +1442,7 @@ def supports_on_map_rows_are_placeholders() -> None:
                     modfiles.atomic_write(_mods(game, cw.vehicle_file(c)), b'jet')
             cw.install(game)
             ids = _placeholder_game_rows(game)
-            assert len(ids) == len(old_release), 'the table grew or shrank'
+            assert len(ids) == len(old_release) + len(zw.IDS), 'the table grew (other than by the zw rows) or shrank'
             check_rows(ids, old_at)
             assert [x for x in ids if cw.slot_of(x) is None] == base_ids + OTHER, 'another row moved'
             for c in on_map:
@@ -1682,7 +1685,8 @@ def install_keeps_rows() -> None:
                 if calls.slot_of(x):
                     assert plan.at[x] == i, f'{name}: {x} moved'
             import ported_weapons as pw   # every EDF5 weapon's row follows the calls' (edf5_weapons_rows)
-            assert plan.appended == [c for c in calls.IDS if c not in table] + list(pw.IDS), name
+            import zw_weapons as zw   # then the new classes' (call_weapons.plan_rows)
+            assert plan.appended == [c for c in calls.IDS if c not in table] + list(pw.IDS) + list(zw.IDS), name
             assert sorted(plan.at[c] for c in plan.appended) == list(range(len(table), len(table) + len(plan.appended)))
     fresh = cw.plan_rows(STOCK)
     assert [fresh.at[c] for c in calls.IDS] == list(range(len(STOCK), len(STOCK) + len(calls.IDS)))
@@ -5285,6 +5289,8 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
     files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS if not cw.placeholder(c)})   # a placeholder has none
+    import zw_weapons as zw   # the new classes' weapons (their rows when the table holds them)
+    files.update({rel: w.id.encode() for w in zw.WEAPONS if w.id in table_ids for rel in zw.files(w)})
     for c in calls.CALLS:
         if c.jet in cw.MODEL_VEHICLES:   # their install reads the request's own setup (call_weapons.vehicle_needs)
             files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
@@ -5395,7 +5401,8 @@ def sazabi_fallback_install_upgrade() -> None:
             patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
             patched(sazabi_model, model_dir=lambda: None), patched(vc, Game=lambda root: Game()):
         import ported_weapons as pw   # every install has a row per EDF5 weapon: here they wait for EDF5
-        files = _call_files(game, STOCK + _call_ids() + [pw.retired_id(x) for x in pw.IDS])
+        import zw_weapons as zw
+        files = _call_files(game, STOCK + _call_ids() + [pw.retired_id(x) for x in pw.IDS] + list(zw.IDS))
         arms = {f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.SAZABI_WEAPONS}
         for rel in arms:
             os.remove(_mods(game, rel))  # clean CI package: no Sazabi weapons have ever been installed
@@ -5652,6 +5659,9 @@ def pack_install_upgrade_uninstall() -> None:
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
                           check=lambda game: True))
+            # the new classes' SGOs (tools/make_zw_classes.py): its Root.cpk reader stubbed, its install / remove real
+            enter(patched(importlib.import_module('make_zw_classes'),
+                          build=lambda game: {'OBJECT/ZW_VEHICLER_01.SGO': b'zw battle'}))
             enter(patched(buildcache, recipes=lambda: {g: 'recipe' for g in buildcache.GROUPS}))
             enter(patched(installer.model_workers, group_workers=lambda: 1))   # the stand-in builders are this process's
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
@@ -9183,13 +9193,14 @@ def edf5_weapons_rows() -> None:
     are the same on every machine) after the calls, in the registry's order; a reinstall keeps each row or placeholder
     where it is; tail_start counts them as ours; retired_id picks each kind's."""
     import ported_weapons as pw
+    import zw_weapons as zw   # the new classes' rows after them (call_weapons.plan_rows)
     fresh = cw.plan_rows(STOCK)
-    assert fresh.appended == list(calls.IDS) + list(pw.IDS)
+    assert fresh.appended == list(calls.IDS) + list(pw.IDS) + list(zw.IDS)
     assert [fresh.at[x] for x in fresh.appended] == list(range(len(STOCK), len(STOCK) + len(fresh.appended)))
-    installed = STOCK + list(calls.IDS) + list(pw.IDS) + OTHER
+    installed = STOCK + list(calls.IDS) + list(pw.IDS) + list(zw.IDS) + OTHER
     again = cw.plan_rows(installed)
     assert all(again.at[x] == installed.index(x) for x in pw.IDS) and again.appended == []
-    pending = STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS] + OTHER
+    pending = STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS] + list(zw.IDS) + OTHER
     assert all(cw.plan_rows(pending).at[x] == pending.index(pw.retired_id(x)) for x in pw.IDS)
     ports = list(pw.IDS[:3])
     assert cw.tail_start(STOCK + ports) == len(STOCK) and cw.tail_start(STOCK + ports + OTHER) == len(STOCK) + 3 + 2
