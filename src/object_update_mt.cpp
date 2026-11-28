@@ -95,7 +95,8 @@ void GateHit(unsigned char* src,unsigned gate) noexcept {
     case Gate::kBody: engine.Flush(Reason::kBodyQuery);break;
     case Gate::kPose: engine.Flush(Reason::kPoseMode);break;
     case Gate::kSetPosition: engine.Flush(Reason::kSetPosition);break;
-    case Gate::kDelete: engine.Flush(Reason::kDelete);break;
+    // 0x118A1C2：bit2（已删）时原版直接跳到尾声 0x118A3C3，什么都不碰，不必等工作线程
+    case Gate::kDelete: if(!(src[0x18]&4))engine.Flush(Reason::kDelete);break;
     case Gate::kContainer: if(engine.IsPending(src))engine.Flush(Reason::kRecall);break;
     }
 }

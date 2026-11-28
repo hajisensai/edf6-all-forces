@@ -713,6 +713,7 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
     import gen
     gate = state['gate']
     i = 0
+    entry = -1   # the launch's mission entries so far (0: the first; a stay leg makes none)
     try:
         for i, leg in enumerate(legs):
             began = time.monotonic()
@@ -735,6 +736,7 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
                     return
                 marks['done'] = time.time()
                 continue
+            entry += 1
             if i:
                 if leg['ini'] or legs[i - 1]['ini']:   # this leg's settings (or the launch's again) before its way in
                     with gate.writing():
@@ -749,7 +751,7 @@ def run_legs(game: str, legs: list[dict], plans: list, warms: list[float], diffi
                 marks['asked'] = time.time()
                 drive.command(game, drive.next_command(mission, difficulties[i], opts['next_reboot']), gate)
             # in its mission once the mission runs (the loading over), every leg the same way: its warm-up from there
-            why = wait_next(game, i, seen, opts['leg_timeout'], mission, difficulties[i], gate)
+            why = wait_next(game, entry, seen, opts['leg_timeout'], mission, difficulties[i], gate)
             if why:
                 marks['error'] = why
                 return

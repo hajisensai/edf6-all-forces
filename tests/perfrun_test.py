@@ -1304,7 +1304,8 @@ def flip_run() -> None:
             pass
     names = ('game_pids', 'run', 'rows', 'command', 'replace_placed', 'restore_placed', 'anything_left')
     saved = {k: getattr(drive, k) for k in names}
-    gsaved = {k: getattr(gen, k) for k in ('installed', 'check_scenario', 'write_scenario', 'restore_scenario')}
+    gsaved = {k: getattr(gen, k) for k in ('installed', 'check_scenario', 'write_scenario', 'restore_scenario',
+                                      'rewrite_scenario')}
     sample_saved, population_saved = perfrun._sample, perfrun.wait_population
     d = tempfile.mkdtemp()
     try:
@@ -1343,7 +1344,7 @@ def flip_run() -> None:
         drive.anything_left = lambda game_: False
         gen.installed = lambda game_: True
         gen.check_scenario = lambda game_, plan: []
-        gen.write_scenario = lambda game_, plan: []
+        gen.write_scenario = gen.rewrite_scenario = lambda game_, plan: []
         gen.restore_scenario = lambda game_: True
         perfrun._sample = fake_sample
         perfrun.wait_population = lambda *a, **k: calls.append(('population',)) or None
@@ -1381,6 +1382,22 @@ def flip_run() -> None:
         check(bad == 1 and 'did not reload the ini' in why and
               [c[1] for c in calls if c[0] == 'sample'] == ['stress_1-A1'],
               'a stay leg the plugin never reloaded for: failed, not sampled as if it were B')
+        # two scenarios: the second's A1 is the launch's first `next` (NEXT 1), its three stay legs before it none
+        _, two = perfrun.options(['stress:1', 'stress:2', '--flip', 'ObjectUpdateMT=0', '--dll', 'installed',
+                                  '--ini', 'Debug=0'])
+        auto = ['[ 9.0 s] RUNNING: the mission runs (row 0, difficulty 1, mode 7, content id 0)']
+        drive.rows = lambda game_: list(auto)
+        drive.command = lambda *a, **k: (calls.append(('command',)), auto.append(
+            f"[ 1.0 s] NEXT {sum(1 for c in calls if c[0] == 'command')} entered: the mission runs (row 0, "
+            'difficulty 1, mode 7, content id 0)'))
+        calls.clear()
+        reload[0] = True
+        two['leg_timeout'] = 2.0
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc2 = perfrun.multi_run(game, two['legs'], os.path.join(d, 'out-two'), None, two)
+        check(rc2 == 0 and [c[1] for c in calls if c[0] == 'sample'] ==
+              [f'stress_{n}-{v}' for n in (1, 2) for v in ('A1', 'B1', 'A2', 'B2')] and
+              calls.count(('command',)) == 1, 'a second scenario after stay legs: in by NEXT 1, not NEXT 4')
         check([r['variant'] for r in runs] == ['A', 'B', 'A', 'B'] and [r['stay'] for r in runs] ==
               [False, True, True, True] and all('asked' in r for r in runs[1:]), "run.json: the leg's variant, stay")
         table = perf_report.flip_table([os.path.join(out, n) for n in ('stress_1-A1', 'stress_1-B1', 'stress_1-A2',
