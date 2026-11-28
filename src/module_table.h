@@ -12,6 +12,7 @@
 #include "native_body_math.h"
 #include "native_bone_update.h"
 #include "target_grid.h"
+#include "bullet_expand_cull.h"
 #include "scene.h"
 #include "boarding.h"
 #include "plugin_body.h"
@@ -84,6 +85,7 @@
 #include "soldier_save.h"
 #include "soldier_classes.h"
 #include "vehicler_foot.h"
+#include "vehicler_start.h"
 #include "weapon_equip.h"
 #include "loadout_store.h"
 #include "room_ui.h"
@@ -143,6 +145,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kFrameRate,"frame rate",kLoadOnly) \
     M(kNativePerformance,"native performance",kLoadOnly) \
     M(kTargetGrid,"target grid",kLoadOnly) \
+    M(kBulletExpandCull,"bullet expand cull",kLoadOnly) \
     M(kFsBudget,"fs budget",kLoadOnly) \
     M(kTeamCapacity,"team capacity",kLoadOnly) \
     M(kHavokProps,"havok props",kLoadOnly) \
@@ -233,6 +236,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kRoomPvp,"room pvp",kLoadOnly) \
     M(kLockon,"lockon",kLoadOnly) \
     M(kSeatSwitch,"seat switch",nullptr) \
+    M(kVehiclerStart,"vehicler start",nullptr) \
     M(kAllClassesRide,"all classes ride",kLoadOnly) \
     M(kBigWorld,"big world",nullptr) \
     M(kLegacyMap,"legacy map",kLoadOnly) \
@@ -370,6 +374,7 @@ constexpr InstallEntry kInstalls[]={
     }},
     {IP::kBeforeAppInit,Id::kFsBudget,&Install<&InstallFsLoaderBudget>},   // before the application's init starts CRI File System (fsbudget.cpp)
     {IP::kBeforeAppInit,Id::kTargetGrid,&Install<&InstallTargetGrid>},   // the nearest-enemy pick on team grids (target_grid.cpp)
+    {IP::kBeforeAppInit,Id::kBulletExpandCull,&Install<&InstallBulletExpandCull>},   // bullets' group expansion: only the parts their sweep reaches (bullet_expand_cull.cpp)
     {IP::kBeforeAppInit,Id::kTeamCapacity,&Install<&InstallTeamCapacity>}, // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     {IP::kBeforeAppInit,Id::kHavokProps,&Install<&InstallHavokProps>},     // before the application's init (so before any hknpWorld): the event dispatcher's uint32 indexes
     {IP::kBeforeAppInit,Id::kAiWorldCapacity,&Install<&InstallAiWorldCapacity>},   // before any mission makes an ai::World (aiworld_capacity.cpp): 0xFFFE pathfinding agents, not 1024
@@ -461,6 +466,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kFeatures,Id::kRoomPvp,&Install<&InstallRoomPvp>},        // the room's start held until every member acknowledged the PvP lock (room_pvp.cpp)
     {IP::kFeatures,Id::kLockon,&Install<&InstallLockon>},          // every lock-on weapon's search order: the player's nearest the view first
     {IP::kFeatures,Id::kSeatSwitch,&Install<&InstallSeatSwitch>},  // the player moving between seats (the stock board button's steps, checked)
+    {IP::kFeatures,Id::kVehiclerStart,&Install<&InstallVehiclerStart>},   // the Vehicler's start seat: the stock ride's natives checked (vehicler_start.cpp)
     {IP::kFeatures,Id::kAllClassesRide,&Install<&InstallAllClassesRide>},   // every class in every seat: before any mission makes a vehicle (the seat build is in its constructor)
     {IP::kFeatures,Id::kBigWorld,&Install<&InstallBigWorld>},
     {IP::kFeatures,Id::kLegacyMap,[](const LoadContext&) noexcept {Log("LEGACYMAP collision migration hooked=%d",InstallLegacyMap());}},   // EDF4.1 maps (plan P6)
@@ -489,6 +495,7 @@ constexpr InstallEntry kInstalls[]={
     {IP::kMission,Id::kAirstrikes,[](const LoadContext&) noexcept {Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());}},
     {IP::kMission,Id::kCrew,[](const LoadContext&) noexcept {
         if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");}},
+    {IP::kLast,Id::kBulletExpandCull,&Install<&InstallBulletExpandCullSettle>},   // after damagestats' settle redirect: chains it, arms the cut
     {IP::kLast,Id::kPerfProbe,&Install<&perfprobe::Install>},      // last: it chains call sites other hooks redirect at load (perf_probe.h)
     {IP::kLast,Id::kSyncLoad,&Install<&syncload::Install>},        // after it: the game thread is the frame anchor's (sync_load_probe.h)
 };
@@ -557,6 +564,7 @@ constexpr ResetEntry kResets[]={
     {RP::kMissionState,Id::kRoomUi,&Call<&ResetRoomUi>},   // the room / HQ screen is gone: its menu and room sync go on the next screen frame
     {RP::kMissionState,Id::kPayload,&Call<&ResetPayload>},
     {RP::kMissionState,Id::kSeatSwitch,&Call<&ResetSeatSwitch>},
+    {RP::kMissionState,Id::kVehiclerStart,&Call<&ResetVehiclerStart>},
     {RP::kMissionState,Id::kGear,&Call<&ResetGear>},
     {RP::kMissionState,Id::kJetSound,&Call<&ResetJetSound>},
     {RP::kMissionState,Id::kVehicleSound,&Call<&ResetVehicleSound>},
@@ -604,6 +612,7 @@ constexpr TickEntry kTicks[]={
     {TP::kAfterHudPublish,Id::kBigWorld,&Call<&BigWorldProbe>},
     {TP::kAfterHudPublish,Id::kPlayArea,&Call<&PlayAreaTick>},   // the walls where the map's ground ends (playarea.cpp)
     {TP::kAfterHudPublish,Id::kSupportDispatch,&Call<&SupportDispatchTick>},
+    {TP::kAfterHudPublish,Id::kVehiclerStart,&Call<&VehiclerStartTick>},   // after the dispatch's: its made hulls activated first
     {TP::kAfterHudPublish,Id::kPlayerJet,&Call<&PlayerEjectTick>},
     {TP::kAfterHudPublish,Id::kView,&Call<&ViewDiagTick>},   // the grey-map diagnosis (viewdiag.cpp)
     {TP::kAfterHudPublish,Id::kBoarding,&Call<&BoardingTick>},
