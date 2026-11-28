@@ -36,6 +36,7 @@
 #include "qmark.h"
 #include "qmark_protocol.h"
 #include "enemy_control_protocol.h"
+#include "runeblade.h"
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -216,6 +217,7 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(SupportPointsNetChannel());
     plugin_net::RegisterChannel(JetLeverNetChannel());
     plugin_net::RegisterChannel(AuraNetChannel());
+    plugin_net::RegisterChannel(RuneBladeNetChannel());
 }
 // A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
 // said once a magic (a few magics), never once a message.

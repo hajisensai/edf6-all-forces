@@ -85,6 +85,7 @@
 #include "soldier_save.h"
 #include "soldier_classes.h"
 #include "vehicler_foot.h"
+#include "runeblade.h"
 #include "vehicler_start.h"
 #include "weapon_equip.h"
 #include "loadout_store.h"
@@ -255,6 +256,7 @@ constexpr const char* kLoadOnly="install only: its hooks and the addresses they 
     M(kEdf41Mother401,"edf41 mother401",kLoadOnly) \
     M(kSoldierFactory,"soldier factory",kLoadOnly) \
     M(kVehiclerFoot,"vehicler foot",kLoadOnly) \
+    M(kRuneBlade,"runeblade",kLoadOnly) \
     M(kSoldierTypePatches,"soldier type patches",kLoadOnly) \
     M(kEnemyControlRadar,"enemy control radar",kLoadOnly) \
     M(kControlledPvpSpawn,"controlled pvp spawn",kLoadOnly) \
@@ -357,6 +359,7 @@ constexpr InstallEntry kInstalls[]={
     // the Vehicler on foot (vehicler_foot.cpp): its dash held back over AssultSoldier's live frame slot (the clones copy it),
     // and the bullet falloff gate widened to AmmoDamageReduce a > 1 (the Gyrojet's damage growing with its flight)
     {IP::kBeforeGameStatus,Id::kVehiclerFoot,&Install<&InstallVehiclerFoot>},
+    {IP::kBeforeGameStatus,Id::kRuneBlade,&Install<&InstallRuneBlade>},
     // six player classes (soldier_classes.cpp): before the game status, whose constructor reads the mode data's
     // SoldierInit (SetMode 0xDC460 from 0xD6722)
     {IP::kBeforeGameStatus,Id::kSoldierClasses,&Install<&InstallSoldierClasses>},

@@ -31,6 +31,7 @@
 #include "highcam.h"
 #include "sightzoom_api.h"
 #include "subcarrier.h"
+#include "runeblade.h"
 
 namespace crew {
 namespace hudi {
@@ -495,6 +496,7 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
 
 #include "cockpit_screens.inc"
 namespace hudi {
+#include "hud_runeblade.inc"
 
 // The controlled enemy's HUD in the player's place (the user, 2026-10-19: "操控怪物的时候玩家hud没有改成怪物的hud"):
 // stockgauge.cpp hides the player's armor gauge and weapon gauges for the lease; here, where they were, the enemy's
@@ -801,6 +803,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         ModuleBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         AuraHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        RuneBladeHud(drawer,ctx,t,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(fresh)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
