@@ -33,6 +33,13 @@ for name, (n, digest) in zw.RELEASED.items():
     check(len(zw.IDS) >= n and hashlib.sha256('\n'.join(zw.IDS[:n]).encode()).hexdigest() == digest,
           f'{name}: the released rows moved')
 check(max(n for n, _ in zw.RELEASED.values()) == len(zw.IDS), 'a new row is released')
+check(zw.IDS[:5] == ('ZW_VehicleNone', 'ZW_Gyrojet01', 'ZW_MeleeNone', 'ZW_RuneCarbine01', 'ZW_SupportNone'),
+      'stage 1 rows where they were (vehicler stage 2 appends after them)')
+counts = sorted(n for n, _ in zw.RELEASED.values())
+check(counts == sorted(set(counts)), 'each release a longer prefix')
+# vehicle rows (vehicler stage 2): inert vehicle-slot tags; their vehicles are pylib/zw_vehicles.py's (tests/zw_vehicles_test)
+check(all(w.category == 400 and w.template == zw.NONE_TEMPLATE for w in zw.WEAPONS if w.kind == 'vehicle'),
+      'vehicle rows: category 400 from aSupportNone')
 others = set(calls.IDS) | set(pw.IDS) | {pw.retired_id(x) for x in pw.IDS}
 check(not (set(zw.IDS) | {zw.retired_id(x) for x in zw.IDS}) & others, 'zw rows apart from the calls / ported rows')
 check(all(zw.retired_id(x).startswith(calls.RETIRED_PREFIX) and zw.retired_id(x) != x for x in zw.IDS),

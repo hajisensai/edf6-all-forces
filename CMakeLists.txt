@@ -1186,6 +1186,8 @@ add_test(NAME cockpit_tub COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/t
 add_test(NAME cockpit_panoramic COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_panoramic_test.py")
 # The new player classes' weapon rows and resources (tools/zw_weapons.py, tools/make_zw_classes.py); the Root.cpk part skips without the game.
 add_test(NAME zw_classes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_classes_test.py")
+# The Vehicler's vehicles (pylib/zw_vehicles.py, tools/make_zw_vehicles.py) and src/zw_vehicles.inc being current.
+add_test(NAME zw_vehicles COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/zw_vehicles_test.py")
 add_test(NAME texshare COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/texshare_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
