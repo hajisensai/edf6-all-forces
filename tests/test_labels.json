@@ -1192,7 +1192,8 @@
     "plugin-hud",
     "plugin-native",
     "plugin-net",
-    "plugin-ports"
+    "plugin-ports",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -6257,7 +6258,8 @@
   "preload_set": {
    "labels": [
     "plugin-core",
-    "plugin-native"
+    "plugin-native",
+    "plugin-support"
    ],
    "scripts": []
   },
@@ -9327,6 +9329,14 @@
    "scripts": [
     "tests/zw_classes_test.py"
    ]
+  },
+  "zw_dispatch": {
+   "labels": [
+    "plugin-core",
+    "plugin-native",
+    "plugin-support"
+   ],
+   "scripts": []
   },
   "zw_vehicles": {
    "labels": [

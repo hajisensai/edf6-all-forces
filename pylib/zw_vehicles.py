@@ -15,12 +15,18 @@ found); `todo` lists what the vehicle is meant to have and this stage does not b
                force factor (TankBase 0x67FB00, docs/vehicle-top-speed-re.md), [2] the guns
   envelope     (half width, half length, height) about the native origin in metres, the stock MDB's bounds rounded out
                (src/support_spawn.h kSupportVehicles does the same; tests/zw_vehicles_test.py reads them back)
+  curve        the stock request curve its guns' damage goes by with the support level (src/support_level.h Curve,
+               support_firepower.h: the plugin marks the vehicle as it marks a ground support tank), its growth over the
+               campaign: the SGO damage is the level-1 tank's order, the level multiplies it (0.7 .. 23 on 'blacker').
+               The HP does not grow (support_firepower.h: the game's own, unlevelled)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
+CURVES = ('eros', 'blacker', 'grape')   # src/support_level.h enum class Curve
+LOGISTICS_GAUGE = 40   # the logistics gauge's size (src/zw_vehicle_catalog.h kZwLogisticsGauge): one full slot
 NAME_KEYS = {'JA': 'name.ja', 'EN': 'name.en', 'CN': 'name.cn', 'KR': 'name.kr', 'SC': 'name.sc'}
 
 # The native vehicle classes a hull may be, and their vtables (EDF.dll 0x678CCB46): what src/zw_vehicles.inc gives the
@@ -62,7 +68,9 @@ class ZwVehicle:
     force: float                 # setup[1][2]
     guns: tuple[Gun, ...]        # in the stock setup's weapon order, one for each stock weapon
     envelope: tuple[float, float, float]
-    logistics_cost: int          # logistics points a resupply of it costs (vehicler.md §3.2; first numbers)
+    logistics_cost: int          # its price: logistics points a resupply of it costs, by vehicle (the maintainer 2026-11-28:
+                                 # light ones cheap, heavy dear; HSTV-L / M247 about half the gauge, MBT-70 a full one)
+    curve: str = 'blacker'       # src/support_level.h Curve its guns' damage goes by (CURVES)
     state: str = 'placeholder'   # its model: 'placeholder' (the stock hull's) until its own is made
     todo: tuple[str, ...] = field(default=())
 
@@ -110,10 +118,10 @@ MBT70_GUN = Gun('EDF6VC_ZW_MBT70_GUN', 'V_505TANK_CANNON01', {
 VEHICLES: tuple[ZwVehicle, ...] = (
     # V1 HSTV-L: the fast one (V505's 10 m/s -> 22; the stock 18 m/s requests' force)
     ZwVehicle('ZW_V1_HSTVL', 'EDF6VC_ZW_HSTVL', 'V505_TANK', 'Vehicle505_Tank', 1, durability=700.0, speed=22.0,
-              force=0.025, guns=(HSTVL_GUN,), envelope=(1.61, 5.60, 2.63), logistics_cost=25),
+              force=0.025, guns=(HSTVL_GUN,), envelope=(1.61, 5.60, 2.63), logistics_cost=20),
     # V2 M247: early anti-air (the stock flak hull; its stock requests run 10..30 m/s)
     ZwVehicle('ZW_V2_M247', 'EDF6VC_ZW_M247', 'V603_FLAK', 'Vehicle603_Flak', 1, durability=550.0, speed=12.0,
-              force=0.025, guns=(M247_GUN_L, M247_GUN_R), envelope=(1.56, 4.11, 3.76), logistics_cost=30),
+              force=0.025, guns=(M247_GUN_L, M247_GUN_R), envelope=(1.56, 4.11, 3.76), logistics_cost=20),
     # V3 MBT-70: the balanced main tank, heavier and slower than V1 (the stock 14 m/s requests' force)
     ZwVehicle('ZW_V3_MBT70', 'EDF6VC_ZW_MBT70', 'V505_TANK', 'Vehicle505_Tank', 1, durability=1400.0, speed=14.0,
               force=0.0125, guns=(MBT70_GUN,), envelope=(1.61, 5.60, 2.63), logistics_cost=40,

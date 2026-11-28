@@ -5,6 +5,7 @@ mission_setup == vehicle_setup, class / seats / vtable as the table says, each g
 envelope covering the stock model's bounds. Plain asserts: python tests/zw_vehicles_test.py"""
 from pathlib import Path
 import os
+import re
 import sys
 import tempfile
 
@@ -44,6 +45,10 @@ for v in zv.VEHICLES:
     check(v.cls in zv.CLASS_VTABLES and v.seats >= 1 and all(x > 0 for x in v.envelope), f'{v.row}: spec')
     check(v.state == 'placeholder', f'{v.row}: stage 2 model is a placeholder')
     check(v.logistics_cost > 0 and v.speed > 0 and v.durability > 0, f'{v.row}: numbers')
+    check(v.curve in zv.CURVES, f'{v.row}: a firepower curve the plugin has')
+    check(0 < v.logistics_cost <= zv.LOGISTICS_GAUGE, f'{v.row}: its price fits the gauge')
+gauge = re.search(r'kZwLogisticsGauge=(\d+)u', (ROOT / 'src' / 'zw_vehicle_catalog.h').read_text(encoding='utf-8'))
+check(gauge is not None and int(gauge.group(1)) == zv.LOGISTICS_GAUGE, 'the plugin gauge is the registry one')
 check(any('液压' in t for t in zv.BY_ROW['ZW_V3_MBT70'].todo), 'V3: hydraulic suspension left as todo')
 check(all(g.values['LockonTargetType'] == zv.MARK_AIR for g in zv.BY_ROW['ZW_V2_M247'].guns), 'V2: radar air mark')
 check(zv.BY_ROW['ZW_V1_HSTVL'].speed > max(v.speed for v in zv.VEHICLES if v.row != 'ZW_V1_HSTVL'), 'V1 fastest')

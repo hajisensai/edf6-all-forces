@@ -36,6 +36,7 @@ using CreateFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
 using SetupFn=void(__fastcall*)(void*,void*);
 bool profile=false,preloaded[kSupportVehicleCount]{},broken[kSupportVehicleCount]{};
 bool drillPreloaded=false,drillBroken=false;   // the drill transport (support_spawn.h kSupportDrillTransport)
+bool zwPreloaded[kZwVehicleCount]{},zwBroken[kZwVehicleCount]{};   // the Vehicler's vehicles (zw_vehicle_catalog.h)
 // Only support-created objects may be rolled back; ObjRef rejects expired/reused addresses.
 ObjRef created[64]{};
 
@@ -89,7 +90,10 @@ bool ApplyMissionSetup(unsigned char* v) noexcept {
 void PreloadSupportVehicles() noexcept {
     for(auto& p:preloaded)p=false;
     drillPreloaded=false;
+    for(auto& p:zwPreloaded)p=false;
     for(auto& ref:created)ref=ObjRef{};
+    // This machine's players' Vehicler vehicle this mission (the request's kind: vehicler_start, M3).
+    SnapshotZwVehicles();
     profile=CheckProfile();
     if(!profile){Log("SUPPORT ground: native spawn profile mismatch, disabled");return;}
     __try {
@@ -112,9 +116,22 @@ void PreloadSupportVehicles() noexcept {
             QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kSupportDrillTransport.sgo);
             drillPreloaded=true;
         } else if(!drillBroken)Log("SUPPORT ground: Mods/OBJECT/%ls not installed: no drill transport underground (reinstall)",kSupportDrillTransportFile);
+        // The Vehicler's vehicles: the installer's files too (tools/make_zw_vehicles.py). Not there: a broken install,
+        // logged; that vehicle then does not come (the player walks in), nothing stands in for it.
+        for(int k=0;k<kZwVehicleCount;++k) {
+            if(zwBroken[k] || !preload::Want(preload::ZwVehicle(k)))continue;
+            if(!EDF6_SUPPORT_SPAWN_MOD_FILE(L"OBJECT",kZwVehicles[k].file)) {
+                Log("SUPPORT ground: Mods/OBJECT/%ls not installed: no %ls this mission (reinstall)",kZwVehicles[k].file,kZwVehicles[k].row);
+                continue;
+            }
+            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreload)(mgr,kZwVehicles[k].sgo,2,-1);
+            QueueVehicleWeapons(mgr,reinterpret_cast<VehicleWeaponPreloadFn>(image+kPreload),kZwVehicles[k].sgo);
+            zwPreloaded[k]=true;
+        }
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         for(auto& p:preloaded)p=false;
         drillPreloaded=false;
+        for(auto& p:zwPreloaded)p=false;
         Log("SUPPORT ground: mission preload fault, all ground calls disabled for this mission");
     }
 }
@@ -126,6 +143,9 @@ bool SupportVehicleReady(SupportVehicleKind kind,SupportCrewMode mode) noexcept 
 }
 
 bool SupportDrillTransportReady() noexcept {return profile && drillPreloaded && !drillBroken;}
+bool ZwVehicleReady(int kind) noexcept {
+    return kind>=0 && kind<kZwVehicleCount && profile && zwPreloaded[kind] && !zwBroken[kind] && SupportFirepowerReady();
+}
 
 namespace {
 // One hull of `row` (a stock row, or the drill transport): created at the entry, checked to be the class and seats the
@@ -190,6 +210,11 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind kind,SupportCrewMode mode,
 unsigned char* SpawnSupportDrillTransport(const float* entry,const float* heading,const void* owner) noexcept {
     if(!SupportDrillTransportReady())return nullptr;
     return MakeHull(kSupportDrillTransport,drillPreloaded,drillBroken,entry,heading,owner,nullptr);
+}
+
+unsigned char* SpawnZwVehicle(int kind,const float* entry,const float* heading,const void* owner) noexcept {
+    if(!ZwVehicleReady(kind))return nullptr;
+    return MakeHull(ZwHullSpec(kZwVehicles[kind]),zwPreloaded[kind],zwBroken[kind],entry,heading,owner,nullptr);
 }
 
 // airdrop.cpp: a vehicle the game's container made for the plugin's transport plane gets the same setup step.
