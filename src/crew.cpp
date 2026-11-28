@@ -45,6 +45,7 @@
 #include "transport.h"
 #include "perf_probe.h"
 #include "perf_census.h"
+#include "perf_hud.h"
 #include "aura.h"
 #include "pvp.h"
 #include "enemy_control.h"
@@ -960,6 +961,7 @@ void InstallInputs() noexcept {
     Log("HOOK inputs=%d",hooked);
 }
 }  // namespace
+int TeamObjectCount(std::int32_t team) noexcept { return TeamObjects(team); }
 
 // Both the local Soldier pre-update and vehicle inputs use this one scene-clock boundary. In a mission with no
 // vehicles, the local player still advances PVP, thermal cleanup, HUD publication and support; repeated actors do not.

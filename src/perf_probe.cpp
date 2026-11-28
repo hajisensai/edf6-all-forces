@@ -19,6 +19,7 @@
 #include "net_counters.h"
 #include "object_update_mt.h"
 #include "bullet_expand_cull.h"
+#include "perf_hud.h"
 
 namespace crew::perfprobe {
 namespace {
@@ -58,6 +59,12 @@ constexpr unsigned char kCollideDispatchSig[]={0x48,0x8B,0x06,0x48,0x8D,0x54,0x2
 // The draw submits (system, object, pass in r8d) of the scene's lists, and the mesh draws.
 constexpr unsigned kSubmitCalls[]={0x11E255C,0x11E25F9,0x11E3A3F,0x11E4029,0x11E40BC};
 constexpr unsigned kSubmit=0x11E1630;
+// The game's own profile scopes (perf_hud.h): the end call of each, in perfhud::Scope's order. System::update's step
+// phases (begun at 0x11990E0 xgs_scene_object_ai_update, 0x1199215 _pre_update, 0x119933F xgs_havok_update, 0x11993C5
+// xgs_scene_object_update, 0x1199546 xgs_scene_camera_update) and the render recording's two (0x119791F
+// xgs_scene_object_safe_update, 0x1197A7B xgs_scene_render_command); each end is the next 0x11AA880 call after its begin.
+constexpr unsigned kScopeEnd=0x11AA880;
+constexpr unsigned kScopeEndCalls[]={0x11991B9,0x1199323,0x1199362,0x119952E,0x1199696,0x1197A35,0x11987D4};
 constexpr unsigned kMeshCalls[]={0x1103FD1,0x6C30CB};
 constexpr unsigned kMesh=0x10FF4E0;
 // Render thread (G line, gpu-5 / gpu-6). Umbra's occlusion query read 0x1631790 (rcx renderer, rdx query, r9 result,
@@ -102,6 +109,9 @@ DrawFn nextDraw=nullptr;
 PassFn nextResolve=nullptr,nextFence=nullptr,nextPresentCmd=nullptr;
 SubmitFn nextSubmit[std::size(kSubmitCalls)]={};
 MeshFn nextMesh[std::size(kMeshCalls)]={};
+using ScopeEndFn=void*(__fastcall*)(void*);
+ScopeEndFn nextScopeEnd[std::size(kScopeEndCalls)]={};
+static_assert(std::size(kScopeEndCalls)==perfhud::kScopes);
 PresentFn nextPresent=nullptr;
 QueryFn nextQuery=nullptr;
 PassFn nextPalette=nullptr;
@@ -926,9 +936,34 @@ int NetRows(netcount::Row* rows,const char* keyFormat,char* out,std::size_t size
 }
 }  // namespace
 
+// A profile scope's end (perf_hud.h): the stock end writes +0x18, then the scope (the caller's stack object) is read.
+template<unsigned I> void* __fastcall ScopeEndAt(void* scope) {
+    void* const r=nextScopeEnd[I](scope);
+    const auto* const p=static_cast<const unsigned char*>(scope);
+    long long begin=0,end=0;
+    std::memcpy(&begin,p+0x10,sizeof(begin));std::memcpy(&end,p+0x18,sizeof(end));
+    perfhud::ScopeEnded(I,end-begin);
+    return r;
+}
+// The performance panel's scopes, whatever Debug says (PerfHud is read live): all of them or the panel has nothing.
+void InstallScopes() noexcept {
+    void* const hooks[]={reinterpret_cast<void*>(&ScopeEndAt<0>),reinterpret_cast<void*>(&ScopeEndAt<1>),
+                         reinterpret_cast<void*>(&ScopeEndAt<2>),reinterpret_cast<void*>(&ScopeEndAt<3>),
+                         reinterpret_cast<void*>(&ScopeEndAt<4>),reinterpret_cast<void*>(&ScopeEndAt<5>),
+                         reinterpret_cast<void*>(&ScopeEndAt<6>)};
+    static_assert(std::size(hooks)==std::size(kScopeEndCalls));
+    unsigned n=0;
+    for(unsigned i=0;i<std::size(kScopeEndCalls);++i)
+        n+=Chain(kScopeEndCalls[i],kScopeEnd,hooks[i],reinterpret_cast<void**>(&nextScopeEnd[i]));
+    perfhud::ScopesChained(n==std::size(kScopeEndCalls));
+    Log("HOOK perf scopes=%u/%zu (the performance panel, PerfHud: the step's phases, the render recording's parts)",n,
+        std::size(kScopeEndCalls));
+}
+
 void Install() noexcept {
     LARGE_INTEGER hz;QueryPerformanceFrequency(&hz);
     tickMs=1000.0/static_cast<double>(hz.QuadPart);
+    InstallScopes();
     if(!Cfg().debug)return;
     // each hook's next is the global it calls through, written by Chain before the site is
     const bool anchor=Chain(kInputCall,kInput,reinterpret_cast<void*>(&InputHook),reinterpret_cast<void**>(&nextInput));
